@@ -1,0 +1,1937 @@
+// HVAC Secondary Systems - Heat Recovery
+//
+// -------------------------------------------------------------------------
+//  Copyright (c) 2016-2017, California Energy Commission
+//  All rights reserved.
+//  Redistribution and use in source and binary forms, with or without
+//  modification, are permitted provided that the following conditions are
+//  met:
+// 
+//    * Redistributions of source code must retain the above copyright
+//  notice, this list of conditions and the following disclaimer.
+//    * Redistributions in binary form must reproduce the above copyright
+//  notice, this list of conditions and the following disclaimer in
+//  the documentation and/or other materials provided with the
+//  distribution.
+//    * Neither the name of the California Energy Commission nor the names of its
+//  contributors may be used to endorse or promote products
+//  derived from this software without specific prior written
+//  permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+//  IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+//  TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION
+//  BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+//  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+//  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+//  BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+//  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+//  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// -------------------------------------------------------------------------
+//  
+
+
+// -----------------------------------------------------------------------------
+// Data model structure QC rules
+RULE NEW HtRcvry:HtRcvryIdx
+  DATATYPE
+    Integer
+  LONGFORM
+    HeatRecoveryIndex
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    ChildIndex( 1 ) 
+ENDRULE
+RULE AirSys:HtRcvryRef
+  DESCRIPTION
+    "Reference to the AirSystem HtRcvry object."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( LocalCompAssigned( HtRcvryRef ) = 0 .AND.
+        IfValidAnd( MaxChild( HtRcvry:HtRcvryIdx ) > 0 ) )
+    then ChildRef( HtRcvry:Name, MaxChild( HtRcvry:HtRcvryIdx ) )
+    else UNCHANGED
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// HtRcvry efficiency adjustments for HRR
+// ZnSys
+RULE NEW ZnSys:IsVentOnlyHtRecvry
+  DATATYPE
+    Float
+  LONGFORM
+    IsVentilationOnlyHeatRecovery
+  DESCRIPTION
+    "The flag that indicates the ZnSys is Type = 'VentilationOnly' with 
+     ExhSysType = 'HeatRecovery."
+  INPUTCLASS 
+    NotInput        
+  DEFAULT
+    if( Type = "VentilationOnly" .AND. 
+        IfValidAnd( ExhSysType = "HeatRecovery" ) )
+    then 1
+    else 0
+    endif
+  SIZING
+    ValidOr( IsVentOnlyHtRecvry, 0 )
+ENDRULE
+
+RULE NEW ZnSys:HRRHtRcvryFlowAdj
+  DATATYPE
+    Float
+  LONGFORM
+    HighRiseResidentialHeatRecoveryFlowAdjustment
+  DESCRIPTION
+    "The adjustment to heat recovery effectiveness of an HRV/ERV system,
+     serving a high-rise residential (HRR) zone if ventilation flow provided
+     is greater than code limit + tolerance."
+  HELP
+    "Only applicable to single-zone ventilation systems serving high-rise 
+     residential zones."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+// Ticket 3040: Reduce HtRcvry eff when HtRcvry flow greater than limit
+// Rule used for 2019.1.3
+;   if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+;   then
+;     if( SysVentFlow > SysCodeVentFlow * ( 1 + HtRcvryVentTolRes ) )
+;     then // HtRcvry flow is greater than limit
+;       ( SysCodeVentFlow * ( 1 + HtRcvryVentTolRes ) ) / SysVentFlow
+;     else // HtRcvryEff is unchanged
+;       1.0
+;     endif
+;   else 1.0
+;   endif
+// Rule used for 2019.2.0
+// Not used, adjustment using only HRRHtRcvryEffAdj
+    1.0
+ENDRULE
+RULE NEW ZnSys:HRRHtRcvryEffAdj
+  DATATYPE
+    Float
+  LONGFORM
+    HighRiseResidentialHeatRecoveryDerating
+  DESCRIPTION
+    "The derating factor for heat recovery effectiveness of an HRV/ERV system
+     serving a high-rise residential (HRR) zone."
+  HELP
+    "Only applicable to single-zone ventilation systems serving high-rise 
+     residential zones."
+  INPUTCLASS 
+    NotInput        
+  DEFAULT : T24N
+// Ticket 3040: Reduce HtRcvry eff based on HERS testing/verification
+    if( SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:ResVentEquipChkReq ) > 0 .AND.
+;        IfValidAnd( IsVentOnlyHtRecvry > 0 ) .AND.
+        Proj:HRRVentSysChange > 0 )
+    then // Is a zonal HRR ventilation system with heat recovery
+      if( HERSFanPwrTested = 0 .AND. HERSFDDVerified = 0 )
+      then 1.0 - Proj:HERSFanPwrTestAdj + Proj:HERSFDDAdj
+      else
+      if( HERSFanPwrTested = 0 .AND. HERSFDDVerified > 0 )
+      then 1.0 - Proj:HERSFanPwrTestAdj
+      else  
+      if( HERSFanPwrTested > 0 .AND. HERSFDDVerified = 0 )
+      then 1.0 + Proj:HERSFDDAdj
+      else 1.0 // No adjustment
+      endif endif endif
+    else 1.0
+    endif
+   DEFAULT
+     1.0
+ENDRULE
+
+// AirSys
+RULE NEW AirSys:HRRHtRcvryFlowAdj
+  DATATYPE
+    Float
+  LONGFORM
+    HighRiseResidentialHeatRecoveryFlowAdjustment
+  DESCRIPTION
+    "The adjustment to heat recovery effectiveness of an HRV/ERV system,
+     serving a high-rise residential (HRR) zone if ventilation flow provided
+     is greater than code limit + tolerance."
+  INPUTCLASS 
+    NotInput        
+  DEFAULT
+// Ticket 3040: Reduce HtRcvry eff when HtRcvry flow greater than limit
+// Rule used for 2019.1.3
+;   if( IsHRRVentSys > 0 )
+;   then
+;     if( SysVentFlow > SysCodeVentFlow * ( 1 + HtRcvryVentTolRes ) )
+;     then
+;       ( SysCodeVentFlow * ( 1 + HtRcvryVentTolRes ) ) / SysVentFlow
+;     else // HtRcvryEff is unchanged
+;       1
+;     endif
+;   else 1
+;   endif
+// Rule used for 2019.2.0
+// Not used, adjustment using only HRRHtRcvryEffAdj
+    1.0 
+  SIZING
+    if( IfValidAnd( IsPropVentOnlySys > 0 ) )
+    then PropVentOnlyZnSysRef:HRRHtRcvryFlowAdj
+    else HRRHtRcvryFlowAdj
+    endif
+ENDRULE
+RULE NEW AirSys:HRRHtRcvryEffAdj
+  DATATYPE
+    Float
+  LONGFORM
+    HighRiseResidentialHeatRecoveryEffectivenessAdjustment
+  DESCRIPTION
+    "The adjustement factor for heat recovery effectiveness of an HRV/ERV system
+     serving a high-rise residential (HRR) zone."
+  HELP
+    "An adjustment made for compliance analysis that accounts for non-simulated
+     factors, such as occupant control and equipment useful life." 
+  INPUTCLASS 
+    NotInput        
+  DEFAULT : T24N
+// Ticket 3040: Reduce HtRcvry eff based on HERS testing/verification
+    if( SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:ResVentEquipChkReq ) > 0 .AND.
+;        ChildCount( HtRcvry ) > 0 .AND. 
+        Proj:HRRVentSysChange > 0 )
+    then // Is a zonal HRR ventilation system with heat recovery
+      if( HERSFanPwrTested = 0 .AND. HERSFDDVerified = 0 )
+      then 1.0 - Proj:HERSFanPwrTestAdj + Proj:HERSFDDAdj
+      else
+      if( HERSFanPwrTested = 0 .AND. HERSFDDVerified > 0 )
+      then 1.0 - Proj:HERSFanPwrTestAdj
+      else  
+      if( HERSFanPwrTested > 0 .AND. HERSFDDVerified = 0 )
+      then 1.0 + Proj:HERSFDDAdj
+      else 0 // No adjustment
+      endif endif endif
+    else 1.0
+    endif
+  DEFAULT
+     1.0
+  SIZING
+    if( IfValidAnd( IsPropVentOnlySys > 0 ) )
+    then PropVentOnlyZnSysRef:HRRHtRcvryEffAdj
+    else HRRHtRcvryEffAdj
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+// For ZnSys:Type = 'VentilationOnly', ExhSysType = 'HeatRecovery'
+// -----------------------------------------------------------------------------
+RULE ZnSys:HtRcvryCertification
+  DESCRIPTION
+    "The certification program for the heat recovery equipment."
+  HELP
+    "Default is 'HVI' for ZoneSystem equipment, 'AHRI' for AirSystems."
+  INPUTCLASS 
+    Default
+  OPTION
+    AHRI
+    HVI
+  DEFAULT
+    if( IfValidAnd( ExhSysType = "HeatRecovery" ) )
+    then "HVI"
+    else UNDEFINED
+    endif
+ENDRULE
+RULE ZnSys:RtdHtRcvryEff
+  DESCRIPTION
+    "The rated heat recovery effectiveness of HVI certified heat recovery
+     equipment."
+  HELP
+    "For HVI certified HRV/ERV products, this is the Adjusted Rated 
+     Sensible Recovery Efficiency (ASRE) @ 0°C, divided by 100."
+  INPUTCLASS 
+    CondRequired
+  MINIMUM
+    0
+  MAXIMUM 
+    1
+  REPORTPRECISION
+    0
+  DEFAULT
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) .AND.
+        IfValidAnd( HtRcvryCertification = "HVI" ) )
+    then 0.60
+    else UNDEFINED
+    endif
+  CHECKSIM
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) .AND.
+        IfValidAnd( HtRcvryCertification = "HVI" ) .AND.
+        IfValidAnd( RtdHtRcvryEff > 0 ) = 0 )
+    then
+      PostError("ZoneSytem '%s' is Type = 'VentilationOnly' and SubType = 'HeatRecovery',
+                 but does not have a heat recovery efficiency defined.", Name) 
+    else UNCHANGED
+    endif
+  SIZING
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) .AND.
+        IfValidAnd( HtRcvryCertification = "HVI" ) )
+    then RtdHtRcvryEff
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW ZnSys:HtRcvryEffSim
+  DATATYPE
+    Float
+  LONGFORM
+    HeatRecoveryEffectivenessSimulated
+  DESCRIPTION
+    "The rated heat recovery effectiveness of HVI certified heat recovery
+     equipment, for simulation."
+  HELP
+    "The simulated heat recovery effectiveness includes any adjustments
+     required for code or simulation purposes."
+  INPUTCLASS 
+    NotInput 
+  DEFAULT
+    if( IfValidAnd( RtdHtRcvryEff > 0 ) )
+    then RtdHtRcvryEff
+    else UNDEFINED
+    endif       
+  SIZING
+    if( IfValidAnd( RtdHtRcvryEff > 0 ) )
+    then RtdHtRcvryEff
+    else UNDEFINED
+    endif 
+ENDRULE
+
+RULE ZnSys:HXType
+  DESCRIPTION
+    "The type of heat exchanger device."
+  INPUTCLASS
+    Default
+  OPTION
+    Plate
+    Wheel
+  DEFAULT
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then "Plate"
+    else UNDEFINED
+    endif
+  CHECKCODE
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) .AND.
+        IfValidAnd( HtRcvryCertification = "HVI" ) .AND.
+        IfValidAnd( HXType != "Plate" ) )
+    then
+      PostWarning("ZnSys '%s' has a VentilationOnly system with HVI certified 
+                   heat recovery equipment. A 'Plate' HX type will be modeled.",
+                  Name) 
+    else UNCHANGED
+    endif 
+  SIZING
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( HtRcvryCertification = "HVI" ) )
+      then "Plate"
+      else HXType
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE ZnSys:RcvryType
+  DESCRIPTION
+    "The type of energy recovered by the device."
+  HELP
+    "'Total' indicates sensible and latent heat are exchanged, as is the case in an
+      energy recovery ventilator (ERV).
+
+     'SensibleOnly' does not include transfer of latent heat, as is the case in a 
+     heat recovery ventilator (HRV)."
+  INPUTCLASS
+    Default
+  OPTION
+    Total
+    SensibleOnly
+;   LatentOnly // Not supported for this ZnSys implementation
+  DEFAULT
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then "Total"
+    else UNDEFINED
+    endif 
+  SIZING
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( HtRcvryCertification = "HVI" ) )
+      then "SensibleOnly"
+      else RcvryType
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE ZnSys:HasHXBypass
+  DESCRIPTION
+    "This field denotes whether the heat exchanger is locked out when 
+     economizer is operating."
+  INPUTCLASS
+    Default
+  OPTION
+    Yes
+    No
+  DEFAULT
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then "No"
+    else UNDEFINED
+    endif
+  SIZING
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( HtRcvryCertification = "HVI" ) )
+      then "No"
+      else HasHXBypass
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE ZnSys:SupFlowRtd
+  DESCRIPTION
+    "The 100% supply air flow rate at which the heat recovery device is rated."
+  HELP
+    "This value may differ from the actual design supply air flow rate of the
+     system. During the simulation, the flow through the device may vary depending
+     on the control of the system air flows.  If simulated supply and exhaust
+     air flow rates are not within 50% and 130% of this value, an EnergyPlus
+     warning will be issued."
+  INPUTCLASS
+    NotInput
+  UNITS
+    cfm
+  DEFAULT
+    // Set equal to existing input RtdFlowCap
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then ValidOr( ZnSys:RtdFlowCap, 0 )
+    else UNDEFINED
+    endif
+  SIZING
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then SupFlowRtd
+    else UNDEFINED
+    endif
+ENDRULE
+
+// 100% Flow - Heating
+RULE ZnSys:HtgSensEff100
+  DESCRIPTION
+    "The sensible heat exchange effectiveness at heating condition 
+     with both the supply and exhaust air volume flow rates equal to 100%."
+  INPUTCLASS
+    Default
+  DEFAULT
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( HtRcvryCertification = "HVI" ) )
+      then HtRcvryEffSim
+      else
+      if( IfValidAnd( RcvryType = "Total" ) )
+      then 0.69
+      else
+      if( IfValidAnd( RcvryType = "SensibleOnly" ) )
+      then 0.61
+      else 0
+      endif endif endif
+    else UNDEFINED
+    endif
+  SIZING
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( RcvryType = "Total" ) .OR. 
+          IfValidAnd( RcvryType = "SensibleOnly" ) )
+      then 
+        if( IfValidAnd( HtRcvryCertification = "HVI" ) )
+        then HtRcvryEffSim * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
+        else HtgSensEff100 * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
+        endif
+      else 0
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+RULE ZnSys:HtgLatEff100
+  DESCRIPTION
+    "The latent heat exchange effectiveness at heating condition 
+     with both the supply and exhaust air volume flow rates equal to 100%."
+  INPUTCLASS
+    Default
+  DEFAULT
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( RcvryType = "Total" ) )
+      then 0.54
+      else if( IfValidAnd( RcvryType = "LatentOnly" ) )
+      then 0.50
+      else 0
+      endif endif
+    else UNDEFINED
+    endif
+  SIZING
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( RcvryType = "Total" ) .OR. 
+          IfValidAnd( RcvryType = "LatentOnly" ) )
+      then HtgLatEff100 * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
+      else 0
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+RULE ZnSys:HtgTotEff100
+  DESCRIPTION
+    "The total heat exchange effectiveness at heating condition 
+     with both the supply and exhaust air volume flow rates equal to 100%."
+  INPUTCLASS
+    Default
+  DEFAULT
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( HtRcvryCertification = "HVI" ) )
+      then UNDEFINED
+      else
+      if( IfValidAnd( RcvryType = "Total" ) )
+      then 0.64
+      else
+      if( IfValidAnd( RcvryType = "SensibleOnly" ) )
+      then 0.41
+      else
+      if( IfValidAnd( RcvryType = "LatentOnly" ) )
+      then 0.35
+      else 0
+      endif endif endif endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+// 100% Flow - Cooling
+RULE ZnSys:ClgSensEff100
+  DESCRIPTION
+    "The sensible heat exchange effectiveness at cooling condition 
+     with both the supply and exhaust air volume flow rates equal to 100%."
+  INPUTCLASS
+    Default
+  DEFAULT
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( HtRcvryCertification = "HVI" ) )
+      then HtRcvryEffSim
+      else
+      if( IfValidAnd( RcvryType = "Total" ) )
+      then 0.69
+      else
+      if( IfValidAnd( RcvryType = "SensibleOnly" ) )
+      then 0.59
+      else 0
+      endif endif endif
+    else UNDEFINED
+    endif
+  SIZING
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( RcvryType = "Total" ) .OR. 
+          IfValidAnd( RcvryType = "SensibleOnly" ) )
+      then
+        if( IfValidAnd( HtRcvryCertification = "HVI" ) )
+        then HtRcvryEffSim * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
+        else ClgSensEff100 * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
+        endif
+      else 0
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+RULE ZnSys:ClgLatEff100
+  DESCRIPTION
+    "The latent heat exchange effectiveness at cooling condition 
+     with both the supply and exhaust air volume flow rates equal to 100%."
+  INPUTCLASS
+    Default
+  DEFAULT
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( RcvryType = "Total" ) )
+      then 0.43
+      else if( IfValidAnd( RcvryType = "LatentOnly" ) )
+      then 0.45
+      else 0
+      endif endif
+    else UNDEFINED
+    endif
+  SIZING
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( RcvryType = "Total" ) .OR. 
+          IfValidAnd( RcvryType = "LatentOnly" ) )
+      then ClgLatEff100 * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
+      else 0
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+RULE ZnSys:ClgTotEff100
+  DESCRIPTION
+    "The latent heat exchange effectiveness at cooling condition 
+     with both the supply and exhaust air volume flow rates equal to 100%."
+  INPUTCLASS
+    Default
+  DEFAULT
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( HtRcvryCertification = "HVI" ) )
+      then UNDEFINED
+      else
+      if( IfValidAnd( RcvryType = "Total" ) )
+      then 0.69
+      else
+      if( IfValidAnd( RcvryType = "SensibleOnly" ) )
+      then 0.43
+      else
+      if( IfValidAnd( RcvryType = "LatentOnly" ) )
+      then 0.30
+      else 0
+      endif endif endif endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+// 75% Flow - Heating
+RULE ZnSys:HtgSensEff75
+  DESCRIPTION
+    "The sensible heat exchange effectiveness at heating condition 
+     with both the supply and exhaust air volume flow rates equal to 75%."
+  INPUTCLASS
+    Default
+  DEFAULT
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then HtgSensEff100 // Flow assumed to be CV, set equal to 100% value
+    else UNDEFINED
+    endif  
+  SIZING
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( RcvryType = "Total" ) .OR.
+          IfValidAnd( RcvryType = "SensibleOnly" ) )
+      then HtgSensEff100 // Flow assumed to be CV, set equal to 100% value
+      else 0
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+RULE ZnSys:HtgLatEff75
+  DESCRIPTION
+    "The latent heat exchange effectiveness at heating condition 
+     with both the supply and exhaust air volume flow rates equal to 75%."
+  INPUTCLASS
+    Default
+  DEFAULT
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then HtgLatEff100 // Flow assumed to be CV, set equal to 100% value
+    else UNDEFINED
+    endif  
+  SIZING
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( RcvryType = "Total" ) .OR.
+          IfValidAnd( RcvryType = "LatentOnly" ) )
+      then HtgLatEff100 // Flow assumed to be CV, set equal to 100% value
+      else 0
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+RULE ZnSys:HtgTotEff75
+  DESCRIPTION
+    "The total heat exchange effectiveness at heating condition 
+     with both the supply and exhaust air volume flow rates equal to 75%."
+  INPUTCLASS
+    Default
+  DEFAULT
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then HtgTotEff100 // Flow assumed to be CV, set equal to 100% value
+    else UNDEFINED
+    endif
+  SIZING
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( RcvryType = "Total" ) .OR.
+          IfValidAnd( RcvryType = "LatentOnly" ) )
+      then HtgTotEff100 // Flow assumed to be CV, set equal to 100% value
+      else 0
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+// 75% Flow - Cooling
+RULE ZnSys:ClgSensEff75
+  DESCRIPTION
+    "The sensible heat exchange effectiveness at cooling condition 
+     with both the supply and exhaust air volume flow rates equal to 75%."
+  INPUTCLASS
+    Default
+  DEFAULT
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then ClgTotEff100 // Flow assumed to be CV, set equal to 100% value
+    else UNDEFINED
+    endif
+  SIZING
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( RcvryType = "Total" ) .OR.
+          IfValidAnd( RcvryType = "SensibleOnly" ) )
+      then ClgSensEff100 // Flow assumed to be CV, set equal to 100% value
+      else 0
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+RULE ZnSys:ClgLatEff75
+  DESCRIPTION
+    "The latent heat exchange effectiveness at cooling condition 
+     with both the supply and exhaust air volume flow rates equal to 75%."
+  INPUTCLASS
+    Default
+  DEFAULT
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then ClgLatEff100 // Flow assumed to be CV, set equal to 100% value
+    else UNDEFINED
+    endif
+  SIZING
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( RcvryType = "Total" ) .OR.
+          IfValidAnd( RcvryType = "LatentOnly" ) )
+      then ClgLatEff100 // Flow assumed to be CV, set equal to 100% value
+      else 0
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+RULE ZnSys:ClgTotEff75
+  DESCRIPTION
+    "The total heat exchange effectiveness at cooling condition 
+     with both the supply and exhaust air volume flow rates equal to 75%."
+  INPUTCLASS
+    Default
+  DEFAULT
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then ClgTotEff100 // Flow assumed to be CV, set equal to 100% value
+    else UNDEFINED
+    endif
+  SIZING
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( RcvryType = "Total" ) .OR.
+          IfValidAnd( RcvryType = "LatentOnly" ) )
+      then ClgTotEff100  // Flow assumed to be CV, set equal to 100% value
+      else 0
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE ZnSys:TempCtrl
+  DESCRIPTION
+    "This field determines if the heat exchanger's supply air outlet is 
+    controlled to a temperature set point.."
+  INPUTCLASS
+    Default
+  OPTION
+    None
+    Fixed
+    Scheduled
+  DEFAULT
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( HasHXBypass = "Yes") )
+      then "Fixed"
+      else "None"
+      endif
+    else UNDEFINED
+    endif
+  CHECKSIM
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( Type = "Plate" ) .AND.
+          IfValidAnd( HasHXBypass = "No" ) .AND.
+          IfValidANd( TempCtrl != "None" ) )
+      then
+        PostWarning("For HeatRecovery '%s' is Type = 'Plate' and temperature control
+                     is set to '%s', but no bypass has been specified. Specify that
+                     HeatRecovery unit has a bypass to simulate temperature control.",
+                     Name, TempCtrl)
+      else
+      if( IfValidAnd( Type = "Plate" ) .AND.
+          IfValidAnd( HasHXBypass = "Yes" ) .AND.
+          IfValidANd( TempCtrl = "None" ) )
+      then 
+        PostWarning("For HeatRecovery '%s', a bypass has been specified but 
+                     temperature control is set to 'None'. For the bypass to be
+                     used, a temperature control method and setpoint must be specified",
+                     Name)
+      else UNCHANGED
+      endif endif
+    else UNCHANGED
+    endif
+  SIZING
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( Type = "Plate" ) .AND.
+          IfValidAnd( HasHXBypass = "No" ) )
+      then "None"
+      else TempCtrl
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE ZnSys:FixedSupTemp
+  DESCRIPTION
+    "Fixed temperature set point in °F at heat exchanger supply air outlet."
+  INPUTCLASS
+    Default
+  UNITS
+    °F
+  DEFAULT
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( TempCtrl = "Fixed" ) )
+      then 70
+      else UNDEFINED
+      endif
+    else UNDEFINED
+    endif
+  SIZING
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( TempCtrl = "Fixed" ) )
+      then FixedSupTemp
+      else UNDEFINED
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE ZnSys:TempSetptSchRef
+  DESCRIPTION
+    "Scheduled temperature set point in °F at heat exchanger supply air
+    outlet. "
+  INPUTCLASS
+    CondRequired
+  SIZING
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( TempCtrl = "Scheduled" ) .AND. 
+          LocalCompAssigned( TempSetptSchRef ) )
+      then TempSetptSchRef
+      else UNDEFINED
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE ZnSys:DefrostCtrl
+  DESCRIPTION
+    "Heat exchanger defrost control method."
+  HELP
+    "There are four heat exchanger defrost control method: None, 
+     ExhaustAirRecirculation, ExhaustOnly, and MinimumExhaustTemperature."
+  INPUTCLASS
+    Default
+  OPTION
+    None
+    ExhaustAirRecirculation
+    ExhaustOnly
+    MinimumExhaustTemperature
+  DEFAULT
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then "None"
+    else UNDEFINED
+    endif
+  SIZING
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) .AND.
+        IfValidAnd( HtRcvryCertification = "AHRI" ) )
+    then DefrostCtrl
+    else "None"
+    endif
+ENDRULE
+
+RULE ZnSys:DefrostCtrlTemp
+  DESCRIPTION
+    "The numeric field defines T_db of air which is used to initiate 
+     frost control."
+  HELP
+    "For ExhaustAirRecirculation and ExhaustOnly frost control, the threshold
+     temperature defines the supply air inlet temperature below which 
+     frost control is active. "
+  INPUTCLASS
+    Default
+  UNITS
+    °F
+  DEFAULT
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( DefrostCtrl = "ExhaustAirRecirculation" ) .OR.
+          IfValidAnd( DefrostCtrl = "ExhaustOnly" ) )
+      then 40
+      else UNDEFINED
+      endif
+    else UNDEFINED
+    endif
+  SIZING
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( DefrostCtrl = "ExhaustAirRecirculation" ) .OR.
+          IfValidAnd( DefrostCtrl = "ExhaustOnly" ) )
+      then DefrostCtrlTemp
+      else UNDEFINED
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE ZnSys:DefrostTimeFrac
+  DESCRIPTION
+    "This numeric field defines the fraction of simulation timestep 
+    when frost control will be invoked when the threhold temperature 
+    is reached."
+  HELP
+    "Only applicable when DefrostControl = 'ExhaustAirRecirculation'
+     and 'ExhaustOnly'."
+  INPUTCLASS
+    Prescribed
+  DEFAULT
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( DefrostCtrl = "ExhaustAirRecirculation" ) .OR.
+          IfValidAnd( DefrostCtrl = "ExhaustOnly" ) )
+      then 0.083
+      else UNDEFINED
+      endif
+    else UNDEFINED
+    endif
+  SIZING
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( DefrostCtrl = "ExhaustAirRecirculation" ) .OR.
+          IfValidAnd( DefrostCtrl = "ExhaustOnly" ) )
+      then DefrostTimeFrac
+      else UNDEFINED
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE ZnSys:DefrostTimeFracRt
+  DESCRIPTION
+    "This numeric field defines the rate of increase in the defrost 
+     time fraction as the supply air inlet temperature falls below the
+     threhold temperature."
+  HELP
+    "Only applicable when DefrostControl = 'ExhaustAirRecirculation'
+     and 'ExhaustOnly'."
+  INPUTCLASS
+    Prescribed
+  DEFAULT
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( DefrostCtrl = "ExhaustAirRecirculation" ) .OR.
+          IfValidAnd( DefrostCtrl = "ExhaustOnly" ) )
+      then 0.012
+      else UNDEFINED
+      endif
+    else UNDEFINED
+    endif
+  SIZING
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( DefrostCtrl = "ExhaustAirRecirculation" ) .OR.
+          IfValidAnd( DefrostCtrl = "ExhaustOnly" ) )
+      then DefrostTimeFracRt
+      else UNDEFINED
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE ZnSys:EconoLockout
+  DESCRIPTION
+    "This field denotes whether the heat exchanger is locked out when
+     economizer is operating."
+  INPUTCLASS
+    NotInput
+  OPTION
+    Yes
+    No
+  DEFAULT
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then "No" // Not use for ZnSys version of this object
+    else UNDEFINED
+    endif
+  SIZING
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) .AND.
+        IfValidAnd( HtRcvryCertification = "AHRI" ) )
+    then EconoLockout
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE ZnSys:AuxPwr
+  DESCRIPTION
+    "The electric consumption rate of heat exchanger unit."
+  HELP
+    "This energy is not added to the air stream."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) )
+    then 0 // Not use for ZnSys version of this object
+    else UNDEFINED
+    endif
+  SIZING
+    if( IfValidAnd( IsVentOnlyHtRecvry > 0 ) .AND.
+        IfValidAnd( HtRcvryCertification = "AHRI" ) )
+    then AuxPwr
+    else UNDEFINED
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+// AirSystem
+// -----------------------------------------------------------------------------
+RULE HtRcvry:HtRcvryCertification
+  DESCRIPTION
+    "The certification program for the heat recovery equipment."
+  HELP
+    "Default is 'HVI' for ZoneSystem equipment, 'AHRI' for AirSystems."
+  INPUTCLASS 
+    Default
+  OPTION
+    AHRI
+    HVI
+  DEFAULT
+    "AHRI"
+ENDRULE
+
+RULE HtRcvry:RtdHtRcvryEff
+  DESCRIPTION
+    "The rated heat recovery effectiveness of HVI certified heat recovery
+     equipment."
+  HELP
+    "For HVI certified HRV/ERV products, this is the Adjusted Rated 
+     Sensible Recovery Efficiency (ASRE) @ 0°C, divided by 100."
+  INPUTCLASS 
+    CondRequired
+  MINIMUM
+    0
+  MAXIMUM 
+    1
+  REPORTPRECISION
+    0
+  DEFAULT
+    if( IfValidAnd( HtRcvryCertification = "HVI" ) )
+    then 0.60
+    else UNDEFINED
+    endif
+  CHECKSIM
+    if( IfValidAnd( HtRcvryCertification = "HVI" ) .AND.
+        IfValidAnd( RtdHtRcvryEff > 0 ) = 0 )
+    then
+      PostError("AirSystem '%s' does not have a heat recovery efficiency defined.", Name) 
+    else UNCHANGED
+    endif
+  SIZING
+    if( IfValidAnd( HtRcvryCertification = "HVI" ) )
+    then RtdHtRcvryEff
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW HtRcvry:HtRcvryEffSim
+  DATATYPE
+    Float
+  LONGFORM
+    HeatRecoveryEffectivenessSimulated
+  DESCRIPTION
+    "The rated heat recovery effectiveness of HVI certified heat recovery
+     equipment, for simulation."
+  HELP
+    "The simulated heat recovery effectiveness includes any adjustments
+     required for code or simulation purposes."
+  INPUTCLASS 
+    NotInput 
+  DEFAULT
+    if( IfValidAnd( RtdHtRcvryEff > 0 ) )
+    then RtdHtRcvryEff
+    else UNDEFINED
+    endif       
+  SIZING
+    if( IfValidAnd( RtdHtRcvryEff > 0 ) )
+    then RtdHtRcvryEff
+    else UNDEFINED
+    endif 
+ENDRULE
+
+RULE NEW HtRcvry:OACtrlRef
+  DATATYPE
+    OACtrl
+  LONGFORM
+    OutsideAirControlReference
+  DESCRIPTION
+    "Reference to the AirSystem OACtrl object, at the HtRcvry object."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( ParentCompAssigned( AirSys:OACtrlRef ) )
+    then AirSys:OACtrlRef
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE HtRcvry:SysCnt
+  DESCRIPTION
+    "Echo of AirSys:Count"
+  HELP
+    "The number of duplicate systems can only be >1 when all attributes of 
+     the system are the same.  If Count is specified to be >1, all parameters
+     (capacities, power, etc) should be specified for the single piece of equipment.
+     The ruleset will apply multipliers for the final simulation."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    AirSys:Cnt
+  SIZING
+    AirSys:Cnt
+  ANNUAL
+    z:SysCnt
+ENDRULE
+
+RULE HtRcvry:Status
+  DESCRIPTION
+    "The status of the system or component, used for additions and alterations."
+  INPUTCLASS 
+    NotInput
+; OPTION
+;   * Defined in BEMEnums, shown here for reference. Default is 'New' 
+;   New
+;   Existing 
+  DEFAULT
+// Status defined from top-down. If parent system is altered, child objects
+// are defaulted to Existing
+    if( Parent( IsNew ) ) then "New" else "Existing" endif
+// SIZING and ANNUAL rules not used; status of any new objects created by rules 
+// is defined by BEMEnums default
+  SIZING
+    if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+    then AirSys:Status
+    else Status
+    endif
+  ANNUAL
+    z:Status
+ENDRULE
+
+RULE HtRcvry:AvailSchRef
+  DESCRIPTION
+    "The name of schedule that denotes whether the unit can operate"
+  HELP
+    "0 = 'off' and 1 = 'on'. If this field is blank, the schedule has values of 1 
+    for all time periods."
+  INPUTCLASS
+    NotInput
+ENDRULE
+
+RULE HtRcvry:Type
+  DESCRIPTION
+    "The type of heat exchanger device."
+  INPUTCLASS
+    Default
+//OPTION
+// Defined in BEMEnums, shown here for reference.
+;  Plate
+;  Wheel
+  DEFAULT
+    "Plate"
+  SIZING
+    if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+    then PropVentOnlyZnSysRef:HXType
+    else Type
+    endif
+  ANNUAL
+    z:Type
+ENDRULE
+
+RULE HtRcvry:RcvryType
+  DESCRIPTION
+    "The type of energy recovered by the device."
+  HELP
+    "'Total' indicates sensible and latent heat are exchanged, as is the case in an
+      energy recovery ventilator (ERV).
+
+     'SensibleOnly' does not include transfer of latent heat, as is the case in a 
+     heat recovery ventilator (HRV)."
+;HELP
+;  "'Total' indicates sensible and latent heat are exchanged, as is the case in an
+;   energy recovery ventilator (ERV).
+
+;  'SensibleOnly' does not include transfer of latent heat, as is the case in a 
+;  heat recovery ventilator (ERV). 
+
+;  'LatentOnly' is not common, and generally should not be used."
+  INPUTCLASS
+    Default
+//OPTION
+// Defined in BEMEnums, shown here for reference.
+;  Total
+;  SensibleOnly
+;  LatentOnly
+  DEFAULT
+    "Total"
+  CHECKSIM
+    if( RcvryType = "LatentOnly" )
+    then
+      PostError("HeatRecovery object '%s' has RecoveryType 'LatentOnly'.
+                 This option is not longer supported.", Name)
+    else UNCHANGED
+    endif 
+  SIZING
+    if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 )  )
+    then PropVentOnlyZnSysRef:RcvryType
+    else
+    if( IfValidAnd( HtRcvryCertification = "HVI" ) )
+    then "SensibleOnly"
+    else RcvryType
+    endif endif
+  ANNUAL
+    z:RcvryType
+ENDRULE
+
+RULE HtRcvry:HasHXBypass
+  DESCRIPTION
+    "This field denotes whether the heat exchanger is locked out when 
+     economizer is operating."
+  INPUTCLASS
+    Default
+  OPTION
+    Yes
+    No
+  DEFAULT
+    "No"
+  SIZING
+    if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+    then PropVentOnlyZnSysRef:HasHXBypass
+    else HasHXBypass
+    endif
+  ANNUAL
+    z:HasHXBypass
+ENDRULE
+
+RULE HtRcvry:SupInAirSegRef
+  DESCRIPTION
+    "Defines the supply air segment of the HeatRecovery object."
+  HELP
+    "Currently, the only valid AirSegment:Type that can be assigned is 
+     'Supply'."
+  INPUTCLASS
+    NotInput
+ENDRULE
+
+RULE HtRcvry:ExhOutAirSegRef
+  DESCRIPTION
+    "Defines the exhaust segment of the HeatRecovery object."
+  HELP
+    "Currently, the only valid AirSegment:Type that can be assigned is 
+     'Exhaust'."
+  INPUTCLASS
+    NotInput
+ENDRULE
+
+RULE HtRcvry:SupFlowRtd
+  DESCRIPTION
+    "The 100% supply air flow rate at which the heat recovery device is rated."
+  HELP
+    "This value may differ from the actual design supply air flow rate of the
+     system. During the simulation, the flow through the device may vary depending
+     on the control of the system air flows.  If simulated supply and exhaust
+     air flow rates are not within 50% and 130% of this value, an EnergyPlus
+     warning will be issued."
+  INPUTCLASS
+    Default
+  UNITS
+    cfm
+  DEFAULT
+    AirSys:SupFanCap
+  SIZING
+    AirSys:SupFanCap
+  ANNUAL
+    z:SupFlowRtd
+ENDRULE
+
+RULE HtRcvry:SupFlowRtdSim
+  DESCRIPTION
+    "The 100% supply air flow rate at which the heat recovery device is rated,
+     for simulation."
+  INPUTCLASS
+    NotInput
+  UNITS
+    cfm
+  DEFAULT
+    if( IfValidAnd( SupFlowRtd > 0 ) )
+    then SupFlowRtd * SysCnt
+    else UNDEFINED
+    endif
+  SIZING
+    if( IfValidAnd( SupFlowRtd > 0 ) )
+    then SupFlowRtd * SysCnt
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( IfValidAnd( SupFlowRtd > 0 ) )
+    then SupFlowRtd * SysCnt
+    else UNDEFINED
+    endif
+ENDRULE
+
+// 100% Flow - Heating
+RULE HtRcvry:HtgSensEff100
+  DESCRIPTION
+    "The sensible heat exchange effectiveness at heating condition 
+     with both the supply and exhaust air volume flow rates equal to 100%."
+  INPUTCLASS
+    Default
+  DEFAULT
+    if( RcvryType = "Total" )
+    then 0.69
+    else if( RcvryType = "SensibleOnly" )
+    then 0.61
+    else 0
+    endif endif
+  SIZING
+    if( RcvryType = "Total" .OR. RcvryType = "SensibleOnly" )
+    then
+      if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+      then PropVentOnlyZnSysRef:HtgSensEff100 // Already adjusted at ZnSys
+      else
+      if( IfValidAnd( HtRcvryCertification = "HVI" ) )
+      then HtRcvryEffSim * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
+      else HtgSensEff100 * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
+      endif endif
+    else 0
+    endif
+  ANNUAL
+    z:HtgSensEff100 
+ENDRULE
+RULE HtRcvry:HtgLatEff100
+  DESCRIPTION
+    "The latent heat exchange effectiveness at heating condition 
+     with both the supply and exhaust air volume flow rates equal to 100%."
+  INPUTCLASS
+    Default
+  DEFAULT
+    if( RcvryType = "Total" )
+    then 0.54
+    else if( RcvryType = "LatentOnly" )
+    then 0.50
+    else 0
+    endif endif
+  SIZING
+    if( RcvryType = "Total" .OR. RcvryType = "LatentOnly" )
+    then
+      if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+      then PropVentOnlyZnSysRef:HtgLatEff100 // Already adjusted at ZnSys
+      else HtgLatEff100 * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
+      endif
+    else 0
+    endif
+  ANNUAL
+    z:HtgLatEff100 
+ENDRULE
+RULE HtRcvry:HtgTotEff100
+  DESCRIPTION
+    "The total heat exchange effectiveness at heating condition 
+     with both the supply and exhaust air volume flow rates equal to 100%."
+  INPUTCLASS
+    Default
+  DEFAULT
+    if( RcvryType = "Total" )
+    then 0.64
+    else if( RcvryType = "SensibleOnly" )
+    then 0.41
+    else if( RcvryType = "LatentOnly" )
+    then 0.35
+    else 0
+    endif endif endif
+  SIZING
+    if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+    then PropVentOnlyZnSysRef:HtgTotEff100 // Already adjusted at ZnSys
+    else
+    if( IfValidAnd( HtRcvryCertification = "HVI" ) )
+    then UNDEFINED
+    else HtgTotEff100 * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
+    endif endif
+  ANNUAL
+    z:HtgTotEff100 
+ENDRULE
+
+// 100% Flow - Cooling
+RULE HtRcvry:ClgSensEff100
+  DESCRIPTION
+    "The sensible heat exchange effectiveness at cooling condition 
+     with both the supply and exhaust air volume flow rates equal to 100%."
+  INPUTCLASS
+    Default
+  DEFAULT
+    if( RcvryType = "Total" )
+    then 0.69
+    else if( RcvryType = "SensibleOnly" )
+    then 0.59
+    else 0
+    endif endif
+  SIZING
+    if( RcvryType = "Total" .OR. RcvryType = "SensibleOnly" )
+    then
+      if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+      then PropVentOnlyZnSysRef:ClgSensEff100 // Already adjusted at ZnSys
+      else
+      if( IfValidAnd( HtRcvryCertification = "HVI" ) )
+      then HtRcvryEffSim * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
+      else ClgSensEff100 * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
+      endif endif
+    else 0
+    endif
+  ANNUAL
+    z:ClgSensEff100 
+ENDRULE
+RULE HtRcvry:ClgLatEff100
+  DESCRIPTION
+    "The latent heat exchange effectiveness at cooling condition 
+     with both the supply and exhaust air volume flow rates equal to 100%."
+  INPUTCLASS
+    Default
+  DEFAULT
+    if( RcvryType = "Total" )
+    then 0.43
+    else if( RcvryType = "LatentOnly" )
+    then 0.45
+    else 0
+    endif endif
+  SIZING
+    if( RcvryType = "Total" .OR. RcvryType = "LatentOnly" )
+    then
+      if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+      then PropVentOnlyZnSysRef:ClgLatEff100 // Already adjusted at ZnSys
+      else ClgLatEff100 * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
+      endif
+    else 0
+    endif
+  ANNUAL
+    z:ClgLatEff100 
+ENDRULE
+RULE HtRcvry:ClgTotEff100
+  DESCRIPTION
+    "The latent heat exchange effectiveness at cooling condition 
+     with both the supply and exhaust air volume flow rates equal to 100%."
+  INPUTCLASS
+    Default
+  DEFAULT
+    if( RcvryType = "Total" )
+    then 0.69
+    else if( RcvryType = "SensibleOnly" )
+    then 0.43
+    else if( RcvryType = "LatentOnly" )
+    then 0.30
+    else 0
+    endif endif endif
+  SIZING
+    if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+    then PropVentOnlyZnSysRef:ClgTotEff100 // Already adjusted at ZnSys
+    else
+    if( IfValidAnd( HtRcvryCertification = "HVI" ) )
+    then UNDEFINED
+    else ClgTotEff100 * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
+    endif endif
+  ANNUAL
+    z:ClgTotEff100 
+ENDRULE
+
+// 75% Flow - Heating
+RULE HtRcvry:HtgSensEff75
+  DESCRIPTION
+    "The sensible heat exchange effectiveness at heating condition 
+     with both the supply and exhaust air volume flow rates equal to 75%."
+  INPUTCLASS
+    Default
+  DEFAULT
+    if( IfValidAnd( HtgSensEff100 > 0 ) )
+    then HtgSensEff100 + 0.03 // Estimate
+    else 0
+    endif  
+  SIZING
+    if( IfValidAnd( RcvryType = "Total" ) .OR. 
+        IfValidAnd( RcvryType = "SensibleOnly" ) )
+    then
+      if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+      then PropVentOnlyZnSysRef:HtgSensEff75 // Already adjusted at ZnSys
+      else
+      if( IfValidAnd( HtRcvryCertification = "HVI" ) )
+      then HtgSensEff100 // Flow assumed to be CV, set equal to 100% value
+      else HtgSensEff75 * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
+      endif endif
+    else 0
+    endif
+  ANNUAL
+    z:HtgSensEff75 
+ENDRULE
+RULE HtRcvry:HtgLatEff75
+  DESCRIPTION
+    "The latent heat exchange effectiveness at heating condition 
+     with both the supply and exhaust air volume flow rates equal to 75%."
+  INPUTCLASS
+    Default
+  DEFAULT
+    if( IfValidAnd( HtgLatEff100 > 0 ) )
+    then HtgLatEff100 + 0.03 // Estimate
+    else 0
+    endif  
+  SIZING
+    if( IfValidAnd( RcvryType = "Total" ) .OR. 
+        IfValidAnd( RcvryType = "LatentOnly" ) )
+    then
+      if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+      then PropVentOnlyZnSysRef:HtgLatEff75 // Already adjusted at ZnSys
+      else HtgLatEff75 * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
+      endif
+    else 0
+    endif
+  ANNUAL
+    z:HtgLatEff75
+ENDRULE
+RULE HtRcvry:HtgTotEff75
+  DESCRIPTION
+    "The total heat exchange effectiveness at heating condition 
+     with both the supply and exhaust air volume flow rates equal to 75%."
+  INPUTCLASS
+    Default
+  DEFAULT
+    if( IfValidAnd( HtgTotEff100 > 0 ) )
+    then HtgTotEff100 + 0.03 // Estimate
+    else 0
+    endif  
+  SIZING
+    if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+    then PropVentOnlyZnSysRef:HtgTotEff75 // Already adjusted at ZnSys
+    else
+    if( IfValidAnd( HtRcvryCertification = "HVI" ) )
+    then UNDEFINED
+    else HtgTotEff75 * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
+    endif endif
+  ANNUAL
+    z:HtgTotEff75
+ENDRULE
+
+// 75% Flow - Cooling
+RULE HtRcvry:ClgSensEff75
+  DESCRIPTION
+    "The sensible heat exchange effectiveness at cooling condition 
+     with both the supply and exhaust air volume flow rates equal to 75%."
+  INPUTCLASS
+    Default
+  DEFAULT
+    if( IfValidAnd( ClgSensEff100 > 0 ) )
+    then ClgSensEff100 + 0.03 // Estimate
+    else 0
+    endif  
+  SIZING
+    if( IfValidAnd( RcvryType = "Total" ) .OR. 
+        IfValidAnd( RcvryType = "SensibleOnly" ) )
+    then
+      if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+      then PropVentOnlyZnSysRef:ClgSensEff75 // Already adjusted at ZnSys
+      else
+      if( IfValidAnd( HtRcvryCertification = "HVI" ) )
+      then ClgSensEff100 // Flow assumed to be CV, set equal to 100% value
+      else ClgSensEff75 * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
+      endif endif
+    else 0
+    endif
+  ANNUAL
+    z:ClgSensEff75
+ENDRULE
+RULE HtRcvry:ClgLatEff75
+  DESCRIPTION
+    "The latent heat exchange effectiveness at cooling condition 
+     with both the supply and exhaust air volume flow rates equal to 75%."
+  INPUTCLASS
+    Default
+  DEFAULT
+    if( IfValidAnd( ClgLatEff100 > 0 ) )
+    then ClgLatEff100 + 0.03 // Estimate
+    else 0
+    endif
+  SIZING
+    if( IfValidAnd( RcvryType = "Total" ) .OR. 
+        IfValidAnd( RcvryType = "LatentOnly" ) )
+    then
+      if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+      then PropVentOnlyZnSysRef:ClgLatEff75 // Already adjusted at ZnSys
+      else ClgLatEff75 * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
+      endif
+    else 0
+    endif 
+  ANNUAL
+    z:ClgLatEff75
+ENDRULE
+RULE HtRcvry:ClgTotEff75
+  DESCRIPTION
+    "The total heat exchange effectiveness at cooling condition 
+     with both the supply and exhaust air volume flow rates equal to 75%."
+  INPUTCLASS
+    Default
+  DEFAULT
+    if( IfValidAnd( ClgTotEff100 > 0 ) )
+    then ClgTotEff100 + 0.03 // Estimate
+    else 0
+    endif
+  SIZING
+    if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+    then PropVentOnlyZnSysRef:ClgTotEff75 // Already adjusted at ZnSys
+    else
+    if( IfValidAnd( HtRcvryCertification = "HVI" ) )
+    then UNDEFINED
+    else ClgTotEff75 * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
+    endif endif
+  ANNUAL
+    z:ClgTotEff75
+ENDRULE
+
+RULE HtRcvry:TempCtrl
+  DESCRIPTION
+    "This field determines if the heat exchanger's supply air outlet is 
+    controlled to a temperature set point."
+  INPUTCLASS
+    Default
+  OPTION
+    None
+    Fixed
+    Scheduled
+  DEFAULT
+    if( IfValidAnd( HasHXBypass = "Yes") )
+    then "Fixed"
+    else "None"
+    endif
+  CHECKSIM
+    if( Type = "Plate" .AND. HasHXBypass = "No" .AND. TempCtrl != "None" ) 
+    then
+      PostError("HeatRecovery '%s' is Type = 'Plate' and temperature control
+                 is set to '%s', but no bypass has been specified. Specify that
+                 HeatRecovery unit has a bypass to simulate temperature control, or
+                 set Bypass to 'No'.", Name, TempCtrl)
+    else
+    if( Type = "Plate" .AND. HasHXBypass = "Yes" .AND. TempCtrl = "None" )
+    then 
+      PostWarning("HeatRecovery '%s' is Type = 'Plate' and specified to have a bypass, but 
+                   temperature control is set to 'None'. For the bypass to be
+                   used, a temperature control method and setpoint must be specified.",
+                   Name)
+// Add checks to ensure a system has an economizer if bypass/temp control is specified.
+// It appears in E+ v9.0.1, an economizer is not required to have bypass. These checks
+// may be required for E+ v8.5
+;   else
+;   if( TempCtrl != "None" )
+;   then
+;     if( LocalCompAssigned( OACtrlRef ) = 0 )
+;     then // No OACtrl object specified
+;       PostWarning("AirSystem '%s' has a HeatRecovery object with temperature control, 
+;                    but no OAControl object has been specified. For temperature control
+;                    to be used, an OAControl with an economizer must be included in the
+;                    model.", AirSys:Name)
+;      else
+;      if( IfValidAnd( OACtrlRef:EconoCtrlMthd = "NoEconomizer" ) )
+;      then // OACtrl object specified, no economizer
+;        PostWarning("AirSystem '%s' has a HeatRecovery object with temperature control, 
+;                     but the OAControl object has 'NoEconomizer' specified. For temperature
+;                     control to be used, an OAControl with an economizer must be included
+;                     in the model.", AirSys:Name)
+;     else UNCHANGED
+;     endif endif
+    else UNCHANGED
+    endif endif
+  SIZING
+    if( Type = "Plate" .AND. HasHXBypass = "No" )
+    then "None"
+    else
+    if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+    then PropVentOnlyZnSysRef:TempCtrl
+    else TempCtrl
+    endif endif
+  ANNUAL
+    z:TempCtrl
+ENDRULE
+
+RULE HtRcvry:FixedSupTemp
+  DESCRIPTION
+    "Fixed temperature set point in °F at heat exchanger supply air outlet."
+  INPUTCLASS
+    Default
+  UNITS
+    °F
+  DEFAULT
+    if( TempCtrl = "Fixed" )
+    then
+      if( IfValidAnd( AirSys:ClgCtrl = "Fixed" ) )
+      then ValidOr( AirSys:ClgFixedSupTemp, 70 )
+      else
+      if( IfValidAnd( AirSys:ClgCtrl = "FixedDualSetpoint" ) )
+      then ValidOr( AirSys:HtgFixedSupTemp, 70 )
+      else ValidOr( AirSys:HtgDsgnSupAirTemp, 70 )
+      endif endif
+    else UNDEFINED
+    endif
+  SIZING
+    if( TempCtrl = "Fixed" )
+    then
+      if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+      then PropVentOnlyZnSysRef:FixedSupTemp
+      else FixedSupTemp
+      endif
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:FixedSupTemp
+ENDRULE
+
+RULE HtRcvry:TempSetptSchRef
+  DESCRIPTION
+    "Scheduled temperature set point in °F at heat exchanger supply air
+    outlet. "
+  INPUTCLASS
+    CondRequired
+  CHECKSIM
+    if( TempCtrl = "Scheduled" .AND. 
+        LocalCompAssigned( TempSetptSchRef ) = 0 )
+    then
+      PostError("HeatRecovery object '%s' has a the control temperature 
+                 specified as a schedule, but no schedule has been defined.", Name)
+    else UNCHANGED
+    endif
+  SIZING
+    if( TempCtrl = "Scheduled" )
+    then 
+      if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+      then PropVentOnlyZnSysRef:TempSetptSchRef
+      else TempSetptSchRef
+      endif
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:TempSetptSchRef
+ENDRULE
+
+RULE HtRcvry:DefrostCtrl
+  DESCRIPTION
+    "Heat exchanger defrost control method."
+  HELP
+    "There are four heat exchanger defrost control method: None, 
+     ExhaustAirRecirculation, ExhaustOnly, and MinimumExhaustTemperature."
+  INPUTCLASS
+    Default
+  OPTION
+    None
+    ExhaustAirRecirculation
+    ExhaustOnly
+    MinimumExhaustTemperature
+  DEFAULT
+    "None"
+  SIZING
+   if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+   then PropVentOnlyZnSysRef:DefrostCtrl
+   else DefrostCtrl
+   endif
+  ANNUAL
+    z:DefrostCtrl
+ENDRULE
+
+RULE HtRcvry:DefrostCtrlTemp
+  DESCRIPTION
+    "The numeric field defines T_db of air which is used to initiate 
+     frost control."
+  HELP
+    "For ExhaustAirRecirculation and ExhaustOnly frost control, the threshold
+     temperature defines the supply air inlet temperature below which 
+     frost control is active. "
+  INPUTCLASS
+    Default
+  UNITS
+    °F
+  DEFAULT
+    if( DefrostCtrl = "ExhaustAirRecirculation" .OR.
+        DefrostCtrl = "ExhaustOnly" )
+    then 40
+    else UNDEFINED
+    endif
+  SIZING
+    if( DefrostCtrl = "ExhaustAirRecirculation" .OR.
+        DefrostCtrl = "ExhaustOnly" )
+    then
+      if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+      then PropVentOnlyZnSysRef:DefrostCtrlTemp
+      else DefrostCtrlTemp
+      endif
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:DefrostCtrlTemp
+ENDRULE
+
+RULE HtRcvry:DefrostTimeFrac
+  DESCRIPTION
+    "This numeric field defines the fraction of simulation timestep 
+    when frost control will be invoked when the threhold temperature 
+    is reached."
+  HELP
+    "Only applicable when DefrostControl = 'ExhaustAirRecirculation'
+     and 'ExhaustOnly'."
+  INPUTCLASS
+    Prescribed
+  DEFAULT
+    if( DefrostCtrl = "ExhaustAirRecirculation" .OR.
+        DefrostCtrl = "ExhaustOnly" )
+    then 0.083
+    else UNDEFINED
+    endif
+  SIZING
+    if( DefrostCtrl = "ExhaustAirRecirculation" .OR.
+        DefrostCtrl = "ExhaustOnly" )
+    then
+      if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+      then PropVentOnlyZnSysRef:DefrostTimeFrac
+      else DefrostTimeFrac
+      endif
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:DefrostTimeFrac
+ENDRULE
+
+RULE HtRcvry:DefrostTimeFracRt
+  DESCRIPTION
+    "This numeric field defines the rate of increase in the defrost 
+     time fraction as the supply air inlet temperature falls below the
+     threhold temperature."
+  HELP
+    "Only applicable when DefrostControl = 'ExhaustAirRecirculation'
+     and 'ExhaustOnly'."
+  INPUTCLASS
+    Prescribed
+  DEFAULT
+    if( DefrostCtrl = "ExhaustAirRecirculation" .OR.
+        DefrostCtrl = "ExhaustOnly" )
+    then 0.012
+    else UNDEFINED
+    endif
+  SIZING
+    if( DefrostCtrl = "ExhaustAirRecirculation" .OR.
+        DefrostCtrl = "ExhaustOnly" )
+    then
+      if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+      then PropVentOnlyZnSysRef:DefrostTimeFracRt
+      else DefrostTimeFracRt
+      endif
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:DefrostTimeFrac
+ENDRULE
+
+RULE HtRcvry:EconoLockout
+  DESCRIPTION
+    "This field denotes whether the heat exchanger is locked out when
+     economizer is operating."
+  INPUTCLASS
+    Default
+  OPTION
+    Yes
+    No
+  DEFAULT
+    "No"
+  CHECKCODE
+    if( Type = "Plate" .AND. HasHXBypass = "No" .AND. EconoLockout = "Yes" )  
+    then
+      PostWarning("HeatRecovery '%s' is a 'Plate' heat exchanger with no bypass.
+                   Heat exchanger lockout with economizer will not be simulated.",
+                  Name)
+    else UNCHANGED
+    endif
+  SIZING
+    if( Type = "Plate" .AND. HasHXBypass = "No" )  
+    then "No"
+    else
+    if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+    then PropVentOnlyZnSysRef:EconoLockout
+    else EconoLockout
+    endif endif
+  ANNUAL
+    z:EconoLockout
+ENDRULE
+
+RULE HtRcvry:AuxPwr
+  DESCRIPTION
+    "The electric consumption rate of heat exchanger unit."
+  HELP
+    "This energy is not added to the air stream."
+  INPUTCLASS
+    Default
+  DEFAULT
+    0
+  SIZING
+    if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+    then
+      if( IfValidAnd( PropVentOnlyZnSysRef:AuxPwr > 0 ) )
+      then PropVentOnlyZnSysRef:AuxPwr * SysCnt
+      else 0
+      endif
+    else ValidOr( AuxPwr, 0 ) * SysCnt
+    endif    
+  ANNUAL
+    z:AuxPwr
+ENDRULE
+
+RULE NEW HtRcvry:HtRcvryRpt
+  DATATYPE
+    String
+  LONGFORM
+    HeatRecoveryReport
+  INPUTCLASS
+    NotInput
+  ANNUAL_PROPOSED
+    if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+    then UNDEFINED
+    else
+    if( LocalStatus( RcvryType ) > 0 ) then
+      if( Type = "Plate" ) then 
+          if ( AuxPwr > 1000 ) then
+           Format ("Plate, %s kW", FltToStr( AuxPwr / 1000, 2 ) )
+          else
+           Format ("Plate, %s W", FltToStr( AuxPwr, 1 ) )
+          endif
+      else if( Type = "Wheel" ) then
+          if ( AuxPwr > 1000 ) then
+           Format ("Plate, %s kW", FltToStr( AuxPwr / 1000, 2 ) )
+          else
+           Format ("Plate, %s W", FltToStr( AuxPwr, 1 ) )
+          endif
+      else 
+       "No Heat Recovery"
+      endif endif
+    else
+      "No Heat Recovery"
+    endif endif
+ENDRULE
