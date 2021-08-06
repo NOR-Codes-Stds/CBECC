@@ -1,0 +1,631 @@
+// PV - General Information
+//
+// -------------------------------------------------------------------------
+//  Copyright (c) 2012-2018, California Energy Commission
+//  All rights reserved.
+//  Redistribution and use in source and binary forms, with or without
+//  modification, are permitted provided that the following conditions are
+//  met:
+// 
+//    * Redistributions of source code must retain the above copyright
+//  notice, this list of conditions and the following disclaimer.
+//    * Redistributions in binary form must reproduce the above copyright
+//  notice, this list of conditions and the following disclaimer in
+//  the documentation and/or other materials provided with the
+//  distribution.
+//    * Neither the name of the California Energy Commission nor the names of its
+//  contributors may be used to endorse or promote products
+//  derived from this software without specific prior written
+//  permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+//  IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+//  TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION
+//  BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+//  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+//  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+//  BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+//  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+//  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// -------------------------------------------------------------------------
+
+//Relevant ACM Section: ...
+
+RULE Proj:PVBattSim
+  DESCRIPTION
+    "Whether or not to include analysis of photovoltaics and battery storage.
+    If checked the compliance report will be watermarked. if unchecked any PV and battery
+    included in the model will not be simulated."
+  INPUTCLASS : T24N_2019
+    Optional
+  INPUTCLASS
+    NotInput  IgnoreUserInput  "Always activated for 2022+ analysis"
+  CHECKSIM 
+    if (IfValidAnd( PVBattSim > 0 ) .AND. SumAll( PVArray:DCSysSize ) > 0 .AND. QuickAnalysis > 0)
+    then  POSTERROR("Quick Analysis (on main Project dialog tab) must be de-selected in order to run PV and Battery analysis.")
+    else  UNCHANGED  
+    endif
+  DEFAULT : T24N_2019
+    if (IfValidAnd( ZEROCode > 0 ))
+    then 1
+    else 0 
+    endif
+  DEFAULT 
+    1
+  SIZING
+    UNDEFINED
+  ANNUAL_PROPOSED
+    u:PVBattSim
+  ANNUAL_BASELINE
+    UNDEFINED
+ENDRULE
+
+RULE NEW Proj:HavePVBattSim
+  DATATYPE
+    Integer
+  DESCRIPTION
+    "flag storing PVBattSim default/input"
+  INPUTCLASS
+    NotInput 
+  DEFAULT 
+    if (ComponentCount( PVArray ) < 1) then  0
+    else  PVBattSim  endif
+ENDRULE
+
+
+RULE Proj:HavePVGeomObj
+  INPUTCLASS
+    NotInput 
+  DEFAULT 
+    if (ComponentCount( PVArrayGeom ) < 1) then  0  else  1  endif
+  ANNUAL_PROPOSED
+    if (ComponentCount( PVArrayGeom ) < 1) then  0  else  1  endif
+  ANNUAL_BASELINE
+    if (ComponentCount( PVArrayGeom ) < 1) then  0  else  1  endif
+ENDRULE
+
+RULE Proj:HavePVShadeObj
+  INPUTCLASS
+    NotInput 
+  DEFAULT 
+    if (ComponentCount( PVArrayShade ) < 1) then  0  else  1  endif
+  ANNUAL_PROPOSED
+    if (ComponentCount( PVArrayShade ) < 1) then  0  else  1  endif
+  ANNUAL_BASELINE
+    if (ComponentCount( PVArrayShade ) < 1) then  0  else  1  endif
+ENDRULE
+
+
+RULE PVArrayGeom:ChildPolyLpRef
+  INPUTCLASS
+    NotInput 
+  DEFAULT 
+    MaxChildComp( PolyLp:Area )
+ENDRULE
+
+RULE PVArrayShade:ChildPolyLpRef
+  INPUTCLASS
+    NotInput 
+  DEFAULT 
+    MaxChildComp( PolyLp:Area )
+ENDRULE
+
+
+// PVArray properties
+RULE PVArray:SpecMthd
+  DESCRIPTION
+    "Type of data used to describe the PV array"  
+  INPUTCLASS
+    Default 
+  OPTION
+    Simplified
+    Detailed
+  DEFAULT 
+    "Simplified"
+ENDRULE
+
+RULE PVArray:DCSysSize
+  DESCRIPTION
+    "DC (direct current) power rating of the photovoltaic array (at standard test conditions)"  
+  INPUTCLASS
+    Default 
+  UNITS
+    kW
+  DEFAULT 
+    0
+ENDRULE
+
+RULE PVArray:ModuleType
+  DESCRIPTION
+    "Type of photovoltaic modules in the array"  
+  INPUTCLASS
+    Default 
+  RESETS
+    ResetThisWhenTheFollowingIsModified
+      PVArray:SpecMthd
+  DEFAULT 
+    "Standard"
+ENDRULE
+
+RULE PVArray:CalFlexibleInstall
+  DESCRIPTION
+    "whether of not this array uses the California Flexible Installation criteria"  
+  INPUTCLASS
+    Default 
+  DEFAULT 
+    if (Proj:HavePVShadeObj)
+    then  0
+    else  1
+    endif
+  ANNUAL_PROPOSED 
+    if (Proj:HavePVShadeObj)
+    then  0
+    else  1
+    endif
+  ANNUAL_BASELINE 
+    if (Proj:HavePVShadeObj)
+    then  0
+    else  1
+    endif
+ENDRULE
+
+
+RULE PVArray:PolyLpRef
+  DESCRIPTION
+    "PolyLp object that describes PV array geometry"  
+  INPUTCLASS
+    NotInput
+  DEFAULT 
+    if (GeomSpecMthd == "reference PVArrayGeom object" .AND.
+        LocalCompAssigned( PVArrayGeomRef ))
+    then  PVArrayGeomRef:ChildPolyLpRef
+    else if (LocalCompAssigned( PolyLpRef ) .AND.
+             ChildCount( PolyLp ) > 0)
+    then  MaxChildComp( PolyLp:Area )
+    else  UNCHANGED
+    endif endif
+ENDRULE
+
+
+RULE NEW PVArray:ValidFlag
+  DATATYPE
+    Integer
+  DESCRIPTION
+    "flag indicating this a valid PV Array (defined w/ size > 0)"
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (IfValidAnd( DCSysSize > 0 ))
+    then  1
+    else  0
+    endif
+ENDRULE
+
+RULE NEW PVArrayGeom:NumPVArrayRefs
+  DATATYPE
+    Integer
+  DESCRIPTION
+    "Number of PV Arrays this object assigned to"  
+  INPUTCLASS
+    NotInput
+  DEFAULT 
+    SumRevRef( PVArray:PVArrayGeomRef, PVArray:ValidFlag )
+ENDRULE
+
+
+RULE PVArray:LctnSpecMthd
+  DESCRIPTION
+    "How PV array location is to be specified"  
+  INPUTCLASS
+    Default 
+  OPTION
+    - not specified -
+    X,Y,Z and height, width
+;    in relation to another PV Array
+  RESETS
+    ResetThisWhenTheFollowingIsModified
+      PVArray:CalFlexibleInstall
+    ResetTheFollowingWhenThisIsModified
+      PVArray:RefX
+      PVArray:RefY
+      PVArray:RefZ
+      PVArray:Hgt
+      PVArray:Wd
+  DEFAULT 
+    "- not specified -"
+ENDRULE
+; more resets for above rule (once implemented)
+;      PVArray:RelLctnSpecMthd
+;      PVArray:RelLctnDistance
+;      PVArray:RelLctnAz
+;      PVArray:RelLctnTiltDeg
+
+RULE PVArray:GeomSpecMthd
+  DESCRIPTION
+    "How PV array geometry (azimuth & tilt) is to be specified"  
+  INPUTCLASS
+    Default 
+  ;OPTION
+  ;  azimuth and tilt
+  ;  reference PVArrayGeom object
+  RESETS
+    ResetThisWhenTheFollowingIsModified
+      PVArray:CalFlexibleInstall
+  DEFAULT 
+    "azimuth and tilt"
+  CHECKSIM
+    if (IfValidAnd( PVBattSim > 0 )==0 .OR. IfValidAnd( DCSysSize > 0 )==0) then  UNCHANGED
+    else if (GeomSpecMthd == "azimuth and tilt")
+    then  if (LctnSpecMthd == "- not specified -")
+          then  UNCHANGED
+          else if (LctnSpecified == 0)
+          then  PostError( "PV Array '%s' Location fields missing or invalid.", Name )
+          else  UNCHANGED
+          endif endif
+    else if (GeomSpecMthd == "reference PVArrayGeom object")
+    then  if (LocalCompAssigned( PVArrayGeomRef )==0)
+          then  PostError( "PV Array '%s' Geometry to be defined via PVArrayGeom object assignment, but none is assigned.", Name )
+          else if (IfValidAnd( PVArrayGeomRef:ChildPolyLpRef:TiltAngle >= 0 )==0 .OR. IfValidAnd( PVArrayGeomRef:ChildPolyLpRef:TiltAngle <= 90 )==0)
+          then  PostError( "PVArrayGeom '%s' (referenced by PV Array '%s') is invalid (PolyLp missing, facing downward or vertices entered in reversed order).", PVArrayGeomRef:Name, Name )
+          else if (IfValidAnd( Az >= 0 )==0 .OR. IfValidAnd( TiltAngle >= 0 )==0 .OR.
+                   IfValidAnd( PVArrayGeomRef:ChildPolyLpRef:Area > 0 )==0)
+          then  PostError( "Geometry defined by PVArrayGeom '%s' (referenced by PV Array '%s') has invalid geometry.", PVArrayGeomRef:Name, Name )
+          else  UNCHANGED
+          endif endif endif
+    else  UNCHANGED
+    endif endif endif
+ENDRULE
+
+RULE PVArray:PVArrayGeomRef
+  DESCRIPTION
+    "The PVShade object that describes the orientation & tilt (& polygon) of this PV array" 
+  INPUTCLASS
+    Optional 
+ ; DEFAULT   - no default
+ENDRULE
+
+
+;   "Set Proj:PVWRelLocDistLbl[1]"   Proj:PVWRelLocDistLbl[1]  = {
+;         if (PVWGeomSpecMethod[1] == 1 .OR. PVWLocSpecMethod[1] != 2) then  UNDEFINED
+;         else if (PVWRelLocSpecMeth[1] == 5)
+;         then  "Distance Between Centroids:"
+;         else  "Distance Separating Arrays:"    endif endif  }
+
+;;     Proj:PVWRelLocArrayIdx[ALL], Optional,  0,    1,   1,    1,  1,  1
+;;     Proj:PVWRelLocDistance[ALL], Optional,  0,    1,   1,    1,  1,  1 BEMP_Flt,  5,  "ft",    "Distance between this and another PV array"    
+;;     Proj:PVWRelLocAzm[ALL],      Optional,  0,    1,   1,    1,  1,  1 BEMP_Flt,  5,  "deg",   "Azimuth from centroid of another array to this one (0=N, 90=E, ...)"    
+
+;   "Set Proj:PVWRelLocAzmLbl[1]"    Proj:PVWRelLocAzmLbl[1]    = {
+;         if (PVWGeomSpecMethod[1] == 1 .OR. PVWLocSpecMethod[1] != 2 .OR.
+;             PVWRelLocSpecMeth[1] != 5 .OR. IfValidAnd( PVWRelLocArrayIdx[1] > 0 )==0 .OR.
+;             IfValidAnd( PVWRelLocArrayIdx[1] <= 5 )==0) then  UNDEFINED
+;         else  Format( "Azimuth from centroid of array #%g to centroid of this array:", PVWRelLocArrayIdx[1] )
+;         endif  }
+
+;;     Proj:PVWRelLocTiltDeg[ALL],  Optional,  0,    1,   1,    1,  1,  1 BEMP_Flt,  5,  "deg",   "Tilt from centroid of another array to this one (in degrees, 0-horizontal, 90-vertical)"    
+;   "Set Proj:PVWRelLocTiltLbl[1]"    Proj:PVWRelLocTiltLbl[1]    = {
+;         if (PVWGeomSpecMethod[1] == 1 .OR. PVWLocSpecMethod[1] != 2 .OR.
+;             PVWRelLocSpecMeth[1] != 5 .OR. IfValidAnd( PVWRelLocArrayIdx[1] > 0 )==0 .OR.
+;             IfValidAnd( PVWRelLocArrayIdx[1] <= 5 )==0) then  UNDEFINED
+;         else  Format( "Tilt from centroid of array #%g to centroid of this array:", PVWRelLocArrayIdx[1] )
+;         endif  }
+
+; TO DO - when PVWGeomSpecMethod[*] == 1, then FORCE defaulting of Azimuth & Tilt (based on assigned PVArrayGeom object PolyLp)
+RULE PVArray:Az
+  DESCRIPTION
+    "Direction that the array faces (0-North, 45-NE, 90-East, 180-S, 270-W)"  
+  INPUTCLASS
+    Default 
+  UNITS
+    deg
+  MINIMUM
+    90
+  MAXIMUM
+    300
+  RESETS
+    ResetThisWhenTheFollowingIsModified
+      PVArray:GeomSpecMthd
+      PVArray:PVArrayGeomRef
+      PVArray:CalFlexibleInstall
+  DEFAULT 
+    if (GeomSpecMthd = "reference PVArrayGeom object")
+    then  if (LocalCompAssigned( PVArrayGeomRef )==0) then  UNDEFINED
+          else if (IfValidAnd( PVArrayGeomRef:ChildPolyLpRef:TiltAngle >=  0 )==0 .OR.
+                   IfValidAnd( PVArrayGeomRef:ChildPolyLpRef:TiltAngle <= 90 )==0)
+          then  UNDEFINED
+          else if (LocalStatus( PVArrayGeomRef:ChildPolyLpRef:Azimuth ) > 0)
+          then  PVArrayGeomRef:ChildPolyLpRef:Azimuth
+          else  UNDEFINED
+          endif endif endif
+    else  170
+    endif
+ENDRULE
+
+
+RULE PVArray:TiltInp
+  DESCRIPTION
+    "Type of PV array tilt input (degrees vs. pitch)"  
+  INPUTCLASS
+    Default 
+  OPTION
+    deg
+    pitch
+  RESETS
+    ResetThisWhenTheFollowingIsModified
+      PVArray:CalFlexibleInstall
+  DEFAULT 
+    "deg"
+ENDRULE
+
+RULE PVArray:TiltAngle
+  DESCRIPTION
+    "PV array angle in degrees (0-horizontal, 90-vertical)"  
+  INPUTCLASS
+    Optional
+  UNITS
+    deg
+  MINIMUM
+    0
+  MAXIMUM
+    90
+  RESETS
+    ResetThisWhenTheFollowingIsModified
+      PVArray:GeomSpecMthd
+      PVArray:TiltInp
+      PVArray:CalFlexibleInstall
+  DEFAULT 
+    if (GeomSpecMthd = "reference PVArrayGeom object")
+    then  if (LocalCompAssigned( PVArrayGeomRef )==0) then  UNDEFINED
+          else if (LocalStatus( PVArrayGeomRef:ChildPolyLpRef:TiltAngle ) > 0)
+          then  PVArrayGeomRef:ChildPolyLpRef:TiltAngle
+          else  UNDEFINED  endif endif
+    else  UNDEFINED  endif
+ENDRULE
+
+RULE PVArray:TiltPitch
+  DESCRIPTION
+    "PV array pitch (inches rise / 12 inches run)"  
+  INPUTCLASS
+    Optional
+  UNITS
+    x in 12
+  MINIMUM
+    0
+  RESETS
+    ResetThisWhenTheFollowingIsModified
+      PVArray:GeomSpecMthd
+      PVArray:TiltInp
+      PVArray:CalFlexibleInstall
+  DEFAULT 
+    if (GeomSpecMthd = "reference PVArrayGeom object" .AND.
+        LocalStatus( TiltAngle ) < 1) then  UNDEFINED
+    else if (  GeomSpecMthd = "reference PVArrayGeom object" .OR.
+              (TiltInp = "deg" .AND. LocalStatus( TiltAngle ) > 4) )
+    then  if (TiltAngle = 0) then  0
+          else  12 * tan( (TiltAngle/180)*3.14159 )
+          endif
+    else   5
+    endif endif
+ENDRULE
+
+RULE PVArray:TiltAngle
+  ; second round of defaulting to handle cross-referencing between Angle & Tilt expressions
+  DEFAULT 
+    if (GeomSpecMthd = "reference PVArrayGeom object") then  UNCHANGED
+    else if (TiltInp = "pitch" .AND. LocalStatus( TiltPitch ) > 4)
+    then  (atan( TiltPitch / 12 ) / 3.14159) * 180
+    else   (atan( 5 / 12 ) / 3.14159) * 180
+    endif endif
+ENDRULE
+
+
+RULE PVArray:RefX
+  DESCRIPTION
+    "PV array lower-left x-coordinate" 
+  INPUTCLASS
+    Optional
+  UNITS
+    ft
+ENDRULE
+
+RULE PVArray:RefY
+  DESCRIPTION
+    "PV array lower-left y-coordinate"
+  INPUTCLASS
+    Optional
+  UNITS
+    ft
+ENDRULE
+
+RULE PVArray:RefZ
+  DESCRIPTION
+    "PV array lower-left z-coordinate (elevation)"
+  INPUTCLASS
+    Optional
+  UNITS
+    ft
+ENDRULE
+
+RULE PVArray:Hgt
+  DESCRIPTION
+    "Height of PV array"  
+  INPUTCLASS
+    Optional
+  UNITS
+    ft
+  MINIMUM
+    0.1
+ENDRULE
+
+RULE PVArray:Wd
+  DESCRIPTION
+    "Width of PV array"
+  INPUTCLASS
+    Optional
+  UNITS
+    ft
+  MINIMUM
+    0.1
+ENDRULE
+
+
+RULE PVArray:LctnSpecified
+  INPUTCLASS
+    NotInput 
+  DEFAULT 
+    if (GeomSpecMthd == "azimuth and tilt")
+    then  if (LctnSpecMthd == "- not specified -") then  0
+          else if (LctnSpecMthd == "X,Y,Z and height, width")
+          then  if (LocalStatus( Hgt  )>0 .AND. LocalStatus( Wd   )>0 .AND.
+                    LocalStatus( RefX )>0 .AND. LocalStatus( RefY )>0 .AND.
+                    LocalStatus( RefZ )>0) then  2
+                else  0  endif
+          else if (LctnSpecMthd == "in relation to another PV Array")
+          then  0  ; NYI
+          else  0  ; undefined
+          endif endif endif
+    else if (GeomSpecMthd == "reference PVArrayGeom object")
+    then  if (LocalCompAssigned( PVArrayGeomRef )==0) then  0
+          else if (IfValidAnd( Az >= 0 )==0 .OR. IfValidAnd( TiltAngle >= 0 )==0 .OR.
+                   IfValidAnd( PVArrayGeomRef:ChildPolyLpRef:Area > 0 )==0) then  0
+          else  2  endif endif
+    else  0  endif endif
+ENDRULE
+
+RULE PVArray:LctnMessage
+  INPUTCLASS
+    NotInput 
+  DEFAULT 
+    if (IfValidAnd( DCSysSize > 0 )==0 .OR. GeomSpecMthd == "reference PVArrayGeom object")
+    then  UNDEFINED
+    else if (Proj:HavePVShadeObj > 0 .AND.
+             IfValidAnd( LctnSpecified > 0 )==0)
+    then  "ERROR:  Location must be specified when PV Array Shade object(s) exist."
+    else  UNDEFINED
+    endif endif
+ENDRULE
+RULE PVArray:LctnSpecMthd
+  CHECKSIM
+    if (IfValidAnd( PVBattSim > 0 ) .AND.
+        IfValidAnd( DCSysSize > 0 ) .AND.
+        Proj:HavePVShadeObj > 0 .AND.
+        IfValidAnd( LctnSpecified > 0 )==0)
+    then  PostError( "Location must be specified for PV Array '%s' since PV Array Shade object(s) exist.", Name )
+    else  UNCHANGED
+    endif
+ENDRULE
+
+
+RULE PVArray:GeomSummaryMessage
+  INPUTCLASS
+    NotInput 
+  DEFAULT 
+    if (IfValidAnd( DCSysSize > 0 )==0) then  UNDEFINED
+    else if (FindInString( LctnMessage, "ERROR" ) >= 0)
+    then  LctnMessage
+    else if (GeomSpecMthd == "azimuth and tilt")
+    then  if (LctnSpecMthd == "- not specified -")
+          then  if (TiltInp == "deg")
+                then  Format( "%.0f%c azimuth, %.1f%c tilt (%.1f-in-12) (no location specified)", Az, 176, TiltAngle, 176, TiltPitch )
+                else  Format( "%.0f%c azimuth, %.1f-in-12 tilt (%.1f%c) (no location specified)", Az, 176, TiltPitch, TiltAngle, 176 )
+                endif
+          else if (LctnSpecified == 0)
+          then  "ERROR:  PV Array Location fields above missing or invalid."
+          else  Format( "PV Array:  %.1f ft2 (%.1f W/ft2) with %.0f%c azimuth and %.1f%c tilt.", (Hgt * Wd),
+                         (DCSysSize * 1000 / (Hgt * Wd)), Az, 176, TiltAngle, 176 )
+          endif endif
+    else if (GeomSpecMthd == "reference PVArrayGeom object")
+    then  if (LocalCompAssigned( PVArrayGeomRef )==0)
+          then  "ERROR:  Geometry to be defined via PVArrayGeom object assignment, but none is assigned."
+          else if (IfValidAnd( PVArrayGeomRef:ChildPolyLpRef:TiltAngle >= 0 )==0 .OR. IfValidAnd( PVArrayGeomRef:ChildPolyLpRef:TiltAngle <= 90 )==0)
+          then  Format( "ERROR:  PVArrayGeom '%s' is invalid (facing downward, vertices may be reversed).", PVArrayGeomRef:Name )
+          else if (IfValidAnd( Az >= 0 )==0 .OR. IfValidAnd( TiltAngle >= 0 )==0 .OR.
+                   IfValidAnd( PVArrayGeomRef:ChildPolyLpRef:Area > 0 )==0)
+          then  Format( "ERROR:  Geometry defined by PVArrayGeom '%s' which has invalid geometry.", PVArrayGeomRef:Name )
+          else  Format( "PV Array:  %.1f ft2 (%.1f W/ft2) with %.0f%c azimuth and %.1f%c tilt.", PVArrayGeomRef:ChildPolyLpRef:Area,
+                         (DCSysSize * 1000 / PVArrayGeomRef:ChildPolyLpRef:Area), Az, 176, TiltAngle, 176 )
+          endif endif endif
+    else  "(geometry summary msg)"
+    endif endif endif endif
+ENDRULE
+
+
+RULE PVArray:ArrayType
+  DESCRIPTION
+    "Type of mount and/or method of tracking the sun's direction"  
+  INPUTCLASS
+    Default 
+  OPTION
+    Fixed (open rack)
+    Fixed (roof mount)
+  RESETS
+    ResetThisWhenTheFollowingIsModified
+      PVArray:CalFlexibleInstall
+  DEFAULT 
+    "Fixed (open rack)"
+ENDRULE
+
+RULE csePVARRAY:pvArrayType
+  DESCRIPTION
+    "Type of mount and/or method of tracking the sun's direction"  
+  INPUTCLASS
+    NotInput 
+  OPTION
+    FixedOpenRack
+    FixedRoofMount
+    OneAxisTracking
+    OneAxisBacktracking
+    TwoAxisTracking
+  DEFAULT 
+    "FixedOpenRack"
+ENDRULE
+
+
+RULE PVArray:InverterEff
+  DESCRIPTION
+    "Nominal rated DC-to-AC conversion efficiency (rated AC power output divided by rated DC power output)"  
+  INPUTCLASS
+    Optional
+  UNITS
+    %
+  RESETS
+    ResetThisWhenTheFollowingIsModified
+      PVArray:SpecMthd
+  DEFAULT 
+    if (IfValidAnd( DCSysSize > 0 )==0) then  UNDEFINED
+    else  96
+    endif
+ENDRULE
+
+RULE PVArrayShade:ChildPolyLpRef
+  CHECKSIM
+    if (IfValidAnd( PVBattSim > 0 )==0) then  UNCHANGED
+    else if (LocalCompAssigned( ChildPolyLpRef )==0)
+    then  PostError( "PVArrayShade '%s' Geometry (PolyLp) missing.", Name )
+    else if (IfValidAnd( ChildPolyLpRef:TiltAngle >= 0 )==0 .OR. IfValidAnd( ChildPolyLpRef:TiltAngle <= 90 )==0)
+    then  PostError( "PVArrayShade '%s' Geometry is invalid (PolyLp missing, facing downward or vertices entered in reversed order).", Name )
+    else  UNCHANGED
+    endif endif endif
+ENDRULE
+
+
+
+
+// ** debugging rule evaluation duration **
+RULE NEW Proj:RuleEvalDuration
+  INPUTCLASS
+    NotInput 
+  DEFAULT 
+    LogDuration( "            time to evaluate PV DEFAULT rules:  %.3f seconds" )
+  SIZING_PROPOSED 
+    LogDuration( "            time to evaluate PV SIZING_PROPOSED rules:  %.3f seconds" )
+  SIZING_BASELINE 
+    LogDuration( "            time to evaluate PV SIZING_BASELINE rules:  %.3f seconds" )
+  ANNUAL_PROPOSED
+    LogDuration( "            time to evaluate PV ANNUAL_PROPOSED rules:  %.3f seconds" )
+  ANNUAL_BASELINE
+    LogDuration( "            time to evaluate PV ANNUAL_PROPOSED rules:  %.3f seconds" )
+ENDRULE
+

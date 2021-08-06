@@ -1,0 +1,263 @@
+// Battery - General Information
+//
+// -------------------------------------------------------------------------
+//  Copyright (c) 2012-2018, California Energy Commission
+//  All rights reserved.
+//  Redistribution and use in source and binary forms, with or without
+//  modification, are permitted provided that the following conditions are
+//  met:
+// 
+//    * Redistributions of source code must retain the above copyright
+//  notice, this list of conditions and the following disclaimer.
+//    * Redistributions in binary form must reproduce the above copyright
+//  notice, this list of conditions and the following disclaimer in
+//  the documentation and/or other materials provided with the
+//  distribution.
+//    * Neither the name of the California Energy Commission nor the names of its
+//  contributors may be used to endorse or promote products
+//  derived from this software without specific prior written
+//  permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+//  IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+//  TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION
+//  BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+//  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+//  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+//  BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+//  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+//  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// -------------------------------------------------------------------------
+
+//Relevant ACM Section: ...
+
+
+// Battery proerties
+
+// SAC 2/17/20 - min batt size reduced to 0 for 2022 testing
+RULE Batt:MaxCap
+  DESCRIPTION
+    "The maximum amount of energy that can be stored in the battery system"  
+  INPUTCLASS
+    Default 
+  UNITS
+    kWh
+  MINIMUM : T24N_2022
+    0
+  MINIMUM
+    5
+  DEFAULT 
+    5
+ENDRULE
+
+// SAC 3/4/20 - add 'Ranked Day DR Control' option
+RULE Batt:Ctrl
+  DESCRIPTION
+    "Algorithm used to determine how/when the battery is charged and discharged"  
+  INPUTCLASS
+    Default 
+  RESETS
+    ResetTheFollowingWhenThisIsModified
+      Battery:TDVSummerPkFirstHr
+  OPTION
+    Basic
+    Time of Use
+    Ranked Day DR Control
+    Advanced DR Control
+  DEFAULT 
+    "Basic"
+ENDRULE
+    ;         99,    "- specify -"   - user-specified expression (requires secondary sim)
+    ;          1,    "Basic"
+    ;         10,    "Time of Use"
+    ;         11,    "Advanced DR Control"
+    ;        100,    "Advanced Control (old)"   - (requires secondary sim)
+    ;        101,    "Ranked Day DR Control"      ; SAC 3/4/20 - testing new option
+
+// SAC 3/11/20
+RULE Batt:NumRankedDays
+  DESCRIPTION
+    "Number of ranked (TDV) days to operate in TDVPeakSave mode (for advanced control simulation)"  
+  INPUTCLASS
+    Optional 
+  MINIMUM
+    1
+  MAXIMUM
+    365
+  DEFAULT 
+    20
+ENDRULE
+
+RULE Batt:ChrgEff
+  DESCRIPTION
+    "The charging efficiency of storing electricity into the battery system"  
+  INPUTCLASS
+    Default 
+  UNITS
+    frac
+  DEFAULT 
+    0.95
+ENDRULE
+
+RULE Batt:DschrgEff
+  DESCRIPTION
+    "The discharge efficiency for when the battery system is discharging power"  
+  INPUTCLASS
+    Default 
+  UNITS
+    frac
+  DEFAULT 
+    0.95
+ENDRULE
+
+RULE Batt:DegradePct
+  DESCRIPTION
+    "The percent of total battery capacity simulated (adjusting for battery degradation over time)"  
+  INPUTCLASS
+    NotInput 
+  UNITS
+    %
+  DEFAULT 
+    100
+ENDRULE
+; TO DO  - switch above value to 85%
+
+RULE Batt:CapRat
+  DESCRIPTION
+    "Battery Capacity Ratio = user input kWh / 14 (1.0 for a default Powerwall II)"  
+  INPUTCLASS
+    NotInput 
+  UNITS
+    ratio
+  DEFAULT 
+    ValidOr( MaxCap, 0 ) / 14
+ENDRULE
+
+
+;1,           "CtrlMsg",          BEMP_Str,  1,  0,  0,  NInp,  "",                 0,  0,                          1003, "ControlMessage",   ""  ; "Message describing battery control"   
+
+
+RULE Batt:MaxChrgPwr
+  DESCRIPTION
+    "The maximum rate at which the battery can be charged in kilowatts (i.e., energy flowing into the battery)"  
+  INPUTCLASS
+    NotInput 
+  UNITS
+    kW
+  DEFAULT 
+    if (IfValidAnd( MaxCap > 0 )) then  5 * (MaxCap / 14)
+    else  5     ; CSE default 4
+    endif
+ENDRULE
+
+RULE Batt:MaxDschrgPwr
+  DESCRIPTION
+    "The maximum rate at which the battery can be discharged in kilowatts (i.e., energy flowing out of the battery)"  
+  INPUTCLASS
+    NotInput 
+  UNITS
+    kW
+  DEFAULT 
+    if (IfValidAnd( MaxCap > 0 )) then  5 * (MaxCap / 14)
+    else  5   ; CSE default 4  
+    endif
+ENDRULE
+
+
+// based on analysis of when peaks occur in Com Elec TDV data   - SAC 8/4/19 - revised to be equivalent to Res peak hours (same TDV peaks)
+TABLE TDVSummerPkTable
+    CZNum   FirstHr
+    1       20
+    2       19
+    3       20
+    4       19
+    5       20
+    6       20
+    7       20
+    8       19
+    9       19
+    10      19
+    11      19
+    12      19
+    13      19
+    14      19
+    15      19
+    16      20
+ENDTABLE
+// Res hrs:     1   2   3   4   5   6   7   8   9  10  11  12  13  14  15  16
+//             20  19  20  19  20  20  20  19  19  19  19  19  19  19  19  20
+
+RULE Batt:TDVSummerPkFirstHr
+  DESCRIPTION
+    "First hour of the summer peak TDV period (18 => hour between 5p & 6p)"  
+  INPUTCLASS
+    Prescribed 
+  UNITS
+    hr
+  MINIMUM 
+    1
+  MAXIMUM 
+    24
+  DEFAULT 
+   if (IfValidAnd( Proj:CliZnNum >= 1 ) .AND. IfValidAnd( Proj:CliZnNum <= 16 ))
+   then  TDVSummerPkTable:FirstHr( "CZNum", Proj:CliZnNum )
+   else  19
+   endif
+ENDRULE
+
+RULE cseBATTERY:btUseUsrChg
+  OPTION
+    Yes
+    No
+ENDRULE
+
+// SAC 8/4/19 - default in Res is 10 due to difference in TDV units
+RULE Batt:AdvBattTDVPkDayVal
+  DESCRIPTION
+    "Value that identifies TDV peak days (for advanced control simulation)"  
+  INPUTCLASS
+    Prescribed 
+  MINIMUM 
+    0.1
+  DEFAULT
+    34.12  
+ENDRULE
+
+
+;1,           "UserMsg",          BEMP_Str,  1,  0,  0,  NInp,  "",                 0,  0,                          3208, "UserMessage",  ""  ; "Message to user about Battery inputs"    
+
+
+RULE Batt:UserMsg2[1]
+  DEFAULT 
+    "The battery model doesn't currently include extra energy consumption for"
+ENDRULE
+RULE Batt:UserMsg2[2]
+  DEFAULT 
+    "cooling the battery during charging in environments above 77°F or to keep"
+ENDRULE
+RULE Batt:UserMsg2[3]
+  DEFAULT 
+    "the battery from freezing in winter if outdoors."
+ENDRULE
+
+
+
+
+// ** debugging rule evaluation duration **
+RULE NEW Proj:RuleEvalDuration
+  INPUTCLASS
+    NotInput 
+  DEFAULT 
+    LogDuration( "            time to evaluate Space and Building DEFAULT rules:  %.3f seconds" )
+  SIZING_PROPOSED 
+    LogDuration( "            time to evaluate Space and Building SIZING_PROPOSED rules:  %.3f seconds" )
+  SIZING_BASELINE 
+    LogDuration( "            time to evaluate Space and Building SIZING_BASELINE rules:  %.3f seconds" )
+  ANNUAL_PROPOSED
+    LogDuration( "            time to evaluate Space and Building ANNUAL_PROPOSED rules:  %.3f seconds" )
+  ANNUAL_BASELINE
+    LogDuration( "            time to evaluate Space and Building ANNUAL_PROPOSED rules:  %.3f seconds" )
+ENDRULE
+
