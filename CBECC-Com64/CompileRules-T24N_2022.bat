@@ -1,6 +1,6 @@
 if not exist "Data\Rulesets" mkdir "Data\Rulesets"
 if not exist "Data\Rulesets\T24N_2022" mkdir "Data\Rulesets\T24N_2022"
-if exist BEMCompiler19c.exe BEMCompiler19c.exe --bemBaseTxt="../RulesetDev/Rulesets/BEMBase.txt" --bemEnumsTxt="../RulesetDev/Rulesets/T24N/T24N_2022 BEMEnums.txt" --bemBaseBin="Data/Rulesets/T24N_2022/T24N_2022 BEMBase.bin" --rulesTxt="../RulesetDev/Rulesets/T24N/Rules/T24N_2022.txt" --rulesBin="Data/Rulesets/T24N_2022.bin" --rulesLog="_T24N-2022 Rules Log.out" --compileDM --compileRules
+if exist BEMCompiler19c.exe BEMCompiler19c.exe --sharedPath1="../RulesetDev/Rulesets/shared/" --bemBaseTxt="../RulesetDev/Rulesets/BEMBase.txt" --bemEnumsTxt="../RulesetDev/Rulesets/T24N/T24N_2022 BEMEnums.txt" --bemBaseBin="Data/Rulesets/T24N_2022/T24N_2022 BEMBase.bin" --rulesTxt="../RulesetDev/Rulesets/T24N/Rules/T24N_2022.txt" --rulesBin="Data/Rulesets/T24N_2022.bin" --rulesLog="_T24N-2022 Rules Log.out" --compileDM --compileRules
 echo OFF
 echo BEMCompiler19c.exe returned (%ERRORLEVEL%) for T24N_2022
 if %ERRORLEVEL%==0 goto :copyfiles
