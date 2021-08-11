@@ -1,0 +1,1662 @@
+; -------------------------------------------------------------------------
+; Rules pertaining to:   Defaulting the Proposed Building Model - focusing on Loads (internal gains) properties
+; CEC Title-24 Residential Energy Code
+; -------------------------------------------------------------------------
+; Copyright (c) 2012-2014, California Energy Commission
+; Copyright (c) 2012-2014, Wrightsoft Corporation
+; All rights reserved.
+; Redistribution and use in source and binary forms, with or without modification,
+; are permitted provided that the following conditions are met:
+; - Redistributions of source code must retain the above copyright notice, this
+;   list of conditions and the following disclaimer.
+; - Redistributions in binary form must reproduce the above copyright notice, this
+;   list of conditions, the following disclaimer in the documentation and/or other
+;   materials provided with the distribution.
+; - Neither the name of the California Energy Commission nor the names of its
+;   contributors may be used to endorse or promote products derived from this
+;   software without specific prior written permission.
+; DISCLAIMER: THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+; "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+; THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+; NON-INFRINGEMENT ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION,
+; WRIGHTSOFT CORPORATION, ITRON, INC. OR ANY OTHER AUTHOR OR COPYRIGHT HOLDER OF
+; THIS SOFTWARE (COLLECTIVELY, THE "AUTHORS") BE LIABLE FOR ANY DIRECT, INDIRECT,
+; INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+; LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA,
+; OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+; LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
+; OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+; ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.  EACH LICENSEE AND SUBLICENSEE OF THE
+; SOFTWARE AGREES NOT TO ASSERT ANY CLAIM AGAINST ANY OF THE AUTHORS RELATING TO
+; THIS SOFTWARE, WHETHER DUE TO PERFORMANCE ISSUES, TITLE OR INFRINGEMENT ISSUES,
+;STRICT LIABILITY OR OTHERWISE.
+; -------------------------------------------------------------------------
+
+; SAC 10/24/16 - new rulelist to default cool vent, IAQ & internal gains properties
+;*************************************************************************
+RULELIST "ProposedInput_CoolVent_IAQ_IntGains" 0 0 0 0
+;*************************************************************************
+   ;--------------------------------------------------------------------
+   ; ProposedInput: Dwelling Unit (incl. dwelling unit internal gain) Rules
+   ;--------------------------------------------------------------------
+	"Set Proj:AppliancesMsg"		Proj:AppliancesMsg	= {	if (IsMultiFamily < 0.5) then  " "
+																				else  "Appliance fuel & usage and DHW Compact Distribution inputs are entered on Dwelling Unit Type dialog for multifamily models"  endif  }
+	"Set Proj:IAQMsg"					Proj:IAQMsg				= {	if (IsMultiFamily < 0.5) then  " "
+																				else  "IAQ (indoor air quality) data entered on Dwelling Unit Type dialog for multifamily models"  endif  }
+; SAC 8/27/13 - added logic to ensure that we have VENTILATED attic space before allowing Cool Vent
+;	"Set Proj:EnableClVent"			Proj:EnableClVent		= {	if (IsMultiFamily < 0.5 .AND. ComponentCount( Zone ) > 0.5 .AND. SumAll( Zone:CondClgBlwAtticArea ) > 0.1) then  1  else  0  endif  }
+;	mjb	4/14/14	only add Cool Vent if floor area > 1000
+; mjb 7/9/14   removed floor area limit since we want users to add a WHF in their design if they want to (just not in Std Design)
+; SAC 7/11/14 - restored logic to ensure that there is at least SOME Zone:CondClgBlwAtticArea before enabling ClVent
+	"Set Proj:EnableClVent"			Proj:EnableClVent		= {	if (IsMultiFamily < 0.5 .AND. ComponentCount( Zone ) > 0.5 .AND. ComponentCount( Attic ) > 0 .AND.
+																						SumAll( Zone:CondClgBlwAtticArea ) > 0.1 .AND. SumAll( Attic:ClVentableArea ) > 0.1)
+																				then  1  else  0  endif  }
+;	"Set Zone:NeedStdClVent"		Zone:NeedStdClVent		= {	if (( Proj:RunScope == 2 .AND. Status = 3) .OR. (Proj:RunScope == 1 .AND. Proj:IsAddAlone > 0.5) ) then
+;																							if (AdditionCFA > 1000) then 1 else 0 endif  
+;																						else  0  endif   }
+	"Check NeedStdClVent"			Proj:EnableClVent		= {	if ( IfValidAnd(MaxChild(Zone:NeedStdClVent) > 0.5)) then 1 else UNCHANGED endif	}
+
+   "Set Proj:LimitedClVent"      Proj:LimitedClVent   =     ; SAC 1/16/19 - added to enable ClVent fans to outside as opposed to vented attics (tic #1040)
+      {  if (IsMultiFamily < 0.5 .AND. EnableClVent == 0 .AND. SumAll( Zone:CondVolume ) > 1)
+         then  1
+         else  0  endif  }
+   "Set Proj:ClVentUI"     Proj:ClVentUI   =
+      {  if (EnableClVent .OR. LimitedClVent)
+         then  1  else  0  endif  }
+
+   ; SAC 1/16/19 - added rule default for Proj:UnitClVentOption which may be defaulted via enums before a dependency (tic #1040)
+   "Reset Proj:UnitClVentOption (set it to 'none') if necessary"  Proj:Action  =
+      {  if (LocalStatus( UnitClVentOption ) > 4 .AND. EnableClVent == 0 .AND.
+             UnitClVentOption != 0 .AND.
+             ( LimitedClVent == 0 .OR. UnitClVentOption == 1 ))
+         then  EvalRulelist( "Blast_Proj_UnitClVentOption" )
+         else  UNCHANGED  endif }
+   "Default Proj:UnitClVentOption"     Proj:UnitClVentOption  =
+      {  if (EnableClVent)
+         then  1     ; Default Prescriptive Whole House Fan
+         else  0     ; none 
+         endif  }
+
+   "Set Proj:ClVentFanUI"     Proj:ClVentFanUI  =        ; SAC 1/19/19 (tic #1040)
+      {  if (ClVentUI > 0 .AND. UnitClVentOption = 2)
+         then  1  else  0  endif  }
+
+   "Set Zone:ClVentCompat"    Zone:ClVentCompat  =       ; SAC 1/19/19 - 0/1 toggle indicating whether zone is compatible with a (SFam) cool vent fan (may not require ClgBlwAttic) (tic #1040)   
+      {  if (Proj:EnableClVent) then  ValidOr( HasCondClgBlwAttic, 0 )
+         else if (Proj:ClVentUI > 0 .AND. (Proj:UnitClVentOption = 2 .OR. Proj:UnitClVentOption = 5) .AND.
+                  IfValidAnd( CondFloorArea > 0 )) then  1
+         else  0  endif endif  }
+
+;	"debug"		Proj:Action	= {	PostWarning( "Proposed Input -- WHF:  EnableClVent = %g", EnableClVent )  }
+   "Set Proj:CoolVentMsg"     Proj:CoolVentMsg  =
+      {  if (IsMultiFamily > 0.5) then  "Cooling ventilation (whole house fan) is not implemented for multi-family buildings"
+         else if (LimitedClVent == 0) then  "One or more conditioned Zones must be defined to enable Cooling Ventilation"
+         else  " "  endif endif  }     ; SAC 1/16/19 - revised for LimitedClVent (tic #1040)
+																	;			else if (ComponentCount( Zone ) < 0.5 .OR. SumAll( Zone:CondClgBlwAtticArea ) < 0.1)
+																	;			then  "One or more conditioned Zones with ceilings below attic must be defined to enable Cooling Ventilation"
+																	;			else if (SumAll( Attic:ClVentableArea ) < 0.1)
+																	;			then  "One or more ventilated Attics must be present to enable Cooling Ventilation"
+																	;			else  " "  endif endif endif  }
+
+  ; SAC 12/31/15 - new properties added to enable user specification of reduced attic relief free vent area (tic 596) - not used for ClVentOption = CFI (HVACSys)
+	"Default Proj:UnitClVentLowArea"		Proj:UnitClVentLowArea	= {	0  }		; Whether or not there is reduced attic relief vent free area
+	"Set Proj:UnitClVentAreaMult"			Proj:UnitClVentAreaMult	= {	if (EnableClVent > 0.5 .AND. StandardsVersion < 2017 .AND. 
+																								 UnitClVentLowArea > 0.5 .AND. (UnitClVentOption == 1 .OR. UnitClVentOption == 2)) then  0.5  else  1  endif  }
+	"Set Proj:ClVentAirFlowMult"			Proj:ClVentAirFlowMult	= {	if (UnitClVentAreaMult == 0.5) then  0.93  else  1  endif  }
+
+	; SAC 4/15/16 - added logic to ensure that user-defined Appl_RefrigUsage[1] is not retained when ApplRefrigEffMethod[1] is not set to '- specify -'
+	"Blast user-input Appl_RefrigUsage[1] if needed"	Proj:Action	= {	if (LocalStatus( Appl_RefrigUsage[1] ) < 7 .OR. ApplRefrigEffMethod[1] == 2) then  UNCHANGED
+																								else	EvalRulelist( "ForceDefault_Proj_RefrigUsage", 1 )  endif  }
+; modified to match RESNET - mjb 11/09/15
+	; SAC 4/14/16 - added T24-2016 default
+	"Default Proj:Appl_RefrigUsage[1]"	Proj:Appl_RefrigUsage[1]	= {	if (Proj:DRtgRefRunID == 2014) then  637 + 18 * SimNumBedrooms
+																								else if (Proj:IntGainsMethod <= 2013) then  669
+																								else	454 + (37 * SimNumBedrooms)  endif endif  }		;	if (Local(ApplRefrigEffMethod[1]) == 1) then  669.  else UNCHANGED endif }
+
+	"Default Proj:ExtLtg_PwrAdjMult"		Proj:ExtLtg_PwrAdjMult		= {	if (Proj:DRtgRefRunID == 2014) then  1.0
+																								else	0.49  endif  }
+
+	"Init Zone:Appl_RefrigGain"		Zone:Appl_RefrigGain		= {    0  }
+	"Init Zone:Appl_DishGain"			Zone:Appl_DishGain		= {    0  }
+	"Init Zone:Appl_CookGain[1]"		Zone:Appl_CookGain[1]	= {    0  }
+	"Init Zone:Appl_CookGain[2]"		Zone:Appl_CookGain[2]	= {    0  }
+	"Init Zone:Appl_CookGain[3]"		Zone:Appl_CookGain[3]	= {    0  }
+	"Init Zone:Appl_WasherGain"		Zone:Appl_WasherGain		= {    0  }
+	"Init Zone:ApplDryerGain[1]"		Zone:Appl_DryerGain[1]	= {    0  }
+	"Init Zone:ApplDryerGain[2]"		Zone:Appl_DryerGain[2]	= {    0  }
+	"Init Zone:ApplDryerGain[3]"		Zone:Appl_DryerGain[3]	= {    0  }
+	"Init Zone:ExtLtg_Gain"				Zone:ExtLtg_Gain			= {    0  }
+	"Init OtherZone:Appl_RefrigGain"		OtherZone:Appl_RefrigGain		= {    0  }    ; SAC 9/20/19 (MFamProto)
+	"Init OtherZone:Appl_DishGain"		OtherZone:Appl_DishGain		= {    0  }
+	"Init OtherZone:Appl_CookGain[1]"	OtherZone:Appl_CookGain[1]	= {    0  }
+	"Init OtherZone:Appl_CookGain[2]"	OtherZone:Appl_CookGain[2]	= {    0  }
+	"Init OtherZone:Appl_CookGain[3]"	OtherZone:Appl_CookGain[3]	= {    0  }
+	"Init OtherZone:Appl_WasherGain"		OtherZone:Appl_WasherGain		= {    0  }
+	"Init OtherZone:ApplDryerGain[1]"	OtherZone:Appl_DryerGain[1]	= {    0  }
+	"Init OtherZone:ApplDryerGain[2]"	OtherZone:Appl_DryerGain[2]	= {    0  }
+	"Init OtherZone:ApplDryerGain[3]"	OtherZone:Appl_DryerGain[3]	= {    0  }
+	"Init OtherZone:ExtLtg_Gain"		   OtherZone:ExtLtg_Gain	= {    0  }    ; SAC 9/10/19 (MFamProto)
+
+	"Set Zone:CondApplArea"				Zone:CondApplArea			= {	if (Local(Type) == 1 .OR. Local(Type) == 2) then  Local(FloorArea)  else  0  endif  }
+	"Set Proj:ApplRefrigZone[1]"		Proj:ApplRefrigZone[1]	= {	if (ComponentCount( Zone ) > 0) then  MaxAllComp( Zone:CondApplArea )  else  UNDEFINED  endif }
+	"Set Proj:ApplDishZone[1]"			Proj:ApplDishZone[1]		= {	if (ComponentCount( Zone ) > 0) then  MaxAllComp( Zone:CondApplArea )  else  UNDEFINED  endif }
+	"Set Proj:ApplCookZone[1]"			Proj:ApplCookZone[1]		= {	if (ComponentCount( Zone ) > 0) then  MaxAllComp( Zone:CondApplArea )  else  UNDEFINED  endif }
+	"Set Proj:ApplWasherZone[1]"		Proj:ApplWasherZone[1]	=              ; SAC 9/20/19 - OtherZone (MFamProto)
+      {  if (Proj:IsMultiFamily > 0 .AND. MaxAll( OtherZone:LaundryArea ) > 0) then  MaxAllComp( OtherZone:LaundryArea )
+         else if (ComponentCount( Zone ) > 0) then  MaxAllComp( Zone:FloorArea )     else  UNDEFINED  endif endif  }
+	"Set Proj:ApplDryerZone[1]"		Proj:ApplDryerZone[1]	= {	ApplWasherZone[1] }
+	"Set Proj:ExtGainZone"				Proj:ExtGainZone   		=              ; SAC 9/10/19 - added logic to assign OtherZone (MFamProto)
+      {  if (Proj:IsMultiFamily > 0 .AND. MaxAll( OtherZone:Area ) >= MaxAll( Zone:FloorArea )) then  MaxAllComp( OtherZone:Area )
+         else if (ComponentCount( Zone ) > 0) then  MaxAllComp( Zone:FloorArea )     else  UNDEFINED  endif endif }
+
+	;	1 = electricity, 2 = gas, 3 = other
+	"Set Proj:ApplCookFuel[1]"			Proj:ApplCookFuel[1]		= { if (Local(Fuel_HaveNatGas) == 0) then 1 else 2 endif }	; SAC 11/9/15
+	"Set Proj:ApplDryerFuel[1]"		Proj:ApplDryerFuel[1]	= { if (Local(Fuel_HaveNatGas) == 0) then 1 else 2 endif }
+	"Set Proj:Appl_HaveRefrig[1]"		Proj:Appl_HaveRefrig[1]	= { 1 }
+	"Set Proj:Appl_HaveDish[1]"		Proj:Appl_HaveDish[1]	= { 1 }
+	"Set Proj:Appl_HaveCook[1]"		Proj:Appl_HaveCook[1]	= { 1 }
+	"Set Proj:Appl_HaveWasher[1]"		Proj:Appl_HaveWasher[1]	= { 1 }
+	"Set Proj:Appl_HaveDryer[1]"		Proj:Appl_HaveDryer[1]	= { 1 }
+
+	"Default Dwelling Unit Data"		Proj:Action	= {	if (IsMultiFamily < 0.5)
+																		then  EvalRulelist( "Default_DwellingUnitData_SFam" )
+																		else	EvalRulelist( "Default_DwellingUnitData" )  endif  }
+
+	; SAC 4/15/16 - added logic to ensure that user-defined Appl_DishUsage[1] is not retained when ApplDishUsageMethod[1] is not set to '- specify -'
+	"Blast user-input Appl_DishUsage[1] if needed"		Proj:Action	= {	if (LocalStatus( Appl_DishUsage[1] ) < 7 .OR. ApplDishUsageMethod[1] == 2) then  UNCHANGED
+																								else	EvalRulelist( "ForceDefault_Proj_DishUsage", 1 )  endif  }
+; SAC 12/28/15 - revised logic to use SimNumBedrooms in place of NumBedrooms to prevent use of existing bedroom counts in Addition Alone analyses
+; modified to match RESNET - mjb 11/09/15
+	; SAC 4/13/16 - modified for T24-2016
+	"Default Proj:Appl_DishUsage[1]"		Proj:Appl_DishUsage[1]		= {	if (IsMultiFamily > 0.5 .OR. Appl_HaveDish[1] < 0.5) then  0
+																					;			else if (ApplDishUsageMethod[1] == 1 .AND. NumDwellingUnits[1] > 0) then		- default using this logic even if ApplDishUsageMethod[1] != 1
+																								else if (NumDwellingUnits[1] > 0)
+																								then	if (Proj:DRtgRefRunID == 2014)
+																										then  switch (SimNumBedrooms / NumDwellingUnits[1])
+			                                                                              case 0: 78		case 1: 109		case 2: 140		case 3: 171		case 4: 202
+         			                                                                   	case 5: 233		case 6: 264		case 7: 295		case 8: 326		case 9: 357
+																													default: 109	endswitch
+																										else if (Proj:IntGainsMethod <= 2013)
+																										then	switch (SimNumBedrooms / NumDwellingUnits[1])
+																													case 0: 90		case 1: 90		case 2: 126		case 3: 126		case 4: 126
+																													case 5: 145		case 6: 145		case 7: 174		case 8: 174		case 9: 174
+																													default: 203	endswitch
+																										else	0.14507		; kWh/gal (for T24-2016 gains)
+																										endif endif
+																								else  0  endif endif  }
+	"Set Proj:Appl_DishUsageUnits"	Proj:Appl_DishUsageUnits	= {	if (Proj:IntGainsMethod > 2013) then  "kWh/gal"  else  "kWh/yr"  endif  }
+
+; modified to match RESNET - mjb 11/09/15
+	; SAC 4/13/16 - modified for T24-2016
+	"Set Proj:AvgLtgGainPerCFA (non-dwelling unit)"		Proj:AvgLtgGainPerCFA	= {
+						if (IsMultiFamily > 0.5) then  UNCHANGED
+						else if (CondFloorArea < 0.1) then  0
+						else if (Proj:DRtgRefRunID == 2014)
+						then	(455. + 0.8   * CondFloorArea) * (Ltg_FracPort + ((1-Ltg_FracPort) * Ltg_PwrAdjMult)) / 365 / CondFloorArea
+						else if (Proj:IntGainsMethod <= 2013)
+						then	(214. + 0.601 * CondFloorArea) * (Ltg_FracPort + ((1-Ltg_FracPort) * Ltg_PwrAdjMult)) / 365 / CondFloorArea
+						else	; T24-2016
+								if (Proj:RunScope == 1 .AND. Proj:IsAddAlone > 0.5)
+								then	; New Cons, Addition Alone
+										if (IfValidAnd( LtgCondFloorArea > 0 ))
+										then	(100 + (0.1775 * LtgCondFloorArea)) * 3412/365 /
+													(ValidOr( AddAloneExistArea, 0 ) + ValidOr( AddAloneAddedArea, 0 )) 
+										else	0		; ERROR - addition alone project areas bogus
+										endif
+								else	; EAA or New Cons NOT Addition Alone
+										if (IfValidAnd( CondFloorArea > 0 ))
+										then	(100 + (0.1775 * LtgCondFloorArea)) * 3412/365 / CondFloorArea
+										else	0		; ERROR - Proj:CondFloorArea bogus
+										endif
+								endif
+						endif endif endif endif  }
+
+; SAC 12/28/15 - revised logic to use SimNumBedrooms in place of NumBedrooms to prevent use of existing bedroom counts in Addition Alone analyses
+	"Set Proj:AvgPplGainPerCFA (non-dwelling unit)"		Proj:AvgPplGainPerCFA	= {
+						if (IsMultiFamily > 0.5) then  UNCHANGED
+						else if (CondFloorArea < 0.1) then  0
+						else	int( (1.75 + (0.4 * SimNumBedrooms) + 0.5) ) * (3900/0.573) / CondFloorArea  endif endif  }
+
+; modified to match RESNET - mjb 11/09/15
+	"Set Proj:AvgMscEGainPerCFA (non-dwelling unit)"		Proj:AvgMscEGainPerCFA	= {
+						if (IsMultiFamily > 0.5) then  UNCHANGED
+						else if (CondFloorArea < 0.1) then  0
+						else if (Proj:DRtgRefRunID == 2014)
+						then	(413. + (0.91  * CondFloorArea) + (69 * SimNumBedrooms)) / 365 / CondFloorArea
+						else	(723. + (0.706 * CondFloorArea)) / 365 / CondFloorArea  endif endif endif  }
+
+; adds in electricity component of Dryer and Cook when these are fueled by gas - mjb 11/10/15
+	"Set Proj:AvgMscEGainPerCFA (non-dwelling unit)"		Proj:AvgMscEGainPerCFA	= {
+						if (Proj:DRtgRefRunID != 2014 .OR. IsMultiFamily > 0.5) then  UNCHANGED
+						else if (ApplDryerFuel[1] != 2) then UNCHANGED
+						   else AvgMscEGainPerCFA + (41. + (11.7 * SimNumBedrooms)) / 365 / CondFloorArea  endif endif  }
+	"Set Proj:AvgMscEGainPerCFA (non-dwelling unit)"		Proj:AvgMscEGainPerCFA	= {
+						if (Proj:DRtgRefRunID != 2014 .OR. IsMultiFamily > 0.5) then  UNCHANGED
+						else if (ApplCookFuel[1] != 2) then UNCHANGED
+						   else AvgMscEGainPerCFA + (22.6 + (2.7 * SimNumBedrooms)) / 365 / CondFloorArea  endif endif  }
+
+  ; refigerators - handled by assignment of zones, not 
+	; modified to match RESNET - mjb 11/09/15
+	; SAC 4/14/16 - revised for T24-2016
+	"Set Zone:Appl_RefrigGain (non-dwelling unit)"		Proj:ApplRefrigZone[1]:Appl_RefrigGain	= {	if (IsMultiFamily > 0.5 .OR. Appl_HaveRefrig[1] < 0.5) then  UNCHANGED
+																																	else	Appl_RefrigUsage[1] / 365  endif  }
+	"Set Zone:Appl_DishGain (non-dwelling unit)"			Proj:ApplDishZone[1]:Appl_DishGain		= {	if (IsMultiFamily > 0.5 .OR. Appl_HaveDish[1]   < 0.5) then  UNCHANGED
+																																	else if (Proj:IntGainsMethod <= 2013)
+																																	then	Appl_DishUsage[1]   / 365.
+																																	else	Appl_DishUsage[1]  endif endif  }
+	"Set Zone:Appl_CookGain (non-dwelling unit)-Elec"	Proj:ApplCookZone[1]:Appl_CookGain[1]	= {	if (IsMultiFamily > 0.5 .OR. Appl_HaveCook[1]   < 0.5) then  UNCHANGED
+																																	else if (Proj:DRtgRefRunID == 2014 .AND. ApplCookFuel[1] == 1)
+																																	then	((331 + 39 * SimNumBedrooms))                 * 3413.   / 365.
+																																	else if (Proj:IntGainsMethod <= 2013 .AND. ApplCookFuel[1] == 1)
+																																	then	((31. + (.008 * CondFloorArea)) * 0.43 * 0.9) * 100000. / 365.
+																																	else if (Proj:IntGainsMethod > 2013)
+																																	then	if (ApplCookFuel[1] == 1)
+																																			then	(213  + (26.3 * Proj:SimNumBedrooms)) * 3412 / 365		; elec cooking
+																																			else	( 16  + ( 1.9 * Proj:SimNumBedrooms)) * 3412 / 365		; elec aux for gas cooking
+																																			endif
+																																	else	0  endif endif endif endif  }
+	"Set Zone:Appl_CookGain (non-dwelling unit)-NGas"	Proj:ApplCookZone[1]:Appl_CookGain[2]	= {	if (IsMultiFamily > 0.5 .OR. Appl_HaveCook[1]   < 0.5 .OR. ApplCookFuel[1] != 2) then  UNCHANGED
+																																	else if (Proj:DRtgRefRunID == 2014)
+																																	then	((22.6 + 2.7 * SimNumBedrooms))               * 100000. / 365.
+																																	else if (Proj:IntGainsMethod <= 2013)
+																																	then	((31. + (.008 * CondFloorArea)) * 0.43 * 0.9) * 100000. / 365.
+																																	else	(10 + (1.3 * Proj:SimNumBedrooms)) * 100000 / 365
+																																	endif endif endif  }
+	"Set Zone:Appl_CookGain (non-dwelling unit)-Othr"	Proj:ApplCookZone[1]:Appl_CookGain[3]	= {	if (IsMultiFamily > 0.5 .OR. Appl_HaveCook[1]   < 0.5 .OR. ApplCookFuel[1] != 3) then  UNCHANGED
+																																	else if (Proj:DRtgRefRunID == 2014)
+																																	then	((22.6 + 2.7 * SimNumBedrooms))               * 100000. / 365.
+																																	else if (Proj:IntGainsMethod <= 2013)
+																																	then	((31. + (.008 * CondFloorArea)) * 0.43 * 0.9) * 100000. / 365.
+																																	else	0  endif endif endif  }
+	"Set Zone:Appl_WasherGain (non-dwelling unit)"		Proj:ApplWasherZone[1]:Appl_WasherGain	= {	if (IsMultiFamily > 0.5 .OR. Appl_HaveWasher[1] < 0.5) then  UNCHANGED
+																																	else if (Proj:DRtgRefRunID == 2014)
+																																	then	(38 + 10 * SimNumBedrooms)       / 365.
+																																	else if (Proj:IntGainsMethod <= 2013)
+																																	then	(-64 + (0.108 * CondFloorArea))  / 365. 
+																																	else	0.010067		; SAC 4/15/16 - T24-2016 washer gain
+																																	endif endif endif  }
+	; SAC 4/15/16 - revised for T24-2016 gains
+	"Set Zone:Appl_DryerGain (non-dwelling unit)-Elc"	Proj:ApplDryerZone[1]:Appl_DryerGain[1] ={	if (IsMultiFamily > 0.5 .OR. Appl_HaveDryer[1]  < 0.5 .OR. (Proj:IntGainsMethod <= 2013 .AND. ApplDryerFuel[1] != 1)) then  UNCHANGED
+																																	else if (Proj:DRtgRefRunID == 2014)
+																																	then	(524 + 149 * SimNumBedrooms)    * 3413    / 365.
+																																	else if (Proj:IntGainsMethod <= 2013)
+																																	then	(13. + (0.01  * CondFloorArea)) * 100000. / 365.
+																																	else	if (ApplDryerFuel[1] == 1) then  0.08509  else  0.004252  endif	; T24-2016
+																																	endif endif endif  }
+	"Set Zone:Appl_DryerGain (non-dwelling unit)-NGs"	Proj:ApplDryerZone[1]:Appl_DryerGain[2] ={	if (IsMultiFamily > 0.5 .OR. Appl_HaveDryer[1]  < 0.5 .OR. ApplDryerFuel[1] != 2) then  UNCHANGED
+																																	else if (Proj:DRtgRefRunID == 2014)
+																																	then	(18.8 + 5.3 * SimNumBedrooms)   * 100000. / 365.
+																																	else if (Proj:IntGainsMethod <= 2013)
+																																	then	(13. + (0.01  * CondFloorArea)) * 100000. / 365.
+																																	else	299.91		; T24-2016
+																																	endif endif endif  }
+	"Set Zone:Appl_DryerGain (non-dwelling unit)-Oth"	Proj:ApplDryerZone[1]:Appl_DryerGain[3] ={	if (IsMultiFamily > 0.5 .OR. Appl_HaveDryer[1]  < 0.5 .OR. ApplDryerFuel[1] != 3) then  UNCHANGED
+																																	else if (Proj:DRtgRefRunID == 2014)
+																																	then	(18.8 + 5.3 * SimNumBedrooms)   * 100000. / 365.
+																																	else if (Proj:IntGainsMethod <= 2013)
+																																	then	(13. + (0.01  * CondFloorArea)) * 100000. / 365.
+																																	else	UNCHANGED
+																																	endif endif endif  }
+
+	"Set Proj:ExtGainZone:ExtLtg_Gain"		Proj:ExtGainZone:ExtLtg_Gain	= {	if (Proj:DRtgRefRunID == 2014)
+																										then	((192.5 + (0.05 * Proj:CondFloorArea)) * Proj:ExtLtg_PwrAdjMult) / 365
+																										else	((-81. + (0.152 * Proj:CondFloorArea)) * Proj:ExtLtg_PwrAdjMult) / 365  endif  }
+
+;	"Set Proj:AvgDwellingUnitCFA"		Proj:AvgDwellingUnitCFA		= {	if (IsMultiFamily > 0.5 .AND. NumDwellingUnits > 1.1) then  CondFloorArea / NumDwellingUnits
+;																							else  CondFloorArea  endif  }
+; ; SAC 4/15/13 - IN FUTURE?? perhaps map individual dwelling unit data entered @ Project level to individual Zones - in which case the following dwelling unti area would be customized
+;	"Set Zone:DwellingUnitCFA"			Zone:DwellingUnitCFA			= {	Proj:AvgDwellingUnitCFA  }
+
+
+   ;--------------------------------------------------------------------
+   ; ProposedInput: Internal Gain Rules
+   ;--------------------------------------------------------------------
+   ; SAC 3/10/16 - apply RESNET mods from MJB
+	"Set Proj:IntGain_MoMult[1] - Jan"		Proj:IntGain_MoMult[1]	= {	if (Proj:DRtgRefRunID == 2014)
+																								then	1.0  * AdditionCFAFrac
+																								else	1.19 * AdditionCFAFrac  endif  }
+	"Set Proj:IntGain_MoMult[2] - Feb"		Proj:IntGain_MoMult[2]	= {	if (Proj:DRtgRefRunID == 2014)
+																								then	1.0  * AdditionCFAFrac
+																								else	1.11 * AdditionCFAFrac  endif  }
+	"Set Proj:IntGain_MoMult[3] - Mar"		Proj:IntGain_MoMult[3]	= {	if (Proj:DRtgRefRunID == 2014)
+																								then	1.0  * AdditionCFAFrac
+																								else	1.02 * AdditionCFAFrac  endif  }
+	"Set Proj:IntGain_MoMult[4] - Apr"		Proj:IntGain_MoMult[4]	= {	if (Proj:DRtgRefRunID == 2014)
+																								then	1.0  * AdditionCFAFrac
+																								else	0.93 * AdditionCFAFrac  endif  }
+	"Set Proj:IntGain_MoMult[5] - May"		Proj:IntGain_MoMult[5]	= {	if (Proj:DRtgRefRunID == 2014)
+																								then	1.0  * AdditionCFAFrac
+																								else	0.84 * AdditionCFAFrac  endif  }
+	"Set Proj:IntGain_MoMult[6] - Jun"		Proj:IntGain_MoMult[6]	= {	if (Proj:DRtgRefRunID == 2014)
+																								then	1.0  * AdditionCFAFrac
+																								else	0.80 * AdditionCFAFrac  endif  }
+	"Set Proj:IntGain_MoMult[7] - Jul"		Proj:IntGain_MoMult[7]	= {	if (Proj:DRtgRefRunID == 2014)
+																								then	1.0  * AdditionCFAFrac
+																								else	0.82 * AdditionCFAFrac  endif  }
+	"Set Proj:IntGain_MoMult[8] - Aug"		Proj:IntGain_MoMult[8]	= {	if (Proj:DRtgRefRunID == 2014)
+																								then	1.0  * AdditionCFAFrac
+																								else	0.88 * AdditionCFAFrac  endif  }
+	"Set Proj:IntGain_MoMult[9] - Sep"		Proj:IntGain_MoMult[9]	= {	if (Proj:DRtgRefRunID == 2014)
+																								then	1.0  * AdditionCFAFrac
+																								else	0.98 * AdditionCFAFrac  endif  }
+	"Set Proj:IntGain_MoMult[10] - Oct"		Proj:IntGain_MoMult[10]	= {	if (Proj:DRtgRefRunID == 2014)
+																								then	1.0  * AdditionCFAFrac
+																								else	1.07 * AdditionCFAFrac  endif  }
+	"Set Proj:IntGain_MoMult[11] - Nov"		Proj:IntGain_MoMult[11]	= {	if (Proj:DRtgRefRunID == 2014)
+																								then	1.0  * AdditionCFAFrac
+																								else	1.16 * AdditionCFAFrac  endif  }
+	"Set Proj:IntGain_MoMult[12] - Dec"		Proj:IntGain_MoMult[12]	= {	if (Proj:DRtgRefRunID == 2014)
+																								then	1.0  * AdditionCFAFrac
+																								else	1.21 * AdditionCFAFrac  endif  } 
+
+	"Default Proj:Ltg_DefaultDaySch based on library entry (if not already defined)"
+			Proj:Ltg_DefaultDaySch	= {	if (LocalStatus( Ltg_DefaultDaySch ) > 0) then  UNCHANGED
+													else  RuleLibrary( SchDay, "CARes2013 InsLighting Hrly" )  endif  }
+	"Default Proj:Ppl_DefaultDaySch based on library entry (if not already defined)"
+				Proj:Ppl_DefaultDaySch	= {	if (LocalStatus( Ppl_DefaultDaySch ) > 0) then  UNCHANGED
+										else RuleLibrary( SchDay, "CARes2013 Occupancy Hrly" ) endif	}
+	"Default Proj:Eqp_DefaultDaySch based on library entry (if not already defined)"
+				Proj:Eqp_DefaultDaySch	= {	if (LocalStatus( Eqp_DefaultDaySch ) > 0) then  UNCHANGED
+										else RuleLibrary( SchDay, "CARes2013 Equipment Hrly" ) endif	}
+	"Default Proj:ExtLtg_DefaultDaySch based on library entry (if not already defined)"
+			Proj:ExtLtg_DefaultDaySch	= {	if (LocalStatus( ExtLtg_DefaultDaySch ) > 0) then  UNCHANGED
+													else  RuleLibrary( SchDay, "CARes2013 ExtLighting Hrly" )  endif  }
+
+	"Set Zone:Ltg_Gain"		Zone:Ltg_Gain		= {	if (Proj:IntGainsMethod <= 2013) then  Proj:AvgLtgGainPerCFA
+																	else if (IfValidAnd( CondFloorArea > 0 )==0) then  0
+																	else if (Proj:IsMultiFamily > 0.5) then  SumChildren( DwellUnit:TotalLtgGain ) / CondFloorArea
+																	else  ((100 + (0.1775 * Proj:LtgCondFloorArea)) * 3412/365) / Proj:CondFloorArea
+																	endif endif endif  }
+;	"Set Zone:Ltg_Gain"		Zone:Ltg_Gain		= {	if (Global( Proj:CondFloorArea ) > 0.1) then
+;																		(((214. + 0.601 * DwellingUnitCFA) * 
+;																		(Global( Proj:Ltg_FracPort ) + ((1-Global( Proj:Ltg_FracPort )) * Global( Proj:Ltg_PwrAdjMult ))) / 365) * 
+;																		Global( Proj:NumDwellingUnits ) / Global( Proj:CondFloorArea ))
+;																	else  0  endif  }
+
+	"Default lighting profile (Zone:LtgDaySched)"
+				Zone:LtgDaySched	= {	if (GlobalStatus( Proj:Ltg_DefaultDaySch ) > 0) then  Global( Proj:Ltg_DefaultDaySch )
+												else  UNCHANGED  endif  }
+	"Default people profile (Zone:PplDaySched)"
+				Zone:PplDaySched	= {	if (GlobalStatus( Proj:Ppl_DefaultDaySch ) > 0) then  Global( Proj:Ppl_DefaultDaySch )
+												else  UNCHANGED  endif  }
+	"Default equipment profile (Zone:EqpDaySched)"
+				Zone:EqpDaySched	= {	if (GlobalStatus( Proj:Eqp_DefaultDaySch ) > 0) then  Global( Proj:Eqp_DefaultDaySch )
+												else  UNCHANGED  endif  }
+	"Default exterior lighting profile (Zone:ExtLtgDaySched)"
+				Zone:ExtLtgDaySched	= {	if (GlobalStatus( Proj:ExtLtg_DefaultDaySch ) > 0) then  Global( Proj:ExtLtg_DefaultDaySch )
+												else  UNCHANGED  endif  }
+
+;	"Set Zone:Ppl_PeoplePerUnit"	Zone:Ppl_PeoplePerUnit	= {	if ( Global( Proj:NumDwellingUnits) > 0) then
+;																	1.75 + 0.4 * (Global( Proj:NumBedrooms ) / Global( Proj:NumDwellingUnits ))
+;																else 0 endif }
+;	"Set Zone:Ppl_GainPerCFA"		Zone:Ppl_GainPerCFA		= {	if (Global( Proj:CondFloorArea ) > 0.1) then
+;																	((3900/0.573) * Local( Ppl_PeoplePerUnit ) * Global( Proj:NumDwellingUnits ) / Global( Proj:CondFloorArea))
+;																else 0 endif }
+	"Set Zone:Ppl_GainPerCFA"		Zone:Ppl_GainPerCFA		= {	Proj:AvgPplGainPerCFA  }
+
+	"Default people profile (Zone:PplDaySched)"
+				Zone:PplDaySched	= {	if (GlobalStatus( Proj:Ppl_DefaultDaySch ) > 0) then  Global( Proj:Ppl_DefaultDaySch )
+												else  UNCHANGED  endif  }
+
+	"Set Zone:Msc_GainPerCFA"		Zone:Msc_GainPerCFA		= { Proj:AvgMscEGainPerCFA  }
+;	"Set Zone:Msc_GainPerCFA"		Zone:Msc_GainPerCFA		= { if (Global( Proj:CondFloorArea ) > 0.1) then
+;																	((723. + (0.706 * Local( CondFloorArea )) * Global( Proj:NumDwellingUnits )) / 365.) / Global( Proj:CondFloorArea )
+;																else 0 endif }
+
+	"Default equipment profile (Zone:EqpDaySched)"
+				Zone:EqpDaySched	= {	if (GlobalStatus( Proj:Eqp_DefaultDaySch ) > 0) then  Global( Proj:Eqp_DefaultDaySch )
+												else  UNCHANGED  endif  }
+
+; SAC 10/4/19 - older Res Zone-based int gains rules replaced by NRes versions (MFamProto)
+;   ; SAC 9/20/19 - OtherZone (MFamProto)
+;	"Set OtherZone:Ltg_Gain"		OtherZone:Ltg_Gain		= {	if (Proj:IntGainsMethod <= 2013) then  Proj:AvgLtgGainPerCFA
+;																	else if (IfValidAnd( CondFloorArea > 0 )==0) then  0
+;																	else  ((100 + (0.1775 * Proj:LtgCondFloorArea)) * 3412/365) / Proj:CondFloorArea
+;																	endif endif  }
+;	"Default lighting profile (OtherZone:LtgDaySched)"
+;		OtherZone:LtgDaySched	= {	if (GlobalStatus( Proj:Ltg_DefaultDaySch ) > 0) then  Global( Proj:Ltg_DefaultDaySch )
+;												else  UNCHANGED  endif  }
+;	"Default people profile (OtherZone:PplDaySched)"
+;		OtherZone:PplDaySched	= {	if (GlobalStatus( Proj:Ppl_DefaultDaySch ) > 0) then  Global( Proj:Ppl_DefaultDaySch )
+;												else  UNCHANGED  endif  }
+;	"Default equipment profile (OtherZone:EqpDaySched)"
+;		OtherZone:EqpDaySched	= {	if (GlobalStatus( Proj:Eqp_DefaultDaySch ) > 0) then  Global( Proj:Eqp_DefaultDaySch )
+;												else  UNCHANGED  endif  }
+;	"Default exterior lighting profile (OtherZone:ExtLtgDaySched)"
+;		OtherZone:ExtLtgDaySched	= {	if (GlobalStatus( Proj:ExtLtg_DefaultDaySch ) > 0) then  Global( Proj:ExtLtg_DefaultDaySch )
+;												else  UNCHANGED  endif  }
+;	"Set OtherZone:Ppl_GainPerCFA"		OtherZone:Ppl_GainPerCFA		= {	Proj:AvgPplGainPerCFA  }
+;	"Default people profile (OtherZone:PplDaySched)"
+;		OtherZone:PplDaySched	= {	if (GlobalStatus( Proj:Ppl_DefaultDaySch ) > 0) then  Global( Proj:Ppl_DefaultDaySch )
+;												else  UNCHANGED  endif  }
+;	"Set OtherZone:Msc_GainPerCFA"		OtherZone:Msc_GainPerCFA		= { Proj:AvgMscEGainPerCFA  }
+;	"Default equipment profile (OtherZone:EqpDaySched)"
+;		OtherZone:EqpDaySched	= {	if (GlobalStatus( Proj:Eqp_DefaultDaySch ) > 0) then  Global( Proj:Eqp_DefaultDaySch )
+;												else  UNCHANGED  endif  }
+END
+;*************************************************************************
+
+; SAC 10/24/16 - new rulelist to default laundry properties
+;*************************************************************************
+RULELIST "ProposedInput_Loads_Laundry" 0 0 0 0
+;*************************************************************************
+   ;--------------------------------------------------------------------
+   ; ProposedInput: Zone, Proj & DwellUnit Rules pertaining to central multifamily laundry
+   ;--------------------------------------------------------------------
+	"Default Proj:CentralMFamLaundry"		Proj:CentralMFamLaundry		= {
+		0  }		; Whether or not there is centralized multi-family laundry equipment
+	"Default Proj:DfltMFamLaundryZn"			Proj:DfltMFamLaundryZn		=     ; Default central laundry equipment zone  ; SAC 9/10/19 - revised for OtherZone (MFamProto)
+	{	     if (Proj:IsMultiFamily > 0 .AND. MaxAll( OtherZone:LaundryArea ) > 0)
+	   then     MaxAllComp( OtherZone:LaundryArea )
+	   else if (MaxAll(     Zone:UncondFloorArea ) > 0)
+		then		MaxAllComp( Zone:UncondFloorArea )
+		else if (MaxAll(     Zone:LvgCondFloorArea ) > 0)
+		then		MaxAllComp( Zone:LvgCondFloorArea )
+		else if (MaxAll(     Zone:CondFloorArea ) > 0)
+		then		MaxAllComp( Zone:CondFloorArea )
+		else if (MaxAll(     Zone:SlpCondFloorArea ) > 0)
+		then		MaxAllComp( Zone:SlpCondFloorArea )
+		else  UNCHANGED  endif endif endif endif endif  }
+
+	"Default DwellUnit:WasherZoneRef"		DwellUnit:WasherZoneRef		=        ; SAC 10/2/19 - revised for DwellUnitType:WasherOption (MFamProto)
+		{  if (IfValidAnd( DwellUnitTypeRef:WasherOption = 2 ) .AND. IfValidAnd( Proj:CentralMFamLaundry > 0.5 ) .AND.
+   		    GlobalCompAssigned( Proj:DfltMFamLaundryZn ))
+	   	then	Proj:DfltMFamLaundryZn
+		   else	Parent( Name )  endif  }
+	"Default DwellUnit:DryerZoneRef"			DwellUnit:DryerZoneRef		=
+	   {  if (HaveWasher > 0.5 .AND. HaveDryer > 0.5 .AND. LocalCompAssigned( WasherZoneRef ))
+   		then	WasherZoneRef
+	   	else if (IfValidAnd( DwellUnitTypeRef:DryerOption = 2 ) .AND. IfValidAnd( Proj:CentralMFamLaundry > 0.5 ) .AND.
+		            GlobalCompAssigned( Proj:DfltMFamLaundryZn ))
+   		then	Proj:DfltMFamLaundryZn
+	   	else	Parent( Name )  endif endif  }
+END
+;*************************************************************************
+
+
+;*************************************************************************
+RULELIST "Default_DwellingUnitData_SFam"  0 0 0 0
+;*************************************************************************
+
+	; SAC 7/3/15 - added properties to disable all IAQ ventilation
+	"Default Proj:DisableIAQ flag"	Proj:DisableIAQ	= {	0  }		; option to toggle OFF all IAQ ventilation
+	"Set Proj:IAQDisabled"				Proj:IAQDisabled	= {	if (BypassRuleLimits > 0 .AND. DisableIAQ > 0) then  1  else  0  endif  }		; Flag indicating that IAQ vent has been toggled OFF
+
+	"Set Zone:Top"			Zone:Top 	= {	Bottom + (FloorHeight * (NumStories - 1)) + CeilingHeight  }   ; SAC 4/12/17 - copied from 'ProposedInput_HVAC' for use below
+
+   "Set Proj:SFamMaxVertLimits[1] - lower warning limit"  Proj:SFamMaxVertLimits[1]  = {  (MaxAll( Zone:Top ) - max( 0, MinAll( Zone:Bottom ) )) * 0.5  }
+   "Set Proj:SFamMaxVertLimits[2] - upper warning limit"  Proj:SFamMaxVertLimits[2]  = {  SFamMaxVertLimits[1] * 4  }
+   "Default Proj:SFamMaxVertDist - vertical distance between the lowest and highest above-grade points within the pressure boundary of the conditioned space in the home"  ; SAC 4/14/19 (tic #1079)
+      Proj:SFamMaxVertDist  = {  SFamMaxVertLimits[1] * 2  }
+
+; SAC 4/12/17 - added Proj:EffAnnAvgInfilRt to facilitate 2019 SFam Min IAQ calcs - based on data/formulas in e-mail from KN 4/6/17
+;     The Effective Annual Average Infiltration Rate (Qinf) shall be calculated using Equation 4.3:
+;     Qinf = 0.052 × Q50 × wsf × [H/Hr]ª                                                                (4.3)
+;       where
+;         Qinf = estimated infiltration rate, cfm (= Proj:EffAnnAvgInfilRt)
+;         Q50 = leakage rate at 50 Pa depressurization or pressurization, cfm (min of Proj:ACH50 or 2.0)
+;         wsf = weather and shielding factor from Normative Appendix B (from look-up table: T24RClimateZoneCodeBase:wsfQinf)
+;         H = vertical distance between the lowest and highest above-grade points within the pressure boundary, ft (MaxAll( Zone:Top ) - max( 0, MinAll( Zone:Bottom ) ))
+;                             note: should replace 'MaxAll( Zone:Top )' w/ 'MaxAcrossIf( Zone:Top, Zone:Type < 10 )' if/when Unconditioned Zones enabled
+;         Hr = reference height, 8.2 ft
+;         ª = 0.4 for the purpose of calculating the Effective Annual Average Infiltration Rate
+   ; SAC 4/15/19 - replaced "MaxAll( Zone:Top ) - max( 0, MinAll( Zone:Bottom ) )" with new Proj:SFamMaxVertDist (tic #1079)
+   "Set Proj:EffAnnAvgInfilRt - Effective Annual Average Infiltration Rate (Qinf)"  ; SAC 4/12/17
+      Proj:EffAnnAvgInfilRt  = {
+         if (EnergyCodeYearNum >= 2019)
+         then  0.052 * (min( ValidOr( Proj:ACH50, 5 ), 2.0 )) *
+               T24RClimateZoneCodeBase:wsfQinf( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:CompCodeBase, "BldgType", Proj:BldgTypeTblStr ) *
+               pow( (SFamMaxVertDist / 8.2), 0.4 ) *
+               (CondVolume / 60)     ; SAC 4/13/17 - added conversion from ACH to CFM
+         else  UNDEFINED  endif  }
+
+   "Set Proj:MinIAQCFM_CFAMult - Cond flr area multiplier for Min IAQ CFM calc"  ; SAC 4/12/17
+      Proj:MinIAQCFM_CFAMult  = {
+         if (EnergyCodeYearNum >= 2019)
+         then  0.03
+         else  0.01  endif  }
+
+   ; SAC 4/19/19 - added SFam ADU stuff to account for IAQ (tic #1010)
+      ; Proj:SFamADUType,  'n/a' for MFam / SFam: 0:'no', 1:'Detached', 2:'Attached'
+   "Set Proj:SFamADUMsg"      Proj:SFamADUMsg  =
+      {  if (EnergyCodeYearNum < 2019) then  "ADU modeling not available in energy codes prior to 2019"
+         else if (IsMultiFamily > 0) then    "ADU inputs not available in multifamily models"
+         else if (SFamADUType < 1) then      "Choose Accessory Dwelling Unit Type on Building tab to activate ADU modeling features"
+         else  "Accessory Dwelling Unit (ADU) data"  endif endif endif  }
+   ; Proj:SFamADUNumBedrooms,       Prescribed,   0,    1,   1,    1,  1,  1
+   ; Proj:SFamADUArea,              Prescribed,   0,    1,   1,    1,  1,  1
+   "Set Proj:SFamADUNumBedroomsMsg"    Proj:SFamADUNumBedroomsMsg  =
+      {  if (EnergyCodeYearNum < 2019 .OR. IsMultiFamily > 0 .OR. SFamADUType < 1) then  UNDEFINED
+         else if (LocalStatus( SFamADUNumBedrooms ) < 4) then  "(number of ADU bedrooms is a required input)"
+         else if (IfValidAnd( SFamADUNumBedrooms > SimNumBedrooms ))
+         then  if (RunScope == 1 .AND. IsAddAlone > 0.5)
+               then  Format( "Error: Number of ADU bedrooms cannot exceed project addition bedroom count of %s", FltToStr( SimNumBedrooms ) )
+               else  Format( "Error: Number of ADU bedrooms cannot exceed overall project bedroom count of %s", FltToStr( SimNumBedrooms ) )   endif
+         else  UNDEFINED  endif endif endif  }
+   "Set Proj:SFamADUAreaMsg"    Proj:SFamADUAreaMsg  =
+      {  if (EnergyCodeYearNum < 2019 .OR. IsMultiFamily > 0 .OR. SFamADUType < 1) then  UNDEFINED
+         else if (LocalStatus( SFamADUArea ) < 4) then  "(conditioned area of ADU is a required input)"
+         else if (IfValidAnd( SFamADUArea > CondFloorArea )) then  Format( "Error: Conditioned area of ADU cannot exceed overall project area of %s", FltToStr( CondFloorArea ) )
+         else  UNDEFINED  endif endif endif  }
+   "Set Proj:UseSFamADUArea"    Proj:UseSFamADUArea  =
+      {  if (EnergyCodeYearNum < 2019 .OR. IsMultiFamily > 0 .OR. SFamADUType < 1 .OR.
+             IfValidAnd( SFamADUArea > 0 )==0 .OR. IfValidAnd( SFamADUArea <= CondFloorArea )==0 .OR.
+             IfValidAnd( SFamADUNumBedrooms >= 0 )==0) then  0
+         else  SFamADUArea  endif  }
+   "Set Proj:UseSFamADUNumBedrooms"    Proj:UseSFamADUNumBedrooms  =
+      {  if (EnergyCodeYearNum < 2019 .OR. IsMultiFamily > 0 .OR. SFamADUType < 1 .OR.
+             IfValidAnd( SFamADUNumBedrooms >= 0 )==0 .OR. IfValidAnd( SFamADUNumBedrooms <= SimNumBedrooms )==0 .OR.
+             UseSFamADUArea == 0) then  0
+         else  SFamADUNumBedrooms  endif  }
+   "Set Proj:SFamADUFracArea"    Proj:SFamADUFracArea  =
+      {  if (IfValidAnd( UseSFamADUArea > 0 )==0 .OR. IfValidAnd( CondFloorArea > 0 )==0) then  0
+         else  UseSFamADUArea / CondFloorArea  endif  }
+   "Set Proj:SFamADUIAQFracExtArea - ratio of exterior envelope area not attached to garages or other dwellings to total envelope area for attached DUs (Aext in equation 150.0-F)"
+      Proj:SFamADUIAQFracExtArea  = {  0  }
+   ; SAC 4/19/19 - set MinUnbalIAQCFM[2] & MinBalancedIAQCFM[2] for ADU based on existing rules for main dwelling (tic #1010)
+   "Set Proj:MinUnbalIAQCFM[2]"      Proj:MinUnbalIAQCFM[2]  = {
+         if (EnergyCodeYearNum < 2019 .OR. IsMultiFamily > 0 .OR. SFamADUType < 1 .OR.
+             IfValidAnd( UseSFamADUNumBedrooms >= 0 )==0 .OR. IfValidAnd( UseSFamADUArea > 0 )==0) then  0
+         else  (MinIAQCFM_CFAMult * UseSFamADUArea ) + (7.5 * (Max( UseSFamADUNumBedrooms , 1 ) + 1))
+         endif  }
+   ; SAC 4/14/19 - added adjustment of Aext (equation 150.0-F) to both balanced and unbalanced CFM rules (tic #1071)
+   "Set Proj:MinBalancedIAQCFM[2] based on MinUnbalIAQCFM[2] and adjusting for EffAnnAvgInfilRt"      Proj:MinBalancedIAQCFM[2]  = {
+         if (EnergyCodeYearNum >= 2019 .AND. IfValidAnd( MinUnbalIAQCFM[2] > 0 ))
+         then  MinUnbalIAQCFM[2] - (ValidOr( EffAnnAvgInfilRt, 0 ) * SFamADUFracArea * SFamADUIAQFracExtArea)
+         else  MinUnbalIAQCFM[2]  endif  }
+   "Adjust Proj:MinUnbalIAQCFM[2] for EffAnnAvgInfilRt (2019 code)"      Proj:MinUnbalIAQCFM[2]  = {
+         if (EnergyCodeYearNum >= 2019 .AND. IfValidAnd( MinUnbalIAQCFM[2] > 0 ))
+         then  MinUnbalIAQCFM[2] - (((ValidOr( EffAnnAvgInfilRt, 0 ) * SFamADUFracArea) / MinUnbalIAQCFM[2]) * ValidOr( EffAnnAvgInfilRt, 0 ) * SFamADUFracArea * SFamADUIAQFracExtArea)
+         else  UNCHANGED  endif  }
+   ; was used in testing
+   ;"Set Proj:UnitMinIAQCFMLbl[2]"   Proj:UnitMinIAQCFMLbl[2]   =
+   ;   {  if (MinUnbalIAQCFM[2] > 0) then  Format( "Minimum ADU IAQ Ventilation:  %s CFM", FltToStr( MinUnbalIAQCFM[2] , 1 ) )
+   ;      else  UNDEFINED  endif  }
+
+   ; rules to default remaining ADU IAQ properties done via subordinate rulelisst evaluated AFTER following rules describing main dwelling IAQ...
+
+
+   ; SAC 4/18/19 - replacing SFamDwellingType (tic #1071)
+   "Default Proj:SFamDwellingAttached"    Proj:SFamDwellingAttached  = {
+         if (LocalStatus( SFamDwellingType ) > 6 .AND. SFamDwellingType > 1) then  1  else  0  endif  }
+   "Set Proj:SFamDwellingAttMsg - message for UI"     Proj:SFamDwellingAttMsg  =    ; SAC 4/25/19 (tic #1071)
+      {  if (SFamADUType > 0)
+         then  "(other than the ADU in this project)"
+         else  "(examples include a duplex or townhome)"  endif  }
+
+   ; following rules ignore presence of ADU within project - SAC 4/19/19
+   "Set Proj:SFamIAQExtArea - exterior envelope surface area that is not attached to garages or other dwelling units (related to Aext in equation 150.0-F)"  ; SAC 4/14/19 (tic #1071)
+      Proj:SFamIAQExtArea  = {
+         SumAll( Zone:ExtWallArea ) + SumAll( Zone:ClgBlwAtticArea ) +
+         SumAll( Zone:CathCeilingArea ) + SumAll( Zone:ExtFloorArea ) +
+         SumAll( OtherZone:ExtWallArea ) + SumAll( OtherZone:ClgBlwAtticArea ) +
+         SumAll( OtherZone:CathCeilingArea ) + SumAll( OtherZone:ExtFloorArea )   }
+   "Set Proj:SFamIAQIntArea - area between this dwelling unit and adjoining DUs & garages (related to Aext in equation 150.0-F)"  ; SAC 4/14/19 (tic #1071)
+      Proj:SFamIAQIntArea  = {
+         SumAcrossIf( Zone:PartyEdgeArea, Zone:Type < 10 ) +
+         SumAcrossIf( OtherZone:PartyEdgeArea, OtherZone:Type < 10 ) +
+         SumAll( IntWall:DemisingArea ) + SumAll( InteriorCeiling:DemisingArea ) +
+         SumAll( InteriorFloor:DemisingArea )  }
+   "Set Proj:SFamIAQFracExtArea - ratio of exterior envelope area not attached to garages or other dwellings to total envelope area for attached DUs (Aext in equation 150.0-F)"  ; SAC 4/14/19 (tic #1071)
+      Proj:SFamIAQFracExtArea  = {
+         if (EnergyCodeYearNum < 2019 .OR. IsMultiFamily > 0 .OR. SFamDwellingAttached < 1) then  1.0
+         else if ((SFamIAQExtArea + SFamIAQIntArea) < 1) then  1.0
+         else  SFamIAQExtArea / (SFamIAQExtArea + SFamIAQIntArea)
+         endif endif  }
+   "Set Proj:SFamIAQAreaMsg - string describing surface areas related to Aext in equation 150.0-F"  ; SAC 4/14/19 (tic #1071)
+      Proj:SFamIAQAreaMsg  = {
+         if (SFamIAQFracExtArea != 1.0)
+         then  Format( "Aext = %g = %.1f / (%.1f + %.1f)", SFamIAQFracExtArea, SFamIAQExtArea, SFamIAQExtArea, SFamIAQIntArea )
+         else  UNDEFINED  endif  }
+
+  ; SFam IAQ input defaulting ----------
+; 	mjb	4/14/14	modify defaults to account for Additions <= 1000 sf, which do not need IAQ Fans
+;  mjb   7/10/14  remove floor area constraint on new construction
+; SAC 9/23/15 - replaced AdditionCFA w/ CondFloorArea in calc of min IAQ CFM for EAA where AdditionCFA > 1000 (tic 571) -AND- prevent > 0 min IAQ CFM for New Cons, Addition Alone where addition < 1000 SF (tic 569)
+; SAC 12/28/15 - added logic to calculate minimum IAQ CFM based on difference between (final) whole home and existing home areas & # bedrooms for AdditionAlone analyses
+; SAC 8/12/16 - revised logic again, REMOVING mods from 12/28/15, so that IAQ CFM reported on screen and in compliance report reflect entire dwelling (tic #729)
+; SAC 1/16/19 - modified sequence to first set individual MinUnbalIAQCFM & MinBalancedIAQCFM quantities, then use those later to set the final UnitMinIAQCFM[1] based on a (possible) mix of exhaust & balanced IAQ fans (tic #1027)
+; SAC 4/19/19 - modified rules to subtract out ADU area & num bedrooms when calculating main dwelling IAQ (tic #1010)
+   "Set Proj:MinUnbalIAQCFM[1]"      Proj:MinUnbalIAQCFM[1]  = {
+         if ( RunScope == 1 .AND. (IfValidAnd( IsAddAlone > 0.5 )==0 .OR. (AdditionCFA - UseSFamADUArea) > 1000) )
+         then  if (IfValidAnd( IsAddAlone > 0.5 ) .AND. IfValidAnd( AddAloneTotalArea > UseSFamADUArea ))
+               then  (MinIAQCFM_CFAMult * (AddAloneTotalArea - UseSFamADUArea)) + (7.5 * (Max( (NumBedrooms - UseSFamADUNumBedrooms + NumAddBedrooms), 1 ) + 1))
+               else  (MinIAQCFM_CFAMult * (CondFloorArea     - UseSFamADUArea)) + (7.5 * (Max( (NumBedrooms - UseSFamADUNumBedrooms                 ), 1 ) + 1))
+               endif
+         else if ( RunScope == 2 .AND. AdditionCFA > 1000 )
+         then        (MinIAQCFM_CFAMult * (CondFloorArea     - UseSFamADUArea)) + (7.5 * (Max( (NumBedrooms - UseSFamADUNumBedrooms                 ), 1 ) + 1))
+         else  0  endif endif	}
+   ; SAC 4/14/19 - added adjustment of Aext (equation 150.0-F) to both balanced and unbalanced CFM rules (tic #1071)
+   "Set Proj:MinBalancedIAQCFM[1] based on MinUnbalIAQCFM[1] and adjusting for EffAnnAvgInfilRt"      Proj:MinBalancedIAQCFM[1]  = {
+         if (EnergyCodeYearNum >= 2019 .AND. IfValidAnd( MinUnbalIAQCFM[1] > 0 ))
+         then  MinUnbalIAQCFM[1] - (ValidOr( EffAnnAvgInfilRt, 0 ) * (1-SFamADUFracArea) * SFamIAQFracExtArea)
+         else  MinUnbalIAQCFM[1]  endif  }
+   "Adjust Proj:MinUnbalIAQCFM[1] for EffAnnAvgInfilRt (2019 code)"      Proj:MinUnbalIAQCFM[1]  = {
+         if (EnergyCodeYearNum >= 2019 .AND. IfValidAnd( MinUnbalIAQCFM[1] > 0 ))
+         then  MinUnbalIAQCFM[1] - (((ValidOr( EffAnnAvgInfilRt, 0 ) * (1-SFamADUFracArea)) / MinUnbalIAQCFM[1]) * ValidOr( EffAnnAvgInfilRt, 0 ) * (1-SFamADUFracArea) * SFamIAQFracExtArea)
+         else  UNCHANGED  endif  }
+
+	"Set Proj:UnitIAQNumFanRefs[1]"	Proj:UnitIAQNumFanRefs[1]	= {	if (UnitIAQOption[1] != 2 .OR. IAQDisabled > 0) then  0
+																							else if (LocalCompAssigned( UnitIAQFan4[1]  )) then  4
+																							else if (LocalCompAssigned( UnitIAQFan3[1]  )) then  3
+																							else if (LocalCompAssigned( UnitIAQFan2[1]  )) then  2
+																							else if (LocalCompAssigned( UnitIAQFan1[1]  )) then  1  else  0  endif endif endif endif endif  }
+;  mjb   7/10/14  remove floor area constraint on new construction
+	"Default Proj:UnitIAQFanCnt1[1]" 	Proj:UnitIAQFanCnt1[1] 	= {	if (IAQDisabled > 0) then  0
+   																						else if ( RunScope == 1 ) then 1
+;   																							if ( CondFloorArea > 1000 ) then 1 else 0 endif
+   																						else if ( (AdditionCFA - UseSFamADUArea) > 1000 ) then 1 else 0 endif endif endif }		
+	"Default Proj:UnitIAQFanCnt2[1]" 	Proj:UnitIAQFanCnt2[1] 	= {	if (IAQDisabled > 0) then  0
+   																						else if ( RunScope == 1 ) then 1
+;   																							if ( CondFloorArea > 1000 ) then 1 else 0 endif
+   																						else if ( (AdditionCFA - UseSFamADUArea) > 1000 ) then 1 else 0 endif endif	endif }
+	"Default Proj:UnitIAQFanCnt3[1]" 	Proj:UnitIAQFanCnt3[1] 	= {	if (IAQDisabled > 0) then  0
+   																						else if ( RunScope == 1 ) then 1
+;   																							if ( CondFloorArea > 1000 ) then 1 else 0 endif
+   																						else if ( (AdditionCFA - UseSFamADUArea) > 1000 ) then 1 else 0 endif endif endif	}		
+	"Default Proj:UnitIAQFanCnt4[1]" 	Proj:UnitIAQFanCnt4[1] 	= {	if (IAQDisabled > 0) then  0
+   																						else if ( RunScope == 1 ) then 1
+;   																							if ( CondFloorArea > 1000 ) then 1 else 0 endif
+   																						else if ( (AdditionCFA - UseSFamADUArea) > 1000 ) then 1 else 0 endif endif endif	}
+   "Default Proj:UnitIAQZone1[1]" 		Proj:UnitIAQZone1[1] 	= {	if (ComponentCount( Zone ) > 0.5) then  MaxAllComp( Zone:CondFloorArea )  else  UNDEFINED  endif  }
+   "Default Proj:UnitIAQZone2[1]" 		Proj:UnitIAQZone2[1] 	= {	if (ComponentCount( Zone ) > 0.5) then  MaxAllComp( Zone:CondFloorArea )  else  UNDEFINED  endif  }
+   "Default Proj:UnitIAQZone3[1]" 		Proj:UnitIAQZone3[1] 	= {	if (ComponentCount( Zone ) > 0.5) then  MaxAllComp( Zone:CondFloorArea )  else  UNDEFINED  endif  }
+   "Default Proj:UnitIAQZone4[1]" 		Proj:UnitIAQZone4[1] 	= {	if (ComponentCount( Zone ) > 0.5) then  MaxAllComp( Zone:CondFloorArea )  else  UNDEFINED  endif  }
+
+	"Set Proj:UnitIAQCFM1[1]" 			Proj:UnitIAQCFM1[1] 			= {	if (IAQDisabled > 0) then  0
+   																				 else if (UnitIAQOption[1] == 1) then  MinUnbalIAQCFM[1]
+																					 else if (UnitIAQOption[1] != 2 .OR. LocalCompAssigned( UnitIAQFan1[1] ) < 0.5 .OR. LocalCompAssigned( UnitIAQZone1[1] ) < 0.5 .OR. IAQDisabled > 0) then  0  else  UnitIAQFan1[1]:IAQCFM * UnitIAQFanCnt1[1]   endif endif endif  }
+	"Set Proj:UnitIAQCFM2[1]" 			Proj:UnitIAQCFM2[1] 			= {	if (UnitIAQOption[1] != 2 .OR. LocalCompAssigned( UnitIAQFan2[1] ) < 0.5 .OR. LocalCompAssigned( UnitIAQZone2[1] ) < 0.5 .OR. IAQDisabled > 0) then  0  else  UnitIAQFan2[1]:IAQCFM * UnitIAQFanCnt2[1]   endif  }
+	"Set Proj:UnitIAQCFM3[1]" 			Proj:UnitIAQCFM3[1] 			= {	if (UnitIAQOption[1] != 2 .OR. LocalCompAssigned( UnitIAQFan3[1] ) < 0.5 .OR. LocalCompAssigned( UnitIAQZone3[1] ) < 0.5 .OR. IAQDisabled > 0) then  0  else  UnitIAQFan3[1]:IAQCFM * UnitIAQFanCnt3[1]   endif  }
+	"Set Proj:UnitIAQCFM4[1]" 			Proj:UnitIAQCFM4[1] 			= {	if (UnitIAQOption[1] != 2 .OR. LocalCompAssigned( UnitIAQFan4[1] ) < 0.5 .OR. LocalCompAssigned( UnitIAQZone4[1] ) < 0.5 .OR. IAQDisabled > 0) then  0  else  UnitIAQFan4[1]:IAQCFM * UnitIAQFanCnt4[1]   endif  }
+
+   "Set Proj:UnitIAQCFMMsg[1]"   Proj:UnitIAQCFMMsg[1]  =         ; SAC 1/22/19 - revisions for better IAQ screen labeling (tic #1027)
+      {  if (IAQDisabled < 1 .AND. UnitIAQOption[1] == 2 .AND. LocalCompAssigned( UnitIAQFan1[1] ) > 0.5 .AND.
+             LocalCompAssigned( UnitIAQZone1[1] ) > 0.5)
+         then  switch (ValidOr( UnitIAQFan1[1]:IAQFanType, 0 ))
+                  case  1 :  Format( "%g CFM  exhaust",  UnitIAQFan1[1]:IAQCFM * UnitIAQFanCnt1[1] )
+                  case  2 :  Format( "%g CFM  supply",   UnitIAQFan1[1]:IAQCFM * UnitIAQFanCnt1[1] )
+                  case  3 :  Format( "%g CFM  balanced", UnitIAQFan1[1]:IAQCFM * UnitIAQFanCnt1[1] )
+                  default :  Format( "%g CFM  ???",      UnitIAQFan1[1]:IAQCFM * UnitIAQFanCnt1[1] )
+               endswitch
+         else  UNDEFINED  endif  }
+   "Set Proj:UnitIAQCFMMsg[2]"   Proj:UnitIAQCFMMsg[2]  =
+      {  if (IAQDisabled < 1 .AND. UnitIAQOption[1] == 2 .AND. LocalCompAssigned( UnitIAQFan2[1] ) > 0.5 .AND.
+             LocalCompAssigned( UnitIAQZone2[1] ) > 0.5)
+         then  switch (ValidOr( UnitIAQFan2[1]:IAQFanType, 0 ))
+                  case  1 :  Format( "%g CFM  exhaust",  UnitIAQFan2[1]:IAQCFM * UnitIAQFanCnt2[1] )
+                  case  2 :  Format( "%g CFM  supply",   UnitIAQFan2[1]:IAQCFM * UnitIAQFanCnt2[1] )
+                  case  3 :  Format( "%g CFM  balanced", UnitIAQFan2[1]:IAQCFM * UnitIAQFanCnt2[1] )
+                  default :  Format( "%g CFM  ???",      UnitIAQFan2[1]:IAQCFM * UnitIAQFanCnt2[1] )
+               endswitch
+         else  UNDEFINED  endif  }
+   "Set Proj:UnitIAQCFMMsg[3]"   Proj:UnitIAQCFMMsg[3]  =
+      {  if (IAQDisabled < 1 .AND. UnitIAQOption[1] == 2 .AND. LocalCompAssigned( UnitIAQFan3[1] ) > 0.5 .AND.
+             LocalCompAssigned( UnitIAQZone3[1] ) > 0.5)
+         then  switch (ValidOr( UnitIAQFan3[1]:IAQFanType, 0 ))
+                  case  1 :  Format( "%g CFM  exhaust",  UnitIAQFan3[1]:IAQCFM * UnitIAQFanCnt3[1] )
+                  case  2 :  Format( "%g CFM  supply",   UnitIAQFan3[1]:IAQCFM * UnitIAQFanCnt3[1] )
+                  case  3 :  Format( "%g CFM  balanced", UnitIAQFan3[1]:IAQCFM * UnitIAQFanCnt3[1] )
+                  default :  Format( "%g CFM  ???",      UnitIAQFan3[1]:IAQCFM * UnitIAQFanCnt3[1] )
+               endswitch
+         else  UNDEFINED  endif  }
+   "Set Proj:UnitIAQCFMMsg[4]"   Proj:UnitIAQCFMMsg[4]  =
+      {  if (IAQDisabled < 1 .AND. UnitIAQOption[1] == 2 .AND. LocalCompAssigned( UnitIAQFan4[1] ) > 0.5 .AND.
+             LocalCompAssigned( UnitIAQZone4[1] ) > 0.5)
+         then  switch (ValidOr( UnitIAQFan4[1]:IAQFanType, 0 ))
+                  case  1 :  Format( "%g CFM  exhaust",  UnitIAQFan4[1]:IAQCFM * UnitIAQFanCnt4[1] )
+                  case  2 :  Format( "%g CFM  supply",   UnitIAQFan4[1]:IAQCFM * UnitIAQFanCnt4[1] )
+                  case  3 :  Format( "%g CFM  balanced", UnitIAQFan4[1]:IAQCFM * UnitIAQFanCnt4[1] )
+                  default :  Format( "%g CFM  ???",      UnitIAQFan4[1]:IAQCFM * UnitIAQFanCnt4[1] )
+               endswitch
+         else  UNDEFINED  endif  }
+
+   "Set Proj:UnitIAQCFMTot[2](supply)-1"     Proj:UnitIAQCFMTot[2]  =         ; SAC 1/22/19 - revisions to determine overall balanced/unbalanced (tic #1027)
+      {  if (IAQDisabled > 0) then  0
+         else if (UnitIAQOption[1] == 1) then  MinUnbalIAQCFM[1]
+         else if (UnitIAQOption[1] == 2 .AND. LocalCompAssigned( UnitIAQFan1[1] ) > 0.5 .AND.
+                  LocalCompAssigned( UnitIAQZone1[1] ) > 0.5 .AND.
+                  (UnitIAQFan1[1]:IAQFanType == 2 .OR. UnitIAQFan1[1]:IAQFanType == 3))
+         then  UnitIAQFan1[1]:IAQCFM * UnitIAQFanCnt1[1]
+         else  0  endif endif endif  }
+   "Set Proj:UnitIAQCFMTot[2](supply)-2"     Proj:UnitIAQCFMTot[2]  =
+      {  if (IAQDisabled > 0 .OR. UnitIAQOption[1] != 2) then  UNCHANGED
+         else if (LocalCompAssigned( UnitIAQFan2[1] ) > 0.5 .AND. LocalCompAssigned( UnitIAQZone2[1] ) > 0.5 .AND.
+                  (UnitIAQFan2[1]:IAQFanType == 2 .OR. UnitIAQFan2[1]:IAQFanType == 3))
+         then  UnitIAQCFMTot[2] + (UnitIAQFan2[1]:IAQCFM * UnitIAQFanCnt2[1])
+         else  UNCHANGED  endif endif  }
+   "Set Proj:UnitIAQCFMTot[2](supply)-3"     Proj:UnitIAQCFMTot[2]  =
+      {  if (IAQDisabled > 0 .OR. UnitIAQOption[1] != 2) then  UNCHANGED
+         else if (LocalCompAssigned( UnitIAQFan3[1] ) > 0.5 .AND. LocalCompAssigned( UnitIAQZone3[1] ) > 0.5 .AND.
+                  (UnitIAQFan3[1]:IAQFanType == 2 .OR. UnitIAQFan3[1]:IAQFanType == 3))
+         then  UnitIAQCFMTot[2] + (UnitIAQFan3[1]:IAQCFM * UnitIAQFanCnt3[1])
+         else  UNCHANGED  endif endif  }
+   "Set Proj:UnitIAQCFMTot[2](supply)-4"     Proj:UnitIAQCFMTot[2]  =
+      {  if (IAQDisabled > 0 .OR. UnitIAQOption[1] != 2) then  UNCHANGED
+         else if (LocalCompAssigned( UnitIAQFan4[1] ) > 0.5 .AND. LocalCompAssigned( UnitIAQZone4[1] ) > 0.5 .AND.
+                  (UnitIAQFan4[1]:IAQFanType == 2 .OR. UnitIAQFan4[1]:IAQFanType == 3))
+         then  UnitIAQCFMTot[2] + (UnitIAQFan4[1]:IAQCFM * UnitIAQFanCnt4[1])
+         else  UNCHANGED  endif endif  }
+
+   "Set Proj:UnitIAQCFMTot[3](exhaust)-1"    Proj:UnitIAQCFMTot[3]  =  
+      {  if (IAQDisabled > 0) then  0
+         else if (UnitIAQOption[1] == 2 .AND. LocalCompAssigned( UnitIAQFan1[1] ) > 0.5 .AND.
+                  LocalCompAssigned( UnitIAQZone1[1] ) > 0.5 .AND.
+                  (UnitIAQFan1[1]:IAQFanType == 1 .OR. UnitIAQFan1[1]:IAQFanType == 3))
+         then  UnitIAQFan1[1]:IAQCFM * UnitIAQFanCnt1[1]
+         else  0  endif endif  }
+   "Set Proj:UnitIAQCFMTot[3](exhaust)-2"    Proj:UnitIAQCFMTot[3]  =
+      {  if (IAQDisabled > 0 .OR. UnitIAQOption[1] != 2) then  UNCHANGED
+         else if (LocalCompAssigned( UnitIAQFan2[1] ) > 0.5 .AND. LocalCompAssigned( UnitIAQZone2[1] ) > 0.5 .AND.
+                  (UnitIAQFan2[1]:IAQFanType == 1 .OR. UnitIAQFan2[1]:IAQFanType == 3))
+         then  UnitIAQCFMTot[3] + (UnitIAQFan2[1]:IAQCFM * UnitIAQFanCnt2[1])
+         else  UNCHANGED  endif endif  }
+   "Set Proj:UnitIAQCFMTot[3](exhaust)-3"    Proj:UnitIAQCFMTot[3]  =
+      {  if (IAQDisabled > 0 .OR. UnitIAQOption[1] != 2) then  UNCHANGED
+         else if (LocalCompAssigned( UnitIAQFan3[1] ) > 0.5 .AND. LocalCompAssigned( UnitIAQZone3[1] ) > 0.5 .AND.
+                  (UnitIAQFan3[1]:IAQFanType == 1 .OR. UnitIAQFan3[1]:IAQFanType == 3))
+         then  UnitIAQCFMTot[3] + (UnitIAQFan3[1]:IAQCFM * UnitIAQFanCnt3[1])
+         else  UNCHANGED  endif endif  }
+   "Set Proj:UnitIAQCFMTot[3](exhaust)-4"    Proj:UnitIAQCFMTot[3]  =
+      {  if (IAQDisabled > 0 .OR. UnitIAQOption[1] != 2) then  UNCHANGED
+         else if (LocalCompAssigned( UnitIAQFan4[1] ) > 0.5 .AND. LocalCompAssigned( UnitIAQZone4[1] ) > 0.5 .AND.
+                  (UnitIAQFan4[1]:IAQFanType == 1 .OR. UnitIAQFan4[1]:IAQFanType == 3))
+         then  UnitIAQCFMTot[3] + (UnitIAQFan4[1]:IAQCFM * UnitIAQFanCnt4[1])
+         else  UNCHANGED  endif endif  }
+
+   ; SAC 4/19/19 - revise logic to NOT set UnitIAQCFMBalanced[1] flag to 1 if UnitIAQCFMTot[2-&-3] are both 0 (tic #1090)
+   "Set Proj:UnitIAQCFMBalanced[1] flag"     Proj:UnitIAQCFMBalanced[1]  =
+      {  if (UnitIAQCFMTot[2] == UnitIAQCFMTot[3] .AND. UnitIAQCFMTot[2] > 0) then  1
+         else if (UnitIAQCFMTot[2] == 0 .OR. UnitIAQCFMTot[3] == 0) then  0
+         else if (UnitIAQCFMTot[2] > UnitIAQCFMTot[3])
+         then  if (UnitIAQCFMTot[2] >= (0.8 * UnitIAQCFMTot[3]) .AND.
+                   UnitIAQCFMTot[2] <= (1.2 * UnitIAQCFMTot[3]))
+               then  1  else  0  endif
+         else  if (UnitIAQCFMTot[3] >= (0.8 * UnitIAQCFMTot[2]) .AND.
+                   UnitIAQCFMTot[3] <= (1.2 * UnitIAQCFMTot[2]))
+               then  1  else  0  endif
+         endif endif endif  }
+
+   "Set Proj:UnitIAQCFMTot[1](total)"     Proj:UnitIAQCFMTot[1]  =  
+      {  if (UnitIAQCFMBalanced[1])
+         then  (UnitIAQCFMTot[2] + UnitIAQCFMTot[3]) / 2
+         else  max( UnitIAQCFMTot[2], UnitIAQCFMTot[3] )
+         endif  }
+
+;   "Set Proj:BalancedIAQCFMFrac-1"  Proj:BalancedIAQCFMFrac    = {   if (UnitIAQOption[1] == 2 .AND. IfValidAnd( UnitIAQFan1[1]:IAQCFM > 0 ) .AND. IfValidAnd( UnitIAQFan1[1]:IAQFanType = 3 )) then  UnitIAQFan1[1]:IAQCFM  else  0  endif  }
+;   "Set Proj:BalancedIAQCFMFrac-2"  Proj:BalancedIAQCFMFrac    = {   if (UnitIAQOption[1] == 2 .AND. IfValidAnd( UnitIAQFan2[1]:IAQCFM > 0 ) .AND. IfValidAnd( UnitIAQFan2[1]:IAQFanType = 3 )) then  BalancedIAQCFMFrac + UnitIAQFan2[1]:IAQCFM  else  UNCHANGED  endif  }
+;   "Set Proj:BalancedIAQCFMFrac-3"  Proj:BalancedIAQCFMFrac    = {   if (UnitIAQOption[1] == 2 .AND. IfValidAnd( UnitIAQFan3[1]:IAQCFM > 0 ) .AND. IfValidAnd( UnitIAQFan3[1]:IAQFanType = 3 )) then  BalancedIAQCFMFrac + UnitIAQFan3[1]:IAQCFM  else  UNCHANGED  endif  }
+;   "Set Proj:BalancedIAQCFMFrac-4"  Proj:BalancedIAQCFMFrac    = {   if (UnitIAQOption[1] == 2 .AND. IfValidAnd( UnitIAQFan4[1]:IAQCFM > 0 ) .AND. IfValidAnd( UnitIAQFan3[1]:IAQFanType = 3 )) then  BalancedIAQCFMFrac + UnitIAQFan4[1]:IAQCFM  else  UNCHANGED  endif  }
+;   "Set BalancedIAQCFMFrac - Total" Proj:BalancedIAQCFMFrac    = {   if (UnitIAQCFMTot[1] > 0) then  BalancedIAQCFMFrac / UnitIAQCFMTot[1]  else  0  endif  }
+;
+;   "Set Proj:UnitMinIAQCFM[1] (possibly based on mix of exhaust & balanced fans)"   Proj:UnitMinIAQCFM[1]  =      ; SAC 1/16/19 (tic #1027)
+;      {  (BalancedIAQCFMFrac * MinBalancedIAQCFM[1]) + ((1-BalancedIAQCFMFrac) * MinUnbalIAQCFM[1])  }
+   "Set Proj:UnitMinIAQCFM[1] (possibly based on mix of exhaust & balanced fans)"   Proj:UnitMinIAQCFM[1]  =      ; SAC 1/22/19 (tic #1027)
+      {  if (UnitIAQCFMBalanced[1])
+         then  MinBalancedIAQCFM[1]
+         else  MinUnbalIAQCFM[1]
+         endif  }
+
+; ??? SAC 1/16/19 - following DefaultSimIAQCFM need special Balanced vs. Exhaust IAQ fan treatment as is the case for UnitMinIAQCFM[1] above ???  (tic #1027)
+   ; SAC 8/12/16 - added new Proj:DefaultSimIAQCFM to track simulation differences for addition alone analyses (in place of Proj:UnitMinIAQCFM[1]) (tic #729) 
+   ; SAC 4/19/19 - modified rules to subtract out ADU area & num bedrooms when calculating main dwelling DefaultSimIAQCFM (tic #1010)
+   "Set Proj:DefaultSimIAQCFM[1]"      Proj:DefaultSimIAQCFM[1]   = {
+      if ( RunScope == 1 .AND. (IfValidAnd( IsAddAlone > 0.5 )==0 .OR. (AdditionCFA-UseSFamADUArea) > 1000) )
+      then  if (IfValidAnd( IsAddAlone > 0.5 ) .AND. IfValidAnd( AddAloneTotalArea > 0 ))
+            then   (0.01 * (AddAloneTotalArea - UseSFamADUArea)) + (7.5 * (Max( (NumBedrooms - UseSFamADUNumBedrooms + NumAddBedrooms), 1 ) + 1))  -
+                  ((0.01 * (AddAloneExistArea - UseSFamADUArea)) + (7.5 * (Max( (NumBedrooms - UseSFamADUNumBedrooms                 ), 1 ) + 1)))
+            else  UnitMinIAQCFM[1]   endif
+      else        UnitMinIAQCFM[1]   endif  }
+
+   "Set Proj:IAQFanCFMMult[1] - multiplier on IAQ CFM for cases where individual IAQFans assigned to home"  Proj:IAQFanCFMMult[1] =       ; SAC 08/29/20
+      {  if (Proj:RunAbbrev != "s" .AND. Proj:RunAbbrev != "smf" .AND. Proj:RunAbbrev != "dr") then  UNDEFINED
+         else if (UnitIAQOption[1] != 2 .OR. BypassRuleLimits < 1 .OR. StdDesignIAQType[1] != 4) then  UNDEFINED
+         else if (LocalStatus( StdDesignIAQCFM[1] ) > 4 .AND. IfValidAnd( UnitIAQCFMTot[1] > 0 ) .AND.
+                  IfValidAnd(  StdDesignIAQCFM[1] != UnitIAQCFMTot[1] ))
+         then  StdDesignIAQCFM[1] / UnitIAQCFMTot[1]
+         else if (LocalStatus( StdDesignIAQCFM[1] ) < 5 .AND. LocalStatus( StdIAQCFMScaleFactor[1] ) > 4 .AND.
+                  IfValidAnd( UnitIAQCFMTot[1] > 0 ) .AND.
+                  (ValidOr( UnitMinIAQCFM[1], 0 ) * ValidOr( StdIAQCFMScaleFactor[1], 0 )) != ValidOr( UnitIAQCFMTot[1], 0 ))
+         then  (UnitMinIAQCFM[1] * StdIAQCFMScaleFactor[1]) / UnitIAQCFMTot[1]
+         else  UNDEFINED  endif endif endif endif  }
+
+   ; revised to only apply max HRV CFM for std and drtg models - SAC 7/21/20 (tic #1174)
+   ; added logic to leave undefined if UnitMinIAQCFM[1] = 0 (addition alone) - SAC 05/06/21
+   "Set Proj:IAQCFMFracHRVCompat[1] - fraction of design IAQ CFM at/below % cutoff (above minimum CFM) allowed for HRV"   Proj:IAQCFMFracHRVCompat[1]  =       ; SAC 2/5/20 (tic #1174)
+      {  if (IfValidAnd( Proj:AnalysisVersion >= 190200 )==0 .OR. IAQDisabled > 0 .OR.
+             UnitIAQCFMTot[1] < 0.5 .OR. IfValidAnd( UnitMinIAQCFM[1] > 0 )==0) then  UNDEFINED
+         else if (RunAbbrev != "s" .AND. RunAbbrev != "smf" .AND. RunAbbrev != "dr") then  1
+         else if (IfValidAnd( IAQFanCFMMult[1] > 0 ))
+         then  if ((UnitIAQCFMTot[1] * IAQFanCFMMult[1]) <= (UnitMinIAQCFM[1] * 1.1)) then  1
+               else  (UnitMinIAQCFM[1] * 1.1) / (UnitIAQCFMTot[1] * IAQFanCFMMult[1])
+               endif
+         else if (UnitIAQCFMTot[1] <= (UnitMinIAQCFM[1] * 1.1)) then  1
+         else  (UnitMinIAQCFM[1] * 1.1) / UnitIAQCFMTot[1]    endif endif endif endif  } 
+
+   "Set Proj:UnitMinIAQCFMLbl[1]"   Proj:UnitMinIAQCFMLbl[1]   =
+      {  if (IAQDisabled > 0) then  Format( "IAQ Ventilation disabled (%s required but not met)", FltToStr( UnitMinIAQCFM[1] , 1 ) )
+         else if (UnitMinIAQCFM[1]  < 0.5) then  " "  else if (UnitIAQOption[1]  == 3) then  "CFI (Central Fan Integrated) IAQ  - NOT YET IMPLEMENTED -"
+         else if (UnitIAQCFMTot[1]  < (UnitMinIAQCFM[1] - 0.05) )
+         then  if (UnitIAQCFMBalanced[1]) then  Format( "Min IAQ Vent -NOT MET-:  %s required, %s balanced CFM entered",   FltToStr( UnitMinIAQCFM[1] , 1 ), FltToStr( UnitIAQCFMTot[1] , 1 ) )
+               else                             Format( "Min IAQ Vent -NOT MET-:  %s required, %s unbalanced CFM entered", FltToStr( UnitMinIAQCFM[1] , 1 ), FltToStr( UnitIAQCFMTot[1] , 1 ) )  endif
+         else if (UnitIAQOption[1]  == 2)
+         then  if (UnitIAQCFMBalanced[1]) then  Format( "Minimum IAQ Ventilation:  %s CFM  (%s balanced entered)",   FltToStr( UnitMinIAQCFM[1] , 1 ), FltToStr( UnitIAQCFMTot[1] , 1 ) )
+               else                             Format( "Minimum IAQ Ventilation:  %s CFM  (%s unbalanced entered)", FltToStr( UnitMinIAQCFM[1] , 1 ), FltToStr( UnitIAQCFMTot[1] , 1 ) )  endif
+         else  Format( "Minimum IAQ Ventilation:  %s CFM", FltToStr( UnitMinIAQCFM[1] , 1 ) )  endif endif endif endif endif  }
+
+   ; SAC 4/12/19 - enable imit of std design CFM when inputs exceed 150% CFM & include heat recovery (tic #1083)
+   "Set Proj:IAQInclHtRecov[1]-1"      Proj:IAQInclHtRecov[1]  =        ; SAC 2/5/20 - added logic to cover new HtRecov inputs (for 2019.2.0+) (tic #1174)
+      {  if (IAQDisabled > 0 .OR. UnitIAQOption[1] != 2) then  0
+         else if (IfValidAnd( Proj:AnalysisVersion >= 190200 ))
+         then  if (     UnitIAQFanCnt1[1] > 0 .AND. IfValidAnd( UnitIAQFan1[1]:IAQFanType = 3 ) .AND. IfValidAnd( UnitIAQFan1[1]:IncludesRecov > 0 ) .AND. IfValidAnd( UnitIAQFan1[1]:SensRecovEff > 0 ) .AND. IfValidAnd( UnitIAQFan1[1]:AdjSensRecovEff > 0 )) then  1
+      			else if (UnitIAQFanCnt2[1] > 0 .AND. IfValidAnd( UnitIAQFan2[1]:IAQFanType = 3 ) .AND. IfValidAnd( UnitIAQFan2[1]:IncludesRecov > 0 ) .AND. IfValidAnd( UnitIAQFan2[1]:SensRecovEff > 0 ) .AND. IfValidAnd( UnitIAQFan2[1]:AdjSensRecovEff > 0 )) then  1
+		      	else if (UnitIAQFanCnt3[1] > 0 .AND. IfValidAnd( UnitIAQFan3[1]:IAQFanType = 3 ) .AND. IfValidAnd( UnitIAQFan3[1]:IncludesRecov > 0 ) .AND. IfValidAnd( UnitIAQFan3[1]:SensRecovEff > 0 ) .AND. IfValidAnd( UnitIAQFan3[1]:AdjSensRecovEff > 0 )) then  1
+      			else if (UnitIAQFanCnt4[1] > 0 .AND. IfValidAnd( UnitIAQFan4[1]:IAQFanType = 3 ) .AND. IfValidAnd( UnitIAQFan4[1]:IncludesRecov > 0 ) .AND. IfValidAnd( UnitIAQFan4[1]:SensRecovEff > 0 ) .AND. IfValidAnd( UnitIAQFan4[1]:AdjSensRecovEff > 0 )) then  1
+      			else  0  endif endif endif endif
+         else  if (     UnitIAQFanCnt1[1] > 0 .AND. IfValidAnd( UnitIAQFan1[1]:IAQFanType = 3 ) .AND. IfValidAnd( UnitIAQFan1[1]:IAQRecovEffect > 0 )) then  1
+      			else if (UnitIAQFanCnt2[1] > 0 .AND. IfValidAnd( UnitIAQFan2[1]:IAQFanType = 3 ) .AND. IfValidAnd( UnitIAQFan2[1]:IAQRecovEffect > 0 )) then  1
+		      	else if (UnitIAQFanCnt3[1] > 0 .AND. IfValidAnd( UnitIAQFan3[1]:IAQFanType = 3 ) .AND. IfValidAnd( UnitIAQFan3[1]:IAQRecovEffect > 0 )) then  1
+      			else if (UnitIAQFanCnt4[1] > 0 .AND. IfValidAnd( UnitIAQFan4[1]:IAQFanType = 3 ) .AND. IfValidAnd( UnitIAQFan4[1]:IAQRecovEffect > 0 )) then  1
+      			else  0  endif endif endif endif
+			endif endif  }
+
+   "blast StdDesignIAQ properties if user defined and no BypassRuleLimits"    Proj:Action =     ; SAC 9/5/19   ; AllowStdDesignFuel - SAC 04/02/21
+      {  if (IfValidAnd( BypassRuleLimits > 0 ) .OR. AllowStdDesignFuel > 0) then  UNCHANGED
+         else if (LocalStatus( StdDesignIAQType[1]       ) > 4 .OR.
+                  LocalStatus( StdDesignIAQType[2]       ) > 4 .OR.
+                  LocalStatus( StdIAQHtRec_SRE[1]        ) > 4 .OR.
+                  LocalStatus( StdIAQHtRec_SRE[2]        ) > 4 .OR.
+                  LocalStatus( StdIAQHtRec_ASRE[1]       ) > 4 .OR.
+                  LocalStatus( StdIAQHtRec_ASRE[2]       ) > 4 .OR.
+                  LocalStatus( StdDesignIAQCFM[1]        ) > 4 .OR.
+                  LocalStatus( StdDesignIAQCFM[2]        ) > 4 .OR.
+                  LocalStatus( StdIAQCFMScaleFactor[1]   ) > 4 .OR.
+                  LocalStatus( StdIAQCFMScaleFactor[2]   ) > 4 .OR.
+                  LocalStatus( ApplyStdIAQCFMLimitToDRtg ) > 4 .OR.
+                  LocalStatus( StdDesignIAQWperCFM       ) > 4 .OR.
+                  LocalStatus( ApplyStdIAQMaxPwrToDRtg   ) > 4)
+         then  EvalRulelist( "ForceReset_StdDesignIAQLimits" )
+         else  UNCHANGED  endif endif  }
+
+   "blast defaulted Proj:StdDesignIAQCFM[1]"    Proj:StdDesignIAQCFM[1]  = {  UNDEFINED  }
+   "Force setting of Proj:StdDesignIAQCFM[1] if input exceeds 150% min req'd IAQ CFM & includes heat recovery"    Proj:Action =   ; SAC 4/12/19 - (tic #1083)   ; replaced 1.5 by MaxStdIAQCFMRatio - SAC 01/19/21   ; prevent setting StdDesignIAQCFM[1] when UnitMinIAQCFM[1] = 0 (AdditionAlone) - SAC 05/06/21
+      {  if (IAQDisabled > 0 .OR. UnitIAQOption[1] != 2 .OR. IfValidAnd( UnitMinIAQCFM[1] > 0 )==0) then  UNCHANGED
+			else if (IAQInclHtRecov[1] > 0 .AND. UnitIAQCFMTot[1] > (MaxStdIAQCFMRatio * UnitMinIAQCFM[1]))
+         then  EvalRulelist( "Force_StdDesignIAQCFM_1" )
+         else  UNCHANGED  endif endif  }
+
+   "Set Proj:PropIAQCFMScaleFactor[1]"       Proj:PropIAQCFMScaleFactor[1]  =          ; SAC 4/24/20 (tic #1174)
+      {  if (IfValidAnd( UnitMinIAQCFM[1] > 0 )==0) then  UNDEFINED
+         else  ValidOr( UnitIAQCFMTot[1], 0 ) / UnitMinIAQCFM[1]  endif  }
+   "Set Proj:StdIAQCFMScaleEditable[1]"      Proj:StdIAQCFMScaleEditable[1]  =         ; SAC 4/24/20 (tic #1174)
+      {  if (IAQDisabled > 0 .OR. IfValidAnd( BypassRuleLimits > 0 )==0 .OR. LocalStatus( StdDesignIAQCFM[1] ) > 4) then  UNDEFINED
+         else  1  endif  }
+   "Set Proj:StdIAQCFMScaleFactor[1]"        Proj:StdIAQCFMScaleFactor[1]  =           ; SAC 4/24/20 (tic #1174)     ; added logic to set Std IAQ CFM to no more than 110% of Min Req'd for 19.2.0+ - SAC 7/20/20 (tic #1174)
+      {  if (IAQDisabled = 0 .AND. (IfValidAnd( BypassRuleLimits > 0 )==0 .OR. LocalStatus( StdIAQCFMScaleFactor[1] ) < 5) .AND.
+             IfValidAnd( Proj:AnalysisVersion >= 190200 ) .AND. IfValidAnd( PropIAQCFMScaleFactor[1] > 1.1 ))
+         then  1.1
+         else if (IfValidAnd( StdIAQCFMScaleEditable[1] > 0 )==0 .OR. IfValidAnd( PropIAQCFMScaleFactor[1] >= 0 )==0) then  UNDEFINED
+         else  PropIAQCFMScaleFactor[1]  endif endif  }
+
+   ; SAC 3/20/19 - rule to define IAQCFMScaleFactor to be used in simulation for standard design (tic #1083)
+   ; SAC 5/16/19 - removed logic that prevented setting IAQCFMScaleFactor[1] when BypassRuleLimits is activated (tic #1083)
+   "Set Proj:IAQCFMScaleFactor[1] if appropriate"     Proj:IAQCFMScaleFactor[1]  =     ; added logic to set Std IAQ CFM to no more than 110% of Min Req'd for 19.2.0+ - SAC 7/20/20 (tic #1174)
+      {  if (IfValidAnd( StdDesignIAQCFM[1] >= 0 )==0 .AND. IfValidAnd( StdIAQCFMScaleFactor[1] >= 0 )==0) then  UNDEFINED
+         else if (IfValidAnd( IAQDisabled > 0 ) .OR. IsMultiFamily > 0) then  UNDEFINED
+         else if (UnitMinIAQCFM[1] < 0.5 .OR. UnitIAQOption[1] == 3) then  UNDEFINED
+         else if ((IfValidAnd( BypassRuleLimits > 0 )==0 .OR. LocalStatus( StdIAQCFMScaleFactor[1] ) < 5) .AND.
+                  IfValidAnd( Proj:AnalysisVersion >= 190200 ) .AND. IfValidAnd( StdIAQCFMScaleFactor[1] > 0 ))
+         then  StdIAQCFMScaleFactor[1] * UnitMinIAQCFM[1]     / UnitIAQCFMTot[1]
+         else if (IfValidAnd( UnitIAQCFMTot[1] > 0 ) .AND. IfValidAnd( StdIAQCFMScaleEditable[1] > 0 ) .AND.
+                  IfValidAnd( StdIAQCFMScaleFactor[1] >= 0 ))
+         then  if (IfValidAnd( StdDesignIAQType[1] > 0 )==0)
+               then  StdIAQCFMScaleFactor[1] * UnitMinIAQCFM[1]     / UnitIAQCFMTot[1]
+               else if (StdDesignIAQType[1] >= 3)
+               then  StdIAQCFMScaleFactor[1] * MinBalancedIAQCFM[1] / UnitIAQCFMTot[1]
+               else  StdIAQCFMScaleFactor[1] * MinUnbalIAQCFM[1]    / UnitIAQCFMTot[1]   endif endif
+         else if (IfValidAnd( UnitIAQCFMTot[1] > 0 )) then  StdDesignIAQCFM[1] / UnitIAQCFMTot[1]
+         else  UNDEFINED  endif endif endif endif endif endif  }
+
+   "Set Proj:ApplyStdIAQCFMLimitToDRtg - flag indicating whether or not to apply the std design IAQ CFM limits (main dwelling & ADU) to EDR reference run"  ; SAC 9/5/19
+      Proj:ApplyStdIAQCFMLimitToDRtg   = {  1  }      ; SAC 9/5/19 - new default of 1 here causes difference in EDR ref run IAQ CFM when scaling occurs to the Std design
+   ; SAC 4/24/20 - revised to serve as THE Std design fan power (as opposed to a Max Limit) for analysis version 2019.2.0+ (tic #1174)    ; SAC 7/20/20 (tic #1174)   ; SAC 08/27/20
+   "Set Proj:StdDesignIAQWperCFM - standard design IAQ power"    ; SAC 9/5/19
+      Proj:StdDesignIAQWperCFM         =              ; revised DefaultIAQFanPwr unbal 0.3->0.35 & bal 0.6->0.7 - SAC 01/19/21 (tic #1243)   ; AllowStdDesignFuel & StdDesignIAQFanPwr - SAC 04/02/21
+         {  if (((IfValidAnd( BypassRuleLimits > 0 ) .AND. IfValidAnd( AnalysisVersion >= 190200 )) .OR. AllowStdDesignFuel) .AND.
+                IfValidAnd( StdDesignIAQType[1] > 0 ))
+            then  if (AllowStdDesignFuel .AND. IfValidAnd( StdDesignIAQFanPwr > 0 ))
+                  then  StdDesignIAQFanPwr
+                  else if (IfValidAnd( StdDesignIAQType[1] >= 3 ))
+                  then  0.7
+                  else  0.35  endif endif
+            else if (IfValidAnd( Proj:AnalysisVersion >= 190200 ))
+		      then  if ( (Proj:IsMultiFamily >  0 .AND. IfValidAnd( MostDUIAQ_Balanced > 0 )) .OR.
+		                 (Proj:IsMultiFamily == 0 .AND. IfValidAnd( UnitIAQCFMBalanced[1] > 0 )) )
+		            then  0.7
+		            else  0.35  endif
+            else  1.2  endif endif  }
+   "Set Proj:ApplyStdIAQMaxPwrToDRtg - flag indicating whether or not to apply the std design IAQ maximum power EDR reference run"  ; SAC 9/5/19
+      Proj:ApplyStdIAQMaxPwrToDRtg     = {  1  }
+
+   ;---------------------------------------------------------------------------
+   ; SAC 4/22/19 - default remaining ADU IAQ properties (tic #1010)
+   "Set Proj:SFamADUIAQUI"    Proj:SFamADUIAQUI  = {
+         if (IsMultiFamily < 1 .AND. SFamADUType > 0 .AND. UseSFamADUArea > 0 .AND. UseSFamADUNumBedrooms > 0) then 1 else 0 endif  }
+	"Set Proj:UnitIAQNumFanRefs[2]"	Proj:UnitIAQNumFanRefs[2]	= {	if (UnitIAQOption[2] != 2 .OR. IAQDisabled > 0) then  0
+																							else if (LocalCompAssigned( UnitIAQFan4[2]  )) then  4
+																							else if (LocalCompAssigned( UnitIAQFan3[2]  )) then  3
+																							else if (LocalCompAssigned( UnitIAQFan2[2]  )) then  2
+																							else if (LocalCompAssigned( UnitIAQFan1[2]  )) then  1  else  0  endif endif endif endif endif  }
+   ;  mjb   7/10/14  remove floor area constraint on new construction
+	"Default Proj:UnitIAQFanCnt1[2]" 	Proj:UnitIAQFanCnt1[2] 	= {	if (IAQDisabled > 0) then  0
+   																						else if (UseSFamADUArea > 0 .AND. UseSFamADUNumBedrooms > 0) then 1 else 0 endif endif }		
+	"Default Proj:UnitIAQFanCnt2[2]" 	Proj:UnitIAQFanCnt2[2] 	= {	if (IAQDisabled > 0) then  0
+   																						else if (UseSFamADUArea > 0 .AND. UseSFamADUNumBedrooms > 0) then 1 else 0 endif endif }		
+	"Default Proj:UnitIAQFanCnt3[2]" 	Proj:UnitIAQFanCnt3[2] 	= {	if (IAQDisabled > 0) then  0
+   																						else if (UseSFamADUArea > 0 .AND. UseSFamADUNumBedrooms > 0) then 1 else 0 endif endif }		
+	"Default Proj:UnitIAQFanCnt4[2]" 	Proj:UnitIAQFanCnt4[2] 	= {	if (IAQDisabled > 0) then  0
+   																						else if (UseSFamADUArea > 0 .AND. UseSFamADUNumBedrooms > 0) then 1 else 0 endif endif }		
+   "Default Proj:UnitIAQZone1[2]" 		Proj:UnitIAQZone1[2] 	= {	if (ComponentCount( Zone ) > 0.5) then  MaxAllComp( Zone:CondFloorArea )  else  UNDEFINED  endif  }
+   "Default Proj:UnitIAQZone2[2]" 		Proj:UnitIAQZone2[2] 	= {	if (ComponentCount( Zone ) > 0.5) then  MaxAllComp( Zone:CondFloorArea )  else  UNDEFINED  endif  }
+   "Default Proj:UnitIAQZone3[2]" 		Proj:UnitIAQZone3[2] 	= {	if (ComponentCount( Zone ) > 0.5) then  MaxAllComp( Zone:CondFloorArea )  else  UNDEFINED  endif  }
+   "Default Proj:UnitIAQZone4[2]" 		Proj:UnitIAQZone4[2] 	= {	if (ComponentCount( Zone ) > 0.5) then  MaxAllComp( Zone:CondFloorArea )  else  UNDEFINED  endif  }
+
+	"Set Proj:UnitIAQCFM1[2]" 			Proj:UnitIAQCFM1[2] 			= {	if (IAQDisabled > 0) then  0
+   																				 else if (UnitIAQOption[2] == 1) then  MinUnbalIAQCFM[2]
+																					 else if (UnitIAQOption[2] != 2 .OR. LocalCompAssigned( UnitIAQFan1[2] ) < 0.5 .OR. LocalCompAssigned( UnitIAQZone1[2] ) < 0.5 .OR. IAQDisabled > 0) then  0  else  UnitIAQFan1[2]:IAQCFM * UnitIAQFanCnt1[2]   endif endif endif  }
+	"Set Proj:UnitIAQCFM2[2]" 			Proj:UnitIAQCFM2[2] 			= {	if (UnitIAQOption[2] != 2 .OR. LocalCompAssigned( UnitIAQFan2[2] ) < 0.5 .OR. LocalCompAssigned( UnitIAQZone2[2] ) < 0.5 .OR. IAQDisabled > 0) then  0  else  UnitIAQFan2[2]:IAQCFM * UnitIAQFanCnt2[2]   endif  }
+	"Set Proj:UnitIAQCFM3[2]" 			Proj:UnitIAQCFM3[2] 			= {	if (UnitIAQOption[2] != 2 .OR. LocalCompAssigned( UnitIAQFan3[2] ) < 0.5 .OR. LocalCompAssigned( UnitIAQZone3[2] ) < 0.5 .OR. IAQDisabled > 0) then  0  else  UnitIAQFan3[2]:IAQCFM * UnitIAQFanCnt3[2]   endif  }
+	"Set Proj:UnitIAQCFM4[2]" 			Proj:UnitIAQCFM4[2] 			= {	if (UnitIAQOption[2] != 2 .OR. LocalCompAssigned( UnitIAQFan4[2] ) < 0.5 .OR. LocalCompAssigned( UnitIAQZone4[2] ) < 0.5 .OR. IAQDisabled > 0) then  0  else  UnitIAQFan4[2]:IAQCFM * UnitIAQFanCnt4[2]   endif  }
+
+   "Set Proj:ADUIAQCFMMsg[1]"   Proj:ADUIAQCFMMsg[1]  =         ; SAC 1/22/19 - revisions for better IAQ screen labeling (tic #1027)
+      {  if (IAQDisabled < 1 .AND. UnitIAQOption[2] == 2 .AND. LocalCompAssigned( UnitIAQFan1[2] ) > 0.5 .AND.
+             LocalCompAssigned( UnitIAQZone1[2] ) > 0.5)
+         then  switch (ValidOr( UnitIAQFan1[2]:IAQFanType, 0 ))
+                  case  1 :  Format( "%g CFM  exhaust",  UnitIAQFan1[2]:IAQCFM * UnitIAQFanCnt1[2] )
+                  case  2 :  Format( "%g CFM  supply",   UnitIAQFan1[2]:IAQCFM * UnitIAQFanCnt1[2] )
+                  case  3 :  Format( "%g CFM  balanced", UnitIAQFan1[2]:IAQCFM * UnitIAQFanCnt1[2] )
+                  default :  Format( "%g CFM  ???",      UnitIAQFan1[2]:IAQCFM * UnitIAQFanCnt1[2] )
+               endswitch
+         else  UNDEFINED  endif  }
+   "Set Proj:ADUIAQCFMMsg[2]"   Proj:ADUIAQCFMMsg[2]  =
+      {  if (IAQDisabled < 1 .AND. UnitIAQOption[2] == 2 .AND. LocalCompAssigned( UnitIAQFan2[2] ) > 0.5 .AND.
+             LocalCompAssigned( UnitIAQZone2[2] ) > 0.5)
+         then  switch (ValidOr( UnitIAQFan2[2]:IAQFanType, 0 ))
+                  case  1 :  Format( "%g CFM  exhaust",  UnitIAQFan2[2]:IAQCFM * UnitIAQFanCnt2[2] )
+                  case  2 :  Format( "%g CFM  supply",   UnitIAQFan2[2]:IAQCFM * UnitIAQFanCnt2[2] )
+                  case  3 :  Format( "%g CFM  balanced", UnitIAQFan2[2]:IAQCFM * UnitIAQFanCnt2[2] )
+                  default :  Format( "%g CFM  ???",      UnitIAQFan2[2]:IAQCFM * UnitIAQFanCnt2[2] )
+               endswitch
+         else  UNDEFINED  endif  }
+   "Set Proj:ADUIAQCFMMsg[3]"   Proj:ADUIAQCFMMsg[3]  =
+      {  if (IAQDisabled < 1 .AND. UnitIAQOption[2] == 2 .AND. LocalCompAssigned( UnitIAQFan3[2] ) > 0.5 .AND.
+             LocalCompAssigned( UnitIAQZone3[2] ) > 0.5)
+         then  switch (ValidOr( UnitIAQFan3[2]:IAQFanType, 0 ))
+                  case  1 :  Format( "%g CFM  exhaust",  UnitIAQFan3[2]:IAQCFM * UnitIAQFanCnt3[2] )
+                  case  2 :  Format( "%g CFM  supply",   UnitIAQFan3[2]:IAQCFM * UnitIAQFanCnt3[2] )
+                  case  3 :  Format( "%g CFM  balanced", UnitIAQFan3[2]:IAQCFM * UnitIAQFanCnt3[2] )
+                  default :  Format( "%g CFM  ???",      UnitIAQFan3[2]:IAQCFM * UnitIAQFanCnt3[2] )
+               endswitch
+         else  UNDEFINED  endif  }
+   "Set Proj:ADUIAQCFMMsg[4]"   Proj:ADUIAQCFMMsg[4]  =
+      {  if (IAQDisabled < 1 .AND. UnitIAQOption[2] == 2 .AND. LocalCompAssigned( UnitIAQFan4[2] ) > 0.5 .AND.
+             LocalCompAssigned( UnitIAQZone4[2] ) > 0.5)
+         then  switch (ValidOr( UnitIAQFan4[2]:IAQFanType, 0 ))
+                  case  1 :  Format( "%g CFM  exhaust",  UnitIAQFan4[2]:IAQCFM * UnitIAQFanCnt4[2] )
+                  case  2 :  Format( "%g CFM  supply",   UnitIAQFan4[2]:IAQCFM * UnitIAQFanCnt4[2] )
+                  case  3 :  Format( "%g CFM  balanced", UnitIAQFan4[2]:IAQCFM * UnitIAQFanCnt4[2] )
+                  default :  Format( "%g CFM  ???",      UnitIAQFan4[2]:IAQCFM * UnitIAQFanCnt4[2] )
+               endswitch
+         else  UNDEFINED  endif  }
+
+   "Set Proj:ADUIAQCFMTot[2](supply)-1"     Proj:ADUIAQCFMTot[2]  =         ; SAC 1/22/19 - revisions to determine overall balanced/unbalanced (tic #1027)
+      {  if (IAQDisabled > 0) then  0
+         else if (UnitIAQOption[2] == 1) then  MinUnbalIAQCFM[2]
+         else if (UnitIAQOption[2] == 2 .AND. LocalCompAssigned( UnitIAQFan1[2] ) > 0.5 .AND.
+                  LocalCompAssigned( UnitIAQZone1[2] ) > 0.5 .AND.
+                  (UnitIAQFan1[2]:IAQFanType == 2 .OR. UnitIAQFan1[2]:IAQFanType == 3))
+         then  UnitIAQFan1[2]:IAQCFM * UnitIAQFanCnt1[2]
+         else  0  endif endif endif  }
+   "Set Proj:ADUIAQCFMTot[2](supply)-2"     Proj:ADUIAQCFMTot[2]  =
+      {  if (IAQDisabled > 0 .OR. UnitIAQOption[2] != 2) then  UNCHANGED
+         else if (LocalCompAssigned( UnitIAQFan2[2] ) > 0.5 .AND. LocalCompAssigned( UnitIAQZone2[2] ) > 0.5 .AND.
+                  (UnitIAQFan2[2]:IAQFanType == 2 .OR. UnitIAQFan2[2]:IAQFanType == 3))
+         then  ADUIAQCFMTot[2] + (UnitIAQFan2[2]:IAQCFM * UnitIAQFanCnt2[2])
+         else  UNCHANGED  endif endif  }
+   "Set Proj:ADUIAQCFMTot[2](supply)-3"     Proj:ADUIAQCFMTot[2]  =
+      {  if (IAQDisabled > 0 .OR. UnitIAQOption[2] != 2) then  UNCHANGED
+         else if (LocalCompAssigned( UnitIAQFan3[2] ) > 0.5 .AND. LocalCompAssigned( UnitIAQZone3[2] ) > 0.5 .AND.
+                  (UnitIAQFan3[2]:IAQFanType == 2 .OR. UnitIAQFan3[2]:IAQFanType == 3))
+         then  ADUIAQCFMTot[2] + (UnitIAQFan3[2]:IAQCFM * UnitIAQFanCnt3[2])
+         else  UNCHANGED  endif endif  }
+   "Set Proj:ADUIAQCFMTot[2](supply)-4"     Proj:ADUIAQCFMTot[2]  =
+      {  if (IAQDisabled > 0 .OR. UnitIAQOption[2] != 2) then  UNCHANGED
+         else if (LocalCompAssigned( UnitIAQFan4[2] ) > 0.5 .AND. LocalCompAssigned( UnitIAQZone4[2] ) > 0.5 .AND.
+                  (UnitIAQFan4[2]:IAQFanType == 2 .OR. UnitIAQFan4[2]:IAQFanType == 3))
+         then  ADUIAQCFMTot[2] + (UnitIAQFan4[2]:IAQCFM * UnitIAQFanCnt4[2])
+         else  UNCHANGED  endif endif  }
+
+   "Set Proj:ADUIAQCFMTot[3](exhaust)-1"    Proj:ADUIAQCFMTot[3]  =  
+      {  if (IAQDisabled > 0) then  0
+         else if (UnitIAQOption[2] == 2 .AND. LocalCompAssigned( UnitIAQFan1[2] ) > 0.5 .AND.
+                  LocalCompAssigned( UnitIAQZone1[2] ) > 0.5 .AND.
+                  (UnitIAQFan1[2]:IAQFanType == 1 .OR. UnitIAQFan1[2]:IAQFanType == 3))
+         then  UnitIAQFan1[2]:IAQCFM * UnitIAQFanCnt1[2]
+         else  0  endif endif  }
+   "Set Proj:ADUIAQCFMTot[3](exhaust)-2"    Proj:ADUIAQCFMTot[3]  =
+      {  if (IAQDisabled > 0 .OR. UnitIAQOption[2] != 2) then  UNCHANGED
+         else if (LocalCompAssigned( UnitIAQFan2[2] ) > 0.5 .AND. LocalCompAssigned( UnitIAQZone2[2] ) > 0.5 .AND.
+                  (UnitIAQFan2[2]:IAQFanType == 1 .OR. UnitIAQFan2[2]:IAQFanType == 3))
+         then  ADUIAQCFMTot[3] + (UnitIAQFan2[2]:IAQCFM * UnitIAQFanCnt2[2])
+         else  UNCHANGED  endif endif  }
+   "Set Proj:ADUIAQCFMTot[3](exhaust)-3"    Proj:ADUIAQCFMTot[3]  =
+      {  if (IAQDisabled > 0 .OR. UnitIAQOption[2] != 2) then  UNCHANGED
+         else if (LocalCompAssigned( UnitIAQFan3[2] ) > 0.5 .AND. LocalCompAssigned( UnitIAQZone3[2] ) > 0.5 .AND.
+                  (UnitIAQFan3[2]:IAQFanType == 1 .OR. UnitIAQFan3[2]:IAQFanType == 3))
+         then  ADUIAQCFMTot[3] + (UnitIAQFan3[2]:IAQCFM * UnitIAQFanCnt3[2])
+         else  UNCHANGED  endif endif  }
+   "Set Proj:ADUIAQCFMTot[3](exhaust)-4"    Proj:ADUIAQCFMTot[3]  =
+      {  if (IAQDisabled > 0 .OR. UnitIAQOption[2] != 2) then  UNCHANGED
+         else if (LocalCompAssigned( UnitIAQFan4[2] ) > 0.5 .AND. LocalCompAssigned( UnitIAQZone4[2] ) > 0.5 .AND.
+                  (UnitIAQFan4[2]:IAQFanType == 1 .OR. UnitIAQFan4[2]:IAQFanType == 3))
+         then  ADUIAQCFMTot[3] + (UnitIAQFan4[2]:IAQCFM * UnitIAQFanCnt4[2])
+         else  UNCHANGED  endif endif  }
+
+   ; SAC 4/19/19 - revise logic to NOT set UnitIAQCFMBalanced[2] flag to 1 if ADUIAQCFMTot[2-&-3] are both 0 (tic #1090)
+   "Set Proj:UnitIAQCFMBalanced[2] flag"     Proj:UnitIAQCFMBalanced[2]  =
+      {  if (ADUIAQCFMTot[2] == ADUIAQCFMTot[3] .AND. ADUIAQCFMTot[2] > 0) then  1
+         else if (ADUIAQCFMTot[2] == 0 .OR. ADUIAQCFMTot[3] == 0) then  0
+         else if (ADUIAQCFMTot[2] > ADUIAQCFMTot[3])
+         then  if (ADUIAQCFMTot[2] >= (0.8 * ADUIAQCFMTot[3]) .AND.
+                   ADUIAQCFMTot[2] <= (1.2 * ADUIAQCFMTot[3]))
+               then  1  else  0  endif
+         else  if (ADUIAQCFMTot[3] >= (0.8 * ADUIAQCFMTot[2]) .AND.
+                   ADUIAQCFMTot[3] <= (1.2 * ADUIAQCFMTot[2]))
+               then  1  else  0  endif
+         endif endif endif  }
+
+   "Set Proj:ADUIAQCFMTot[1](total)"     Proj:ADUIAQCFMTot[1]  =  
+      {  if (UnitIAQCFMBalanced[2])
+         then  (ADUIAQCFMTot[2] + ADUIAQCFMTot[3]) / 2
+         else  max( ADUIAQCFMTot[2], ADUIAQCFMTot[3] )
+         endif  }
+
+   "Set Proj:UnitMinIAQCFM[2] (possibly based on mix of exhaust & balanced fans)"   Proj:UnitMinIAQCFM[2]  =      ; SAC 1/22/19 (tic #1027)
+      {  if (UnitIAQCFMBalanced[2])
+         then  MinBalancedIAQCFM[2]
+         else  MinUnbalIAQCFM[2]
+         endif  }
+
+   ; ??? SAC 1/16/19 - following DefaultSimIAQCFM need special Balanced vs. Exhaust IAQ fan treatment as is the case for UnitMinIAQCFM[2] above ???  (tic #1027)
+   ; SAC 8/12/16 - added new Proj:DefaultSimIAQCFM to track simulation differences for addition alone analyses (in place of Proj:UnitMinIAQCFM[2]) (tic #729) 
+   ; SAC 4/19/19 - modified rules to subtract out ADU area & num bedrooms when calculating main dwelling DefaultSimIAQCFM (tic #1010)
+   "Set Proj:DefaultSimIAQCFM[2]"      Proj:DefaultSimIAQCFM[2]   =     ; SAC 4/22/19 - modified for ADU (tic #1010)
+      {  UnitMinIAQCFM[2]  }
+      ;if ( UseSFamADUArea > 0 .AND. UseSFamADUNumBedrooms > 0 )
+      ;then  if (IfValidAnd( IsAddAlone > 0.5 ) .AND. IfValidAnd( AddAloneTotalArea > 0 ))
+      ;      then   (0.01 * (AddAloneTotalArea - UseSFamADUArea)) + (7.5 * (Max( (NumBedrooms - UseSFamADUNumBedrooms + NumAddBedrooms), 1 ) + 1))  -
+      ;            ((0.01 * (AddAloneExistArea - UseSFamADUArea)) + (7.5 * (Max( (NumBedrooms - UseSFamADUNumBedrooms                 ), 1 ) + 1)))
+      ;      else  UnitMinIAQCFM[1]   endif
+      ;else        UnitMinIAQCFM[1]   endif  }
+
+   ; revised to only apply max HRV CFM for std and drtg models - SAC 7/21/20 (tic #1174)
+   "Set Proj:IAQCFMFracHRVCompat[2] - fraction of ADU design IAQ CFM at/below % cutoff (above minimum CFM) allowed for HRV"   Proj:IAQCFMFracHRVCompat[2]  =       ; SAC 2/5/20 (tic #1174)
+      {  if (IfValidAnd( Proj:AnalysisVersion >= 190200 )==0 .OR. IAQDisabled > 0 .OR. ADUIAQCFMTot[1] < 0.5) then  UNDEFINED
+         else if (ADUIAQCFMTot[1] <= (UnitMinIAQCFM[2] * 1.1)) then  1
+         else if (RunAbbrev != "s" .AND. RunAbbrev != "smf" .AND. RunAbbrev != "dr") then  1
+         else  (UnitMinIAQCFM[2] * 1.1) / ADUIAQCFMTot[1]    endif endif endif  } 
+
+   "Set Proj:UnitMinIAQCFMLbl[2]"   Proj:UnitMinIAQCFMLbl[2]   =
+      {  if (IAQDisabled > 0) then  Format( "IAQ Ventilation disabled (%s required but not met)", FltToStr( UnitMinIAQCFM[2] , 1 ) )
+         else if (UnitMinIAQCFM[2]  < 0.5) then  " "  else if (UnitIAQOption[2]  == 3) then  "CFI (Central Fan Integrated) IAQ  - NOT YET IMPLEMENTED -"
+         else if (ADUIAQCFMTot[1]  < (UnitMinIAQCFM[2] - 0.05) )
+         then  if (UnitIAQCFMBalanced[2]) then  Format( "Min IAQ Vent -NOT MET-:  %s required, %s balanced CFM entered",   FltToStr( UnitMinIAQCFM[2] , 1 ), FltToStr( ADUIAQCFMTot[1] , 1 ) )
+               else                             Format( "Min IAQ Vent -NOT MET-:  %s required, %s unbalanced CFM entered", FltToStr( UnitMinIAQCFM[2] , 1 ), FltToStr( ADUIAQCFMTot[1] , 1 ) )  endif
+         else if (UnitIAQOption[2]  == 2)
+         then  if (UnitIAQCFMBalanced[2]) then  Format( "Minimum IAQ Ventilation:  %s CFM  (%s balanced entered)",   FltToStr( UnitMinIAQCFM[2] , 1 ), FltToStr( ADUIAQCFMTot[1] , 1 ) )
+               else                             Format( "Minimum IAQ Ventilation:  %s CFM  (%s unbalanced entered)", FltToStr( UnitMinIAQCFM[2] , 1 ), FltToStr( ADUIAQCFMTot[1] , 1 ) )  endif
+         else  Format( "Minimum IAQ Ventilation:  %s CFM", FltToStr( UnitMinIAQCFM[2] , 1 ) )  endif endif endif endif endif  }
+
+   ; SAC 4/12/19 - enable imit of std design CFM when inputs exceed 150% CFM & include heat recovery (tic #1083)
+   "Set Proj:IAQInclHtRecov[2]-1"      Proj:IAQInclHtRecov[2]  =        ; SAC 2/5/20 - added logic to cover new HtRecov inputs (for 2019.2.0+) (tic #1174)
+      {  if (IAQDisabled > 0 .OR. UnitIAQOption[2] != 2) then  0
+         else if (IfValidAnd( Proj:AnalysisVersion >= 190200 ))
+         then  if (     UnitIAQFanCnt1[2] > 0 .AND. IfValidAnd( UnitIAQFan1[2]:IAQFanType = 3 ) .AND. IfValidAnd( UnitIAQFan1[2]:IncludesRecov > 0 ) .AND. IfValidAnd( UnitIAQFan1[2]:SensRecovEff > 0 ) .AND. IfValidAnd( UnitIAQFan1[2]:AdjSensRecovEff > 0 )) then  1
+      			else if (UnitIAQFanCnt2[2] > 0 .AND. IfValidAnd( UnitIAQFan2[2]:IAQFanType = 3 ) .AND. IfValidAnd( UnitIAQFan2[2]:IncludesRecov > 0 ) .AND. IfValidAnd( UnitIAQFan2[2]:SensRecovEff > 0 ) .AND. IfValidAnd( UnitIAQFan2[2]:AdjSensRecovEff > 0 )) then  1
+		      	else if (UnitIAQFanCnt3[2] > 0 .AND. IfValidAnd( UnitIAQFan3[2]:IAQFanType = 3 ) .AND. IfValidAnd( UnitIAQFan3[2]:IncludesRecov > 0 ) .AND. IfValidAnd( UnitIAQFan3[2]:SensRecovEff > 0 ) .AND. IfValidAnd( UnitIAQFan3[2]:AdjSensRecovEff > 0 )) then  1
+      			else if (UnitIAQFanCnt4[2] > 0 .AND. IfValidAnd( UnitIAQFan4[2]:IAQFanType = 3 ) .AND. IfValidAnd( UnitIAQFan4[2]:IncludesRecov > 0 ) .AND. IfValidAnd( UnitIAQFan4[2]:SensRecovEff > 0 ) .AND. IfValidAnd( UnitIAQFan4[2]:AdjSensRecovEff > 0 )) then  1
+      			else  0  endif endif endif endif
+         else  if (     UnitIAQFanCnt1[2] > 0 .AND. IfValidAnd( UnitIAQFan1[2]:IAQFanType = 3 ) .AND. IfValidAnd( UnitIAQFan1[2]:IAQRecovEffect > 0 )) then  1
+      			else if (UnitIAQFanCnt2[2] > 0 .AND. IfValidAnd( UnitIAQFan2[2]:IAQFanType = 3 ) .AND. IfValidAnd( UnitIAQFan2[2]:IAQRecovEffect > 0 )) then  1
+		      	else if (UnitIAQFanCnt3[2] > 0 .AND. IfValidAnd( UnitIAQFan3[2]:IAQFanType = 3 ) .AND. IfValidAnd( UnitIAQFan3[2]:IAQRecovEffect > 0 )) then  1
+      			else if (UnitIAQFanCnt4[2] > 0 .AND. IfValidAnd( UnitIAQFan4[2]:IAQFanType = 3 ) .AND. IfValidAnd( UnitIAQFan4[2]:IAQRecovEffect > 0 )) then  1
+      			else  0  endif endif endif endif
+			endif endif  }
+
+   "blast defaulted Proj:StdDesignIAQCFM[2]"    Proj:StdDesignIAQCFM[2]  = {  UNDEFINED  }
+   "Force setting of Proj:StdDesignIAQCFM[2] if input exceeds 150% min req'd IAQ CFM & includes heat recovery"    Proj:Action =   ; SAC 4/12/19 - (tic #1083)    ; replaced 1.5 by MaxStdIAQCFMRatio - SAC 01/19/21
+      {  if (IAQDisabled > 0 .OR. UnitIAQOption[2] != 2) then  UNCHANGED
+			else if (IAQInclHtRecov[2] > 0 .AND. IfValidAnd( ADUIAQCFMTot[2] > (MaxStdIAQCFMRatio * UnitMinIAQCFM[2]) ))
+         then  EvalRulelist( "Force_StdDesignIAQCFM_2" )
+         else  UNCHANGED  endif endif  }
+
+   "Set Proj:PropIAQCFMScaleFactor[2]"       Proj:PropIAQCFMScaleFactor[2]  =          ; SAC 7/20/20 (tic #1174)
+      {  if (IfValidAnd( UnitMinIAQCFM[2] > 0 )==0) then  UNDEFINED
+         else  ValidOr( ADUIAQCFMTot[1], 0 ) / UnitMinIAQCFM[2]  endif  }
+      ;   else  ValidOr( UnitIAQCFMTot[2], 0 ) / UnitMinIAQCFM[2]  endif  }   ; replaced this w/ above since UnitIAQCFMTot[2] does NOT correspond w/ ADU - SAC 01/28/21
+   "Set Proj:StdIAQCFMScaleFactor[2]"        Proj:StdIAQCFMScaleFactor[2]  =           ; added rule to set Std IAQ CFM to no more than 110% of Min Req'd - SAC 7/20/20 (tic #1174)
+      {  if (IAQDisabled = 0 .AND. (IfValidAnd( BypassRuleLimits > 0 )==0 .OR. LocalStatus( StdIAQCFMScaleFactor[2] ) < 5) .AND.
+             IfValidAnd( Proj:AnalysisVersion >= 190200 ) .AND. IfValidAnd( PropIAQCFMScaleFactor[2] > 1.1 ))
+         then  1.1
+         else  UNDEFINED  endif  }
+
+   ; SAC 3/20/19 - rule to define IAQCFMScaleFactor to be used in simulation for standard design (tic #1083)
+   ; SAC 5/16/19 - removed logic that prevented setting IAQCFMScaleFactor[2] when BypassRuleLimits is activated (tic #1083)
+   "Set Proj:IAQCFMScaleFactor[2] if appropriate"     Proj:IAQCFMScaleFactor[2]  =     ; added logic to set Std IAQ CFM to no more than 110% of Min Req'd for 19.2.0+ - SAC 7/20/20 (tic #1174)
+      {  if (IfValidAnd( StdDesignIAQCFM[2] >= 0 )==0 .AND. IfValidAnd( StdIAQCFMScaleFactor[2] >= 0 )==0) then  UNDEFINED
+         else if (IfValidAnd( IAQDisabled > 0 ) .OR. IsMultiFamily > 0) then  UNDEFINED
+         else if (UnitMinIAQCFM[2] < 0.5 .OR. UnitIAQOption[2] == 3) then  UNDEFINED
+         else if ((IfValidAnd( BypassRuleLimits > 0 )==0 .OR. LocalStatus( StdIAQCFMScaleFactor[2] ) < 5) .AND.
+                  IfValidAnd( Proj:AnalysisVersion >= 190200 ) .AND. IfValidAnd( StdIAQCFMScaleFactor[2] > 0 ))
+         then  StdIAQCFMScaleFactor[2] * UnitMinIAQCFM[2]     / ADUIAQCFMTot[1]
+         else if (IfValidAnd( ADUIAQCFMTot[1] > 0 )) then  StdDesignIAQCFM[2] / ADUIAQCFMTot[1]
+         else  UNDEFINED  endif endif endif endif endif  }
+   ; SAC 4/22/19 - end of mods adding rules detailing ADU IAQ (tic #1010)
+
+   ; added rules to set MostDUIAQ_* for SFam models (to aid in downstream IAQ UI & std design) - SAC 03/18/21 (tic #1243)
+   "Set Proj:MostDUIAQ_Balanced - SFam"      Proj:MostDUIAQ_Balanced  =  
+      {  if (Proj:IsMultiFamily > 0.5) then  UNCHANGED
+         else if (IfValidAnd( UnitIAQCFMBalanced[1] > 0 )) then  1  else  0  endif endif  } 
+   "Set Proj:MostDUIAQ_Exhaust"     Proj:MostDUIAQ_Exhaust   =
+      {  if (Proj:IsMultiFamily > 0.5) then  UNCHANGED
+         else if (IfValidAnd( MostDUIAQ_Balanced > 0 )==0 .AND.
+                  (UnitIAQCFMTot[3] + ADUIAQCFMTot[3]) > (UnitIAQCFMTot[2] + ADUIAQCFMTot[2])) then  1  else  0  endif endif  } 
+   "Set Proj:MostDUIAQ_Supply"      Proj:MostDUIAQ_Supply    =
+      {  if (Proj:IsMultiFamily > 0.5) then  UNCHANGED
+         else if (IfValidAnd( MostDUIAQ_Balanced > 0 ) .OR.
+                  IfValidAnd( MostDUIAQ_Exhaust  > 0 )) then  0  else  1  endif endif  } 
+   "Set Proj:MostDUIAQ_Type"        Proj:MostDUIAQ_Type      =
+      {  if (Proj:IsMultiFamily > 0.5) then  UNCHANGED
+         else if (MostDUIAQ_Balanced > 0) then  "Balanced"
+         else if (MostDUIAQ_Exhaust  > 0) then  "Exhaust"
+         else if (MostDUIAQ_Supply   > 0) then  "Supply"       else  UNDEFINED  endif endif endif endif  }
+   "Set Proj:MostUserDUIAQ_Exhaust (User model only)"    Proj:MostUserDUIAQ_Exhaust =        ; SAC 04/03/21
+      {  if (Proj:IsMultiFamily > 0.5 .OR. IfValidAnd( RunAbbrev = "u" )==0) then  UNCHANGED
+         else  MostDUIAQ_Exhaust  endif  }
+
+;   ; SAC 3/20/19 - rule to define IAQCFMScaleFactor to be used in simulation for standard design (tic #1083)
+;   ; SAC 4/22/19 - revised to take into account BOTH main dwelling AND ADU IAQ
+;   "Set Proj:IAQCFMScaleFactor[1] if appropriate"     Proj:IAQCFMScaleFactor[1]  = {
+;         if (IfValidAnd( StdDesignIAQCFM[1] >= 0 )==0 .AND. IfValidAnd( StdDesignIAQCFM[2] >= 0 )==0) then  UNDEFINED
+;         else if (IfValidAnd( IAQDisabled > 0 ) .OR. IsMultiFamily > 0 .OR. IfValidAnd( BypassRuleLimits > 0 )) then  UNDEFINED
+;         else if ((UnitMinIAQCFM[1] < 0.5 .AND. UnitMinIAQCFM[2] < 0.5) .OR.
+;                  (UnitIAQOption[1] == 3  .AND. UnitIAQOption[2] == 3 )) then  UNDEFINED
+;         else if (UnitMinIAQCFM[1] < 0.5 .OR. UnitIAQOption[1] == 3)
+;         then  if (IfValidAnd( ADUIAQCFMTot[1] > 0 )) then  StdDesignIAQCFM[2] / ADUIAQCFMTot[1]
+;               else  UNDEFINED  endif
+;         else if (UnitMinIAQCFM[2] < 0.5 .OR. UnitIAQOption[2] == 3)
+;         then  if (IfValidAnd( UnitIAQCFMTot[1] > 0 )) then  StdDesignIAQCFM[1] / UnitIAQCFMTot[1]
+;               else  UNDEFINED  endif
+;         else if ((ValidOr( UnitIAQCFMTot[1], 0 ) + ValidOr( ADUIAQCFMTot[1], 0 )) > 0)
+;         then  (ValidOr( StdDesignIAQCFM[1], 0 ) + ValidOr( StdDesignIAQCFM[2], 0 )) /
+;               (ValidOr( UnitIAQCFMTot[1]  , 0 ) + ValidOr( ADUIAQCFMTot[1]   , 0 ))
+;         else  UNDEFINED  endif endif endif endif endif endif  }
+
+   ; SAC 1/20/19 - moved ClVent rules into separate rulelist to enable re-eval following ClVentFan defaulting (which can effect project-wide ClVent settings) (tic #1040)
+   "Default cooling vent properties"   Proj:Action  = {  EvalRulelist( "Default_SFam_CoolingVent" )  }
+END
+;*************************************************************************
+
+;*************************************************************************  SAC 4/12/19 (tic #1083)    ; replaced 1.5 by MaxStdIAQCFMRatio - SAC 01/19/21
+RULELIST "Force_StdDesignIAQCFM_1"  1 0 0 0
+   "Set Proj:StdDesignIAQCFM[1] to MaxStdIAQCFMRatio of minimum required"   Proj:StdDesignIAQCFM[1]  = {  MaxStdIAQCFMRatio * UnitMinIAQCFM[1]  }
+END
+;*************************************************************************  SAC 4/22/19 (tic #1010)    ; replaced 1.5 by MaxStdIAQCFMRatio - SAC 01/19/21
+RULELIST "Force_StdDesignIAQCFM_2"  1 0 0 0
+   "Set Proj:StdDesignIAQCFM[2] to MaxStdIAQCFMRatio of minimum required"   Proj:StdDesignIAQCFM[2]  = {  MaxStdIAQCFMRatio * UnitMinIAQCFM[2]  }
+END
+;*************************************************************************
+
+;*************************************************************************  SAC 1/20/19 (tic #1040)
+RULELIST "Default_SFam_CoolingVent"  0 0 0 0
+  ; SFam Cooling Ventilation input defaulting ----------
+      ;  "UnitClVentFan",     BEMP_Obj,  6,  0,  0, "",                 0,  1, "ClVentFan", 0, "",       1080, "cooling ventilation fan object" 
+   "Set Proj:UnitClVentNumFans[1]"   Proj:UnitClVentNumFans[1]   =
+      {  if (ClVentFanUI < 0.5) then  0
+         else if (LocalCompAssigned( UnitClVentFan[6] )) then  6
+         else if (LocalCompAssigned( UnitClVentFan[5] )) then  5
+         else if (LocalCompAssigned( UnitClVentFan[4] )) then  4
+         else if (LocalCompAssigned( UnitClVentFan[3] )) then  3
+         else if (LocalCompAssigned( UnitClVentFan[2] )) then  2
+         else if (LocalCompAssigned( UnitClVentFan[1] )) then  1  else  0  endif endif endif endif endif endif endif  }
+   "Default Proj:UnitClVentZone[1]"    Proj:UnitClVentZone[1]    =      ; SAC 1/21/19 - revised default to ensure valid for Default Prescrip WHF (tic #1040)
+      {  if (ComponentCount( Zone ) < 1 .OR. (UnitClVentNumFans[1] < 1 .AND. UnitClVentOption != 1)) then  UNDEFINED
+         else if (UnitClVentOption == 5 .OR. (UnitClVentOption == 2 .AND. IfValidAnd( UnitClVentFan[1]:ExhaustsTo = 2 )))
+         then  MaxAllComp( Zone:CondFloorArea )
+         else  MaxAllComp( Zone:CondClgBlwAtticArea )  endif endif  }
+   "Default Proj:UnitClVentZone[2]"    Proj:UnitClVentZone[2]    =
+      {  if (ComponentCount( Zone ) < 1 .OR. UnitClVentNumFans[1] < 2) then  UNDEFINED
+         else if (UnitClVentOption == 5 .OR. (UnitClVentOption == 2 .AND. IfValidAnd( UnitClVentFan[2]:ExhaustsTo = 2 )))
+         then  MaxAllComp( Zone:CondFloorArea )
+         else  MaxAllComp( Zone:CondClgBlwAtticArea )  endif endif  }
+   "Default Proj:UnitClVentZone[3]"    Proj:UnitClVentZone[3]    =
+      {  if (ComponentCount( Zone ) < 1 .OR. UnitClVentNumFans[1] < 3) then  UNDEFINED
+         else if (UnitClVentOption == 5 .OR. (UnitClVentOption == 2 .AND. IfValidAnd( UnitClVentFan[3]:ExhaustsTo = 2 )))
+         then  MaxAllComp( Zone:CondFloorArea )
+         else  MaxAllComp( Zone:CondClgBlwAtticArea )  endif endif  }
+   "Default Proj:UnitClVentZone[4]"    Proj:UnitClVentZone[4]    =
+      {  if (ComponentCount( Zone ) < 1 .OR. UnitClVentNumFans[1] < 4) then  UNDEFINED
+         else if (UnitClVentOption == 5 .OR. (UnitClVentOption == 2 .AND. IfValidAnd( UnitClVentFan[4]:ExhaustsTo = 2 )))
+         then  MaxAllComp( Zone:CondFloorArea )
+         else  MaxAllComp( Zone:CondClgBlwAtticArea )  endif endif  }
+   "Default Proj:UnitClVentZone[5]"    Proj:UnitClVentZone[5]    =
+      {  if (ComponentCount( Zone ) < 1 .OR. UnitClVentNumFans[1] < 5) then  UNDEFINED
+         else if (UnitClVentOption == 5 .OR. (UnitClVentOption == 2 .AND. IfValidAnd( UnitClVentFan[5]:ExhaustsTo = 2 )))
+         then  MaxAllComp( Zone:CondFloorArea )
+         else  MaxAllComp( Zone:CondClgBlwAtticArea )  endif endif  }
+   "Default Proj:UnitClVentZone[6]"    Proj:UnitClVentZone[6]    =
+      {  if (ComponentCount( Zone ) < 1 .OR. UnitClVentNumFans[1] < 6) then  UNDEFINED
+         else if (UnitClVentOption == 5 .OR. (UnitClVentOption == 2 .AND. IfValidAnd( UnitClVentFan[6]:ExhaustsTo = 2 )))
+         then  MaxAllComp( Zone:CondFloorArea )
+         else  MaxAllComp( Zone:CondClgBlwAtticArea )  endif endif  }
+
+; KN 04/14/2016 replaced with new cfm/ft2 if 2016. Code might be needed here to default Proj:DesignRatingBase is 2016
+;                                                                else if (UnitClVentOption == 1) then   2 * CondFloorArea
+   "Set Proj:UnitClVentCFM[1]"   Proj:UnitClVentCFM[1]   =
+      {  if ((EnableClVent < 0.5 .AND. LimitedClVent < 0.5) .OR. UnitClVentOption < 1) then  0
+         else if (UnitClVentOption == 1 .OR. UnitClVentOption == 5)
+         then    T24RClimateZoneCodeBase:WHFcfmpersf( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr ) * CondFloorArea
+         else if (UnitClVentOption == 2 .AND. LocalCompAssigned( UnitClVentFan[1] ))
+         then    ValidOr( UnitClVentFan[1]:CoolingVent, 0 )
+         else  0  endif endif endif  }
+   "Set Proj:UnitClVentCFM[2]"   Proj:UnitClVentCFM[2]   =
+      {  if ((EnableClVent < 0.5 .AND. LimitedClVent < 0.5) .OR. UnitClVentOption < 1) then  0
+         else if (UnitClVentOption == 2 .AND. LocalCompAssigned( UnitClVentFan[2] ))
+         then    ValidOr( UnitClVentFan[2]:CoolingVent, 0 )
+         else  0  endif endif  }
+   "Set Proj:UnitClVentCFM[3]"   Proj:UnitClVentCFM[3]   =
+      {  if ((EnableClVent < 0.5 .AND. LimitedClVent < 0.5) .OR. UnitClVentOption < 1) then  0
+         else if (UnitClVentOption == 2 .AND. LocalCompAssigned( UnitClVentFan[3] ))
+         then    ValidOr( UnitClVentFan[3]:CoolingVent, 0 )
+         else  0  endif endif  }
+   "Set Proj:UnitClVentCFM[4]"   Proj:UnitClVentCFM[4]   =
+      {  if ((EnableClVent < 0.5 .AND. LimitedClVent < 0.5) .OR. UnitClVentOption < 1) then  0
+         else if (UnitClVentOption == 2 .AND. LocalCompAssigned( UnitClVentFan[4] ))
+         then    ValidOr( UnitClVentFan[4]:CoolingVent, 0 )
+         else  0  endif endif  }
+   "Set Proj:UnitClVentCFM[5]"   Proj:UnitClVentCFM[5]   =
+      {  if ((EnableClVent < 0.5 .AND. LimitedClVent < 0.5) .OR. UnitClVentOption < 1) then  0
+         else if (UnitClVentOption == 2 .AND. LocalCompAssigned( UnitClVentFan[5] ))
+         then    ValidOr( UnitClVentFan[5]:CoolingVent, 0 )
+         else  0  endif endif  }
+   "Set Proj:UnitClVentCFM[6]"   Proj:UnitClVentCFM[6]   =
+      {  if ((EnableClVent < 0.5 .AND. LimitedClVent < 0.5) .OR. UnitClVentOption < 1) then  0
+         else if (UnitClVentOption == 2 .AND. LocalCompAssigned( UnitClVentFan[6] ))
+         then    ValidOr( UnitClVentFan[6]:CoolingVent, 0 )
+         else  0  endif endif  }
+   "Set Proj:UnitClVentCFMTot"   Proj:UnitClVentCFMTot   =
+      {  if ((EnableClVent < 0.5 .AND. LimitedClVent < 0.5) .OR. UnitClVentOption < 1) then  0
+         else  UnitClVentCFM[1] + UnitClVentCFM[2] + UnitClVentCFM[3] + UnitClVentCFM[4] +
+               UnitClVentCFM[5] + UnitClVentCFM[6]
+         endif  }
+
+  ; SAC 3/7/16 - added to enable access by report generator for new CF1R
+   "Set Proj:UnitClVentCFMpSF"   Proj:UnitClVentCFMpSF   =
+      {  if ((EnableClVent < 0.5 .AND. LimitedClVent < 0.5) .OR. UnitClVentOption < 1 .OR. CondFloorArea < 0.1) then  0
+         else if (UnitClVentOption == 1 .OR. UnitClVentOption == 2 .OR. UnitClVentOption == 5) then  UnitClVentCFMTot / CondFloorArea
+         else if (UnitClVentOption == 3) then  0 / CondFloorArea      ; CFI cool vent
+         else  0  endif endif endif  }
+      ; ??? how to handle CFi cool vent reporting ???
+      ;    possibly based on ...
+      ;   "Default ClVentFan:CoolingVent"         ClVentFan:CoolingVent    = {   if (Proj:EnableClVent > 0.5 .AND. Proj:UnitClVentOption == 3 .AND.
+      ;                                                                              SumAll( HVACSys:CFIClVentFlow ) > 0.5 .AND. CountRefs( HVACSys:CFIClVentFan ) > 0.5)      ; SumRevRef( HVACSys:CFIClVentFan, HVACSys:CFIClVentFlow ) > 0.5)
+      ;                                                                        then  0.5 * SumRevRef( HVACSys:CFIClVentFan, HVACSys:FloorAreaServed[1] ) / CountRefs( HVACSys:CFIClVentFan )      ; SumRevRef( HVACSys:CFIClVentFan, HVACSys:CFIClVentFlow )
+
+   "Set Proj:MaxClVentFlow"      Proj:MaxClVentFlow  = {  3.5  }     ; SAC 6/29/20 (tic #1236)
+   "Set Proj:ClVentErrMsg"       Proj:ClVentErrMsg  =                ; SAC 6/29/20 (tic #1236)
+      {  if (CondFloorArea < 1 .OR. (EnableClVent < 0.5 .AND. LimitedClVent < 0.5) .OR. UnitClVentOption < 1) then  UNDEFINED
+         else if ((UnitClVentCFMTot / CondFloorArea) > (MaxClVentFlow + 0.01))
+         then  Format( "ERROR: Cool vent flow cannot exceed maximum of %s CFM/ft2 (%s CFM)", FltToStr( MaxClVentFlow, 2, 1, 0, 1 ), FltToStr( (MaxClVentFlow * CondFloorArea) ) )
+         else  UNDEFINED
+         endif endif  }
+
+   "Set Proj:UnitClVentLabel"    Proj:UnitClVentLabel  =
+      {  if ((EnableClVent < 0.5 .AND. LimitedClVent < 0.5) .OR. UnitClVentOption < 1) then  " "
+         else if (UnitClVentOption  == 3) then  "CFI Cool Vent specified in HVAC System inputs"
+         else  Format( "Cooling Ventilation:  %s CFM  (%s CFM/ft2)", FltToStr( UnitClVentCFMTot ), FltToStr( (UnitClVentCFMTot / CondFloorArea), 2, 1, 0, 1 ) )  endif endif  }
+   "Set Proj:ShowClVentZone"     Proj:ShowClVentZone   =
+      {  if ((EnableClVent > 0 .OR. LimitedClVent > 0) .AND.
+             (UnitClVentOption == 1 .OR. UnitClVentOption == 2 .OR. UnitClVentOption == 5))
+         then  1  else  0  endif  }
+
+   ; SAC 11/5/17 - added ClVentVerified for 2019 analysis (tic #920)
+   "Default Proj:ClVentVerified"    Proj:ClVentVerified  = {  0  }
+   "Set Proj:ClVentHERSOption"      Proj:ClVentHERSOption  =         ; SAC 4/23/19 (tic #1023)
+      {  if (EnergyCodeYearNum >= 2019 .AND. (UnitClVentOption = 1 .OR. UnitClVentOption = 5)) then  1  else  0  endif  }
+;				0,	"- none -"
+;				1,	"Default Prescriptive Whole House Fan"
+;				5,	"Default WHF Exhausting to Outside"
+;				2,	"Specify Individual Whole House Fans"
+;				3,	"Central Fan Ventilation Cooling System"
+
+   ; SAC 5/6/19 - added logic to ensure ClVent mult HERS benefit for 2019+ models where 'Specify Individual Whole House Fans' selected => forcing HERS (tic #1023)
+   "Set Proj:ClVentVerifMult"       Proj:ClVentVerifMult = {
+         if (EnergyCodeYearNum < 2019) then  1
+         else if (UnitClVentOption = 3 .OR. UnitClVentOption = 2) then  1
+         else if (ClVentVerified = 0)
+         then  0.67  else  1  endif endif endif  }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "Default_DwellingUnitData"  0 0 0 0
+;*************************************************************************
+
+	; SAC 7/8/15 - added properties to disable all IAQ ventilation
+	"Default Proj:DisableIAQ flag"	Proj:DisableIAQ	= {	0  }		; option to toggle OFF all IAQ ventilation
+	"Set Proj:IAQDisabled"				Proj:IAQDisabled	= {	if (BypassRuleLimits > 0 .AND. DisableIAQ > 0) then  1  else  0  endif  }		; Flag indicating that IAQ vent has been toggled OFF
+
+	"Set Proj:UnitTotCondFlrArea"			Proj:UnitTotCondFlrArea		= {	SumAll( DwellUnit:TotalCondFlrArea )  }
+	"Set DwellUnit:TotalNumBedrooms"		DwellUnit:TotalNumBedrooms	= {	if (ParentComponentType() == "Zone") then  ValidOr( DwellUnitTypeRef:NumBedrooms, 0 ) * Count  else  0  endif  }
+	"Set Proj:NumBedrooms"					Proj:NumBedrooms				= {	SumAll( DwellUnit:TotalNumBedrooms )  }
+	"Set Proj:SimNumBedrooms"				Proj:SimNumBedrooms			= {	NumBedrooms  }
+
+	; SAC 5/10/16 - added default of project-wide cool vent values to 0 for MFam models
+	"Init Proj:UnitClVentCFMTot"	Proj:UnitClVentCFMTot	= {	0  }
+	"Init Proj:UnitClVentCFMpSF"	Proj:UnitClVentCFMpSF	= {	0  }
+
+  ; Interior Lighting Gains - docu from IntgainAlgorithm6.txt dated 9/4/12:
+  ;			a.   //Lights  Returns Btu/day-CFA - based on ElectricityInteriorLights = (214+ 0.601×CFA)×(FractPortable + (1-FractPortable)×PAMInterior )  //HTM Eqn 11, p. 30
+  ;			 		#define FractPortable .22    //fixed for now, variable later for HERS
+  ;			 		#define Paminterior 0.625    //fixed for now, variable later for HERS
+  ;		 			#Redefine LightsGainperCFA (((214. + 0.601 * CFAperUnit) * (FractPortable + (1-FractPortable) * Paminterior ) * 3413. / 365) * DwellingUnits /CFA)
+	"Set DwellUnit:UnitLtgGain"				DwellUnit:UnitLtgGain	= {	if (Proj:IntGainsMethod <= 2013)
+																								then	(214 +  0.601  * CondFlrArea ) * (Ltg_FracPort + ((1-Ltg_FracPort) * Ltg_PwrAdjMult)) / 365
+																								else	(100 + (0.1775 * min( 4150, CondFlrArea ))) * 3412 / 365  endif  }
+	"Set DwellUnit:TotalLtgGain"				DwellUnit:TotalLtgGain	= {	if (ParentComponentType() == "Zone") then  UnitLtgGain * Count  else  0  endif  }
+	"Set Proj:AvgLtgGainPerCFA (MFam)"		Proj:AvgLtgGainPerCFA	= {	if (Proj:IsMultiFamily < 0.5) then  UNCHANGED
+																								else if (UnitTotCondFlrArea < 0.1) then  0
+																								else	SumAll( DwellUnit:TotalLtgGain ) / UnitTotCondFlrArea  endif endif  }
+  ; SAC 4/13/16 - added TV, STB & Comp gains for T24-2016
+	"Set DwellUnit:UnitTVGain"					DwellUnit:UnitTVGain		= {	if (Proj:IntGainsMethod <= 2013) then  0
+																								else	(265 + (31.8 * ValidOr( DwellUnitTypeRef:NumBedrooms, 0 ))) * 3412 / 365  endif  }
+	"Set DwellUnit:TotalTVGain"				DwellUnit:TotalTVGain	= {	if (ParentComponentType() == "Zone") then  UnitTVGain * Count  else  0  endif  }
+	"Set DwellUnit:UnitSTBGain"				DwellUnit:UnitSTBGain	= {	if (Proj:IntGainsMethod <= 2013) then  0
+																								else	(76 + (59.4 * ValidOr( DwellUnitTypeRef:NumBedrooms, 0 ))) * 3412 / 365  endif  }
+	"Set DwellUnit:TotalSTBGain"				DwellUnit:TotalSTBGain	= {	if (ParentComponentType() == "Zone") then  UnitSTBGain * Count  else  0  endif  }
+	"Set DwellUnit:UnitCompGain"				DwellUnit:UnitCompGain	= {	if (Proj:IntGainsMethod <= 2013) then  0
+																								else	(79 + (55.4 * ValidOr( DwellUnitTypeRef:NumBedrooms, 0 ))) * 3412 / 365  endif  }
+	"Set DwellUnit:TotalCompGain"				DwellUnit:TotalCompGain	= {	if (ParentComponentType() == "Zone") then  UnitCompGain * Count  else  0  endif  }
+
+  ; Internal Gains due to Occupants - docu from IntgainAlgorithm6.txt dated 9/4/12:
+  ;		   b.  People    Returns BTU/day-CFA - 100% is internal gain 57.3% sensible, 42.7% latent  Based on HTM and  BA existing bldgs Sensible 220, Latent 164 BTU
+  ;						#redefine PeopleperUnit (1.75 + 0.4 * BRperUnit)           - 0.5 added to formulas below to ensure average # people following integer truncation
+  ;						#Redefine PeopleGainperCFA ((3900/0.573) * PeopleperUnit * DwellingUnits / CFA) 
+	; SAC 5/6/13 - revised to be fractional (not round to nearest person)
+	"Set Proj:PeoplePerUnit[1]"		Proj:PeoplePerUnit[1]	= {	if (IfValidAnd( NumDwellingUnits > 0 )) then  ((1.75 * NumDwellingUnits) + (0.4 * SimNumBedrooms)) / NumDwellingUnits   else  0  endif  }
+	"Set Proj:UnitPeopleGain[1]"		Proj:UnitPeopleGain[1]	= {	PeoplePerUnit[1]  * (3900/0.573)  }
+	"Set Proj:AvgPplGainPerCFA"		Proj:AvgPplGainPerCFA	= {	if (UnitTotCondFlrArea < 0.1) then  0
+																						else	UnitPeopleGain[1] * NumDwellingUnits / UnitTotCondFlrArea  endif  }
+
+  ; Miscellaneous Electric Gains - docu from IntgainAlgorithm6.txt dated 9/4/12:
+  ;			c.  Misc Electricity  Returns BTU/day-CFA - 100% is internal gain
+  ;		 			#Redefine MiscGainperCFA ((723. + (0.706 * CFAperUnit))* DwellingUnits * 3413. / 365.)/CFA  //Rev 6 120831
+	;	"Set Proj:UnitMscElecGain[1]"		Proj:UnitMscElecGain[1]		= {	if (IfValidAnd( NumDwellingUnits > 0 )) then  (723. + (0.706 * UnitTotCondFlrArea )) / 365 / NumDwellingUnits  else  0  endif  }
+	;	"Set Proj:AvgMscEGainPerCFA"		Proj:AvgMscEGainPerCFA		= {	if (UnitTotCondFlrArea < 0.1) then  0
+	;																							else	UnitMscElecGain[1] * NumDwellingUnits / UnitTotCondFlrArea  endif  }
+	; SAC 4/13/16 - added logic for T24-2016
+	"Set DwellUnit:UnitMscElecGain"	DwellUnit:UnitMscElecGain	= {	if (Proj:IntGainsMethod <= 2013)
+																							then	(723 + (0.706 * CondFlrArea )) / 365  		; kWh/day-DwlgUnt
+																							else	(570 + (198.9 * ValidOr( DwellUnitTypeRef:NumBedrooms, 0 ))) * 3412 / 365  endif  }
+	"Set DwellUnit:TotalMscElecGain"	DwellUnit:TotalMscElecGain	= {	UnitMscElecGain * Count  }
+	"Set Proj:AvgMscEGainPerCFA"		Proj:AvgMscEGainPerCFA		= {	if (UnitTotCondFlrArea < 0.1) then  0
+																							else	SumAll( DwellUnit:TotalMscElecGain ) / UnitTotCondFlrArea  endif  }
+
+  ; Dishwasher Electric Gains - docu from IntgainAlgorithm6.txt dated 9/4/12:
+  ;		b.  Dishwasher.  0 based choose returns BTU/day  // uses Table based in INTEGER bedrooms per dwelling.  
+  ;	 			#Redefine DishwasherGain (choose (BRperUnit,90,90,126,126,126,145,145,174,174,174,default 203) * DwellingUnits * 3413. / 365.) 
+	; already set for DwellUnitType objects
+	;	"Set Proj:UnitDishElecGain[1]"	Proj:UnitDishElecGain[1]  = {  if (UnitInputValid[1]  > 0.5) then  switch (UnitNumBedrooms[1] )  case 0: 90	case 1: 90
+	;																								case 2: 126   case 3: 126   case 4: 126   case 5: 145   case 6: 145   case 7: 174
+	;																								case 8: 174   case 9: 174   default: 203  	endswitch  else  0  endif  }
+	; SAC 4/14/16 - revised for T24-2016 gains
+	"Set DwellUnit:TotalDishUsage"		DwellUnit:TotalDishUsage		= {	if (IfValidAnd( DwellUnitTypeRef:HaveDish > 0.5 ))
+																									then	if (Proj:IntGainsMethod <= 2013)
+																											then	DwellUnitTypeRef:DishElecUsage * Count
+																											else	DwellUnitTypeRef:DishElecUsage * ValidOr( UnitTotCondFlrArea, 0 )		; kWh*CFA/gal
+																											endif
+																									else  0  endif  }
+
+  ; Cooking Gains - docu from IntgainAlgorithm6.txt dated 9/4/12:
+  ;	   c.  Stove and Oven   -  Assumes both are gas with electonic igniter  Returns BTU/day - Full Energy Use, 90% is internal Gain
+  ;	 			define CookGain (((31. + (.008 * CFAperUnit))* 0.43* 0.9)* DwellingUnits * 100000. / 365.)  //Added the 0.43 for the electronic ignition  12/4  BAW
+	;	"Set Proj:UnitCookGain[1]"		Proj:UnitCookGain[1]		= {	if (UnitInputValid[1]  > 0.5) then  ((31. + (.008 * UnitCondFlrArea[1] )) * 0.43 * 0.9) * 100000. / 365.  else  0  endif  }
+	; SAC 4/14/16 - split into Elec & Gas gain and added logic for T24-2016
+	"Set DwellUnit:UnitCookElecGain"		DwellUnit:UnitCookElecGain		= {	if (Proj:IntGainsMethod <= 2013 .AND. DwellUnitTypeRef:CookFuel == 1)
+																									then	((31. + (.008 * CondFlrArea )) * 0.43 * 0.9) * 100000. / 365.
+																									else if (Proj:IntGainsMethod > 2013)
+																									then	if (DwellUnitTypeRef:CookFuel == 1)
+																											then	(213  + (26.3 * ValidOr( DwellUnitTypeRef:NumBedrooms, 0 ))) * 3412 / 365		; elec cooking
+																											else	( 16  + ( 1.9 * ValidOr( DwellUnitTypeRef:NumBedrooms, 0 ))) * 3412 / 365		; elec aux for gas cooking
+																											endif
+																									else	0  endif endif  }
+	"Set DwellUnit:UnitCookGasGain"		DwellUnit:UnitCookGasGain		= {	if (DwellUnitTypeRef:CookFuel == 1) then  0
+																									else if (Proj:IntGainsMethod <= 2013)
+																									then	((31. + (.008 * CondFlrArea )) * 0.43 * 0.9) * 100000. / 365.
+																									else	(10 + (1.3 * ValidOr( DwellUnitTypeRef:NumBedrooms, 0 ))) * 100000 / 365
+																									endif endif  }
+	"Set DwellUnit:TotalCookGasGain"		DwellUnit:TotalCookGasGain		= {	if (DwellUnitTypeRef:CookFuel == 2) then  UnitCookGasGain  * Count  else  0  endif  }
+	"Set DwellUnit:TotalCookElecGain"	DwellUnit:TotalCookElecGain	= {															UnitCookElecGain * Count						}
+	"Set DwellUnit:TotalCookOthrGain"	DwellUnit:TotalCookOthrGain	= {	if (DwellUnitTypeRef:CookFuel == 3) then  UnitCookGasGain  * Count  else  0  endif  }
+
+  ; Clothes Washer Gains - docu from IntgainAlgorithm6.txt dated 9/4/12:
+  ;		d.  Clothes Washer  -   // Returns BTU/day
+  ;	         #Redefine WasherGain ((-64 + 0.108 * CFAperUnit) * DwellingUnits * 3413. / 365.)
+	;	"Set Proj:UnitClthWashGain[1]"	Proj:UnitClthWashGain[1]	= {	if (UnitInputValid[1]  > 0.5) then  (-64 + (0.108 * UnitCondFlrArea[1] )) / 365.  else  0  endif  }
+	; SAC 4/15/16 - revised for T24-2016 gains
+	"Set DwellUnit:UnitClthWashGain"		DwellUnit:UnitClthWashGain		= {	if (ValidOr( HaveWasher, 0 ) > 0.5)
+																									then	if (Proj:IntGainsMethod <= 2013)
+																											then  (-64 + (0.108 * CondFlrArea )) / 365.
+																											else	0.010067   ; kWh/gal
+																											endif
+																									else  0  endif  }
+	"Set DwellUnit:TotalClthWashGain"	DwellUnit:TotalClthWashGain	= {	UnitClthWashGain * Count  }
+
+  ; Clothes Dryer Gains - docu from IntgainAlgorithm6.txt dated 9/4/12:
+  ;		e.  Clothes Dryer  -  Assumes gas with electonic igniter  Returns BTU/day - Full energy Use, 30% is internal gain
+  ;	 			define DryerGAin (13. + (.01 * CFAperUnit))* DwellingUnits * 100000. / 365.  //Added the 0.43 for the electronic ignition  //120831
+	;	"Set Proj:UnitClthDryGain[1]"		Proj:UnitClthDryGain[1]		= {	if (UnitInputValid[1]  > 0.5) then  (13. + (.01 * UnitCondFlrArea[1] )) * 100000. / 365.  else  0  endif  }
+   "Set DwellUnit:DryerFuel (0-none, 1-Elec, 2-Gas)"     DwellUnit:DryerFuel  =     ; SAC 10/2/19 - MFamProto
+      {  if (ValidOr( HaveDryer, 0 ) < 0.5) then  0
+         else if (IfValidAnd( Proj:EnergyCodeYearNum >= 2019 ) .AND. LocalCompAssigned( DryerZoneRef ) == ComponentType( "OtherZone" ))
+         then  DryerZoneRef:DryerFuel
+         else if (IfValidAnd( DwellUnitTypeRef:DryerFuel > 0 )) then  DwellUnitTypeRef:DryerFuel
+         else  0  endif endif endif  }
+	; SAC 4/15/16 - expanded into separate elec/gas gains and revised for T24-2016 gains
+   "Set DwellUnit:UnitClthDryGasGain"     DwellUnit:UnitClthDryGasGain  =
+      {  if (ValidOr( HaveDryer, 0 ) < 0.5 .OR. DryerFuel < 2) then  0
+         else if (Proj:IntGainsMethod <= 2013)
+         then   (13. + (.01 * CondFlrArea )) * 100000. / 365.
+         else  299.91      ; T24-2016 therm/gal
+         endif endif  }
+   "Set DwellUnit:UnitClthDryElecGain"    DwellUnit:UnitClthDryElecGain =
+      {  if (ValidOr( HaveDryer, 0 ) < 0.5) then  0
+         else if (Proj:IntGainsMethod <= 2013 .AND. DryerFuel == 1)
+         then   (13. + (.01 * CondFlrArea )) * 100000. / 365.
+         else if (Proj:IntGainsMethod > 2013)
+         then   if (DryerFuel == 1) then  0.08509  else  0.004252  endif  ; T24-2016 kWh/gal
+         else   0  endif endif endif  }
+
+	"Set DwellUnit:TotalClthDryGasGain"		DwellUnit:TotalClthDryGasGain		= {	if (DwellUnitTypeRef:DryerFuel == 2) then  UnitClthDryGasGain  * Count  else  0  endif  }
+	"Set DwellUnit:TotalClthDryElecGain"	DwellUnit:TotalClthDryElecGain	= {															 UnitClthDryElecGain * Count                  }
+	"Set DwellUnit:TotalClthDryOthrGain"	DwellUnit:TotalClthDryOthrGain	= {	if (DwellUnitTypeRef:DryerFuel == 3) then  UnitClthDryGasGain  * Count  else  0  endif  }
+
+;			"Dflt Proj:Appl_RefrigUsage[1]" 	Proj:Appl_RefrigUsage[1] 	= {	669  }		"Dflt Proj:Appl_RefrigUsage[2]" 	Proj:Appl_RefrigUsage[2] 	= {	669  }		"Dflt Proj:Appl_RefrigUsage[3]" 	Proj:Appl_RefrigUsage[3] 	= {	669  }
+	"Set DwellUnit:TotalRefrigUsage"		DwellUnit:TotalRefrigUsage		= {	if (IfValidAnd( DwellUnitTypeRef:HaveRefrig > 0.5 )) then  DwellUnitTypeRef:RefrigElecUsage * Count  else  0  endif  }
+
+; APPLIANCE INTERNAL GAINS - by assigned zone...
+  ; refigerator gain - handled by assignment of zones
+	"Set Zone:Appl_RefrigGain - unit #1"	Zone:Appl_RefrigGain		= {	SumChildren( DwellUnit:TotalRefrigUsage )  / 365  }
+
+  ; cooking gain-Electric - handled by assignment of zones
+	"Set Zone:Appl_CookGain-Elec - unit #1"		Zone:Appl_CookGain[1]	= {	SumChildren( DwellUnit:TotalCookElecGain )  }
+
+  ; cooking gain-NatGas - handled by assignment of zones
+	"Set Zone:Appl_CookGain-NGas - unit #1"		Zone:Appl_CookGain[2]	= {	SumChildren( DwellUnit:TotalCookGasGain )  }
+
+  ; cooking gain-OtherFuel - handled by assignment of zones
+	"Set Zone:Appl_CookGain-Othr - unit #1"		Zone:Appl_CookGain[3]	= {	SumChildren( DwellUnit:TotalCookOthrGain )  }
+
+  ; dishwasher gain - handled by assignment of zones
+	; SAC 4/14/16 - revised for T24-2016 gains
+	"Set Zone:Appl_DishGain - unit #1"		Zone:Appl_DishGain		= {	if (Proj:IntGainsMethod <= 2013)
+																								then	SumChildren( DwellUnit:TotalDishUsage )  / 365
+																								else if (IfValidAnd( CondFloorArea > 0 ))
+																								then	SumChildren( DwellUnit:TotalDishUsage )  / CondFloorArea
+																								else	0  endif endif  }
+  ; clothes washer gain - handled by assignment of zones
+	"Set Zone:Appl_WasherGain - unit #1"			Zone:Appl_WasherGain		= {	SumRevRef( DwellUnit:WasherZoneRef, DwellUnit:TotalClthWashGain )  }
+
+  ; clothes dryer gain-Electric - handled by assignment of zones
+	"Set Zone:Appl_DryerGain-Elec - unit #1"		Zone:Appl_DryerGain[1]	= {	SumRevRef( DwellUnit:DryerZoneRef, DwellUnit:TotalClthDryElecGain )  }
+
+  ; clothes dryer gain-NatGas - handled by assignment of zones
+	"Set Zone:Appl_DryerGain-NGas - unit #1"		Zone:Appl_DryerGain[2]	= {	SumRevRef( DwellUnit:DryerZoneRef, DwellUnit:TotalClthDryGasGain )  }
+
+  ; clothes dryer gain-OtherFuel - handled by assignment of zones
+	"Set Zone:Appl_DryerGain-Othr - unit #1"		Zone:Appl_DryerGain[3]	= {	SumRevRef( DwellUnit:DryerZoneRef, DwellUnit:TotalClthDryOthrGain )  }
+
+  ; clothes washer gain - handled by assignment of OtherZones - SAC 9/10/19 (MFamProto)
+	"Set OtherZone:Appl_WasherGain - unit #1"			   OtherZone:Appl_WasherGain		= {	SumRevRef( DwellUnit:WasherZoneRef, DwellUnit:TotalClthWashGain )  }
+  ; clothes dryer gain-Electric - handled by assignment of OtherZones - SAC 9/10/19 (MFamProto)
+	"Set OtherZone:Appl_DryerGain-Elec - unit #1"		OtherZone:Appl_DryerGain[1]	= {	SumRevRef( DwellUnit:DryerZoneRef, DwellUnit:TotalClthDryElecGain )  }
+  ; clothes dryer gain-NatGas - handled by assignment of OtherZones - SAC 9/10/19 (MFamProto)
+	"Set OtherZone:Appl_DryerGain-NGas - unit #1"		OtherZone:Appl_DryerGain[2]	= {	SumRevRef( DwellUnit:DryerZoneRef, DwellUnit:TotalClthDryGasGain )  }
+  ; clothes dryer gain-OtherFuel - handled by assignment of OtherZones - SAC 9/10/19 (MFamProto)
+	"Set OtherZone:Appl_DryerGain-Othr - unit #1"		OtherZone:Appl_DryerGain[3]	= {	SumRevRef( DwellUnit:DryerZoneRef, DwellUnit:TotalClthDryOthrGain )  }
+
+; added testing IAQ inputs from SFam in MFam - SAC 5/13/20
+   "blast StdDesignIAQ properties if user defined and no BypassRuleLimits"    Proj:Action =     ; SAC 9/5/19   ; AllowStdDesignFuel - SAC 04/02/21
+      {  if (IfValidAnd( BypassRuleLimits > 0 ) .OR. AllowStdDesignFuel) then  UNCHANGED
+         else if (LocalStatus( StdDesignIAQType[1]       ) > 4 .OR.
+                  LocalStatus( StdIAQHtRec_SRE[1]        ) > 4 .OR.
+                  LocalStatus( StdIAQHtRec_ASRE[1]       ) > 4 .OR.
+                  LocalStatus( StdDesignIAQCFM[1]        ) > 4 .OR.
+                  LocalStatus( StdIAQCFMScaleFactor[1]   ) > 4 .OR.
+                  LocalStatus( ApplyStdIAQCFMLimitToDRtg ) > 4 .OR.
+                  LocalStatus( StdDesignIAQWperCFM       ) > 4 .OR.
+                  LocalStatus( ApplyStdIAQMaxPwrToDRtg   ) > 4)
+         then  EvalRulelist( "ForceReset_StdDesignIAQLimits" )
+         else  UNCHANGED  endif endif  }
+
+;   "Set Proj:PropIAQCFMScaleFactor[1]"       Proj:PropIAQCFMScaleFactor[1]  =          ; SAC 4/24/20 (tic #1174)
+;      {  if (IfValidAnd( UnitMinIAQCFM[1] > 0 )==0) then  UNDEFINED
+;         else  ValidOr( UnitIAQCFMTot[1], 0 ) / UnitMinIAQCFM[1]  endif  }
+   "Set Proj:StdIAQCFMScaleEditable[1]"      Proj:StdIAQCFMScaleEditable[1]  =         ; SAC 4/24/20 (tic #1174)
+;      {  if (IAQDisabled > 0 .OR. IfValidAnd( BypassRuleLimits > 0 )==0 .OR. LocalStatus( StdDesignIAQCFM[1] ) > 4) then  UNDEFINED
+      {  if (IAQDisabled > 0 .OR. IfValidAnd( BypassRuleLimits > 0 )==0) then  UNDEFINED
+         else  1  endif  }
+   "Set Proj:StdIAQCFMScaleFactor[1]"        Proj:StdIAQCFMScaleFactor[1]  =           ; SAC 4/24/20 (tic #1174)
+      {  if (IfValidAnd( StdIAQCFMScaleEditable[1] > 0 )==0) then  UNDEFINED
+         else  1  endif  }
+;      {  if (IfValidAnd( StdIAQCFMScaleEditable[1] > 0 )==0 .OR. IfValidAnd( PropIAQCFMScaleFactor[1] >= 0 )==0) then  UNDEFINED
+;         else  PropIAQCFMScaleFactor[1]  endif  }
+
+   ; SAC 3/20/19 - rule to define IAQCFMScaleFactor to be used in simulation for standard design (tic #1083)
+   ; SAC 5/16/19 - removed logic that prevented setting IAQCFMScaleFactor[1] when BypassRuleLimits is activated (tic #1083)
+   "Set Proj:IAQCFMScaleFactor[1] if appropriate"     Proj:IAQCFMScaleFactor[1]  = {
+         UNDEFINED  }
+;         if (IfValidAnd( StdDesignIAQCFM[1] >= 0 )==0 .AND. IfValidAnd( StdIAQCFMScaleFactor[1] >= 0 )==0) then  UNDEFINED
+;         else if (IfValidAnd( IAQDisabled > 0 )) then  UNDEFINED
+;         else if (UnitMinIAQCFM[1] < 0.5 .OR. UnitIAQOption[1] == 3) then  UNDEFINED
+;         else if (IfValidAnd( UnitIAQCFMTot[1] > 0 ) .AND. IfValidAnd( StdIAQCFMScaleEditable[1] > 0 ) .AND.
+;                  IfValidAnd( StdIAQCFMScaleFactor[1] >= 0 ))
+;         then  if (IfValidAnd( StdDesignIAQType[1] > 0 )==0)
+;               then  StdIAQCFMScaleFactor[1] * UnitMinIAQCFM[1]     / UnitIAQCFMTot[1]
+;               else if (StdDesignIAQType[1] = 3)
+;               then  StdIAQCFMScaleFactor[1] * MinBalancedIAQCFM[1] / UnitIAQCFMTot[1]
+;               else  StdIAQCFMScaleFactor[1] * MinUnbalIAQCFM[1]    / UnitIAQCFMTot[1]   endif endif
+;         else if (IfValidAnd( UnitIAQCFMTot[1] > 0 )) then  StdDesignIAQCFM[1] / UnitIAQCFMTot[1]
+;         else  UNDEFINED  endif endif endif endif endif  }
+
+   "Set Proj:ApplyStdIAQCFMLimitToDRtg - flag indicating whether or not to apply the std design IAQ CFM limits (main dwelling & ADU) to EDR reference run"  ; SAC 9/5/19
+      Proj:ApplyStdIAQCFMLimitToDRtg   = {  1  }      ; SAC 9/5/19 - new default of 1 here causes difference in EDR ref run IAQ CFM when scaling occurs to the Std design
+   ; SAC 4/24/20 - revised to serve as THE Std design fan power (as opposed to a Max Limit) for analysis version 2019.2.0+ (tic #1174)    ; SAC 7/20/20 (tic #1174)   ; SAC 08/27/20
+   "Set Proj:StdDesignIAQWperCFM - standard design IAQ power"    ; SAC 9/5/19
+      Proj:StdDesignIAQWperCFM         =              ; revised DefaultIAQFanPwr unbal 0.3->0.35 & bal 0.6->0.7 - SAC 01/19/21 (tic #1243)   ; AllowStdDesignFuel & StdDesignIAQFanPwr - SAC 04/02/21
+         {  if (((IfValidAnd( BypassRuleLimits > 0 ) .AND. IfValidAnd( AnalysisVersion >= 190200 )) .OR. AllowStdDesignFuel) .AND.
+                IfValidAnd( StdDesignIAQType[1] > 0 ))
+            then  if (AllowStdDesignFuel .AND. IfValidAnd( StdDesignIAQFanPwr > 0 ))
+                  then  StdDesignIAQFanPwr
+                  else if (IfValidAnd( StdDesignIAQType[1] >= 3 ))
+                  then  0.7
+                  else  0.35  endif endif
+            else if (IfValidAnd( AnalysisVersion >= 190200 ))
+		      then  if ( (IsMultiFamily >  0 .AND. IfValidAnd( MostDUIAQ_Balanced > 0 )) .OR.
+		                 (IsMultiFamily == 0 .AND. IfValidAnd( UnitIAQCFMBalanced[1] > 0 )) )
+		            then  0.7
+		            else  0.35  endif
+            else  1.2  endif endif  }
+   "Set Proj:ApplyStdIAQMaxPwrToDRtg - flag indicating whether or not to apply the std design IAQ maximum power EDR reference run"  ; SAC 9/5/19
+      Proj:ApplyStdIAQMaxPwrToDRtg     = {  1  }
+END
+;*************************************************************************
+
+
+;*************************************************************************  SAC 1/16/19 (tic #1040)
+RULELIST "Blast_Proj_UnitClVentOption"  1 0 0 0
+   "Blast Proj:UnitClVentOption"    Proj:UnitClVentOption = {  0  }
+END
+;*************************************************************************
+
+; SAC 4/15/16 - ensure that user-defined Appl_RefrigUsage[1] is not retained when ApplRefrigEffMethod[1] is not set to '- specify -'
+;*************************************************************************
+RULELIST "ForceDefault_Proj_RefrigUsage" 1 0 0 0
+	"Blast Proj:Appl_RefrigUsage[1]"		Proj:Appl_RefrigUsage[1]	= {	UNDEFINED  }
+END
+;*************************************************************************
+
+; SAC 4/15/16 - ensure that user-defined Appl_DishUsage[1] is not retained when ApplDishUsageMethod[1] is not set to '- specify -'
+;*************************************************************************
+RULELIST "ForceDefault_Proj_DishUsage" 1 0 0 0
+	"Blast Proj:Appl_DishUsage[1]"		Proj:Appl_DishUsage[1]	= {	UNDEFINED  }
+END
+;*************************************************************************
+
+; SAC 4/15/16 - ensure that user-defined RefrigElecUsage is not retained when RefrigEffMethod is not set to '- specify -'
+;*************************************************************************
+RULELIST "ForceDefault_DUT_RefrigElecUsage" 1 0 0 0
+	"Blast DwellUnitType:RefrigElecUsage"		DwellUnitType:RefrigElecUsage	= {	UNDEFINED  }
+END
+;*************************************************************************
+
+; SAC 4/15/16 - ensure that user-defined DishElecUsage is not retained when DishUsageMethod is not set to '- specify -'
+;*************************************************************************
+RULELIST "ForceDefault_DUT_DishElecUsage" 1 0 0 0
+	"Blast DwellUnitType:DishElecUsage"		DwellUnitType:DishElecUsage	= {	UNDEFINED  }
+END
+;*************************************************************************
+
+;************************************************************************* ; SAC 9/5/19
+RULELIST "ForceReset_StdDesignIAQLimits" 1 0 0 0
+   "Blast Proj:StdDesignIAQType[1]"          Proj:StdDesignIAQType[1]         = {  UNDEFINED  }
+   "Blast Proj:StdDesignIAQType[2]"          Proj:StdDesignIAQType[2]         = {  UNDEFINED  }
+   "Blast Proj:StdIAQHtRec_SRE[1]"           Proj:StdIAQHtRec_SRE[1]          = {  UNDEFINED  }
+   "Blast Proj:StdIAQHtRec_SRE[2]"           Proj:StdIAQHtRec_SRE[2]          = {  UNDEFINED  }
+   "Blast Proj:StdIAQHtRec_ASRE[1]"          Proj:StdIAQHtRec_ASRE[1]         = {  UNDEFINED  }
+   "Blast Proj:StdIAQHtRec_ASRE[2]"          Proj:StdIAQHtRec_ASRE[2]         = {  UNDEFINED  }
+   "Blast Proj:StdDesignIAQCFM[1]"           Proj:StdDesignIAQCFM[1]          = {  UNDEFINED  }
+   "Blast Proj:StdDesignIAQCFM[2]"           Proj:StdDesignIAQCFM[2]          = {  UNDEFINED  }
+   "Blast Proj:StdIAQCFMScaleFactor[1]"      Proj:StdIAQCFMScaleFactor[1]     = {  UNDEFINED  }
+   "Blast Proj:StdIAQCFMScaleFactor[2]"      Proj:StdIAQCFMScaleFactor[2]     = {  UNDEFINED  }
+   "Blast Proj:ApplyStdIAQCFMLimitToDRtg"    Proj:ApplyStdIAQCFMLimitToDRtg   = {  UNDEFINED  }
+   "Blast Proj:StdDesignIAQWperCFM"          Proj:StdDesignIAQWperCFM         = {  UNDEFINED  }
+   "Blast Proj:ApplyStdIAQMaxPwrToDRtg"      Proj:ApplyStdIAQMaxPwrToDRtg     = {  UNDEFINED  }
+END
+;*************************************************************************
+
+
+;*************************************************************************
+;*************************************************************************
+ENDFILE
+

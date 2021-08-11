@@ -1,0 +1,151 @@
+; -------------------------------------------------------------------------
+; Rules pertaining to:   Prep For Battery object of CSE Energy Simulation
+; CEC Title-24 Residential Energy Code
+; -------------------------------------------------------------------------
+; Copyright (c) 2012-2016, California Energy Commission
+; Copyright (c) 2012-2016, Wrightsoft Corporation
+; All rights reserved.
+; Redistribution and use in source and binary forms, with or without modification,
+; are permitted provided that the following conditions are met:
+; - Redistributions of source code must retain the above copyright notice, this
+;   list of conditions and the following disclaimer.
+; - Redistributions in binary form must reproduce the above copyright notice, this
+;   list of conditions, the following disclaimer in the documentation and/or other
+;   materials provided with the distribution.
+; - Neither the name of the California Energy Commission nor the names of its
+;   contributors may be used to endorse or promote products derived from this
+;   software without specific prior written permission.
+; DISCLAIMER: THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+; "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+; THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+; NON-INFRINGEMENT ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION,
+; WRIGHTSOFT CORPORATION, ITRON, INC. OR ANY OTHER AUTHOR OR COPYRIGHT HOLDER OF
+; THIS SOFTWARE (COLLECTIVELY, THE "AUTHORS") BE LIABLE FOR ANY DIRECT, INDIRECT,
+; INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+; LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA,
+; OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+; LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
+; OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+; ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.  EACH LICENSEE AND SUBLICENSEE OF THE
+; SOFTWARE AGREES NOT TO ASSERT ANY CLAIM AGAINST ANY OF THE AUTHORS RELATING TO
+; THIS SOFTWARE, WHETHER DUE TO PERFORMANCE ISSUES, TITLE OR INFRINGEMENT ISSUES,
+; STRICT LIABILITY OR OTHERWISE.
+; -------------------------------------------------------------------------
+
+
+;*************************************************************************
+RULELIST "CSE_SimulationPrep_Battery" 1 0 0 1
+;   Rules which are executed immediately prior to performing a CSE simulation - covering BATTERY object only
+;*************************************************************************
+
+	"Create BATTERY (when called for)"  Proj:CSE_Battery	= {  CreateComp( cseBATTERY, "battery 1" )  }
+
+   ; SAC 12/31/17 - added battery degradation
+	"Set cseBATTERY:btMaxCap"		   cseBATTERY:btMaxCap		   = {
+	      if (IfValidAnd( Proj:BattDegradePercent >= 1 ) .AND.
+	          IfValidAnd( Proj:BattDegradePercent <= 100 ))
+	      then  Proj:BattMaxCap * Proj:BattDegradePercent / 100
+	      else  Proj:BattMaxCap  endif  }
+
+	"Set cseBATTERY:btChgEff"		   cseBATTERY:btChgEff		   = {	Proj:BattChgEff  }
+	"Set cseBATTERY:btDschgEff"	   cseBATTERY:btDschgEff	   = {	Proj:BattDschgEff  }
+	"Set cseBATTERY:btMaxChgPwr"		cseBATTERY:btMaxChgPwr		= {	Proj:BattMaxChgPwr  }
+	"Set cseBATTERY:btMaxDschgPwr"	cseBATTERY:btMaxDschgPwr	= {	Proj:BattMaxDschgPwr  }
+
+;   "btChgReq",          BEMP_Flt,  1,  0,  1, "kW",               0,  0,                          3208, "The power request to charge (or discharge if negative) the battery"    
+   ; SAC 12/17/17 - altered cseBATTERY:btChgReq_x to include TDVSummerPkFirstHr for TOU BatteryControl expression(tic #941)
+   ; SAC 12/31/17 - replaced Adv DR Ctrl expression - was: Format( "select( $dsDay>0, 0, @Weather.tdvElecAvg>=8 && @Weather.tdvElec<=0.2*@Weather.tdvElecPk,-@METER[%cMtrElec%c].H.PV / 3412.142,\n\n   @Weather.tdvElecAvg>=8 && @Weather.tdvElec>10 && @Weather.tdvElec>0.2*@Weather.tdvElecPk,-%g, @Weather.tdvElec<@Weather.tdvElecAvg,\n\n   -min(@BATTERY[ 1].loadSeen, 0),Default -@BATTERY[ 1].loadSeen)", 34, 34, Proj:BattMaxDschgPwr )
+   ; SAC 7/28/19 - removed Advanced DR (now handled internally by CSE) - was previously:
+   ;                     Format( "select( $dsDay>0, 0, @Weather.tdvElecPk>%g && $hour != @weather.tdvElecHrRank[1] && $hour != @weather.tdvElecHrRank[2] && $hour != @weather.tdvElecHrRank[3] ,-@METER[%cMtrElec%c].H.PV / 3412.142,\n\n   @Weather.tdvElecPk>%g && ($hour == @weather.tdvElecHrRank[1] || $hour == @weather.tdvElecHrRank[2]) ,-1000,\n\n   @Weather.tdvElecPk>%g && $hour == @weather.tdvElecHrRank[3] ,-1.305 * %g, Default -@BATTERY[ 1].loadSeen)",
+   ;                                    Proj:AdvBattTDVPkDayVal, 34, 34, Proj:AdvBattTDVPkDayVal, Proj:AdvBattTDVPkDayVal, Proj:BattCapRatio )
+   ; SAC 10/28/19 - further revisions to ensure 2019.1.1 results consistent w/ 2019.1.0
+   ; SAC 3/4/20 - revised TOU control expression to include June as peak TOU month (since June is peak month in some/certain 2022 weather CZ(s))
+	"Set cseBATTERY:btChgReq_x"	   cseBATTERY:btChgReq_x	   = {
+      switch (Proj:BatteryControl)
+         case   99 :  ; "- specify -"
+                        if (GlobalStatus( Proj:BattChgReq_x ) < 1) then  UNDEFINED
+                        else if (strlen(  Proj:BattChgReq_x ) < 1) then  UNDEFINED
+                        else  Proj:BattChgReq_x
+                        endif endif
+         case    1 :  ; "Default"
+                        UNDEFINED
+         case   10 :  ; "Time of Use"
+                        if (IfValidAnd( Proj:BattMaxDschgPwr > 0 )==0 .OR. IfValidAnd( Proj:TDVSummerPkFirstHr > 0 )==0) then  UNDEFINED
+                        else if (IfValidAnd( Proj:AnalysisVersion >= 220000 ))
+                        then  Format( "select( $dsDay>0, 0, $month>5 && $month<10 && $hour<%g,-min(@BATTERY[ 1].loadSeen, 0),$month>5 && $month<10 && $hour>(%g-1),-1000, default -@BATTERY[ 1].loadSeen)",
+                                       Proj:TDVSummerPkFirstHr, Proj:TDVSummerPkFirstHr )
+                        else  Format( "select( $dsDay>0, 0, $month>6 && $month<10 && $hour<%g,-min(@BATTERY[ 1].loadSeen, 0),$month>6 && $month<10 && $hour>(%g-1),-1000, default -@BATTERY[ 1].loadSeen)",
+                                       Proj:TDVSummerPkFirstHr, Proj:TDVSummerPkFirstHr )
+                        endif endif
+         case   11 :  ; "Advanced DR Control"
+                        if (IfValidAnd( Proj:AnalysisVersion > 190101 ))
+                        then  UNDEFINED
+                        else  ; 2019.1.0 and earlier logic
+                              Format( "select( $dsDay>0, 0, @Weather.tdvElecPk>10 && $hour != @weather.tdvElecHrRank[1] && $hour != @weather.tdvElecHrRank[2] && $hour != @weather.tdvElecHrRank[3] ,-@METER[%cMtrElec%c].H.PV / 3412.142,\n\n   @Weather.tdvElecPk>10 && ($hour == @weather.tdvElecHrRank[1] || $hour == @weather.tdvElecHrRank[2]) ,-1000,\n\n   @Weather.tdvElecPk>10 && $hour == @weather.tdvElecHrRank[3] ,-1.305 * %g, Default -@BATTERY[ 1].loadSeen)", 34, 34, Proj:BattCapRatio )
+                        endif
+         case  100 :  ; "Advanced Control"
+                        Format( "import(BTCtrlData,%cBatteryCharge%c)", 34, 34 )    ; ADVANCED CONTROL BATTERY CONTROL EXPRESSION - OLD version
+         default   :    UNDEFINED
+      endswitch  }
+   ; SAC 7/28/19 - added btControlAlg_x to enable Advanced DR for new CSE simulation feature    - SAC 10/28/19 - further revisions to ensure 2019.1.1 results consistent w/ 2019.1.0
+   ; SAC 3/4/20 - added initial test expression for new 'Ranked Day DR Control' control option  - SAC 3/5/20 - extended to include in 2019.2.0
+	"Set cseBATTERY:btControlAlg_x"  cseBATTERY:btControlAlg_x	   = {
+         if (IfValidAnd( Proj:AnalysisVersion > 190101 ))
+         then  switch (Proj:BatteryControl)
+                  case   11 :  ; "Advanced DR Control"
+                                 Format( "@Weather.tdvElecPk>%g ? %cTDVPeakSave%c : %cDefault%c", Proj:AdvBattTDVPkDayVal, 34, 34, 34, 34 )
+                  case  101 :  ; "Ranked Day DR Control"
+                                 if (IfValidAnd( Proj:AnalysisVersion >= 190200 ))
+                                 then  Format( "@Weather.tdvElecPkRank<=%g ? %cTDVPeakSave%c : %cDefault%c", ValidOr( Proj:BattDRNumRankedDays, 20 ), 34, 34, 34, 34 )
+                                 else  Format( "@Weather.tdvElecPk>%g ? %cTDVPeakSave%c : %cDefault%c", Proj:AdvBattTDVPkDayVal, 34, 34, 34, 34 )
+                                 endif
+                  default   :    UNDEFINED
+               endswitch
+         else  ; 2019.1.0 and earlier logic
+               UNDEFINED
+         endif  }
+
+
+; SAC 7/28/19 - REMOVE output of following property for New CSE battery sim    - SAC 10/28/19 - further revisions to ensure 2019.1.1 results consistent w/ 2019.1.0
+	"Set cseBATTERY:btUseUsrChg"	   cseBATTERY:btUseUsrChg	   = {
+         if (IfValidAnd( Proj:AnalysisVersion > 190101 ))
+         then  UNDEFINED
+         else  ; 2019.1.0 and earlier logic
+               if (LocalStatus( btChgReq_x ) < 1) then  UNDEFINED
+               else if (strlen( btChgReq_x ) < 1) then  UNDEFINED
+               else  "Yes"  endif endif
+         endif  }
+
+;   "btUseUsrChg_x",     BEMP_Str,  1,  0,  1, "",                 0,  0,                          3208, "If YES/1, then the user specified btChgReq will be used to set the battery’s charge request; if NO/0, the default strategy will be used (expression)"
+
+;   "btInitSOE",         BEMP_Flt,  1,  0,  1, "",                 0,  0,                          3208, "The initial state of energy of the BATTERY system as a fraction of the total capacity"
+;   "btInitCycles",      BEMP_Flt,  1,  0,  1, "# cycles",         0,  0,                          3208, "The number of cycles on the battery at the beginning of the run"
+
+   "Set cseBATTERY:btMeter"      cseBATTERY:btMeter = {
+      if (GlobalCompAssigned( Proj:CSE_ElecMETER ) < 1) then  UNDEFINED
+      else  Proj:CSE_ElecMETER  endif  }
+
+; SAC 12/15/16 - create and setup CSE IMPORTFILE object used to support simulation of battery control (if needed)
+   ; SAC 7/29/19 - revised rule to no longer reference btUseUsrChg (which is no longer used)    - SAC 10/28/19 - further revisions to ensure 2019.1.1 results consistent w/ 2019.1.0
+   "Create CSE IMPORTFILE object used to support simulation of battery control (if needed)"
+      Proj:BattCtrlImportFile = {
+         if (IfValidAnd( Proj:AnalysisVersion > 190101 ))
+         then  if (BatteryControl == 100 .OR. (BatteryControl == 99 .AND. LocalStatus( BattChgReq_x ) > 0))
+               then  CreateComp( cseIMPORTFILE, "BTCtrlData" )
+               else  UNDEFINED  endif
+         else  ; 2019.1.0 and earlier logic
+               if (BatteryControl == 100 .OR. (BatteryControl == 99 .AND. IfValidAnd( CSE_Battery:btUseUsrChg > 0 )))
+               then  CreateComp( cseIMPORTFILE, "BTCtrlData" )
+               else  UNDEFINED  endif
+         endif  }
+   "Set Proj:BattCtrlImportFile:imFreq"      Proj:BattCtrlImportFile:imFreq     = {  "Hour"  }
+   "Set Proj:BattCtrlImportFile:imFileName"  Proj:BattCtrlImportFile:imFileName = {  "BT_CONTROL.CSV"  }    ; testing only - to be overwritten in source code
+
+END
+;*************************************************************************
+
+
+;*************************************************************************
+;*************************************************************************
+
+ENDFILE

@@ -1,0 +1,2002 @@
+; -------------------------------------------------------------------------
+; Rules pertaining to:   Defaulting the Proposed Building Model - focusing on photovoltaic (PV) properties
+; CEC Title-24 Residential Energy Code
+; -------------------------------------------------------------------------
+; Copyright (c) 2012-2014, California Energy Commission
+; Copyright (c) 2012-2014, Wrightsoft Corporation
+; All rights reserved.
+; Redistribution and use in source and binary forms, with or without modification,
+; are permitted provided that the following conditions are met:
+; - Redistributions of source code must retain the above copyright notice, this
+;   list of conditions and the following disclaimer.
+; - Redistributions in binary form must reproduce the above copyright notice, this
+;   list of conditions, the following disclaimer in the documentation and/or other
+;   materials provided with the distribution.
+; - Neither the name of the California Energy Commission nor the names of its
+;   contributors may be used to endorse or promote products derived from this
+;   software without specific prior written permission.
+; DISCLAIMER: THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+; "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+; THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+; NON-INFRINGEMENT ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION,
+; WRIGHTSOFT CORPORATION, ITRON, INC. OR ANY OTHER AUTHOR OR COPYRIGHT HOLDER OF
+; THIS SOFTWARE (COLLECTIVELY, THE "AUTHORS") BE LIABLE FOR ANY DIRECT, INDIRECT,
+; INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+; LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA,
+; OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+; LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
+; OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+; ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.  EACH LICENSEE AND SUBLICENSEE OF THE
+; SOFTWARE AGREES NOT TO ASSERT ANY CLAIM AGAINST ANY OF THE AUTHORS RELATING TO
+; THIS SOFTWARE, WHETHER DUE TO PERFORMANCE ISSUES, TITLE OR INFRINGEMENT ISSUES,
+;STRICT LIABILITY OR OTHERWISE.
+; -------------------------------------------------------------------------
+
+; SAC 10/24/16 - new rulelist to default photovoltaic (PV) system properties
+;*************************************************************************
+RULELIST "ProposedInput_PVSystem" 0 0 0 0
+;*************************************************************************
+
+   ; SAC 6/10/20 (CommunitySolar)
+   ; enabled for 2019.1.3+ - SAC 7/15/20     ; disabled for 2022 - SAC 7/17/20
+   "Set Proj:AllowCommunitySolar - flag whether the Community Solar feature is available for this project"     Proj:AllowCommunitySolar =    ; disabled for EAA & AddAlone run scopes - SAC 09/04/20
+      {  if (IfValidAnd( AllowPVWInputs > 0 ) .AND. IfValidAnd( AnalysisVersion >= 190103 ) .AND.
+             IfValidAnd( AnalysisVersion < 220000 ) .AND.
+             RunScope == 1 .AND. IsAddAlone == 0) then  1  else  0  endif  }
+   ; Proj:UseCommunitySolar - 0/1 whether or not the Community Solar feature is available for this project   - no default
+   ; Proj:CommunitySolarProject - the Community Solar project this home subscribes to   - enumeration defaulted
+
+   "Set Proj:NumAvailCmntySlrProjs"    Proj:NumAvailCmntySlrProjs =        ; SAC 7/3/20 (CommunitySolar)
+      {  if (AllowCommunitySolar < 1) then  UNDEFINED
+         else  switch (ClimateZone)
+                  case 11 :  1
+                  case 12 :  1
+                  default :  0
+               endswitch   endif  }
+   "Set Proj:CmntySlrProjsAvailMsg"    Proj:CmntySlrProjsAvailMsg =
+      {  if (AllowCommunitySolar < 1 .OR. IfValidAnd( NumAvailCmntySlrProjs > 0 )) then  UNDEFINED
+         else  Format( "(no Community Solar projects available in climate zone %g)", ClimateZone )  endif  }
+   "Set Proj:CmntySlrProjCZCompat"     Proj:CmntySlrProjCZCompat =
+      {  if (AllowCommunitySolar < 1 .OR. IfValidAnd( UseCommunitySolar > 0 )==0) then  UNDEFINED
+         else  switch (CommunitySolarProject)
+                  case  1 : ; SMUD Neighborhood SolarShares - Wildflower
+                              if (ClimateZone == 11 .OR. ClimateZone == 12) then  1  else  0  endif
+                  default :  0
+               endswitch   endif  }
+   "hardwire UseCommunitySolar OFF if no CS projects available in selected CZ"   Proj:Action =
+      {  if (AllowCommunitySolar > 0 .AND. IfValidAnd( UseCommunitySolar > 0 ) .AND. IfValidAnd( NumAvailCmntySlrProjs > 0 )==0)
+         then  EvalRulelist( "ForceOff_UseCommunitySolar" )  else  UNCHANGED  endif  }
+
+   "Call subordinate rulelist if about to switch to valid CommunitySolarProjID"     Proj:Action =
+      {  if (IfValidAnd( CommunitySolarProjID > 0 )) then   UNCHANGED  ; do nothing if CommunitySolarProjID is already toggled on
+         else if (AllowCommunitySolar > 0 .AND. IfValidAnd( UseCommunitySolar > 0 ) .AND. CommunitySolarProject > 0)
+         then  EvalRulelist( "CommunitySolar_BlastConflictingInputs" )
+         else  UNCHANGED  endif endif  }
+   "Call subordinate rulelist if activating, deactivating or changing CommunitySolarProjID"  Proj:Action =
+      {  if ( IfValidAnd( CommunitySolarProjID > 0 ) .AND.
+              (IfValidAnd( UseCommunitySolar = 0 ) .OR. CommunitySolarProject < 1) )
+         then  EvalRulelist( "CommunitySolar_RedefaultPVInputs" )
+         else if ( AllowCommunitySolar > 0 .AND. IfValidAnd( UseCommunitySolar > 0 ) .AND. CommunitySolarProject > 0 .AND.
+                   ( (IfValidAnd( CommunitySolarProjID > 0 )==0 .AND. EnableResearchMode < 1) .OR. 
+                     (IfValidAnd( CommunitySolarProjID > 0 ) .AND. IfValidAnd( CommunitySolarProjID = CommunitySolarProject )==0) ) )
+               ; CommSlr valid -AND- ( ( first time thru & NOT EnableResearchMode ) -OR- ( switching CommSlrProj ) )
+         then  switch (CommunitySolarProject)
+                  case  1 :  EvalRulelist( "CommunitySolar_SMUD_NSS_Wildflower" )
+                  default :  UNCHANGED
+               endswitch
+         else  UNCHANGED  endif endif  }
+   "Default Proj:InCmntySlrProjTerritory"    Proj:InCmntySlrProjTerritory  = {  0  }      ; SAC 7/3/20 (CommunitySolar)
+   "Set Proj:CommunitySolarProjID - the ID of the Community Solar project (or 0 if not allowed or specified)"  Proj:CommunitySolarProjID =   ; SAC 6/10/20
+      {  if (AllowCommunitySolar > 0 .AND. IfValidAnd( UseCommunitySolar > 0 ) .AND. CommunitySolarProject > 0)
+         then  CommunitySolarProject  else  0  endif  }
+   "Confirm all properties inconsistent w/ Community Solar are reset (else blast them)"   Proj:Action =
+      {  if (CommunitySolarProjID < 1) then  UNCHANGED
+         else if (RunAbbrev == "s" .OR. RunAbbrev == "smf" .OR. RunAbbrev == "dr") then  UNCHANGED
+         else if ( IfValidAnd( SpecifyTargetDRtg > 0 )  .OR.  IfValidAnd( ReducedPVReq > 0 )  .OR.
+                   PVWInputs != 1  .OR.  PVSizeOption != 2  .OR.  IfValidAnd( PVWDCSysSize[1] > 0 )==0  .OR.
+                   LocalStatus( PVWDCSysSize[2] ) > 0  .OR.  LocalStatus( PVWDCSysSize[3] ) > 0  .OR.
+                   LocalStatus( PVWDCSysSize[4] ) > 0  .OR.  LocalStatus( PVWDCSysSize[5] ) > 0  .OR.
+                   IfValidAnd( BattMaxCap > 0 ) )
+         then  EvalRulelist( "CommunitySolar_BlastConflictingInputs" )
+         else  UNCHANGED  endif endif endif  }
+
+   "Set Proj:CmntySlrProjInfo - flag to display dialog"     Proj:CmntySlrProjInfo    =             ; SAC 6/30/20 - added community solar project info (tic #1018)
+      {  switch (CommunitySolarProjID)
+            case  1 :  1      ; "SMUD Neighborhood SolarShares - Wildflower"
+            default :  UNDEFINED
+         endswitch  }
+   "Set Proj:CmntySlrProjInfoCap - info dialog caption"     Proj:CmntySlrProjInfoCap = 
+      {  switch (CommunitySolarProjID)
+            case  1 :  "SMUD Neighborhood SolarShares information"      ; "SMUD Neighborhood SolarShares - Wildflower"
+            default :  UNDEFINED
+         endswitch  }
+   "Set Proj:CmntySlrProjInfoMsg - info dialog message"     Proj:CmntySlrProjInfoMsg = 
+      {  switch (CommunitySolarProjID)
+            case  1 :         ; "SMUD Neighborhood SolarShares - Wildflower"
+                       "<a><br></a><a href=https://www.smud.org/NSSbuilders>Click here for information about SMUD's Neighborhood SolarShares program.</a>"
+            default :  UNDEFINED
+         endswitch  }
+         ; prior link replaced SAC 08/28/20:  "<a><br></a><a href=https://www.smud.org/en/Business-Solutions-and-Rebates/Design-and-Construction-Services/Neighborhood-SolarShares-for-developers>Click here for information about SMUD's Neighborhood SolarShares program.</a>"
+   "Set Proj:CmntySlrProjInfoDtl - info dialog details"     Proj:CmntySlrProjInfoDtl = 
+      {  switch (CommunitySolarProjID)
+            case  1 :  UNDEFINED      ; "SMUD Neighborhood SolarShares - Wildflower"
+            default :  UNDEFINED
+         endswitch  }
+   "Set Proj:CmntySlrProjInfoIcn - info dialog icon (0-none, 1-info, 2-warning, 3-error, 4-question)"    Proj:CmntySlrProjInfoIcn = 
+      {  switch (CommunitySolarProjID)
+            case  1 :  1      ; "SMUD Neighborhood SolarShares - Wildflower"
+            default :  UNDEFINED
+         endswitch  }
+
+   "Set Proj:CommunitySolarSim - flag indicating whether Community Solar is to be simulated (1) or not (0-default)"     Proj:CommunitySolarSim = {  0  }       ; SAC 7/16/20
+
+
+; PVWatts calc inputs - SAC 1/25/16
+   ;--------------------------------------------------------------------
+   ; ProposedInput: Photovoltaic System Defaulting Rules
+   ;--------------------------------------------------------------------
+	"Default Proj:UsePVWattsDLL"		Proj:UsePVWattsDLL			= {	0  }		; SAC 2/25/16
+	"Set Proj:AllowPVWModTypeCust"	Proj:AllowPVWModTypeCust	= {	if (Proj:BypassRuleLimits > 1.5) then  1  else  0  endif  }
+
+   "Set Proj:PVWDCSizeMultiplier[1] (iff undefined) - current multiplier on PV system size, used to iterate to achieve a target design rating"
+      Proj:PVWDCSizeMultiplier[1]  = {
+         if (LocalStatus( PVWDCSizeMultiplier[1] ) > 0) then  UNCHANGED
+         else  1  endif  }
+   "Set Proj:PVWDCSizeMultiplier[2] (iff undefined) - previous round multiplier on PV system size, used to iterate to achieve a target design rating"
+      Proj:PVWDCSizeMultiplier[2]  = {
+         if (LocalStatus( PVWDCSizeMultiplier[2] ) > 0) then  UNCHANGED
+         else  1  endif  }
+
+; reduced PV requirement exception inputs - SAC 12/10/17
+   "Default Proj:ReducedPVReq - whether or not an exception to standard PV requirements applies"
+      Proj:ReducedPVReq  = {  0  }
+   ; Proj:ReducedPVReqExcept,  default via enums  - CondRequired, 0,    BEMP_Sym,   "Exception describing why standard PV requirements don't apply to this project"
+   "Set Proj:ReducedPVReqExcDesc - RTF of exception describing why standard PV requirements don't apply to this project"   ; SAC 03/01/21
+      Proj:ReducedPVReqExcDesc  = {
+         switch (ReducedPVReqExcept)
+            case  1 :  "RTF\ReducedPVExcept1.rtf"
+            case  2 :  "RTF\ReducedPVExcept2.rtf"
+            case  3 :  "RTF\ReducedPVExcept3.rtf"
+            case  4 :  "RTF\ReducedPVExcept4.rtf"
+            case  5 :  "RTF\ReducedPVExcept5.rtf"
+            case  6 :  "RTF\ReducedPVExcept6.rtf"
+            case  7 :  "RTF\ReducedPVExcept7.rtf"
+            case  8 :  "RTF\ReducedPVExcept8.rtf"
+            default :  ""
+         endswitch  }
+   "Set Proj:ReducedPVReqMinVal - min reduced PV required (depending on selected exception)"  ; SAC 9/21/18 (tic #1045)  ; SAC 03/01/21
+      Proj:ReducedPVReqMinVal  = {
+         if (IfValidAnd( ReducedPVReq > 0 )==0) then  0
+         else  switch (ReducedPVReqExcept)
+            case  1 :  0
+            case  2 :  if (IfValidAnd( ClimateZone = 15 )==0) then  0
+                       else  int( 1.5 * ValidOr( CondFloorArea, 0 ) + 0.5 ) / 1000  endif   ; 1.5 WDC/SF  (rounded to nearest W)
+            case  3 :  int( 1.0 * ValidOr( CondFloorArea, 0 ) + 0.5 ) / 1000   ; 1.0 WDC/SF
+            case  4 :  int( 0.8 * ValidOr( CondFloorArea, 0 ) + 0.5 ) / 1000   ; 0.8 WDC/SF
+            case  5 :  0
+            case  6 :  0
+            case  7 :  0
+            case  8 :  0
+            default :  0
+         endswitch  endif  }
+   "Set Proj:EnforceRedPVReqMin"    Proj:EnforceRedPVReqMin  = {
+         if (ReducedPVReqMinVal > 0) then  ReducedPVReqExcept  else  0  endif  }
+   ; SAC 10/5/18 - revised following rule to include ReducedPVReqMinVal as default value (when set above > 0) (tic #1045)
+   ; SAC 2/1/20 - added logic to handle new except 6 (AB-178) same as except #1 (tic #1157)
+   "Default Proj:ReducedPVReqValue - reduced PV requirement capacity"   ; SAC 3/8/18 - added default of 0 for ReducedPVReqExcDesc #1 (per LF request)  ; SAC 03/01/21
+      Proj:ReducedPVReqValue   = {
+         if (ReducedPVReq > 0 .AND. (ReducedPVReqExcept = 1 .OR. ReducedPVReqExcept >= 6))
+         then  0
+         else if (ReducedPVReqMinVal > 0.01)
+         then  ReducedPVReqMinVal
+         else  UNDEFINED  endif endif  }
+   "Set Proj:UseReducedPVReqVal - reduced PV requirement capacity (iff valid inputs)"
+      Proj:UseReducedPVReqVal  = {
+         if (ReducedPVReq > 0 .AND. ReducedPVReqExcept > 0 .AND.
+             (ReducedPVReqExcept != 2 .OR. IfValidAnd( ClimateZone = 15 )) .AND.
+             IfValidAnd( ReducedPVReqValue >= 0 ))
+         then  ReducedPVReqValue
+         else  UNDEFINED  endif  }
+
+	; allow to default via enumerations:
+	;	Proj:PVWInputs
+
+   "Blast any user input that should be overridden when PVWInputs = Simplified"   Proj:Action  = {
+         if (PVWInputs > 0) then  UNCHANGED
+         else if (IfValidAnd( Proj:EnergyCodeYearNum >= 2019 )==0 .AND.
+                  ( LocalStatus( PVWInverterEff[1] ) > 4 .OR. LocalStatus( PVWArrayType[1] ) > 4 .OR.
+                    LocalStatus( PVWInverterEff[2] ) > 4 .OR. LocalStatus( PVWArrayType[2] ) > 4 .OR.
+                    LocalStatus( PVWInverterEff[3] ) > 4 .OR. LocalStatus( PVWArrayType[3] ) > 4 .OR.
+                    LocalStatus( PVWInverterEff[4] ) > 4 .OR. LocalStatus( PVWArrayType[4] ) > 4 .OR.
+                    LocalStatus( PVWInverterEff[5] ) > 4 .OR. LocalStatus( PVWArrayType[5] ) > 4 ))
+         then   EvalRulelist( "BlastInputs_PVWInputs_Simplified_2016" )
+         else if (IfValidAnd( Proj:EnergyCodeYearNum >= 2019 ) .AND.    ; PVWArrayType now a simplified input (tic #1047) - SAC 10/9/18
+                  ( LocalStatus( PVWInverterEff[1] ) > 4 .OR. LocalStatus( PVWInverterEff[2] ) > 4 .OR.
+                    LocalStatus( PVWInverterEff[3] ) > 4 .OR. LocalStatus( PVWInverterEff[4] ) > 4 .OR.
+                    LocalStatus( PVWInverterEff[5] ) > 4 ))
+         then   EvalRulelist( "BlastInputs_PVWInputs_Simplified" )
+         else  UNCHANGED  endif endif endif  }
+
+   "Ensure PVWArrayType[*] = 'Fixed (open rack)' (ticket #609)"   Proj:Action  = {    
+         if (IfValidAnd( Proj:EnergyCodeYearNum >= 2019 )==0 .AND.    ; don't force PVWArrayType to 'Fixed (open rack)' for 2019+ (tic #1047) - SAC 10/9/18
+             Proj:BypassRuleLimits < 1 .AND.      ; SAC 2/21/16 - allow user-defined inputs if BRL > 0
+             (PVWArrayType[1] > 1 .OR. PVWArrayType[2] > 1 .OR. PVWArrayType[3] > 1 .OR. PVWArrayType[4] > 1 .OR. PVWArrayType[5] > 1))
+         then   EvalRulelist( "Force_PVWArrayType_to_FixedOpenRack" )
+         else   UNCHANGED  endif  }
+
+	"Set Proj:PVWLastRow"					Proj:PVWLastRow			= {	if (PVWInputs < 1 .AND. IfValidAnd( PVWDCSysSize[1] > 0 )) then  1
+																							else if (IfValidAnd( PVWDCSysSize[5] > 0 )) then  5
+																							else if (IfValidAnd( PVWDCSysSize[4] > 0 )) then  4
+																							else if (IfValidAnd( PVWDCSysSize[3] > 0 )) then  3
+																							else if (IfValidAnd( PVWDCSysSize[2] > 0 )) then  2
+																							else if (IfValidAnd( PVWDCSysSize[1] > 0 )) then  1  else  0  endif endif endif endif endif endif  }
+
+	"Set Proj:HavePVWModTypeCust"	Proj:HavePVWModTypeCust	= {	if (Proj:AllowPVWModTypeCust < 0.5) then  0
+																					else if (PVWLastRow >= 1 .AND. PVWModuleType[1] == 4) then  1
+																					else if (PVWLastRow >= 2 .AND. PVWModuleType[2] == 4) then  1
+																					else if (PVWLastRow >= 3 .AND. PVWModuleType[3] == 4) then  1
+																					else if (PVWLastRow >= 4 .AND. PVWModuleType[4] == 4) then  1
+																					else if (PVWLastRow >= 5 .AND. PVWModuleType[5] == 4) then  1
+																					else	0  endif endif endif endif endif endif  }
+
+	; allow to default via enumerations:
+	;	Proj:PVWModuleType[ALL]
+	;	Proj:PVWArrayTiltInput[ALL]  -  0-"Degrees"  1-"Pitch"
+	;	Proj:PVWArrayType[ALL]
+
+	"Default Proj:PVWDCSysSize[1]"		Proj:PVWDCSysSize[1]			= {	if (AllowPVWInputs = 0) then  UNDEFINED  else  0  endif  }
+	"Default Proj:PVWDCSysSize[2]"		Proj:PVWDCSysSize[2]			= {	if (AllowPVWInputs = 0) then  UNDEFINED  else  0  endif  }
+	"Default Proj:PVWDCSysSize[3]"		Proj:PVWDCSysSize[3]			= {	if (AllowPVWInputs = 0) then  UNDEFINED  else  0  endif  }
+	"Default Proj:PVWDCSysSize[4]"		Proj:PVWDCSysSize[4]			= {	if (AllowPVWInputs = 0) then  UNDEFINED  else  0  endif  }
+	"Default Proj:PVWDCSysSize[5]"		Proj:PVWDCSysSize[5]			= {	if (AllowPVWInputs = 0) then  UNDEFINED  else  0  endif  }
+
+   ; rules to handle CFIType (as opposed to simple toggle on/off) - SAC 1/20/20 (tic #1189)
+   "Switch from user input of PVWCalFlexInstall to PVWCalFlexInstType-1"   Proj:Action  =
+      {  if (IfValidAnd( AnalysisVersion >= 190102 ) .AND. LocalStatus( PVWCalFlexInstType[1] ) < 5 .AND.
+             LocalStatus( PVWCalFlexInstall[1] ) > 5) then  EvalRulelist( "ForceSwitch_PVWCalFlexInstType_1" )
+         else  UNCHANGED  endif  }
+   "Switch from user input of PVWCalFlexInstall to PVWCalFlexInstType-2"   Proj:Action  =
+      {  if (IfValidAnd( AnalysisVersion >= 190102 ) .AND. LocalStatus( PVWCalFlexInstType[2] ) < 5 .AND.
+             LocalStatus( PVWCalFlexInstall[2] ) > 5) then  EvalRulelist( "ForceSwitch_PVWCalFlexInstType_2" )
+         else  UNCHANGED  endif  }
+   "Switch from user input of PVWCalFlexInstall to PVWCalFlexInstType-3"   Proj:Action  =
+      {  if (IfValidAnd( AnalysisVersion >= 190102 ) .AND. LocalStatus( PVWCalFlexInstType[3] ) < 5 .AND.
+             LocalStatus( PVWCalFlexInstall[3] ) > 5) then  EvalRulelist( "ForceSwitch_PVWCalFlexInstType_3" )
+         else  UNCHANGED  endif  }
+   "Switch from user input of PVWCalFlexInstall to PVWCalFlexInstType-4"   Proj:Action  =
+      {  if (IfValidAnd( AnalysisVersion >= 190102 ) .AND. LocalStatus( PVWCalFlexInstType[4] ) < 5 .AND.
+             LocalStatus( PVWCalFlexInstall[4] ) > 5) then  EvalRulelist( "ForceSwitch_PVWCalFlexInstType_4" )
+         else  UNCHANGED  endif  }
+   "Switch from user input of PVWCalFlexInstall to PVWCalFlexInstType-5"   Proj:Action  =
+      {  if (IfValidAnd( AnalysisVersion >= 190102 ) .AND. LocalStatus( PVWCalFlexInstType[5] ) < 5 .AND.
+             LocalStatus( PVWCalFlexInstall[5] ) > 5) then  EvalRulelist( "ForceSwitch_PVWCalFlexInstType_5" )
+         else  UNCHANGED  endif  }
+
+   ; default PVWCalFlexInstType to 'n/a' for 1- & 2-axis tracking arrays (tic #1047) - SAC 1/20/20
+	"Default Proj:PVWCalFlexInstType[1]"	Proj:PVWCalFlexInstType[1]	= {	if (ComponentCount( Shade ) > 0 .OR. PVWArrayType[1] > 2) then  0  else  1  endif  }	
+	"Default Proj:PVWCalFlexInstType[2]"	Proj:PVWCalFlexInstType[2]	= {	if (ComponentCount( Shade ) > 0 .OR. PVWArrayType[2] > 2) then  0  else  1  endif  }	
+	"Default Proj:PVWCalFlexInstType[3]"	Proj:PVWCalFlexInstType[3]	= {	if (ComponentCount( Shade ) > 0 .OR. PVWArrayType[3] > 2) then  0  else  1  endif  }	
+	"Default Proj:PVWCalFlexInstType[4]"	Proj:PVWCalFlexInstType[4]	= {	if (ComponentCount( Shade ) > 0 .OR. PVWArrayType[4] > 2) then  0  else  1  endif  }	
+	"Default Proj:PVWCalFlexInstType[5]"	Proj:PVWCalFlexInstType[5]	= {	if (ComponentCount( Shade ) > 0 .OR. PVWArrayType[5] > 2) then  0  else  1  endif  }	
+
+   ; default PVWCalFlexInstall to 0 for 1- & 2-axis tracking arrays (tic #1047) - SAC 10/9/18
+   ; revise PVWCalFlexInstall defaulting to account for PVWCalFlexInstType selections - SAC 1/20/20 (tic #1189)
+	"Default Proj:PVWCalFlexInstall[1]"	Proj:PVWCalFlexInstall[1]	=
+      {  if (IfValidAnd( AnalysisVersion >= 190102 )) then  PVWCalFlexInstType[1]
+         else if (ComponentCount( Shade ) > 0 .OR. PVWArrayType[1] > 2) then  0  else  1  endif endif  }	
+	"Default Proj:PVWCalFlexInstall[2]"	Proj:PVWCalFlexInstall[2]	=
+      {  if (IfValidAnd( AnalysisVersion >= 190102 )) then  PVWCalFlexInstType[2]
+         else if (ComponentCount( Shade ) > 0 .OR. PVWArrayType[2] > 2) then  0  else  1  endif endif  }	
+	"Default Proj:PVWCalFlexInstall[3]"	Proj:PVWCalFlexInstall[3]	=
+      {  if (IfValidAnd( AnalysisVersion >= 190102 )) then  PVWCalFlexInstType[3]
+         else if (ComponentCount( Shade ) > 0 .OR. PVWArrayType[3] > 2) then  0  else  1  endif endif  }	
+	"Default Proj:PVWCalFlexInstall[4]"	Proj:PVWCalFlexInstall[4]	=
+      {  if (IfValidAnd( AnalysisVersion >= 190102 )) then  PVWCalFlexInstType[4]
+         else if (ComponentCount( Shade ) > 0 .OR. PVWArrayType[4] > 2) then  0  else  1  endif endif  }	
+	"Default Proj:PVWCalFlexInstall[5]"	Proj:PVWCalFlexInstall[5]	=
+      {  if (IfValidAnd( AnalysisVersion >= 190102 )) then  PVWCalFlexInstType[5]
+         else if (ComponentCount( Shade ) > 0 .OR. PVWArrayType[5] > 2) then  0  else  1  endif endif  }	
+
+	"Blast any user input that should be overridden by PVWCalFlexInstall[1]"
+													Proj:Action						= {	if (PVWCalFlexInstall[1] < 1) then  UNCHANGED
+																								else if (LocalStatus( PVWArrayTiltInput[1] ) > 4 .OR. LocalStatus( PVWArrayTiltPitch[1] ) > 4 .OR.
+																											LocalStatus( PVWArrayTiltDeg[1]   ) > 4 .OR. LocalStatus( PVWAzm[1]            ) > 4 )
+																								then	EvalRulelist( "BlastInputs_PVWCalFlexInstall_1" )  else  UNCHANGED  endif endif  }
+	"Blast any user input that should be overridden by PVWCalFlexInstall[2]"
+													Proj:Action						= {	if (PVWCalFlexInstall[2] < 1) then  UNCHANGED
+																								else if (LocalStatus( PVWArrayTiltInput[2] ) > 4 .OR. LocalStatus( PVWArrayTiltPitch[2] ) > 4 .OR.
+																											LocalStatus( PVWArrayTiltDeg[2]   ) > 4 .OR. LocalStatus( PVWAzm[2]            ) > 4 )
+																								then	EvalRulelist( "BlastInputs_PVWCalFlexInstall_2" )  else  UNCHANGED  endif endif  }
+	"Blast any user input that should be overridden by PVWCalFlexInstall[3]"
+													Proj:Action						= {	if (PVWCalFlexInstall[3] < 1) then  UNCHANGED
+																								else if (LocalStatus( PVWArrayTiltInput[3] ) > 4 .OR. LocalStatus( PVWArrayTiltPitch[3] ) > 4 .OR.
+																											LocalStatus( PVWArrayTiltDeg[3]   ) > 4 .OR. LocalStatus( PVWAzm[3]            ) > 4 )
+																								then	EvalRulelist( "BlastInputs_PVWCalFlexInstall_3" )  else  UNCHANGED  endif endif  }
+	"Blast any user input that should be overridden by PVWCalFlexInstall[4]"
+													Proj:Action						= {	if (PVWCalFlexInstall[4] < 1) then  UNCHANGED
+																								else if (LocalStatus( PVWArrayTiltInput[4] ) > 4 .OR. LocalStatus( PVWArrayTiltPitch[4] ) > 4 .OR.
+																											LocalStatus( PVWArrayTiltDeg[4]   ) > 4 .OR. LocalStatus( PVWAzm[4]            ) > 4 )
+																								then	EvalRulelist( "BlastInputs_PVWCalFlexInstall_4" )  else  UNCHANGED  endif endif  }
+	"Blast any user input that should be overridden by PVWCalFlexInstall[5]"
+													Proj:Action						= {	if (PVWCalFlexInstall[5] < 1) then  UNCHANGED
+																								else if (LocalStatus( PVWArrayTiltInput[5] ) > 4 .OR. LocalStatus( PVWArrayTiltPitch[5] ) > 4 .OR.
+																											LocalStatus( PVWArrayTiltDeg[5]   ) > 4 .OR. LocalStatus( PVWAzm[5]            ) > 4 )
+																								then	EvalRulelist( "BlastInputs_PVWCalFlexInstall_5" )  else  UNCHANGED  endif endif  }
+
+
+   ;--------------------------------------------------------------------
+   ; ProposedInput: PV Array Orientation Rules
+   ;--------------------------------------------------------------------
+
+   "Reset PVArrayGeom:NumPVArrayRefs"     PVArrayGeom:NumPVArrayRefs  = {  0  }
+
+   "Default first row of PVArray (PVW*) properties"      Proj:Action  = {
+         if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[1] > 0 )==0) then  UNCHANGED
+         else  EvalRulelist( "Default_PVArray_OrientationLocation_1" )  endif  }
+
+   "Default second row of PVArray (PVW*) properties"     Proj:Action  = {
+         if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[2] > 0 )==0) then  UNCHANGED
+         else  EvalRulelist( "Default_PVArray_OrientationLocation_2" )  endif  }
+
+   "Default third row of PVArray (PVW*) properties"     Proj:Action  = {
+         if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[3] > 0 )==0) then  UNCHANGED
+         else  EvalRulelist( "Default_PVArray_OrientationLocation_3" )  endif  }
+
+   "Default fourth row of PVArray (PVW*) properties"     Proj:Action  = {
+         if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[4] > 0 )==0) then  UNCHANGED
+         else  EvalRulelist( "Default_PVArray_OrientationLocation_4" )  endif  }
+
+   "Default fifth row of PVArray (PVW*) properties"     Proj:Action  = {
+         if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[5] > 0 )==0) then  UNCHANGED
+         else  EvalRulelist( "Default_PVArray_OrientationLocation_5" )  endif  }
+
+; SAC 2/22/17 - new PVW geometry-related inputs
+;     
+;     Proj:PVWGeomSpecMethod[ALL], Optional,  0,    1,   1,    1,  1,  1
+;     1,     Proj:HavePVGeomObjects,     0,  0
+;     2,              0,    "azimuth and tilt"
+;     1,     Proj:HavePVGeomObjects,  -999,  0
+;     2,              0,    "azimuth and tilt"
+;     2,              1,    "reference PVArrayGeom object"
+;     
+;     Proj:PVWPVArrGeomRef[ALL],   Optional,  0,    1,   1,    1,  1,  1
+;     Proj:PVWGeomPolyLpIdx[all],  NotInput,  0,    0,   0,    1,  1,  1
+;     
+;     Proj:PVWLocSpecMethod[ALL],  Optional,  0,    1,   1,    1,  1,  1
+;     2,              0,    "- not specified -"
+;     2,              1,    "X,Y,Z and height, width"
+;     2,              2,    "in relation to another PV Array"
+
+;     
+;     Proj:PVWRelLocSpecMeth[ALL], Optional,  0,    1,   1,    1,  1,  1
+;     2,              0,    "- not specified -"
+;     2,              1,    "in same plane, above"
+;     2,              2,    "in same plane, below"
+;     2,              3,    "in same plane, to the left"
+;     2,              4,    "in same plane, to the right"
+;     2,              5,    "distance, azimuth, tilt"
+;     
+;     Proj:PVWReferenceX[ALL],      Optional,  0,    1,   1,    1,  1,  1
+;     Proj:PVWReferenceY[ALL],      Optional,  0,    1,   1,    1,  1,  1
+;     Proj:PVWReferenceZ[ALL],      Optional,  0,    1,   1,    1,  1,  1
+;     Proj:PVWHeight[ALL],         Optional,  0,    1,   1,    1,  1,  1
+;     Proj:PVWWidth[ALL],          Optional,  0,    1,   1,    1,  1,  1
+
+;     Proj:PVWRelLocArrayIdx[ALL], Optional,  0,    1,   1,    1,  1,  1
+;     Proj:PVWRelLocDistance[ALL], Optional,  0,    1,   1,    1,  1,  1 BEMP_Flt,  5,  "ft",    "Distance between this and another PV array"    
+;     Proj:PVWRelLocAzm[ALL],      Optional,  0,    1,   1,    1,  1,  1 BEMP_Flt,  5,  "deg",   "Azimuth from centroid of another array to this one (0=N, 90=E, ...)"    
+;     Proj:PVWRelLocTiltDeg[ALL],  Optional,  0,    1,   1,    1,  1,  1 BEMP_Flt,  5,  "deg",   "Tilt from centroid of another array to this one (in degrees, 0-horizontal, 90-vertical)"    
+
+; Proj:PVWAzmMsg[ALL],        NotInput,   0,    0,   0,    1,  1,  1
+
+
+   ;--------------------------------------------------------------------  SAC 1/15/19 - tic #1046
+   ; ProposedInput: PV Power Electronics Rules
+   ;--------------------------------------------------------------------
+
+   ; default Proj:PVWPwrElec[ALL] via enumeration defs:  0:"- none -" / 1:"Microinverters" / 2:"DC Power Optimizers"
+
+   "Set Proj:PVWPwrElecEffAdj[1]"   Proj:PVWPwrElecEffAdj[1]   ; SAC 1/15/19 - Power electronics inverter efficiency adjustor (related to PVWPwrElec options) (tic #1046)
+      = {   if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[1] > 0 )==0) then  UNDEFINED
+            else if (PVWPwrElec[1] == 2) then  0.99
+            else  1.0  endif endif  }
+   "Set Proj:PVWPwrElecEffAdj[2]"   Proj:PVWPwrElecEffAdj[2]
+      = {   if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[2] > 0 )==0) then  UNDEFINED
+            else if (PVWPwrElec[2] == 2) then  0.99
+            else  1.0  endif endif  }
+   "Set Proj:PVWPwrElecEffAdj[3]"   Proj:PVWPwrElecEffAdj[3]
+      = {   if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[3] > 0 )==0) then  UNDEFINED
+            else if (PVWPwrElec[3] == 2) then  0.99
+            else  1.0  endif endif  }
+   "Set Proj:PVWPwrElecEffAdj[4]"   Proj:PVWPwrElecEffAdj[4]
+      = {   if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[4] > 0 )==0) then  UNDEFINED
+            else if (PVWPwrElec[4] == 2) then  0.99
+            else  1.0  endif endif  }
+   "Set Proj:PVWPwrElecEffAdj[5]"   Proj:PVWPwrElecEffAdj[5]
+      = {   if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[5] > 0 )==0) then  UNDEFINED
+            else if (PVWPwrElec[5] == 2) then  0.99
+            else  1.0  endif endif  }
+
+   "Set Proj:PVWShdgImpactFac[1]"   Proj:PVWShdgImpactFac[1]   ; SAC 1/15/19 - Shading Impact Factor - ratio of relative power output to fraction shaded: PwrOut = PwrSys*(1-SIF*FracShaded) (tic #1046)
+      = {   if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[1] > 0 )==0) then  UNDEFINED
+            else  switch (PVWPwrElec[1])
+                     case  1 :  1.2   ; Microinverters
+                     case  2 :  1.2   ; DC Power Optimizers
+                     default :  2.0
+                  endswitch  endif  }
+   "Set Proj:PVWShdgImpactFac[2]"   Proj:PVWShdgImpactFac[2]   ; SAC 1/15/19 - Shading Impact Factor - ratio of relative power output to fraction shaded: PwrOut = PwrSys*(1-SIF*FracShaded) (tic #1046)
+      = {   if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[2] > 0 )==0) then  UNDEFINED
+            else  switch (PVWPwrElec[2])
+                     case  1 :  1.2   ; Microinverters
+                     case  2 :  1.2   ; DC Power Optimizers
+                     default :  2.0
+                  endswitch  endif  }
+   "Set Proj:PVWShdgImpactFac[3]"   Proj:PVWShdgImpactFac[3]   ; SAC 1/15/19 - Shading Impact Factor - ratio of relative power output to fraction shaded: PwrOut = PwrSys*(1-SIF*FracShaded) (tic #1046)
+      = {   if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[3] > 0 )==0) then  UNDEFINED
+            else  switch (PVWPwrElec[3])
+                     case  1 :  1.2   ; Microinverters
+                     case  2 :  1.2   ; DC Power Optimizers
+                     default :  2.0
+                  endswitch  endif  }
+   "Set Proj:PVWShdgImpactFac[4]"   Proj:PVWShdgImpactFac[4]   ; SAC 1/15/19 - Shading Impact Factor - ratio of relative power output to fraction shaded: PwrOut = PwrSys*(1-SIF*FracShaded) (tic #1046)
+      = {   if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[4] > 0 )==0) then  UNDEFINED
+            else  switch (PVWPwrElec[4])
+                     case  1 :  1.2   ; Microinverters
+                     case  2 :  1.2   ; DC Power Optimizers
+                     default :  2.0
+                  endswitch  endif  }
+   "Set Proj:PVWShdgImpactFac[5]"   Proj:PVWShdgImpactFac[5]   ; SAC 1/15/19 - Shading Impact Factor - ratio of relative power output to fraction shaded: PwrOut = PwrSys*(1-SIF*FracShaded) (tic #1046)
+      = {   if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[5] > 0 )==0) then  UNDEFINED
+            else  switch (PVWPwrElec[5])
+                     case  1 :  1.2   ; Microinverters
+                     case  2 :  1.2   ; DC Power Optimizers
+                     default :  2.0
+                  endswitch  endif  }
+
+   ;--------------------------------------------------------------------  SAC 1/17/20 - tic #1012
+   ; ProposedInput: PV Solar Access Rules
+   ;--------------------------------------------------------------------
+
+   "Default Proj:PVWSolarAccess[1]"    Proj:PVWSolarAccess[1]  =        ; Solar access (100 * incident solar energy given shading, divided by the incident solar energy if there were no shading)
+      {  if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[1] > 0 )==0) then  UNDEFINED  else  100  endif  }
+   "Default Proj:PVWSolarAccess[2]"    Proj:PVWSolarAccess[2]  =
+      {  if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[2] > 0 )==0) then  UNDEFINED  else  100  endif  }
+   "Default Proj:PVWSolarAccess[3]"    Proj:PVWSolarAccess[3]  =
+      {  if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[3] > 0 )==0) then  UNDEFINED  else  100  endif  }
+   "Default Proj:PVWSolarAccess[4]"    Proj:PVWSolarAccess[4]  =
+      {  if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[4] > 0 )==0) then  UNDEFINED  else  100  endif  }
+   "Default Proj:PVWSolarAccess[5]"    Proj:PVWSolarAccess[5]  =
+      {  if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[5] > 0 )==0) then  UNDEFINED  else  100  endif  }
+
+   "Set Proj:PVWSysLosses[1]"   Proj:PVWSysLosses[1] =
+      {  if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[1] > 0 )==0) then  UNDEFINED
+         else  100 * ( 1-((1-0.14) * max( (1 - PVWShdgImpactFac[1] * (1 - (PVWSolarAccess[1] / 100))), 0 )) )  endif  }
+   "Set Proj:PVWSysLosses[2]"   Proj:PVWSysLosses[2] =
+      {  if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[2] > 0 )==0) then  UNDEFINED
+         else  100 * ( 1-((1-0.14) * max( (1 - PVWShdgImpactFac[2] * (1 - (PVWSolarAccess[2] / 100))), 0 )) )  endif  }
+   "Set Proj:PVWSysLosses[3]"   Proj:PVWSysLosses[3] =
+      {  if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[3] > 0 )==0) then  UNDEFINED
+         else  100 * ( 1-((1-0.14) * max( (1 - PVWShdgImpactFac[3] * (1 - (PVWSolarAccess[3] / 100))), 0 )) )  endif  }
+   "Set Proj:PVWSysLosses[4]"   Proj:PVWSysLosses[4] =
+      {  if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[4] > 0 )==0) then  UNDEFINED
+         else  100 * ( 1-((1-0.14) * max( (1 - PVWShdgImpactFac[4] * (1 - (PVWSolarAccess[4] / 100))), 0 )) )  endif  }
+   "Set Proj:PVWSysLosses[5]"   Proj:PVWSysLosses[5] =
+      {  if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[5] > 0 )==0) then  UNDEFINED
+         else  100 * ( 1-((1-0.14) * max( (1 - PVWShdgImpactFac[5] * (1 - (PVWSolarAccess[5] / 100))), 0 )) )  endif  }
+
+   ;--------------------------------------------------------------------
+   ; ProposedInput: PV Array Performance Rules
+   ;--------------------------------------------------------------------
+
+	"Default Proj:PVWInverterEff[1]"		Proj:PVWInverterEff[1]	= {	if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[1] > 0 )==0) then  UNDEFINED  else  96  endif  }
+	"Default Proj:PVWInverterEff[2]"		Proj:PVWInverterEff[2]	= {	if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[2] > 0 )==0) then  UNDEFINED  else  96  endif  }
+	"Default Proj:PVWInverterEff[3]"		Proj:PVWInverterEff[3]	= {	if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[3] > 0 )==0) then  UNDEFINED  else  96  endif  }
+	"Default Proj:PVWInverterEff[4]"		Proj:PVWInverterEff[4]	= {	if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[4] > 0 )==0) then  UNDEFINED  else  96  endif  }
+	"Default Proj:PVWInverterEff[5]"		Proj:PVWInverterEff[5]	= {	if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[5] > 0 )==0) then  UNDEFINED  else  96  endif  }
+
+	; not inputable (yet?)
+	;	Proj:PVWDCtoACRatio[ALL]
+	;	Proj:PVWGCR[ALL]
+
+  ; SAC 2/25/16
+	"Default Proj:PVWCoverRefrInd[1]"	Proj:PVWCoverRefrInd[1]		= {	if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[1] > 0 )==0 .OR.
+																										AllowPVWModTypeCust < 0.5 .OR. PVWModuleType[1] < 4) then  UNDEFINED  else  1.0  endif  }
+	"Default Proj:PVWCoverRefrInd[2]"	Proj:PVWCoverRefrInd[2]		= {	if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[2] > 0 )==0 .OR.
+																										AllowPVWModTypeCust < 0.5 .OR. PVWModuleType[2] < 4) then  UNDEFINED  else  1.0  endif  }
+	"Default Proj:PVWCoverRefrInd[3]"	Proj:PVWCoverRefrInd[3]		= {	if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[3] > 0 )==0 .OR.
+																										AllowPVWModTypeCust < 0.5 .OR. PVWModuleType[3] < 4) then  UNDEFINED  else  1.0  endif  }
+	"Default Proj:PVWCoverRefrInd[4]"	Proj:PVWCoverRefrInd[4]		= {	if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[4] > 0 )==0 .OR.
+																										AllowPVWModTypeCust < 0.5 .OR. PVWModuleType[4] < 4) then  UNDEFINED  else  1.0  endif  }
+	"Default Proj:PVWCoverRefrInd[5]"	Proj:PVWCoverRefrInd[5]		= {	if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[5] > 0 )==0 .OR.
+																										AllowPVWModTypeCust < 0.5 .OR. PVWModuleType[5] < 4) then  UNDEFINED  else  1.0  endif  }
+  ; SAC 2/25/16
+	"Default Proj:PVWTempCoeff[1]"		Proj:PVWTempCoeff[1]			= {	if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[1] > 0 )==0 .OR.
+																										AllowPVWModTypeCust < 0.5 .OR. PVWModuleType[1] < 4) then  UNDEFINED  else  -0.0026  endif  }
+	"Default Proj:PVWTempCoeff[2]"		Proj:PVWTempCoeff[2]			= {	if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[2] > 0 )==0 .OR.
+																										AllowPVWModTypeCust < 0.5 .OR. PVWModuleType[2] < 4) then  UNDEFINED  else  -0.0026  endif  }
+	"Default Proj:PVWTempCoeff[3]"		Proj:PVWTempCoeff[3]			= {	if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[3] > 0 )==0 .OR.
+																										AllowPVWModTypeCust < 0.5 .OR. PVWModuleType[3] < 4) then  UNDEFINED  else  -0.0026  endif  }
+	"Default Proj:PVWTempCoeff[4]"		Proj:PVWTempCoeff[4]			= {	if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[4] > 0 )==0 .OR.
+																										AllowPVWModTypeCust < 0.5 .OR. PVWModuleType[4] < 4) then  UNDEFINED  else  -0.0026  endif  }
+	"Default Proj:PVWTempCoeff[5]"		Proj:PVWTempCoeff[5]			= {	if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[5] > 0 )==0 .OR.
+																										AllowPVWModTypeCust < 0.5 .OR. PVWModuleType[5] < 4) then  UNDEFINED  else  -0.0026  endif  }
+
+   ; toggle off PVWShowCFILabels when PVWArrayType[*] = "Tracking (two axis)" (tic #1047) - SAC 10/9/18
+	"Set Proj:PVWShowCFILabels"	Proj:PVWShowCFILabels	= {
+         if (IfValidAnd( PVWDCSysSize[1] > 0 ) .AND. PVWCalFlexInstall[1] < 1 .AND. PVWArrayType[1] < 5) then  1
+         else if (PVWInputs > 0 .AND. IfValidAnd( PVWDCSysSize[2] > 0 ) .AND. PVWCalFlexInstall[2] < 1 .AND. PVWArrayType[2] < 5) then  1
+         else if (PVWInputs > 0 .AND. IfValidAnd( PVWDCSysSize[3] > 0 ) .AND. PVWCalFlexInstall[3] < 1 .AND. PVWArrayType[3] < 5) then  1
+         else if (PVWInputs > 0 .AND. IfValidAnd( PVWDCSysSize[4] > 0 ) .AND. PVWCalFlexInstall[4] < 1 .AND. PVWArrayType[4] < 5) then  1
+         else if (PVWInputs > 0 .AND. IfValidAnd( PVWDCSysSize[5] > 0 ) .AND. PVWCalFlexInstall[5] < 1 .AND. PVWArrayType[5] < 5) then  1  else  0  endif endif endif endif endif  }
+
+	"Set Proj:PVWDCSysTotal-1"		Proj:PVWDCSysTotal	= {	if (IfValidAnd( PVWDCSysSize[1] > 0 )) then  PVWDCSysSize[1]  else  0  endif  }
+	"Set Proj:PVWDCSysTotal-2"		Proj:PVWDCSysTotal	= {	if (PVWInputs > 0 .AND. IfValidAnd( PVWDCSysSize[2] > 0 )) then  PVWDCSysTotal + PVWDCSysSize[2]  else  UNCHANGED  endif  }
+	"Set Proj:PVWDCSysTotal-3"		Proj:PVWDCSysTotal	= {	if (PVWInputs > 0 .AND. IfValidAnd( PVWDCSysSize[3] > 0 )) then  PVWDCSysTotal + PVWDCSysSize[3]  else  UNCHANGED  endif  }
+	"Set Proj:PVWDCSysTotal-4"		Proj:PVWDCSysTotal	= {	if (PVWInputs > 0 .AND. IfValidAnd( PVWDCSysSize[4] > 0 )) then  PVWDCSysTotal + PVWDCSysSize[4]  else  UNCHANGED  endif  }
+	"Set Proj:PVWDCSysTotal-5"		Proj:PVWDCSysTotal	= {	if (PVWInputs > 0 .AND. IfValidAnd( PVWDCSysSize[5] > 0 )) then  PVWDCSysTotal + PVWDCSysSize[5]  else  UNCHANGED  endif  }
+
+   "Set Proj:PVWShowColTitles - flag whether or not to display PV data column titles"     Proj:PVWShowColTitles =       ; SAC 6/10/20 (CommunitySolar) 
+      {  if (IfValidAnd( AllowPVWInputs > 0 )==0) then  UNDEFINED
+         else if (PVWDCSysTotal > 0 .AND. (CommunitySolarProjID < 1 .OR. EnableResearchMode > 0))
+         then  1  else  UNDEFINED  endif endif  }
+
+  ; SAC 3/4/16 - added logic to PREVENT rule override of PVRatedPower for 2016+ rulesets (since this no longer input, but simply toggled on/off) (tic #609)
+  ; SAC 4/15/16 - further modified rule to blast user input PVRatedPower for any 2016+ model (as this is no longer an input and its presence screws up PV compliance credit) 
+  ; LDH 8/22/16 - disabled blasting of PVRatedPwr as it is done under RULELIST "Force_2016PVCreditOn"
+	"Force PVRatedPower to (sum of PVWatts inputs) when necessary to PVWDCSysTotal"  Proj:Action		= {	
+;    if (IfValidAnd(StandardsVersion >= 2017) .AND. LocalStatus( PVRatedPower ) > 6)  
+;    then	EvalRulelist( "ForceDefault_PVRatedPower" )  
+;    else 
+    if( IfValidAnd( StandardsVersion < 2017 ) .AND. 
+        IfValidAnd( AllowDesignRating > 0.5 ) .AND. 
+        IfValidAnd( DesignRatingCalcs > 0.5 ) )
+    then	EvalRulelist( "Force_PVRatedPower_to_PVWDCSysTotal" )
+    else	UNCHANGED  
+;    endif 
+    endif  }
+
+END
+;*************************************************************************
+
+
+;*************************************************************************
+RULELIST "Default_PVArray_OrientationLocation_1"  0 0 0 0
+;*************************************************************************
+; array index searches:  [1] / _1 / #1
+   "Set Proj:PVWGeomPolyLpRef[1]"   Proj:PVWGeomPolyLpRef[1]  = {
+         if (PVWGeomSpecMethod[1]==1 .AND. LocalCompAssigned( PVWPVArrGeomRef[1] ))
+         then  PVWPVArrGeomRef[1]:ChildPolyLpRef
+         else  UNCHANGED  endif  }
+   "Incrament Proj:PVWPVArrGeomRef[1]:NumPVArrayRefs"      Proj:PVWPVArrGeomRef[1]:NumPVArrayRefs  = {
+         if (PVWGeomSpecMethod[1]!=1) then  UNCHANGED
+         else  PVWPVArrGeomRef[1]:NumPVArrayRefs + 1  endif  }
+
+   "Set Proj:PVWLocationMsg[1]"     Proj:PVWLocationMsg[1]  = {      ; "message describing need or result of PVWLocSpecMethod" 
+         if (PVWGeomSpecMethod[1]==1) then  UNDEFINED   ; no location msg if geometry defined by PVArrayGeom object ref
+         else if (HaveShadeObjects .AND. PVWLocSpecMethod[1]==0)
+         then  "ERROR:  Location must be specified when Shade object(s) exist."
+         else  " "  endif endif  }   ; "Location required only if simulating PV array shading."  endif endif  }
+         ;     Proj:PVWLocSpecMethod[ALL],  Optional, 
+         ;         0,    "- not specified -"
+         ;         1,    "X,Y,Z and height, width"
+         ;         2,    "in relation to another PV Array"
+
+   "Set Proj:PVWRelLocDistLbl[1]"   Proj:PVWRelLocDistLbl[1]  = {
+         if (PVWGeomSpecMethod[1] == 1 .OR. PVWLocSpecMethod[1] != 2) then  UNDEFINED
+         else if (PVWRelLocSpecMeth[1] == 5)
+         then  "Distance Between Centroids:"
+         else  "Distance Separating Arrays:"    endif endif  }
+
+;     Proj:PVWRelLocArrayIdx[ALL], Optional,  0,    1,   1,    1,  1,  1
+;     Proj:PVWRelLocDistance[ALL], Optional,  0,    1,   1,    1,  1,  1 BEMP_Flt,  5,  "ft",    "Distance between this and another PV array"    
+;     Proj:PVWRelLocAzm[ALL],      Optional,  0,    1,   1,    1,  1,  1 BEMP_Flt,  5,  "deg",   "Azimuth from centroid of another array to this one (0=N, 90=E, ...)"    
+
+   "Set Proj:PVWRelLocAzmLbl[1]"    Proj:PVWRelLocAzmLbl[1]    = {
+         if (PVWGeomSpecMethod[1] == 1 .OR. PVWLocSpecMethod[1] != 2 .OR.
+             PVWRelLocSpecMeth[1] != 5 .OR. IfValidAnd( PVWRelLocArrayIdx[1] > 0 )==0 .OR.
+             IfValidAnd( PVWRelLocArrayIdx[1] <= 5 )==0) then  UNDEFINED
+         else  Format( "Azimuth from centroid of array #%g to centroid of this array:", PVWRelLocArrayIdx[1] )
+         endif  }
+
+;     Proj:PVWRelLocTiltDeg[ALL],  Optional,  0,    1,   1,    1,  1,  1 BEMP_Flt,  5,  "deg",   "Tilt from centroid of another array to this one (in degrees, 0-horizontal, 90-vertical)"    
+   "Set Proj:PVWRelLocTiltLbl[1]"    Proj:PVWRelLocTiltLbl[1]    = {
+         if (PVWGeomSpecMethod[1] == 1 .OR. PVWLocSpecMethod[1] != 2 .OR.
+             PVWRelLocSpecMeth[1] != 5 .OR. IfValidAnd( PVWRelLocArrayIdx[1] > 0 )==0 .OR.
+             IfValidAnd( PVWRelLocArrayIdx[1] <= 5 )==0) then  UNDEFINED
+         else  Format( "Tilt from centroid of array #%g to centroid of this array:", PVWRelLocArrayIdx[1] )
+         endif  }
+
+; TO DO - when PVWGeomSpecMethod[*] == 1, then FORCE defaulting of Azimuth & Tilt (based on assigned PVArrayGeom object PolyLp)
+   "Default Proj:PVWAzm[1]"      Proj:PVWAzm[1]      = {
+         if (PVWGeomSpecMethod[1] == 1)    ; reference PVArrayGeom object
+         then  if (LocalCompAssigned( PVWPVArrGeomRef[1] )==0) then  UNDEFINED
+               else if (IfValidAnd( PVWPVArrGeomRef[1]:ChildPolyLpRef:TiltAngle >=  0 )==0 .OR.
+                        IfValidAnd( PVWPVArrGeomRef[1]:ChildPolyLpRef:TiltAngle <= 90 )==0) then  UNDEFINED
+               else if (LocalStatus( PVWPVArrGeomRef[1]:ChildPolyLpRef:Azimuth ) > 0)
+               then  PVWPVArrGeomRef[1]:ChildPolyLpRef:Azimuth
+               else  UNDEFINED  endif endif endif
+         else  if (PVWArrayType[1] == 3) then  180   ; Tracking (one axis) - SAC 4/29/20
+               else  170  endif endif  }
+
+   ;   Proj:PVWArrayTiltInput[ALL]  -  0-"Degrees"  1-"Pitch"
+   "Blast PVWArrayTiltPitch[1] if PVWArrayTiltInput = deg"  Proj:Action  = {
+         if ((PVWArrayTiltInput[1] == 0 .OR. PVWGeomSpecMethod[1] == 1) .AND.
+             LocalStatus( PVWArrayTiltPitch[1] ) > 4)
+         then   EvalRulelist( "BlastInputs_PVWArrayTiltPitch_1" )  else  UNCHANGED  endif  }
+   "Blast PVWArrayTiltDeg[1] if PVWArrayTiltInput = pitch"  Proj:Action  = {
+         if ((PVWArrayTiltInput[1] == 1 .OR. PVWGeomSpecMethod[1] == 1) .AND.
+             LocalStatus( PVWArrayTiltDeg[1] ) > 4)
+         then   EvalRulelist( "BlastInputs_PVWArrayTiltDeg_1" )  else  UNCHANGED  endif  }
+
+  ; round 1 TiltDeg defaulting only for PVWGeomSpecMethod[] = "reference PVArrayGeom object"
+   "Default Proj:PVWArrayTiltDeg[1]-1"   Proj:PVWArrayTiltDeg[1]      = {
+         if (PVWGeomSpecMethod[1] == 1)    ; reference PVArrayGeom object
+         then  if (LocalCompAssigned( PVWPVArrGeomRef[1] )==0) then  UNDEFINED
+               else if (LocalStatus( PVWPVArrGeomRef[1]:ChildPolyLpRef:TiltAngle ) > 0)
+               then  PVWPVArrGeomRef[1]:ChildPolyLpRef:TiltAngle
+               else  UNDEFINED  endif endif
+         else  UNDEFINED  endif  }
+
+   "Default Proj:PVWArrayTiltPitch[1]"   Proj:PVWArrayTiltPitch[1]   = {
+         if (PVWGeomSpecMethod[1] == 1 .AND. LocalStatus( PVWArrayTiltDeg[1] ) < 1) then  UNDEFINED
+         else if (  PVWGeomSpecMethod[1] == 1 .OR.
+                   (PVWArrayTiltInput[1] == 0 .AND. LocalStatus( PVWArrayTiltDeg[1] ) > 4) )
+         then  if (PVWArrayTiltDeg[1] == 0) then  0  else  12 * tan( (PVWArrayTiltDeg[1]/180)*3.14159 )  endif
+         else  if (PVWArrayType[1] == 3) then  0      ; Tracking (one axis) - SAC 4/29/20
+               else  5  endif endif endif  }
+
+   "Default Proj:PVWArrayTiltDeg[1]-2"   Proj:PVWArrayTiltDeg[1]      = {
+         if (PVWGeomSpecMethod[1] == 1) then  UNCHANGED
+         else if (PVWArrayTiltInput[1] == 1 .AND. LocalStatus( PVWArrayTiltPitch[1] ) > 4)
+         then  (atan( PVWArrayTiltPitch[1] / 12 ) / 3.14159) * 180
+         else  if (PVWArrayType[1] == 3) then  0      ; Tracking (one axis) - SAC 4/29/20
+               else  (atan( 5 / 12 ) / 3.14159) * 180  endif endif endif  }
+
+      ;   "Set Proj:PVWRealAzm[1]"      Proj:PVWRealAzm[1]   = {
+      ;         if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[1] > 0 )==0) then  UNDEFINED
+      ;         else if (PVWGeomSpecMethod[1] == 0)    ; "azimuth and tilt"
+      ;         then  PVWAzm[1]
+      ;         else if (PVWGeomSpecMethod[1] == 1)    ; "reference PVArrayGeom object"
+      ;         then  if (LocalCompAssigned( PVWPVArrGeomRef[1] )==0) then  UNDEFINED
+      ;               else if (LocalStatus( PVWPVArrGeomRef[1]:ChildPolyLpRef:Azimuth ) > 0)
+      ;               then  PVWPVArrGeomRef[1]:ChildPolyLpRef:Azimuth
+      ;               else  UNDEFINED  endif endif
+      ;         else  UNDEFINED  endif endif endif  }
+
+   "Set Proj:PVWLocSpecified[1] - whether PV array location is specified: 0-not, 1-relative, 2-direct"
+      Proj:PVWLocSpecified[1]  = {
+         if (PVWGeomSpecMethod[1] == 0)    ; "azimuth and tilt"
+         then  if (PVWLocSpecMethod[1] == 0) then  0     ; LocSpecMethod = "- not specified -"
+               else if (PVWLocSpecMethod[1] == 1)        ; LocSpecMethod = "X,Y,Z and height, width"
+               then  if (LocalStatus( PVWHeight[1] )>0 .AND. LocalStatus( PVWWidth[1] )>0 .AND.
+                         LocalStatus( PVWReferenceX[1] )>0 .AND. LocalStatus( PVWReferenceY[1] )>0 .AND.
+                         LocalStatus( PVWReferenceZ[1] )>0) then  2
+                     else  0  endif
+               else if (PVWLocSpecMethod[1] == 2)        ; LocSpecMethod = "in relation to another PV Array"
+               then  0  ; NYI
+               else  0  ; undefined
+               endif endif endif
+         else if (PVWGeomSpecMethod[1] == 1)    ; "reference PVArrayGeom object"
+         then  if (LocalCompAssigned( PVWPVArrGeomRef[1] )==0) then  0
+               else if (IfValidAnd( PVWAzm[1] >= 0 )==0 .OR. IfValidAnd( PVWArrayTiltDeg[1] >= 0 )==0 .OR.
+                        IfValidAnd( PVWPVArrGeomRef[1]:ChildPolyLpRef:Area > 0 )==0) then  0
+               else  2  endif endif
+         else  0  endif endif  }
+
+  ; SAC 2/22/17 - new PVW geometry-related inputs
+  ; SAC 10/10/18 - added new messages for 1- & 2-axis tracking arrays (tic #1047)
+   "Set Proj:PVWGeomBtnLabel[1]"    Proj:PVWGeomBtnLabel[1]  = {
+         if (PVWArrayType[1] > 4) then  "No orientation or location for 2-axis tracking arrays"  ; "Tracking (two axis)"
+         else if (PVWArrayType[1] > 2)                ; "Tracking (one axis)"
+         then  if (PVWArrayTiltInput[1] == 0)         ; "deg"
+               then  Format( "Tracking axis: %.0f%c azimuth, %.1f%c tilt", PVWAzm[1], 176, PVWArrayTiltDeg[1], 176 )
+               else                                   ; "pitch"
+                     Format( "Tracking axis: %.0f%c azimuth, %.1f-in-12 tilt", PVWAzm[1], 176, PVWArrayTiltPitch[1] )
+               endif
+         else if (PVWGeomSpecMethod[1] == 0)          ; "azimuth and tilt"
+         then  if (HaveShadeObjects .AND. PVWLocSpecMethod[1]==0)
+               then  "Location Needs To Be Specified"
+               else if (PVWArrayTiltInput[1] == 0)    ; "deg"
+               then  Format( "%.0f%c azimuth, %.1f%c tilt (%.1f-in-12)", PVWAzm[1], 176, PVWArrayTiltDeg[1], 176, PVWArrayTiltPitch[1] )
+               else                                   ; "pitch"
+                     Format( "%.0f%c azimuth, %.1f-in-12 tilt (%.1f%c)", PVWAzm[1], 176, PVWArrayTiltPitch[1], PVWArrayTiltDeg[1], 176 )
+               endif endif
+         else if (PVWGeomSpecMethod[1] == 1)    ; "reference PVArrayGeom object"
+         then  if (LocalCompAssigned( PVWPVArrGeomRef[1] )==0)
+               then  "error: PVArrayGeom not assigned"
+               else if (IfValidAnd( PVWPVArrGeomRef[1]:ChildPolyLpRef:TiltAngle >=  0 )==0 .OR. IfValidAnd( PVWPVArrGeomRef[1]:ChildPolyLpRef:TiltAngle <= 90 )==0)
+               then  "error: PVArrayGeom vertices reversed"
+               else  Format( "%.0f%c az, %.0f%c tilt via '%s'", PVWAzm[1], 176, PVWArrayTiltDeg[1], 176, PVWPVArrGeomRef[1]:Name )
+               endif endif
+         else  "(PVWGeomSpecMethod[1] unrecognized)"
+         endif endif endif endif  }
+
+   ; PV Array Summary Message
+   "Set Proj:PVWGeomSummaryMsg[1]"     Proj:PVWGeomSummaryMsg[1]  = {      ; message describing orientation/location errors or summary of valid inputs
+         if (FindInString( PVWLocationMsg[1], "ERROR" ) >= 0)
+         then  PVWLocationMsg[1]
+         else if (PVWArrayType[1] > 4) then  "PV Array #1:  2-axis tracking"  ; "Tracking (two axis)"
+         else if (PVWArrayType[1] > 2)                ; "Tracking (one axis)"
+         then  if (PVWArrayTiltInput[1] == 0)         ; "deg"
+               then  Format( "PV Array #1:  Tracking axis %.0f%c azimuth, %.1f%c tilt (%.1f-in-12)", PVWAzm[1], 176, PVWArrayTiltDeg[1], 176, PVWArrayTiltPitch[1] )
+               else                                   ; "pitch"
+                     Format( "PV Array #1:  Tracking axis %.0f%c azimuth, %.1f-in-12 tilt (%.1f%c)", PVWAzm[1], 176, PVWArrayTiltPitch[1], PVWArrayTiltDeg[1], 176 )
+               endif
+         else if (PVWGeomSpecMethod[1] == 0)    ; "azimuth and tilt"
+         then  if (PVWLocSpecMethod[1] == 0)
+               then  PVWGeomBtnLabel[1] + " (no location specified)"
+               else if (PVWLocSpecified[1] == 0)
+               then  "ERROR:  PV Array #1 Location fields above missing or invalid."
+               else  Format( "PV Array #1:  %.1f ft2 (%.1f W/ft2) with %.0f%c azimuth and %.1f%c tilt.", (PVWHeight[1] * PVWWidth[1]),
+                              (PVWDCSysSize[1] * 1000 / (PVWHeight[1] * PVWWidth[1])), PVWAzm[1], 176, PVWArrayTiltDeg[1], 176 )
+               endif endif
+         else if (PVWGeomSpecMethod[1] == 1)    ; reference PVArrayGeom object
+         then  if (LocalCompAssigned( PVWPVArrGeomRef[1] )==0)
+               then  "ERROR:  Geometry to be defined via PVArrayGeom object assignment, but no PVArrayGeom object is assigned."
+               else if (IfValidAnd( PVWPVArrGeomRef[1]:ChildPolyLpRef:TiltAngle >= 0 )==0 .OR. IfValidAnd( PVWPVArrGeomRef[1]:ChildPolyLpRef:TiltAngle <= 90 )==0)
+               then  Format( "ERROR:  PVArrayGeom '%s' is invalid (facing downward, vertices may be reversed).", PVWPVArrGeomRef[1]:Name )
+               else if (IfValidAnd( PVWAzm[1] >= 0 )==0 .OR. IfValidAnd( PVWArrayTiltDeg[1] >= 0 )==0 .OR.
+                        IfValidAnd( PVWPVArrGeomRef[1]:ChildPolyLpRef:Area > 0 )==0)
+               then  Format( "ERROR:  Geometry defined by PVArrayGeom '%s' which has invalid geometry.", PVWPVArrGeomRef[1]:Name )
+               else  Format( "PV Array #1:  %.1f ft2 (%.1f W/ft2) with %.0f%c azimuth and %.1f%c tilt.", PVWPVArrGeomRef[1]:ChildPolyLpRef:Area,
+                              (PVWDCSysSize[1] * 1000 / PVWPVArrGeomRef[1]:ChildPolyLpRef:Area), PVWAzm[1], 176, PVWArrayTiltDeg[1], 176 )
+               endif endif endif
+         else  "summary msg"
+         endif endif endif endif endif  }
+
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "Default_PVArray_OrientationLocation_2"  0 0 0 0
+;*************************************************************************
+; array index searches:  [2] / _2 / #2
+   "Set Proj:PVWGeomPolyLpRef[2]"   Proj:PVWGeomPolyLpRef[2]  = {
+         if (PVWGeomSpecMethod[2]==1 .AND. LocalCompAssigned( PVWPVArrGeomRef[2] ))
+         then  PVWPVArrGeomRef[2]:ChildPolyLpRef
+         else  UNCHANGED  endif  }
+   "Incrament Proj:PVWPVArrGeomRef[2]:NumPVArrayRefs"      Proj:PVWPVArrGeomRef[2]:NumPVArrayRefs  = {
+         if (PVWGeomSpecMethod[2]!=1) then  UNCHANGED
+         else  PVWPVArrGeomRef[2]:NumPVArrayRefs + 1  endif  }
+
+   "Set Proj:PVWLocationMsg[2]"     Proj:PVWLocationMsg[2]  = {      ; "message describing need or result of PVWLocSpecMethod" 
+         if (PVWGeomSpecMethod[2]==1) then  UNDEFINED   ; no location msg if geometry defined by PVArrayGeom object ref
+         else if (HaveShadeObjects .AND. PVWLocSpecMethod[2]==0)
+         then  "ERROR:  Location must be specified when Shade object(s) exist."
+         else  " "  endif endif  }   ; "Location required only if simulating PV array shading."  endif endif  }
+         ;     Proj:PVWLocSpecMethod[ALL],  Optional, 
+         ;         0,    "- not specified -"
+         ;         1,    "X,Y,Z and height, width"
+         ;         2,    "in relation to another PV Array"
+
+   "Set Proj:PVWRelLocDistLbl[2]"   Proj:PVWRelLocDistLbl[2]  = {
+         if (PVWGeomSpecMethod[2] == 1 .OR. PVWLocSpecMethod[2] != 2) then  UNDEFINED
+         else if (PVWRelLocSpecMeth[2] == 5)
+         then  "Distance Between Centroids:"
+         else  "Distance Separating Arrays:"    endif endif  }
+
+;     Proj:PVWRelLocArrayIdx[ALL], Optional,  0,    1,   1,    1,  1,  1
+;     Proj:PVWRelLocDistance[ALL], Optional,  0,    1,   1,    1,  1,  1 BEMP_Flt,  5,  "ft",    "Distance between this and another PV array"    
+;     Proj:PVWRelLocAzm[ALL],      Optional,  0,    1,   1,    1,  1,  1 BEMP_Flt,  5,  "deg",   "Azimuth from centroid of another array to this one (0=N, 90=E, ...)"    
+
+   "Set Proj:PVWRelLocAzmLbl[2]"    Proj:PVWRelLocAzmLbl[2]    = {
+         if (PVWGeomSpecMethod[2] == 1 .OR. PVWLocSpecMethod[2] != 2 .OR.
+             PVWRelLocSpecMeth[2] != 5 .OR. IfValidAnd( PVWRelLocArrayIdx[2] > 0 )==0 .OR.
+             IfValidAnd( PVWRelLocArrayIdx[2] <= 5 )==0) then  UNDEFINED
+         else  Format( "Azimuth from centroid of array #%g to centroid of this array:", PVWRelLocArrayIdx[2] )
+         endif  }
+
+;     Proj:PVWRelLocTiltDeg[ALL],  Optional,  0,    1,   1,    1,  1,  1 BEMP_Flt,  5,  "deg",   "Tilt from centroid of another array to this one (in degrees, 0-horizontal, 90-vertical)"    
+   "Set Proj:PVWRelLocTiltLbl[2]"    Proj:PVWRelLocTiltLbl[2]    = {
+         if (PVWGeomSpecMethod[2] == 1 .OR. PVWLocSpecMethod[2] != 2 .OR.
+             PVWRelLocSpecMeth[2] != 5 .OR. IfValidAnd( PVWRelLocArrayIdx[2] > 0 )==0 .OR.
+             IfValidAnd( PVWRelLocArrayIdx[2] <= 5 )==0) then  UNDEFINED
+         else  Format( "Tilt from centroid of array #%g to centroid of this array:", PVWRelLocArrayIdx[2] )
+         endif  }
+
+; TO DO - when PVWGeomSpecMethod[*] == 1, then FORCE defaulting of Azimuth & Tilt (based on assigned PVArrayGeom object PolyLp)
+   "Default Proj:PVWAzm[2]"      Proj:PVWAzm[2]      = {
+         if (PVWGeomSpecMethod[2] == 1)    ; reference PVArrayGeom object
+         then  if (LocalCompAssigned( PVWPVArrGeomRef[2] )==0) then  UNDEFINED
+               else if (IfValidAnd( PVWPVArrGeomRef[2]:ChildPolyLpRef:TiltAngle >=  0 )==0 .OR.
+                        IfValidAnd( PVWPVArrGeomRef[2]:ChildPolyLpRef:TiltAngle <= 90 )==0) then  UNDEFINED
+               else if (LocalStatus( PVWPVArrGeomRef[2]:ChildPolyLpRef:Azimuth ) > 0)
+               then  PVWPVArrGeomRef[2]:ChildPolyLpRef:Azimuth
+               else  UNDEFINED  endif endif endif
+         else  if (PVWArrayType[2] == 3) then  180   ; Tracking (one axis) - SAC 4/29/20
+               else  170  endif endif  }
+
+   ;   Proj:PVWArrayTiltInput[ALL]  -  0-"Degrees"  1-"Pitch"
+   "Blast PVWArrayTiltPitch[2] if PVWArrayTiltInput = deg"  Proj:Action  = {
+         if ((PVWArrayTiltInput[2] == 0 .OR. PVWGeomSpecMethod[2] == 1) .AND.
+             LocalStatus( PVWArrayTiltPitch[2] ) > 4)
+         then   EvalRulelist( "BlastInputs_PVWArrayTiltPitch_2" )  else  UNCHANGED  endif  }
+   "Blast PVWArrayTiltDeg[2] if PVWArrayTiltInput = pitch"  Proj:Action  = {
+         if ((PVWArrayTiltInput[2] == 1 .OR. PVWGeomSpecMethod[2] == 1) .AND.
+             LocalStatus( PVWArrayTiltDeg[2] ) > 4)
+         then   EvalRulelist( "BlastInputs_PVWArrayTiltDeg_2" )  else  UNCHANGED  endif  }
+
+  ; round 1 TiltDeg defaulting only for PVWGeomSpecMethod[] = "reference PVArrayGeom object"
+   "Default Proj:PVWArrayTiltDeg[2]-1"   Proj:PVWArrayTiltDeg[2]      = {
+         if (PVWGeomSpecMethod[2] == 1)    ; reference PVArrayGeom object
+         then  if (LocalCompAssigned( PVWPVArrGeomRef[2] )==0) then  UNDEFINED
+               else if (LocalStatus( PVWPVArrGeomRef[2]:ChildPolyLpRef:TiltAngle ) > 0)
+               then  PVWPVArrGeomRef[2]:ChildPolyLpRef:TiltAngle
+               else  UNDEFINED  endif endif
+         else  UNDEFINED  endif  }
+
+   "Default Proj:PVWArrayTiltPitch[2]"   Proj:PVWArrayTiltPitch[2]   = {
+         if (PVWGeomSpecMethod[2] == 1 .AND. LocalStatus( PVWArrayTiltDeg[2] ) < 1) then  UNDEFINED
+         else if (  PVWGeomSpecMethod[2] == 1 .OR.
+                   (PVWArrayTiltInput[2] == 0 .AND. LocalStatus( PVWArrayTiltDeg[2] ) > 4) )
+         then  if (PVWArrayTiltDeg[2] == 0) then  0  else  12 * tan( (PVWArrayTiltDeg[2]/180)*3.14159 )  endif
+         else  if (PVWArrayType[2] == 3) then  0      ; Tracking (one axis) - SAC 4/29/20
+               else  5  endif endif endif  }
+
+   "Default Proj:PVWArrayTiltDeg[2]-2"   Proj:PVWArrayTiltDeg[2]      = {
+         if (PVWGeomSpecMethod[2] == 1) then  UNCHANGED
+         else if (PVWArrayTiltInput[2] == 1 .AND. LocalStatus( PVWArrayTiltPitch[2] ) > 4)
+         then  (atan( PVWArrayTiltPitch[2] / 12 ) / 3.14159) * 180
+         else  if (PVWArrayType[2] == 3) then  0      ; Tracking (one axis) - SAC 4/29/20
+               else  (atan( 5 / 12 ) / 3.14159) * 180  endif endif endif  }
+
+      ;   "Set Proj:PVWRealAzm[2]"      Proj:PVWRealAzm[2]   = {
+      ;         if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[2] > 0 )==0) then  UNDEFINED
+      ;         else if (PVWGeomSpecMethod[2] == 0)    ; "azimuth and tilt"
+      ;         then  PVWAzm[2]
+      ;         else if (PVWGeomSpecMethod[2] == 1)    ; "reference PVArrayGeom object"
+      ;         then  if (LocalCompAssigned( PVWPVArrGeomRef[2] )==0) then  UNDEFINED
+      ;               else if (LocalStatus( PVWPVArrGeomRef[2]:ChildPolyLpRef:Azimuth ) > 0)
+      ;               then  PVWPVArrGeomRef[2]:ChildPolyLpRef:Azimuth
+      ;               else  UNDEFINED  endif endif
+      ;         else  UNDEFINED  endif endif endif  }
+
+   "Set Proj:PVWLocSpecified[2] - whether PV array location is specified: 0-not, 1-relative, 2-direct"
+      Proj:PVWLocSpecified[2]  = {
+         if (PVWGeomSpecMethod[2] == 0)    ; "azimuth and tilt"
+         then  if (PVWLocSpecMethod[2] == 0) then  0     ; LocSpecMethod = "- not specified -"
+               else if (PVWLocSpecMethod[2] == 1)        ; LocSpecMethod = "X,Y,Z and height, width"
+               then  if (LocalStatus( PVWHeight[2] )>0 .AND. LocalStatus( PVWWidth[2] )>0 .AND.
+                         LocalStatus( PVWReferenceX[2] )>0 .AND. LocalStatus( PVWReferenceY[2] )>0 .AND.
+                         LocalStatus( PVWReferenceZ[2] )>0) then  2
+                     else  0  endif
+               else if (PVWLocSpecMethod[2] == 2)        ; LocSpecMethod = "in relation to another PV Array"
+               then  0  ; NYI
+               else  0  ; undefined
+               endif endif endif
+         else if (PVWGeomSpecMethod[2] == 1)    ; "reference PVArrayGeom object"
+         then  if (LocalCompAssigned( PVWPVArrGeomRef[2] )==0) then  0
+               else if (IfValidAnd( PVWAzm[2] >= 0 )==0 .OR. IfValidAnd( PVWArrayTiltDeg[2] >= 0 )==0 .OR.
+                        IfValidAnd( PVWPVArrGeomRef[2]:ChildPolyLpRef:Area > 0 )==0) then  0
+               else  2  endif endif
+         else  0  endif endif  }
+
+  ; SAC 2/22/17 - new PVW geometry-related inputs
+  ; SAC 10/10/18 - added new messages for 1- & 2-axis tracking arrays (tic #1047)
+   "Set Proj:PVWGeomBtnLabel[2]"    Proj:PVWGeomBtnLabel[2]  = {
+         if (PVWArrayType[2] > 4) then  "No orientation or location for 2-axis tracking arrays"  ; "Tracking (two axis)"
+         else if (PVWArrayType[2] > 2)                ; "Tracking (one axis)"
+         then  if (PVWArrayTiltInput[2] == 0)         ; "deg"
+               then  Format( "Tracking axis: %.0f%c azimuth, %.1f%c tilt", PVWAzm[2], 176, PVWArrayTiltDeg[2], 176 )
+               else                                   ; "pitch"
+                     Format( "Tracking axis: %.0f%c azimuth, %.1f-in-12 tilt", PVWAzm[2], 176, PVWArrayTiltPitch[2] )
+               endif
+         else if (PVWGeomSpecMethod[2] == 0)         ; "azimuth and tilt"
+         then  if (HaveShadeObjects .AND. PVWLocSpecMethod[2]==0)
+               then  "Location Needs To Be Specified"
+               else if (PVWArrayTiltInput[2] == 0)    ; "deg"
+               then  Format( "%.0f%c azimuth, %.1f%c tilt (%.1f-in-12)", PVWAzm[2], 176, PVWArrayTiltDeg[2], 176, PVWArrayTiltPitch[2] )
+               else                                   ; "pitch"
+                     Format( "%.0f%c azimuth, %.1f-in-12 tilt (%.1f%c)", PVWAzm[2], 176, PVWArrayTiltPitch[2], PVWArrayTiltDeg[2], 176 )
+               endif endif
+         else if (PVWGeomSpecMethod[2] == 1)    ; "reference PVArrayGeom object"
+         then  if (LocalCompAssigned( PVWPVArrGeomRef[2] )==0)
+               then  "error: PVArrayGeom not assigned"
+               else if (IfValidAnd( PVWPVArrGeomRef[2]:ChildPolyLpRef:TiltAngle >=  0 )==0 .OR. IfValidAnd( PVWPVArrGeomRef[2]:ChildPolyLpRef:TiltAngle <= 90 )==0)
+               then  "error: PVArrayGeom vertices reversed"
+               else  Format( "%.0f%c az, %.0f%c tilt via '%s'", PVWAzm[2], 176, PVWArrayTiltDeg[2], 176, PVWPVArrGeomRef[2]:Name )
+               endif endif
+         else  "(PVWGeomSpecMethod[2] unrecognized)"
+         endif endif endif endif  }
+
+   ; PV Array Summary Message
+   "Set Proj:PVWGeomSummaryMsg[2]"     Proj:PVWGeomSummaryMsg[2]  = {      ; message describing orientation/location errors or summary of valid inputs
+         if (FindInString( PVWLocationMsg[2], "ERROR" ) >= 0)
+         then  PVWLocationMsg[2]
+         else if (PVWArrayType[2] > 4) then  "PV Array #2:  2-axis tracking"  ; "Tracking (two axis)"
+         else if (PVWArrayType[2] > 2)                ; "Tracking (one axis)"
+         then  if (PVWArrayTiltInput[2] == 0)         ; "deg"
+               then  Format( "PV Array #2:  Tracking axis %.0f%c azimuth, %.1f%c tilt (%.1f-in-12)", PVWAzm[2], 176, PVWArrayTiltDeg[2], 176, PVWArrayTiltPitch[2] )
+               else                                   ; "pitch"
+                     Format( "PV Array #2:  Tracking axis %.0f%c azimuth, %.1f-in-12 tilt (%.1f%c)", PVWAzm[2], 176, PVWArrayTiltPitch[2], PVWArrayTiltDeg[2], 176 )
+               endif
+         else if (PVWGeomSpecMethod[2] == 0)    ; "azimuth and tilt"
+         then  if (PVWLocSpecMethod[2] == 0)
+               then  PVWGeomBtnLabel[2] + " (no location specified)"
+               else if (PVWLocSpecified[2] == 0)
+               then  "ERROR:  PV Array #2 Location fields above missing or invalid."
+               else  Format( "PV Array #2:  %.1f ft2 (%.1f W/ft2) with %.0f%c azimuth and %.1f%c tilt.", (PVWHeight[2] * PVWWidth[2]),
+                              (PVWDCSysSize[2] * 1000 / (PVWHeight[2] * PVWWidth[2])), PVWAzm[2], 176, PVWArrayTiltDeg[2], 176 )
+               endif endif
+         else if (PVWGeomSpecMethod[2] == 1)    ; reference PVArrayGeom object
+         then  if (LocalCompAssigned( PVWPVArrGeomRef[2] )==0)
+               then  "ERROR:  Geometry to be defined via PVArrayGeom object assignment, but no PVArrayGeom object is assigned."
+               else if (IfValidAnd( PVWPVArrGeomRef[2]:ChildPolyLpRef:TiltAngle >= 0 )==0 .OR. IfValidAnd( PVWPVArrGeomRef[2]:ChildPolyLpRef:TiltAngle <= 90 )==0)
+               then  Format( "ERROR:  PVArrayGeom '%s' is invalid (facing downward, vertices may be reversed).", PVWPVArrGeomRef[2]:Name )
+               else if (IfValidAnd( PVWAzm[2] >= 0 )==0 .OR. IfValidAnd( PVWArrayTiltDeg[2] >= 0 )==0 .OR.
+                        IfValidAnd( PVWPVArrGeomRef[2]:ChildPolyLpRef:Area > 0 )==0)
+               then  Format( "ERROR:  Geometry defined by PVArrayGeom '%s' which has invalid geometry.", PVWPVArrGeomRef[2]:Name )
+               else  Format( "PV Array #2:  %.1f ft2 (%.1f W/ft2) with %.0f%c azimuth and %.1f%c tilt.", PVWPVArrGeomRef[2]:ChildPolyLpRef:Area,
+                              (PVWDCSysSize[2] * 1000 / PVWPVArrGeomRef[2]:ChildPolyLpRef:Area), PVWAzm[2], 176, PVWArrayTiltDeg[2], 176 )
+               endif endif endif
+         else  "summary msg"
+         endif endif endif endif endif  }
+
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "Default_PVArray_OrientationLocation_3"  0 0 0 0
+;*************************************************************************
+; array index searches:  [3] / _3 / #3
+   "Set Proj:PVWGeomPolyLpRef[3]"   Proj:PVWGeomPolyLpRef[3]  = {
+         if (PVWGeomSpecMethod[3]==1 .AND. LocalCompAssigned( PVWPVArrGeomRef[3] ))
+         then  PVWPVArrGeomRef[3]:ChildPolyLpRef
+         else  UNCHANGED  endif  }
+   "Incrament Proj:PVWPVArrGeomRef[3]:NumPVArrayRefs"      Proj:PVWPVArrGeomRef[3]:NumPVArrayRefs  = {
+         if (PVWGeomSpecMethod[3]!=1) then  UNCHANGED
+         else  PVWPVArrGeomRef[3]:NumPVArrayRefs + 1  endif  }
+
+   "Set Proj:PVWLocationMsg[3]"     Proj:PVWLocationMsg[3]  = {      ; "message describing need or result of PVWLocSpecMethod" 
+         if (PVWGeomSpecMethod[3]==1) then  UNDEFINED   ; no location msg if geometry defined by PVArrayGeom object ref
+         else if (HaveShadeObjects .AND. PVWLocSpecMethod[3]==0)
+         then  "ERROR:  Location must be specified when Shade object(s) exist."
+         else  " "  endif endif  }   ; "Location required only if simulating PV array shading."  endif endif  }
+         ;     Proj:PVWLocSpecMethod[ALL],  Optional, 
+         ;         0,    "- not specified -"
+         ;         1,    "X,Y,Z and height, width"
+         ;         2,    "in relation to another PV Array"
+
+   "Set Proj:PVWRelLocDistLbl[3]"   Proj:PVWRelLocDistLbl[3]  = {
+         if (PVWGeomSpecMethod[3] == 1 .OR. PVWLocSpecMethod[3] != 2) then  UNDEFINED
+         else if (PVWRelLocSpecMeth[3] == 5)
+         then  "Distance Between Centroids:"
+         else  "Distance Separating Arrays:"    endif endif  }
+
+;     Proj:PVWRelLocArrayIdx[ALL], Optional,  0,    1,   1,    1,  1,  1
+;     Proj:PVWRelLocDistance[ALL], Optional,  0,    1,   1,    1,  1,  1 BEMP_Flt,  5,  "ft",    "Distance between this and another PV array"    
+;     Proj:PVWRelLocAzm[ALL],      Optional,  0,    1,   1,    1,  1,  1 BEMP_Flt,  5,  "deg",   "Azimuth from centroid of another array to this one (0=N, 90=E, ...)"    
+
+   "Set Proj:PVWRelLocAzmLbl[3]"    Proj:PVWRelLocAzmLbl[3]    = {
+         if (PVWGeomSpecMethod[3] == 1 .OR. PVWLocSpecMethod[3] != 2 .OR.
+             PVWRelLocSpecMeth[3] != 5 .OR. IfValidAnd( PVWRelLocArrayIdx[3] > 0 )==0 .OR.
+             IfValidAnd( PVWRelLocArrayIdx[3] <= 5 )==0) then  UNDEFINED
+         else  Format( "Azimuth from centroid of array #%g to centroid of this array:", PVWRelLocArrayIdx[3] )
+         endif  }
+
+;     Proj:PVWRelLocTiltDeg[ALL],  Optional,  0,    1,   1,    1,  1,  1 BEMP_Flt,  5,  "deg",   "Tilt from centroid of another array to this one (in degrees, 0-horizontal, 90-vertical)"    
+   "Set Proj:PVWRelLocTiltLbl[3]"    Proj:PVWRelLocTiltLbl[3]    = {
+         if (PVWGeomSpecMethod[3] == 1 .OR. PVWLocSpecMethod[3] != 2 .OR.
+             PVWRelLocSpecMeth[3] != 5 .OR. IfValidAnd( PVWRelLocArrayIdx[3] > 0 )==0 .OR.
+             IfValidAnd( PVWRelLocArrayIdx[3] <= 5 )==0) then  UNDEFINED
+         else  Format( "Tilt from centroid of array #%g to centroid of this array:", PVWRelLocArrayIdx[3] )
+         endif  }
+
+; TO DO - when PVWGeomSpecMethod[*] == 1, then FORCE defaulting of Azimuth & Tilt (based on assigned PVArrayGeom object PolyLp)
+   "Default Proj:PVWAzm[3]"      Proj:PVWAzm[3]      = {
+         if (PVWGeomSpecMethod[3] == 1)    ; reference PVArrayGeom object
+         then  if (LocalCompAssigned( PVWPVArrGeomRef[3] )==0) then  UNDEFINED
+               else if (IfValidAnd( PVWPVArrGeomRef[3]:ChildPolyLpRef:TiltAngle >=  0 )==0 .OR.
+                        IfValidAnd( PVWPVArrGeomRef[3]:ChildPolyLpRef:TiltAngle <= 90 )==0) then  UNDEFINED
+               else if (LocalStatus( PVWPVArrGeomRef[3]:ChildPolyLpRef:Azimuth ) > 0)
+               then  PVWPVArrGeomRef[3]:ChildPolyLpRef:Azimuth
+               else  UNDEFINED  endif endif endif
+         else  if (PVWArrayType[3] == 3) then  180   ; Tracking (one axis) - SAC 4/29/20
+               else  170  endif endif  }
+
+   ;   Proj:PVWArrayTiltInput[ALL]  -  0-"Degrees"  1-"Pitch"
+   "Blast PVWArrayTiltPitch[3] if PVWArrayTiltInput = deg"  Proj:Action  = {
+         if ((PVWArrayTiltInput[3] == 0 .OR. PVWGeomSpecMethod[3] == 1) .AND.
+             LocalStatus( PVWArrayTiltPitch[3] ) > 4)
+         then   EvalRulelist( "BlastInputs_PVWArrayTiltPitch_3" )  else  UNCHANGED  endif  }
+   "Blast PVWArrayTiltDeg[3] if PVWArrayTiltInput = pitch"  Proj:Action  = {
+         if ((PVWArrayTiltInput[3] == 1 .OR. PVWGeomSpecMethod[3] == 1) .AND.
+             LocalStatus( PVWArrayTiltDeg[3] ) > 4)
+         then   EvalRulelist( "BlastInputs_PVWArrayTiltDeg_3" )  else  UNCHANGED  endif  }
+
+  ; round 1 TiltDeg defaulting only for PVWGeomSpecMethod[] = "reference PVArrayGeom object"
+   "Default Proj:PVWArrayTiltDeg[3]-1"   Proj:PVWArrayTiltDeg[3]      = {
+         if (PVWGeomSpecMethod[3] == 1)    ; reference PVArrayGeom object
+         then  if (LocalCompAssigned( PVWPVArrGeomRef[3] )==0) then  UNDEFINED
+               else if (LocalStatus( PVWPVArrGeomRef[3]:ChildPolyLpRef:TiltAngle ) > 0)
+               then  PVWPVArrGeomRef[3]:ChildPolyLpRef:TiltAngle
+               else  UNDEFINED  endif endif
+         else  UNDEFINED  endif  }
+
+   "Default Proj:PVWArrayTiltPitch[3]"   Proj:PVWArrayTiltPitch[3]   = {
+         if (PVWGeomSpecMethod[3] == 1 .AND. LocalStatus( PVWArrayTiltDeg[3] ) < 1) then  UNDEFINED
+         else if (  PVWGeomSpecMethod[3] == 1 .OR.
+                   (PVWArrayTiltInput[3] == 0 .AND. LocalStatus( PVWArrayTiltDeg[3] ) > 4) )
+         then  if (PVWArrayTiltDeg[3] == 0) then  0  else  12 * tan( (PVWArrayTiltDeg[3]/180)*3.14159 )  endif
+         else  if (PVWArrayType[3] == 3) then  0      ; Tracking (one axis) - SAC 4/29/20
+               else  5  endif endif endif  }
+
+   "Default Proj:PVWArrayTiltDeg[3]-2"   Proj:PVWArrayTiltDeg[3]      = {
+         if (PVWGeomSpecMethod[3] == 1) then  UNCHANGED
+         else if (PVWArrayTiltInput[3] == 1 .AND. LocalStatus( PVWArrayTiltPitch[3] ) > 4)
+         then  (atan( PVWArrayTiltPitch[3] / 12 ) / 3.14159) * 180
+         else  if (PVWArrayType[3] == 3) then  0      ; Tracking (one axis) - SAC 4/29/20
+               else  (atan( 5 / 12 ) / 3.14159) * 180  endif endif endif  }
+
+      ;   "Set Proj:PVWRealAzm[3]"      Proj:PVWRealAzm[3]   = {
+      ;         if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[3] > 0 )==0) then  UNDEFINED
+      ;         else if (PVWGeomSpecMethod[3] == 0)    ; "azimuth and tilt"
+      ;         then  PVWAzm[3]
+      ;         else if (PVWGeomSpecMethod[3] == 1)    ; "reference PVArrayGeom object"
+      ;         then  if (LocalCompAssigned( PVWPVArrGeomRef[3] )==0) then  UNDEFINED
+      ;               else if (LocalStatus( PVWPVArrGeomRef[3]:ChildPolyLpRef:Azimuth ) > 0)
+      ;               then  PVWPVArrGeomRef[3]:ChildPolyLpRef:Azimuth
+      ;               else  UNDEFINED  endif endif
+      ;         else  UNDEFINED  endif endif endif  }
+
+   "Set Proj:PVWLocSpecified[3] - whether PV array location is specified: 0-not, 1-relative, 2-direct"
+      Proj:PVWLocSpecified[3]  = {
+         if (PVWGeomSpecMethod[3] == 0)    ; "azimuth and tilt"
+         then  if (PVWLocSpecMethod[3] == 0) then  0     ; LocSpecMethod = "- not specified -"
+               else if (PVWLocSpecMethod[3] == 1)        ; LocSpecMethod = "X,Y,Z and height, width"
+               then  if (LocalStatus( PVWHeight[3] )>0 .AND. LocalStatus( PVWWidth[3] )>0 .AND.
+                         LocalStatus( PVWReferenceX[3] )>0 .AND. LocalStatus( PVWReferenceY[3] )>0 .AND.
+                         LocalStatus( PVWReferenceZ[3] )>0) then  2
+                     else  0  endif
+               else if (PVWLocSpecMethod[3] == 2)        ; LocSpecMethod = "in relation to another PV Array"
+               then  0  ; NYI
+               else  0  ; undefined
+               endif endif endif
+         else if (PVWGeomSpecMethod[3] == 1)    ; "reference PVArrayGeom object"
+         then  if (LocalCompAssigned( PVWPVArrGeomRef[3] )==0) then  0
+               else if (IfValidAnd( PVWAzm[3] >= 0 )==0 .OR. IfValidAnd( PVWArrayTiltDeg[3] >= 0 )==0 .OR.
+                        IfValidAnd( PVWPVArrGeomRef[3]:ChildPolyLpRef:Area > 0 )==0) then  0
+               else  2  endif endif
+         else  0  endif endif  }
+
+  ; SAC 2/22/17 - new PVW geometry-related inputs
+  ; SAC 10/10/18 - added new messages for 1- & 2-axis tracking arrays (tic #1047)
+   "Set Proj:PVWGeomBtnLabel[3]"    Proj:PVWGeomBtnLabel[3]  = {
+         if (PVWArrayType[3] > 4) then  "No orientation or location for 2-axis tracking arrays"  ; "Tracking (two axis)"
+         else if (PVWArrayType[3] > 2)                ; "Tracking (one axis)"
+         then  if (PVWArrayTiltInput[3] == 0)         ; "deg"
+               then  Format( "Tracking axis: %.0f%c azimuth, %.1f%c tilt", PVWAzm[3], 176, PVWArrayTiltDeg[3], 176 )
+               else                                   ; "pitch"
+                     Format( "Tracking axis: %.0f%c azimuth, %.1f-in-12 tilt", PVWAzm[3], 176, PVWArrayTiltPitch[3] )
+               endif
+         else if (PVWGeomSpecMethod[3] == 0)         ; "azimuth and tilt"
+         then  if (HaveShadeObjects .AND. PVWLocSpecMethod[3]==0)
+               then  "Location Needs To Be Specified"
+               else if (PVWArrayTiltInput[3] == 0)    ; "deg"
+               then  Format( "%.0f%c azimuth, %.1f%c tilt (%.1f-in-12)", PVWAzm[3], 176, PVWArrayTiltDeg[3], 176, PVWArrayTiltPitch[3] )
+               else                                   ; "pitch"
+                     Format( "%.0f%c azimuth, %.1f-in-12 tilt (%.1f%c)", PVWAzm[3], 176, PVWArrayTiltPitch[3], PVWArrayTiltDeg[3], 176 )
+               endif endif
+         else if (PVWGeomSpecMethod[3] == 1)    ; "reference PVArrayGeom object"
+         then  if (LocalCompAssigned( PVWPVArrGeomRef[3] )==0)
+               then  "error: PVArrayGeom not assigned"
+               else if (IfValidAnd( PVWPVArrGeomRef[3]:ChildPolyLpRef:TiltAngle >=  0 )==0 .OR. IfValidAnd( PVWPVArrGeomRef[3]:ChildPolyLpRef:TiltAngle <= 90 )==0)
+               then  "error: PVArrayGeom vertices reversed"
+               else  Format( "%.0f%c az, %.0f%c tilt via '%s'", PVWAzm[3], 176, PVWArrayTiltDeg[3], 176, PVWPVArrGeomRef[3]:Name )
+               endif endif
+         else  "(PVWGeomSpecMethod[3] unrecognized)"
+         endif endif endif endif  }
+
+   ; PV Array Summary Message
+   "Set Proj:PVWGeomSummaryMsg[3]"     Proj:PVWGeomSummaryMsg[3]  = {      ; message describing orientation/location errors or summary of valid inputs
+         if (FindInString( PVWLocationMsg[3], "ERROR" ) >= 0)
+         then  PVWLocationMsg[3]
+         else if (PVWArrayType[3] > 4) then  "PV Array #3:  2-axis tracking"  ; "Tracking (two axis)"
+         else if (PVWArrayType[3] > 2)                ; "Tracking (one axis)"
+         then  if (PVWArrayTiltInput[3] == 0)         ; "deg"
+               then  Format( "PV Array #3:  Tracking axis %.0f%c azimuth, %.1f%c tilt (%.1f-in-12)", PVWAzm[3], 176, PVWArrayTiltDeg[3], 176, PVWArrayTiltPitch[3] )
+               else                                   ; "pitch"
+                     Format( "PV Array #3:  Tracking axis %.0f%c azimuth, %.1f-in-12 tilt (%.1f%c)", PVWAzm[3], 176, PVWArrayTiltPitch[3], PVWArrayTiltDeg[3], 176 )
+               endif
+         else if (PVWGeomSpecMethod[3] == 0)    ; "azimuth and tilt"
+         then  if (PVWLocSpecMethod[3] == 0)
+               then  PVWGeomBtnLabel[3] + " (no location specified)"
+               else if (PVWLocSpecified[3] == 0)
+               then  "ERROR:  PV Array #3 Location fields above missing or invalid."
+               else  Format( "PV Array #3:  %.1f ft2 (%.1f W/ft2) with %.0f%c azimuth and %.1f%c tilt.", (PVWHeight[3] * PVWWidth[3]),
+                              (PVWDCSysSize[3] * 1000 / (PVWHeight[3] * PVWWidth[3])), PVWAzm[3], 176, PVWArrayTiltDeg[3], 176 )
+               endif endif
+         else if (PVWGeomSpecMethod[3] == 1)    ; reference PVArrayGeom object
+         then  if (LocalCompAssigned( PVWPVArrGeomRef[3] )==0)
+               then  "ERROR:  Geometry to be defined via PVArrayGeom object assignment, but no PVArrayGeom object is assigned."
+               else if (IfValidAnd( PVWPVArrGeomRef[3]:ChildPolyLpRef:TiltAngle >= 0 )==0 .OR. IfValidAnd( PVWPVArrGeomRef[3]:ChildPolyLpRef:TiltAngle <= 90 )==0)
+               then  Format( "ERROR:  PVArrayGeom '%s' is invalid (facing downward, vertices may be reversed).", PVWPVArrGeomRef[3]:Name )
+               else if (IfValidAnd( PVWAzm[3] >= 0 )==0 .OR. IfValidAnd( PVWArrayTiltDeg[3] >= 0 )==0 .OR.
+                        IfValidAnd( PVWPVArrGeomRef[3]:ChildPolyLpRef:Area > 0 )==0)
+               then  Format( "ERROR:  Geometry defined by PVArrayGeom '%s' which has invalid geometry.", PVWPVArrGeomRef[3]:Name )
+               else  Format( "PV Array #3:  %.1f ft2 (%.1f W/ft2) with %.0f%c azimuth and %.1f%c tilt.", PVWPVArrGeomRef[3]:ChildPolyLpRef:Area,
+                              (PVWDCSysSize[3] * 1000 / PVWPVArrGeomRef[3]:ChildPolyLpRef:Area), PVWAzm[3], 176, PVWArrayTiltDeg[3], 176 )
+               endif endif endif
+         else  "summary msg"
+         endif endif endif endif endif  }
+
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "Default_PVArray_OrientationLocation_4"  0 0 0 0
+;*************************************************************************
+; array index searches:  [4] / _4 / #4
+   "Set Proj:PVWGeomPolyLpRef[4]"   Proj:PVWGeomPolyLpRef[4]  = {
+         if (PVWGeomSpecMethod[4]==1 .AND. LocalCompAssigned( PVWPVArrGeomRef[4] ))
+         then  PVWPVArrGeomRef[4]:ChildPolyLpRef
+         else  UNCHANGED  endif  }
+   "Incrament Proj:PVWPVArrGeomRef[4]:NumPVArrayRefs"      Proj:PVWPVArrGeomRef[4]:NumPVArrayRefs  = {
+         if (PVWGeomSpecMethod[4]!=1) then  UNCHANGED
+         else  PVWPVArrGeomRef[4]:NumPVArrayRefs + 1  endif  }
+
+   "Set Proj:PVWLocationMsg[4]"     Proj:PVWLocationMsg[4]  = {      ; "message describing need or result of PVWLocSpecMethod" 
+         if (PVWGeomSpecMethod[4]==1) then  UNDEFINED   ; no location msg if geometry defined by PVArrayGeom object ref
+         else if (HaveShadeObjects .AND. PVWLocSpecMethod[4]==0)
+         then  "ERROR:  Location must be specified when Shade object(s) exist."
+         else  " "  endif endif  }   ; "Location required only if simulating PV array shading."  endif endif  }
+         ;     Proj:PVWLocSpecMethod[ALL],  Optional, 
+         ;         0,    "- not specified -"
+         ;         1,    "X,Y,Z and height, width"
+         ;         2,    "in relation to another PV Array"
+
+   "Set Proj:PVWRelLocDistLbl[4]"   Proj:PVWRelLocDistLbl[4]  = {
+         if (PVWGeomSpecMethod[4] == 1 .OR. PVWLocSpecMethod[4] != 2) then  UNDEFINED
+         else if (PVWRelLocSpecMeth[4] == 5)
+         then  "Distance Between Centroids:"
+         else  "Distance Separating Arrays:"    endif endif  }
+
+;     Proj:PVWRelLocArrayIdx[ALL], Optional,  0,    1,   1,    1,  1,  1
+;     Proj:PVWRelLocDistance[ALL], Optional,  0,    1,   1,    1,  1,  1 BEMP_Flt,  5,  "ft",    "Distance between this and another PV array"    
+;     Proj:PVWRelLocAzm[ALL],      Optional,  0,    1,   1,    1,  1,  1 BEMP_Flt,  5,  "deg",   "Azimuth from centroid of another array to this one (0=N, 90=E, ...)"    
+
+   "Set Proj:PVWRelLocAzmLbl[4]"    Proj:PVWRelLocAzmLbl[4]    = {
+         if (PVWGeomSpecMethod[4] == 1 .OR. PVWLocSpecMethod[4] != 2 .OR.
+             PVWRelLocSpecMeth[4] != 5 .OR. IfValidAnd( PVWRelLocArrayIdx[4] > 0 )==0 .OR.
+             IfValidAnd( PVWRelLocArrayIdx[4] <= 5 )==0) then  UNDEFINED
+         else  Format( "Azimuth from centroid of array #%g to centroid of this array:", PVWRelLocArrayIdx[4] )
+         endif  }
+
+;     Proj:PVWRelLocTiltDeg[ALL],  Optional,  0,    1,   1,    1,  1,  1 BEMP_Flt,  5,  "deg",   "Tilt from centroid of another array to this one (in degrees, 0-horizontal, 90-vertical)"    
+   "Set Proj:PVWRelLocTiltLbl[4]"    Proj:PVWRelLocTiltLbl[4]    = {
+         if (PVWGeomSpecMethod[4] == 1 .OR. PVWLocSpecMethod[4] != 2 .OR.
+             PVWRelLocSpecMeth[4] != 5 .OR. IfValidAnd( PVWRelLocArrayIdx[4] > 0 )==0 .OR.
+             IfValidAnd( PVWRelLocArrayIdx[4] <= 5 )==0) then  UNDEFINED
+         else  Format( "Tilt from centroid of array #%g to centroid of this array:", PVWRelLocArrayIdx[4] )
+         endif  }
+
+; TO DO - when PVWGeomSpecMethod[*] == 1, then FORCE defaulting of Azimuth & Tilt (based on assigned PVArrayGeom object PolyLp)
+   "Default Proj:PVWAzm[4]"      Proj:PVWAzm[4]      = {
+         if (PVWGeomSpecMethod[4] == 1)    ; reference PVArrayGeom object
+         then  if (LocalCompAssigned( PVWPVArrGeomRef[4] )==0) then  UNDEFINED
+               else if (IfValidAnd( PVWPVArrGeomRef[4]:ChildPolyLpRef:TiltAngle >=  0 )==0 .OR.
+                        IfValidAnd( PVWPVArrGeomRef[4]:ChildPolyLpRef:TiltAngle <= 90 )==0) then  UNDEFINED
+               else if (LocalStatus( PVWPVArrGeomRef[4]:ChildPolyLpRef:Azimuth ) > 0)
+               then  PVWPVArrGeomRef[4]:ChildPolyLpRef:Azimuth
+               else  UNDEFINED  endif endif endif
+         else  if (PVWArrayType[4] == 3) then  180   ; Tracking (one axis) - SAC 4/29/20
+               else  170  endif endif  }
+
+   ;   Proj:PVWArrayTiltInput[ALL]  -  0-"Degrees"  1-"Pitch"
+   "Blast PVWArrayTiltPitch[4] if PVWArrayTiltInput = deg"  Proj:Action  = {
+         if ((PVWArrayTiltInput[4] == 0 .OR. PVWGeomSpecMethod[4] == 1) .AND.
+             LocalStatus( PVWArrayTiltPitch[4] ) > 4)
+         then   EvalRulelist( "BlastInputs_PVWArrayTiltPitch_4" )  else  UNCHANGED  endif  }
+   "Blast PVWArrayTiltDeg[4] if PVWArrayTiltInput = pitch"  Proj:Action  = {
+         if ((PVWArrayTiltInput[4] == 1 .OR. PVWGeomSpecMethod[4] == 1) .AND.
+             LocalStatus( PVWArrayTiltDeg[4] ) > 4)
+         then   EvalRulelist( "BlastInputs_PVWArrayTiltDeg_4" )  else  UNCHANGED  endif  }
+
+  ; round 1 TiltDeg defaulting only for PVWGeomSpecMethod[] = "reference PVArrayGeom object"
+   "Default Proj:PVWArrayTiltDeg[4]-1"   Proj:PVWArrayTiltDeg[4]      = {
+         if (PVWGeomSpecMethod[4] == 1)    ; reference PVArrayGeom object
+         then  if (LocalCompAssigned( PVWPVArrGeomRef[4] )==0) then  UNDEFINED
+               else if (LocalStatus( PVWPVArrGeomRef[4]:ChildPolyLpRef:TiltAngle ) > 0)
+               then  PVWPVArrGeomRef[4]:ChildPolyLpRef:TiltAngle
+               else  UNDEFINED  endif endif
+         else  UNDEFINED  endif  }
+
+   "Default Proj:PVWArrayTiltPitch[4]"   Proj:PVWArrayTiltPitch[4]   = {
+         if (PVWGeomSpecMethod[4] == 1 .AND. LocalStatus( PVWArrayTiltDeg[4] ) < 1) then  UNDEFINED
+         else if (  PVWGeomSpecMethod[4] == 1 .OR.
+                   (PVWArrayTiltInput[4] == 0 .AND. LocalStatus( PVWArrayTiltDeg[4] ) > 4) )
+         then  if (PVWArrayTiltDeg[4] == 0) then  0  else  12 * tan( (PVWArrayTiltDeg[4]/180)*3.14159 )  endif
+         else  if (PVWArrayType[4] == 3) then  0      ; Tracking (one axis) - SAC 4/29/20
+               else  5  endif endif endif  }
+
+   "Default Proj:PVWArrayTiltDeg[4]-2"   Proj:PVWArrayTiltDeg[4]      = {
+         if (PVWGeomSpecMethod[4] == 1) then  UNCHANGED
+         else if (PVWArrayTiltInput[4] == 1 .AND. LocalStatus( PVWArrayTiltPitch[4] ) > 4)
+         then  (atan( PVWArrayTiltPitch[4] / 12 ) / 3.14159) * 180
+         else  if (PVWArrayType[4] == 3) then  0      ; Tracking (one axis) - SAC 4/29/20
+               else  (atan( 5 / 12 ) / 3.14159) * 180  endif endif endif  }
+
+      ;   "Set Proj:PVWRealAzm[4]"      Proj:PVWRealAzm[4]   = {
+      ;         if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[4] > 0 )==0) then  UNDEFINED
+      ;         else if (PVWGeomSpecMethod[4] == 0)    ; "azimuth and tilt"
+      ;         then  PVWAzm[4]
+      ;         else if (PVWGeomSpecMethod[4] == 1)    ; "reference PVArrayGeom object"
+      ;         then  if (LocalCompAssigned( PVWPVArrGeomRef[4] )==0) then  UNDEFINED
+      ;               else if (LocalStatus( PVWPVArrGeomRef[4]:ChildPolyLpRef:Azimuth ) > 0)
+      ;               then  PVWPVArrGeomRef[4]:ChildPolyLpRef:Azimuth
+      ;               else  UNDEFINED  endif endif
+      ;         else  UNDEFINED  endif endif endif  }
+
+   "Set Proj:PVWLocSpecified[4] - whether PV array location is specified: 0-not, 1-relative, 2-direct"
+      Proj:PVWLocSpecified[4]  = {
+         if (PVWGeomSpecMethod[4] == 0)    ; "azimuth and tilt"
+         then  if (PVWLocSpecMethod[4] == 0) then  0     ; LocSpecMethod = "- not specified -"
+               else if (PVWLocSpecMethod[4] == 1)        ; LocSpecMethod = "X,Y,Z and height, width"
+               then  if (LocalStatus( PVWHeight[4] )>0 .AND. LocalStatus( PVWWidth[4] )>0 .AND.
+                         LocalStatus( PVWReferenceX[4] )>0 .AND. LocalStatus( PVWReferenceY[4] )>0 .AND.
+                         LocalStatus( PVWReferenceZ[4] )>0) then  2
+                     else  0  endif
+               else if (PVWLocSpecMethod[4] == 2)        ; LocSpecMethod = "in relation to another PV Array"
+               then  0  ; NYI
+               else  0  ; undefined
+               endif endif endif
+         else if (PVWGeomSpecMethod[4] == 1)    ; "reference PVArrayGeom object"
+         then  if (LocalCompAssigned( PVWPVArrGeomRef[4] )==0) then  0
+               else if (IfValidAnd( PVWAzm[4] >= 0 )==0 .OR. IfValidAnd( PVWArrayTiltDeg[4] >= 0 )==0 .OR.
+                        IfValidAnd( PVWPVArrGeomRef[4]:ChildPolyLpRef:Area > 0 )==0) then  0
+               else  2  endif endif
+         else  0  endif endif  }
+
+  ; SAC 2/22/17 - new PVW geometry-related inputs
+  ; SAC 10/10/18 - added new messages for 1- & 2-axis tracking arrays (tic #1047)
+   "Set Proj:PVWGeomBtnLabel[4]"    Proj:PVWGeomBtnLabel[4]  = {
+         if (PVWArrayType[4] > 4) then  "No orientation or location for 2-axis tracking arrays"  ; "Tracking (two axis)"
+         else if (PVWArrayType[4] > 2)                ; "Tracking (one axis)"
+         then  if (PVWArrayTiltInput[4] == 0)         ; "deg"
+               then  Format( "Tracking axis: %.0f%c azimuth, %.1f%c tilt", PVWAzm[4], 176, PVWArrayTiltDeg[4], 176 )
+               else                                   ; "pitch"
+                     Format( "Tracking axis: %.0f%c azimuth, %.1f-in-12 tilt", PVWAzm[4], 176, PVWArrayTiltPitch[4] )
+               endif
+         else if (PVWGeomSpecMethod[4] == 0)         ; "azimuth and tilt"
+         then  if (HaveShadeObjects .AND. PVWLocSpecMethod[4]==0)
+               then  "Location Needs To Be Specified"
+               else if (PVWArrayTiltInput[4] == 0)    ; "deg"
+               then  Format( "%.0f%c azimuth, %.1f%c tilt (%.1f-in-12)", PVWAzm[4], 176, PVWArrayTiltDeg[4], 176, PVWArrayTiltPitch[4] )
+               else                                   ; "pitch"
+                     Format( "%.0f%c azimuth, %.1f-in-12 tilt (%.1f%c)", PVWAzm[4], 176, PVWArrayTiltPitch[4], PVWArrayTiltDeg[4], 176 )
+               endif endif
+         else if (PVWGeomSpecMethod[4] == 1)    ; "reference PVArrayGeom object"
+         then  if (LocalCompAssigned( PVWPVArrGeomRef[4] )==0)
+               then  "error: PVArrayGeom not assigned"
+               else if (IfValidAnd( PVWPVArrGeomRef[4]:ChildPolyLpRef:TiltAngle >=  0 )==0 .OR. IfValidAnd( PVWPVArrGeomRef[4]:ChildPolyLpRef:TiltAngle <= 90 )==0)
+               then  "error: PVArrayGeom vertices reversed"
+               else  Format( "%.0f%c az, %.0f%c tilt via '%s'", PVWAzm[4], 176, PVWArrayTiltDeg[4], 176, PVWPVArrGeomRef[4]:Name )
+               endif endif
+         else  "(PVWGeomSpecMethod[4] unrecognized)"
+         endif endif endif endif  }
+
+   ; PV Array Summary Message
+   "Set Proj:PVWGeomSummaryMsg[4]"     Proj:PVWGeomSummaryMsg[4]  = {      ; message describing orientation/location errors or summary of valid inputs
+         if (FindInString( PVWLocationMsg[4], "ERROR" ) >= 0)
+         then  PVWLocationMsg[4]
+         else if (PVWArrayType[4] > 4) then  "PV Array #4:  2-axis tracking"  ; "Tracking (two axis)"
+         else if (PVWArrayType[4] > 2)                ; "Tracking (one axis)"
+         then  if (PVWArrayTiltInput[4] == 0)         ; "deg"
+               then  Format( "PV Array #4:  Tracking axis %.0f%c azimuth, %.1f%c tilt (%.1f-in-12)", PVWAzm[4], 176, PVWArrayTiltDeg[4], 176, PVWArrayTiltPitch[4] )
+               else                                   ; "pitch"
+                     Format( "PV Array #4:  Tracking axis %.0f%c azimuth, %.1f-in-12 tilt (%.1f%c)", PVWAzm[4], 176, PVWArrayTiltPitch[4], PVWArrayTiltDeg[4], 176 )
+               endif
+         else if (PVWGeomSpecMethod[4] == 0)    ; "azimuth and tilt"
+         then  if (PVWLocSpecMethod[4] == 0)
+               then  PVWGeomBtnLabel[4] + " (no location specified)"
+               else if (PVWLocSpecified[4] == 0)
+               then  "ERROR:  PV Array #4 Location fields above missing or invalid."
+               else  Format( "PV Array #4:  %.1f ft2 (%.1f W/ft2) with %.0f%c azimuth and %.1f%c tilt.", (PVWHeight[4] * PVWWidth[4]),
+                              (PVWDCSysSize[4] * 1000 / (PVWHeight[4] * PVWWidth[4])), PVWAzm[4], 176, PVWArrayTiltDeg[4], 176 )
+               endif endif
+         else if (PVWGeomSpecMethod[4] == 1)    ; reference PVArrayGeom object
+         then  if (LocalCompAssigned( PVWPVArrGeomRef[4] )==0)
+               then  "ERROR:  Geometry to be defined via PVArrayGeom object assignment, but no PVArrayGeom object is assigned."
+               else if (IfValidAnd( PVWPVArrGeomRef[4]:ChildPolyLpRef:TiltAngle >= 0 )==0 .OR. IfValidAnd( PVWPVArrGeomRef[4]:ChildPolyLpRef:TiltAngle <= 90 )==0)
+               then  Format( "ERROR:  PVArrayGeom '%s' is invalid (facing downward, vertices may be reversed).", PVWPVArrGeomRef[4]:Name )
+               else if (IfValidAnd( PVWAzm[4] >= 0 )==0 .OR. IfValidAnd( PVWArrayTiltDeg[4] >= 0 )==0 .OR.
+                        IfValidAnd( PVWPVArrGeomRef[4]:ChildPolyLpRef:Area > 0 )==0)
+               then  Format( "ERROR:  Geometry defined by PVArrayGeom '%s' which has invalid geometry.", PVWPVArrGeomRef[4]:Name )
+               else  Format( "PV Array #4:  %.1f ft2 (%.1f W/ft2) with %.0f%c azimuth and %.1f%c tilt.", PVWPVArrGeomRef[4]:ChildPolyLpRef:Area,
+                              (PVWDCSysSize[4] * 1000 / PVWPVArrGeomRef[4]:ChildPolyLpRef:Area), PVWAzm[4], 176, PVWArrayTiltDeg[4], 176 )
+               endif endif endif
+         else  "summary msg"
+         endif endif endif endif endif  }
+
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "Default_PVArray_OrientationLocation_5"  0 0 0 0
+;*************************************************************************
+; array index searches:  [5] / _5 / #5
+   "Set Proj:PVWGeomPolyLpRef[5]"   Proj:PVWGeomPolyLpRef[5]  = {
+         if (PVWGeomSpecMethod[5]==1 .AND. LocalCompAssigned( PVWPVArrGeomRef[5] ))
+         then  PVWPVArrGeomRef[5]:ChildPolyLpRef
+         else  UNCHANGED  endif  }
+   "Incrament Proj:PVWPVArrGeomRef[5]:NumPVArrayRefs"      Proj:PVWPVArrGeomRef[5]:NumPVArrayRefs  = {
+         if (PVWGeomSpecMethod[5]!=1) then  UNCHANGED
+         else  PVWPVArrGeomRef[5]:NumPVArrayRefs + 1  endif  }
+
+   "Set Proj:PVWLocationMsg[5]"     Proj:PVWLocationMsg[5]  = {      ; "message describing need or result of PVWLocSpecMethod" 
+         if (PVWGeomSpecMethod[5]==1) then  UNDEFINED   ; no location msg if geometry defined by PVArrayGeom object ref
+         else if (HaveShadeObjects .AND. PVWLocSpecMethod[5]==0)
+         then  "ERROR:  Location must be specified when Shade object(s) exist."
+         else  " "  endif endif  }   ; "Location required only if simulating PV array shading."  endif endif  }
+         ;     Proj:PVWLocSpecMethod[ALL],  Optional, 
+         ;         0,    "- not specified -"
+         ;         1,    "X,Y,Z and height, width"
+         ;         2,    "in relation to another PV Array"
+
+   "Set Proj:PVWRelLocDistLbl[5]"   Proj:PVWRelLocDistLbl[5]  = {
+         if (PVWGeomSpecMethod[5] == 1 .OR. PVWLocSpecMethod[5] != 2) then  UNDEFINED
+         else if (PVWRelLocSpecMeth[5] == 5)
+         then  "Distance Between Centroids:"
+         else  "Distance Separating Arrays:"    endif endif  }
+
+;     Proj:PVWRelLocArrayIdx[ALL], Optional,  0,    1,   1,    1,  1,  1
+;     Proj:PVWRelLocDistance[ALL], Optional,  0,    1,   1,    1,  1,  1 BEMP_Flt,  5,  "ft",    "Distance between this and another PV array"    
+;     Proj:PVWRelLocAzm[ALL],      Optional,  0,    1,   1,    1,  1,  1 BEMP_Flt,  5,  "deg",   "Azimuth from centroid of another array to this one (0=N, 90=E, ...)"    
+
+   "Set Proj:PVWRelLocAzmLbl[5]"    Proj:PVWRelLocAzmLbl[5]    = {
+         if (PVWGeomSpecMethod[5] == 1 .OR. PVWLocSpecMethod[5] != 2 .OR.
+             PVWRelLocSpecMeth[5] != 5 .OR. IfValidAnd( PVWRelLocArrayIdx[5] > 0 )==0 .OR.
+             IfValidAnd( PVWRelLocArrayIdx[5] <= 5 )==0) then  UNDEFINED
+         else  Format( "Azimuth from centroid of array #%g to centroid of this array:", PVWRelLocArrayIdx[5] )
+         endif  }
+
+;     Proj:PVWRelLocTiltDeg[ALL],  Optional,  0,    1,   1,    1,  1,  1 BEMP_Flt,  5,  "deg",   "Tilt from centroid of another array to this one (in degrees, 0-horizontal, 90-vertical)"    
+   "Set Proj:PVWRelLocTiltLbl[5]"    Proj:PVWRelLocTiltLbl[5]    = {
+         if (PVWGeomSpecMethod[5] == 1 .OR. PVWLocSpecMethod[5] != 2 .OR.
+             PVWRelLocSpecMeth[5] != 5 .OR. IfValidAnd( PVWRelLocArrayIdx[5] > 0 )==0 .OR.
+             IfValidAnd( PVWRelLocArrayIdx[5] <= 5 )==0) then  UNDEFINED
+         else  Format( "Tilt from centroid of array #%g to centroid of this array:", PVWRelLocArrayIdx[5] )
+         endif  }
+
+; TO DO - when PVWGeomSpecMethod[*] == 1, then FORCE defaulting of Azimuth & Tilt (based on assigned PVArrayGeom object PolyLp)
+   "Default Proj:PVWAzm[5]"      Proj:PVWAzm[5]      = {
+         if (PVWGeomSpecMethod[5] == 1)    ; reference PVArrayGeom object
+         then  if (LocalCompAssigned( PVWPVArrGeomRef[5] )==0) then  UNDEFINED
+               else if (IfValidAnd( PVWPVArrGeomRef[5]:ChildPolyLpRef:TiltAngle >=  0 )==0 .OR.
+                        IfValidAnd( PVWPVArrGeomRef[5]:ChildPolyLpRef:TiltAngle <= 90 )==0) then  UNDEFINED
+               else if (LocalStatus( PVWPVArrGeomRef[5]:ChildPolyLpRef:Azimuth ) > 0)
+               then  PVWPVArrGeomRef[5]:ChildPolyLpRef:Azimuth
+               else  UNDEFINED  endif endif endif
+         else  if (PVWArrayType[5] == 3) then  180   ; Tracking (one axis) - SAC 4/29/20
+               else  170  endif endif  }
+
+   ;   Proj:PVWArrayTiltInput[ALL]  -  0-"Degrees"  1-"Pitch"
+   "Blast PVWArrayTiltPitch[5] if PVWArrayTiltInput = deg"  Proj:Action  = {
+         if ((PVWArrayTiltInput[5] == 0 .OR. PVWGeomSpecMethod[5] == 1) .AND.
+             LocalStatus( PVWArrayTiltPitch[5] ) > 4)
+         then   EvalRulelist( "BlastInputs_PVWArrayTiltPitch_5" )  else  UNCHANGED  endif  }
+   "Blast PVWArrayTiltDeg[5] if PVWArrayTiltInput = pitch"  Proj:Action  = {
+         if ((PVWArrayTiltInput[5] == 1 .OR. PVWGeomSpecMethod[5] == 1) .AND.
+             LocalStatus( PVWArrayTiltDeg[5] ) > 4)
+         then   EvalRulelist( "BlastInputs_PVWArrayTiltDeg_5" )  else  UNCHANGED  endif  }
+
+  ; round 1 TiltDeg defaulting only for PVWGeomSpecMethod[] = "reference PVArrayGeom object"
+   "Default Proj:PVWArrayTiltDeg[5]-1"   Proj:PVWArrayTiltDeg[5]      = {
+         if (PVWGeomSpecMethod[5] == 1)    ; reference PVArrayGeom object
+         then  if (LocalCompAssigned( PVWPVArrGeomRef[5] )==0) then  UNDEFINED
+               else if (LocalStatus( PVWPVArrGeomRef[5]:ChildPolyLpRef:TiltAngle ) > 0)
+               then  PVWPVArrGeomRef[5]:ChildPolyLpRef:TiltAngle
+               else  UNDEFINED  endif endif
+         else  UNDEFINED  endif  }
+
+   "Default Proj:PVWArrayTiltPitch[5]"   Proj:PVWArrayTiltPitch[5]   = {
+         if (PVWGeomSpecMethod[5] == 1 .AND. LocalStatus( PVWArrayTiltDeg[5] ) < 1) then  UNDEFINED
+         else if (  PVWGeomSpecMethod[5] == 1 .OR.
+                   (PVWArrayTiltInput[5] == 0 .AND. LocalStatus( PVWArrayTiltDeg[5] ) > 4) )
+         then  if (PVWArrayTiltDeg[5] == 0) then  0  else  12 * tan( (PVWArrayTiltDeg[5]/180)*3.14159 )  endif
+         else  if (PVWArrayType[5] == 3) then  0      ; Tracking (one axis) - SAC 4/29/20
+               else  5  endif endif endif  }
+
+   "Default Proj:PVWArrayTiltDeg[5]-2"   Proj:PVWArrayTiltDeg[5]      = {
+         if (PVWGeomSpecMethod[5] == 1) then  UNCHANGED
+         else if (PVWArrayTiltInput[5] == 1 .AND. LocalStatus( PVWArrayTiltPitch[5] ) > 4)
+         then  (atan( PVWArrayTiltPitch[5] / 12 ) / 3.14159) * 180
+         else  if (PVWArrayType[5] == 3) then  0      ; Tracking (one axis) - SAC 4/29/20
+               else  (atan( 5 / 12 ) / 3.14159) * 180  endif endif endif  }
+
+      ;   "Set Proj:PVWRealAzm[5]"      Proj:PVWRealAzm[5]   = {
+      ;         if (AllowPVWInputs = 0 .OR. IfValidAnd( PVWDCSysSize[5] > 0 )==0) then  UNDEFINED
+      ;         else if (PVWGeomSpecMethod[5] == 0)    ; "azimuth and tilt"
+      ;         then  PVWAzm[5]
+      ;         else if (PVWGeomSpecMethod[5] == 1)    ; "reference PVArrayGeom object"
+      ;         then  if (LocalCompAssigned( PVWPVArrGeomRef[5] )==0) then  UNDEFINED
+      ;               else if (LocalStatus( PVWPVArrGeomRef[5]:ChildPolyLpRef:Azimuth ) > 0)
+      ;               then  PVWPVArrGeomRef[5]:ChildPolyLpRef:Azimuth
+      ;               else  UNDEFINED  endif endif
+      ;         else  UNDEFINED  endif endif endif  }
+
+   "Set Proj:PVWLocSpecified[5] - whether PV array location is specified: 0-not, 1-relative, 2-direct"
+      Proj:PVWLocSpecified[5]  = {
+         if (PVWGeomSpecMethod[5] == 0)    ; "azimuth and tilt"
+         then  if (PVWLocSpecMethod[5] == 0) then  0     ; LocSpecMethod = "- not specified -"
+               else if (PVWLocSpecMethod[5] == 1)        ; LocSpecMethod = "X,Y,Z and height, width"
+               then  if (LocalStatus( PVWHeight[5] )>0 .AND. LocalStatus( PVWWidth[5] )>0 .AND.
+                         LocalStatus( PVWReferenceX[5] )>0 .AND. LocalStatus( PVWReferenceY[5] )>0 .AND.
+                         LocalStatus( PVWReferenceZ[5] )>0) then  2
+                     else  0  endif
+               else if (PVWLocSpecMethod[5] == 2)        ; LocSpecMethod = "in relation to another PV Array"
+               then  0  ; NYI
+               else  0  ; undefined
+               endif endif endif
+         else if (PVWGeomSpecMethod[5] == 1)    ; "reference PVArrayGeom object"
+         then  if (LocalCompAssigned( PVWPVArrGeomRef[5] )==0) then  0
+               else if (IfValidAnd( PVWAzm[5] >= 0 )==0 .OR. IfValidAnd( PVWArrayTiltDeg[5] >= 0 )==0 .OR.
+                        IfValidAnd( PVWPVArrGeomRef[5]:ChildPolyLpRef:Area > 0 )==0) then  0
+               else  2  endif endif
+         else  0  endif endif  }
+
+  ; SAC 2/22/17 - new PVW geometry-related inputs
+  ; SAC 10/10/18 - added new messages for 1- & 2-axis tracking arrays (tic #1047)
+   "Set Proj:PVWGeomBtnLabel[5]"    Proj:PVWGeomBtnLabel[5]  = {
+         if (PVWArrayType[5] > 4) then  "No orientation or location for 2-axis tracking arrays"  ; "Tracking (two axis)"
+         else if (PVWArrayType[5] > 2)                ; "Tracking (one axis)"
+         then  if (PVWArrayTiltInput[5] == 0)         ; "deg"
+               then  Format( "Tracking axis: %.0f%c azimuth, %.1f%c tilt", PVWAzm[5], 176, PVWArrayTiltDeg[5], 176 )
+               else                                   ; "pitch"
+                     Format( "Tracking axis: %.0f%c azimuth, %.1f-in-12 tilt", PVWAzm[5], 176, PVWArrayTiltPitch[5] )
+               endif
+         else if (PVWGeomSpecMethod[5] == 0)         ; "azimuth and tilt"
+         then  if (HaveShadeObjects .AND. PVWLocSpecMethod[5]==0)
+               then  "Location Needs To Be Specified"
+               else if (PVWArrayTiltInput[5] == 0)    ; "deg"
+               then  Format( "%.0f%c azimuth, %.1f%c tilt (%.1f-in-12)", PVWAzm[5], 176, PVWArrayTiltDeg[5], 176, PVWArrayTiltPitch[5] )
+               else                                   ; "pitch"
+                     Format( "%.0f%c azimuth, %.1f-in-12 tilt (%.1f%c)", PVWAzm[5], 176, PVWArrayTiltPitch[5], PVWArrayTiltDeg[5], 176 )
+               endif endif
+         else if (PVWGeomSpecMethod[5] == 1)    ; "reference PVArrayGeom object"
+         then  if (LocalCompAssigned( PVWPVArrGeomRef[5] )==0)
+               then  "error: PVArrayGeom not assigned"
+               else if (IfValidAnd( PVWPVArrGeomRef[5]:ChildPolyLpRef:TiltAngle >=  0 )==0 .OR. IfValidAnd( PVWPVArrGeomRef[5]:ChildPolyLpRef:TiltAngle <= 90 )==0)
+               then  "error: PVArrayGeom vertices reversed"
+               else  Format( "%.0f%c az, %.0f%c tilt via '%s'", PVWAzm[5], 176, PVWArrayTiltDeg[5], 176, PVWPVArrGeomRef[5]:Name )
+               endif endif
+         else  "(PVWGeomSpecMethod[5] unrecognized)"
+         endif endif endif endif  }
+
+   ; PV Array Summary Message
+   "Set Proj:PVWGeomSummaryMsg[5]"     Proj:PVWGeomSummaryMsg[5]  = {      ; message describing orientation/location errors or summary of valid inputs
+         if (FindInString( PVWLocationMsg[5], "ERROR" ) >= 0)
+         then  PVWLocationMsg[5]
+         else if (PVWArrayType[5] > 4) then  "PV Array #5:  2-axis tracking"  ; "Tracking (two axis)"
+         else if (PVWArrayType[5] > 2)                ; "Tracking (one axis)"
+         then  if (PVWArrayTiltInput[5] == 0)         ; "deg"
+               then  Format( "PV Array #5:  Tracking axis %.0f%c azimuth, %.1f%c tilt (%.1f-in-12)", PVWAzm[5], 176, PVWArrayTiltDeg[5], 176, PVWArrayTiltPitch[5] )
+               else                                   ; "pitch"
+                     Format( "PV Array #5:  Tracking axis %.0f%c azimuth, %.1f-in-12 tilt (%.1f%c)", PVWAzm[5], 176, PVWArrayTiltPitch[5], PVWArrayTiltDeg[5], 176 )
+               endif
+         else if (PVWGeomSpecMethod[5] == 0)    ; "azimuth and tilt"
+         then  if (PVWLocSpecMethod[5] == 0)
+               then  PVWGeomBtnLabel[5] + " (no location specified)"
+               else if (PVWLocSpecified[5] == 0)
+               then  "ERROR:  PV Array #5 Location fields above missing or invalid."
+               else  Format( "PV Array #5:  %.1f ft2 (%.1f W/ft2) with %.0f%c azimuth and %.1f%c tilt.", (PVWHeight[5] * PVWWidth[5]),
+                              (PVWDCSysSize[5] * 1000 / (PVWHeight[5] * PVWWidth[5])), PVWAzm[5], 176, PVWArrayTiltDeg[5], 176 )
+               endif endif
+         else if (PVWGeomSpecMethod[5] == 1)    ; reference PVArrayGeom object
+         then  if (LocalCompAssigned( PVWPVArrGeomRef[5] )==0)
+               then  "ERROR:  Geometry to be defined via PVArrayGeom object assignment, but no PVArrayGeom object is assigned."
+               else if (IfValidAnd( PVWPVArrGeomRef[5]:ChildPolyLpRef:TiltAngle >= 0 )==0 .OR. IfValidAnd( PVWPVArrGeomRef[5]:ChildPolyLpRef:TiltAngle <= 90 )==0)
+               then  Format( "ERROR:  PVArrayGeom '%s' is invalid (facing downward, vertices may be reversed).", PVWPVArrGeomRef[5]:Name )
+               else if (IfValidAnd( PVWAzm[5] >= 0 )==0 .OR. IfValidAnd( PVWArrayTiltDeg[5] >= 0 )==0 .OR.
+                        IfValidAnd( PVWPVArrGeomRef[5]:ChildPolyLpRef:Area > 0 )==0)
+               then  Format( "ERROR:  Geometry defined by PVArrayGeom '%s' which has invalid geometry.", PVWPVArrGeomRef[5]:Name )
+               else  Format( "PV Array #5:  %.1f ft2 (%.1f W/ft2) with %.0f%c azimuth and %.1f%c tilt.", PVWPVArrGeomRef[5]:ChildPolyLpRef:Area,
+                              (PVWDCSysSize[5] * 1000 / PVWPVArrGeomRef[5]:ChildPolyLpRef:Area), PVWAzm[5], 176, PVWArrayTiltDeg[5], 176 )
+               endif endif endif
+         else  "summary msg"
+         endif endif endif endif endif  }
+
+END
+;*************************************************************************
+
+
+; SAC 3/4/17 - rulelist to delete all PV array PolyLp children of Proj
+;*************************************************************************
+RULELIST "Delete_Proj_PolyLp_Children"  1 0 0 1
+;*************************************************************************
+   "Delete any/all PolyLp children of Proj"  Proj:Action = {  DeleteChildren( PolyLp )  }
+END
+
+; SAC 3/1/17 - rulelist to create PV array PolyLp
+;*************************************************************************
+RULELIST "Create_PVArrayPolyLp_1"  1 0 0 1
+;*************************************************************************
+   "Create PolyLp (and set Proj:PVWGeomPolyLpIdx[1])"  Proj:PVWGeomPolyLpIdx[1]  = {
+         CreatePolyLoopChild( (PVWHeight[1] * PVWWidth[1]), PVWAzm[1], PVWArrayTiltDeg[1], PVWReferenceZ[1],
+                  5, PVWHeight[1], 0, PVWReferenceX[1], PVWReferenceY[1] )  }
+		// CreatePolyLoopChild( Area, Azimuth, Tilt, Z, PolyType (4=Shade), Height, Shape (0-Rect/1-Oct), Lower-Left X,Y )
+
+   "Set Proj:PVWGeomPolyLpRef[1]"   Proj:PVWGeomPolyLpRef[1]  = {
+         if (IfValidAnd( PVWGeomPolyLpIdx[1] >= 0 )==0) then  UNDEFINED
+         else  CompName( PolyLp, PVWGeomPolyLpIdx[1]+1 )  endif  }
+
+   "Default PolyLp data"   PolyLp:Action  = {
+         if (LocalStatus(Area) > 0 .OR. IfValidAnd( Proj:PVWGeomPolyLpIdx[1] >= 0 )==0) then  UNCHANGED
+         else  EvalRulelist( "Default_PolyLp", 1 )  endif  }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "Create_PVArrayPolyLp_2"  1 0 0 1
+;*************************************************************************
+   "Create PolyLp (and set Proj:PVWGeomPolyLpIdx[2])"  Proj:PVWGeomPolyLpIdx[2]  = {
+         CreatePolyLoopChild( (PVWHeight[2] * PVWWidth[2]), PVWAzm[2], PVWArrayTiltDeg[2], PVWReferenceZ[2],
+                  5, PVWHeight[2], 0, PVWReferenceX[2], PVWReferenceY[2] )  }
+		// CreatePolyLoopChild( Area, Azimuth, Tilt, Z, PolyType (4,5=Shade), Height, Shape (0-Rect/1-Oct), Lower-Left X,Y )
+
+   "Set Proj:PVWGeomPolyLpRef[2]"   Proj:PVWGeomPolyLpRef[2]  = {
+         if (IfValidAnd( PVWGeomPolyLpIdx[2] >= 0 )==0) then  UNDEFINED
+         else  CompName( PolyLp, PVWGeomPolyLpIdx[2]+1 )  endif  }
+
+   "Default PolyLp data"   PolyLp:Action  = {
+         if (LocalStatus(Area) > 0 .OR. IfValidAnd( Proj:PVWGeomPolyLpIdx[2] >= 0 )==0) then  UNCHANGED
+         else  EvalRulelist( "Default_PolyLp", 1 )  endif  }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "Create_PVArrayPolyLp_3"  1 0 0 1
+;*************************************************************************
+   "Create PolyLp (and set Proj:PVWGeomPolyLpIdx[3])"  Proj:PVWGeomPolyLpIdx[3]  = {
+         CreatePolyLoopChild( (PVWHeight[3] * PVWWidth[3]), PVWAzm[3], PVWArrayTiltDeg[3], PVWReferenceZ[3],
+                  5, PVWHeight[3], 0, PVWReferenceX[3], PVWReferenceY[3] )  }
+		// CreatePolyLoopChild( Area, Azimuth, Tilt, Z, PolyType (4,5=Shade), Height, Shape (0-Rect/1-Oct), Lower-Left X,Y )
+
+   "Set Proj:PVWGeomPolyLpRef[3]"   Proj:PVWGeomPolyLpRef[3]  = {
+         if (IfValidAnd( PVWGeomPolyLpIdx[3] >= 0 )==0) then  UNDEFINED
+         else  CompName( PolyLp, PVWGeomPolyLpIdx[3]+1 )  endif  }
+
+   "Default PolyLp data"   PolyLp:Action  = {
+         if (LocalStatus(Area) > 0 .OR. IfValidAnd( Proj:PVWGeomPolyLpIdx[3] >= 0 )==0) then  UNCHANGED
+         else  EvalRulelist( "Default_PolyLp", 1 )  endif  }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "Create_PVArrayPolyLp_4"  1 0 0 1
+;*************************************************************************
+   "Create PolyLp (and set Proj:PVWGeomPolyLpIdx[4])"  Proj:PVWGeomPolyLpIdx[4]  = {
+         CreatePolyLoopChild( (PVWHeight[4] * PVWWidth[4]), PVWAzm[4], PVWArrayTiltDeg[4], PVWReferenceZ[4],
+                  5, PVWHeight[4], 0, PVWReferenceX[4], PVWReferenceY[4] )  }
+		// CreatePolyLoopChild( Area, Azimuth, Tilt, Z, PolyType (4,5=Shade), Height, Shape (0-Rect/1-Oct), Lower-Left X,Y )
+
+   "Set Proj:PVWGeomPolyLpRef[4]"   Proj:PVWGeomPolyLpRef[4]  = {
+         if (IfValidAnd( PVWGeomPolyLpIdx[4] >= 0 )==0) then  UNDEFINED
+         else  CompName( PolyLp, PVWGeomPolyLpIdx[4]+1 )  endif  }
+
+   "Default PolyLp data"   PolyLp:Action  = {
+         if (LocalStatus(Area) > 0 .OR. IfValidAnd( Proj:PVWGeomPolyLpIdx[4] >= 0 )==0) then  UNCHANGED
+         else  EvalRulelist( "Default_PolyLp", 1 )  endif  }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "Create_PVArrayPolyLp_5"  1 0 0 1
+;*************************************************************************
+   "Create PolyLp (and set Proj:PVWGeomPolyLpIdx[5])"  Proj:PVWGeomPolyLpIdx[5]  = {
+         CreatePolyLoopChild( (PVWHeight[5] * PVWWidth[5]), PVWAzm[5], PVWArrayTiltDeg[5], PVWReferenceZ[5],
+                  5, PVWHeight[5], 0, PVWReferenceX[5], PVWReferenceY[5] )  }
+		// CreatePolyLoopChild( Area, Azimuth, Tilt, Z, PolyType (4,5=Shade), Height, Shape (0-Rect/1-Oct), Lower-Left X,Y )
+
+   "Set Proj:PVWGeomPolyLpRef[5]"   Proj:PVWGeomPolyLpRef[5]  = {
+         if (IfValidAnd( PVWGeomPolyLpIdx[5] >= 0 )==0) then  UNDEFINED
+         else  CompName( PolyLp, PVWGeomPolyLpIdx[5]+1 )  endif  }
+
+   "Default PolyLp data"   PolyLp:Action  = {
+         if (LocalStatus(Area) > 0 .OR. IfValidAnd( Proj:PVWGeomPolyLpIdx[5] >= 0 )==0) then  UNCHANGED
+         else  EvalRulelist( "Default_PolyLp", 1 )  endif  }
+END
+;*************************************************************************
+
+
+; SAC 10/24/16 - new rulelist to default PV compliance credit (2013/16) properties
+;*************************************************************************
+RULELIST "ProposedInput_PVCompCredit" 0 0 0 0
+;*************************************************************************
+   ;--------------------------------------------------------------------
+   ; ProposedInput: Photovoltaic System Credit Rules
+   ;--------------------------------------------------------------------
+; mjb 1/12/15 - use lew T24RClimateZoneCodeBase table for lookups
+;	"Set Proj:PVGenerationRate (based on climate zone)"	Proj:PVGenerationRate	= {	if (ClimateZone > 0) then  T24RClimateZoneDesignDay:PVRate( "WeatherFileSet", Proj:WeatherFileSet, "ClimateZone", Proj:ClimateZone )  else  0  endif  }
+;	"Set Proj:MaxPVPrelimCredit (based on climate zone)"	Proj:MaxPVPrelimCredit	= {	if (ClimateZone > 0) then  T24RClimateZoneDesignDay:PVMax(  "WeatherFileSet", Proj:WeatherFileSet, "ClimateZone", Proj:ClimateZone )  else  0  endif  }
+	"Set Proj:PVGenerationRate (based on climate zone)"	Proj:PVGenerationRate	= {
+         if (ClimateZone > 0)
+         then  T24RClimateZoneCodeBase:PVRate( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:CompCodeBase, "BldgType", Proj:BldgTypeTblStr )
+         else  0  endif  }
+; KN 03/25/2015 Changed variable to sfPVMax in prep for expanding to MF with 2016 runs. Calcs still need to be redone to be % of total plus threshold values
+	"Set Proj:MaxPVPrelimCredit (based on climate zone)"	Proj:MaxPVPrelimCredit	= {
+         if (ClimateZone > 0)
+         then  T24RClimateZoneCodeBase:PVMax(  "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:CompCodeBase, "BldgType", Proj:BldgTypeTblStr )
+         else  0  endif  }
+
+	"Set Proj:EnablePVCredit flag - whether or not a PV credit is available for this project"		; SAC 10/5/15		; SAC 12/18/15 - added logic to ignore StandardsVersion when RunID == DesignRating
+				Proj:EnablePVCredit	= {	if (EnergyCodeYearNum >= 2019) then  0
+				                           else if (IfValidAnd( PVGenerationRate > 1 ) .AND. (IfValidAnd( StandardsVersion > 2014 ) .OR. IfValidAnd( RunID == "DesignRating" )) .AND.
+															(Proj:RunScope == 1 .AND. Proj:IsAddAlone < 1)) then  1  else  0  endif endif  }
+
+; SAC 10/6/16 - force PVCompCredit off for 2019 analysis
+   "Force PVCompCredit off for 2019 analysis"   Proj:Action = {
+         if (EnergyCodeYearNum < 2019 .OR. IfValidAnd( PVCompCredit = 0 ) .OR.
+             LocalStatus( PVCompCredit ) < 7)
+         then  UNCHANGED
+         else  EvalRulelist( "ForceDefault_Proj_PVCompCredit" )  endif  }
+
+; SAC 3/2/16 - (tic #609)
+; LDH 8/20/16 - (tic # 609)  added functionality to set PVCompCredit to 1 for 2013 if PV Rated power is >0.  This enables special feature reporting.  See 'SpeclFeatrs:PVSysCredit' 
+	"Default Proj:PVCompCredit"	Proj:PVCompCredit		= {
+    if ( IfValidAnd( StandardsVersion <= 2015 ) .AND. 
+         EnablePVCredit > 0 .AND. 
+         IfValidAnd( PVRatedPower > 0 ) )
+    then 1
+    else 0
+    endif }
+
+; LDH 8/2/16 - MOVED EnablePVCredit and PVRatedPower > 0 checks inside of Force_2016PVCreditOn Rules
+	"Swap PV Credit inputs from PVRatedPower (kW dc) to PVCompCredit (toggle) (for 2016-)"  Proj:Action	= {	
+    if( IfValidAnd(StandardsVersion >= 2017 ) .AND. 
+        LocalStatus( PVRatedPower ) >= 6 )  
+    then	EvalRulelist( "Force_2016PVCreditOn" )  
+    else  UNCHANGED  
+    endif  }
+
+	"Default PVRatedPower to a high value ensuring PVCredit, when selected in 2016+"		; SAC 3/2/16 - (tic #609)
+				Proj:PVRatedPower		= {	if (EnablePVCredit < 0.5 .OR. PVCompCredit < 0.5) then  0		; SAC 3/24/16 - added new logic to set to 0 when appropriate
+													else if (IfValidAnd(StandardsVersion >= 2017) .AND. EnablePVCredit > 0 .AND. PVCompCredit > 0)
+													then	1000  else  UNCHANGED  endif endif  }
+
+	"Set Proj:PVDwellUnitSize"		Proj:PVDwellUnitSize		= {	if (IsMultiFamily < 0.5)  then  CondFloorArea
+																					else if (IsMultiFamily > 0.5 .AND. IfValidAnd( NumDwellingUnits > 0.5 )) then  CondFloorArea / NumDwellingUnits
+																					else  0  endif endif  }
+	"Set Proj:PVDUSizeThreshold"	Proj:PVDUSizeThreshold	= {	if (IfValidAnd( CompCodeBase < 2016 )) then  1000000
+																					else if (IsMultiFamily < 0.5)  then  2000  else  1000  endif endif  }
+	"Set Proj:PVMinRatedPower[1]"	Proj:PVMinRatedPower[1]	= {	if (IfValidAnd( CompCodeBase < 2016 )) then  2
+																					else	if (IsMultiFamily < 0.5)
+																							then	2
+																							else	1 * ValidOr( NumDwellingUnits, 1 )
+																							endif  endif  }
+
+	"Set Proj:PVMessage"			Proj:PVMessage		= {	if (EnablePVCredit > 0.5 .AND. AllowDesignRating > 0.5 .AND. DesignRatingCalcs > 0.5) then  " "  ; SAC 3/2/16 - PV pwr no longer listed here (tic #609), was: "(specify PV power on 'EDR' tab)"
+																		else if (IfValidAnd(StandardsVersion < 2015))
+																		then  "PV credit only available for 'Compliance 2015' (and later) projects."
+																		else if (Proj:RunScope != 1 .OR. Proj:IsAddAlone > 0)
+																		then	"PV system credit available only for New Construction projects."
+																		else if (IfValidAnd(MaxPVPrelimCredit < 0.01))
+																		then  "PV system credit not available for the selected building location."
+																		else if (IfValidAnd( EnablePVCredit > 0 )==0)
+																		then	"PV credit not available for this project."
+																		else	" "  endif endif endif endif endif  }
+
+	; SAC 3/24/16 - added to simplify PVRtdValMsg logic and also use in setting PVSysCreditMsg
+	"Set Proj:PVMinRatedPwrRpt"	Proj:PVMinRatedPwrRpt	= {	if (EnablePVCredit < 0.5 .OR. PVCompCredit < 0.5 .OR. PVRatedPower <= 0) then  0
+																					else if (IfValidAnd( ResultSummary[1]:PVMinRatedPower > 0 )) then   ResultSummary[1]:PVMinRatedPower
+																					else if (IfValidAnd( PVMinRatedPower[2] > 0 )) then   PVMinRatedPower[2]		; PVMinRatedPower[2] calced DURING analysis
+																					else if (IfValidAnd( PVMinRatedPower[1] > 0 )) then   PVMinRatedPower[1]		; generic, pre-analysis PVMinRatedPower
+																					else  0  endif endif endif endif  }
+
+	"Set Proj:PVRtdValMsg"		Proj:PVRtdValMsg	= {	if (IfValidAnd(StandardsVersion < 2017) .AND. IfValidAnd(EnablePVCredit > 0) .AND. IfValidAnd(StandardsVersion > 2014) .AND. IfValidAnd(PVRatedPower > 0) .AND. IfValidAnd(PVRatedPower < PVMinRatedPower[1]))
+																		then  Format( "PV system credit offered only for systems w/ rated power >= %g kWdc.", PVMinRatedPower[1] )
+																		else if (IfValidAnd(StandardsVersion >= 2017) .AND. IfValidAnd(EnablePVCredit > 0) .AND. IfValidAnd(PVCompCredit > 0))		; SAC 3/2/16 - (tic #609)
+																		then	if (PVMinRatedPwrRpt > 0)
+																				then	if (IfValidAnd( AllowDesignRating > 0.5 ) .AND. IfValidAnd( DesignRatingCalcs > 0.5 ) .AND. PVWDCSysTotal > 0)
+																						then	if (PVWDCSysTotal < PVMinRatedPwrRpt)
+																								then	Format( "PV system entered on EDR tab (%g kWdc) must be increased to %g kWdc in order to qualify.", PVWDCSysTotal, PVMinRatedPwrRpt )
+																								else	Format( "PV system entered on EDR tab (%g kWdc) is sufficient to qualify (minimum %g kWdc).", PVWDCSysTotal, PVMinRatedPwrRpt )
+																								endif
+																						else	Format( "Required minimum PV system size is %.1f kWdc.", PVMinRatedPwrRpt )
+																						endif
+																				else	" "  endif
+																		else	" "  endif endif  }
+
+	"Set Proj:PVGenCredit"		Proj:PVGenCredit	= {	if (IfValidAnd(EnablePVCredit > 0) .AND. LocalStatus( PVRatedPower ) > 0)
+																		then	if (IfValidAnd(PVRatedPower >= PVMinRatedPower[1])) then  PVGenerationRate * PVRatedPower
+																				else  0  endif
+																		else  0  endif  }
+	"Init Proj:PVPrelimCredit"	Proj:PVPrelimCredit	= {	if (RunAbbrev .NE. "dr") then  0  else  UNCHANGED  endif  }
+	"Init Proj:PVCredit[1]"		Proj:PVCredit[1]		= {	if (RunAbbrev .NE. "dr") then  0  else  UNCHANGED  endif  }
+;  "debug PV credit 2"		Proj:Action = { PostWarning( "Initializing PV credit 2 in rulelist: ProposedInput...  --  for RunID: %s / RunAbbrev: %s", RunID, RunAbbrev )  }
+	"Init Proj:PVCredit[2]"		Proj:PVCredit[2]		= {	if (RunAbbrev .NE. "dr") then  0  else  UNCHANGED  endif  }
+
+	; SAC 5/23/16 - set /default EDRPVVerified flag (tic #671)
+	"Set Proj:EDRPVVerified"	Proj:EDRPVVerified	= {	if (RunAbbrev == "dr") then  UNCHANGED		; do not reset during DRtg run
+																			else if (IfValidAnd( StandardsVersion >= 2017 ) .AND. IfValidAnd( AllowDesignRating > 0.5 ) .AND.
+																						IfValidAnd( DesignRatingCalcs > 0.5 ) .AND. IfValidAnd( PVWDCSysTotal >= PVMinRatedPwrRpt )) then  1  else  0  endif endif  }
+
+   ; SAC 1/22/17 - set/default NetEnergyMeteringTDVAdj - Net Energy Metering (NEM) adjustor for TDV calculations
+   ; SAC 4/27/17 - added logic for 2016
+   ; SAC 8/26/19 - adjusted NetEnergyMeteringTDVAdj for difference in TDV units for 2022+ ruleset
+   "Set Proj:NetEnergyMeteringTDVAdj"  Proj:NetEnergyMeteringTDVAdj  =        ; SAC 6/10/20 (CommunitySolar)
+      {  if (IfValidAnd( CommunitySolarProjID > 0 )) then  0
+         else if ( IfValidAnd( EnergyCodeYearNum >= 2019 ) .AND. IfValidAnd( AllowExcessPVEDR > 0 )==0)
+         then  0.985 / ValidOr( TDVMult_Elec, 1 )     ; NEM 2.0 TDV adjustment factor
+         else if (IfValidAnd( EnergyCodeYearNum == 2016 ) .AND. IfValidAnd( AllowExcessPVEDR > 0 )==0)
+         then  0.928     ; NEM 2.0 TDV adjustment factor - adjusted down from 2019 value for inflation - SAC 5/23/17
+         else  0  endif endif endif  }
+
+   ; SAC 4/28/17 - added logic for 2016
+   "Set Proj:NetEnergyMeteringNSCAdj"  Proj:NetEnergyMeteringNSCAdj  =        ; SAC 6/10/20 (CommunitySolar)
+      {  if (IfValidAnd( CommunitySolarProjID > 0 )) then  0
+         else if (IfValidAnd( EnergyCodeYearNum >= 2016 ) .AND. IfValidAnd( AllowExcessPVEDR > 0 )==0)
+         then  int( (1000 * T24RClimateZoneCodeBase:NetSurpComp( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:CompCodeBase, "BldgType", Proj:BldgTypeTblStr ) / 3.412) + 0.5 ) / 1000
+         else  0  endif endif  }
+
+   "Set Proj:NetEnergyMeteringSrcAdj"     Proj:NetEnergyMeteringSrcAdj  =     ; SAC 6/11/19 - 2022
+   ;   {  NetEnergyMeteringTDVAdj  }
+      {  0  }
+   "Set Proj:NetEnergyMeteringNSCSrcAdj"  Proj:NetEnergyMeteringNSCSrcAdj  = 
+   ;   {  NetEnergyMeteringNSCAdj  }
+      {  0  }
+END
+;*************************************************************************
+
+
+; SAC 3/2/16 - added rulelist to swap PV Credit inputs from PVRatedPower (kW dc) to PVCompCredit (toggle) (for 2016-) (tic #609)
+; LDH 8/22/16 - Added Logic from "Swap PV Credit inputs from PVRatedPower (kW dc) to PVCompCredit (toggle) (for 2016-)" rule
+;*************************************************************************
+RULELIST "Force_2016PVCreditOn" 1 0 1 0
+	"Force Proj:PVCompCredit On"	Proj:PVCompCredit		= { 
+    if( EnablePVCredit > 0 .AND.
+        IfValidAnd( PVRatedPower > 0 ) )
+    then 1
+    else UNCHANGED
+    endif }
+	"Blast Proj:PVRatedPower"		Proj:PVRatedPower		= {	UNDEFINED }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "ForceDefault_Proj_PVCompCredit" 1 0 0 0
+;*************************************************************************
+; SAC 10/6/16 - force PVCompCredit off for 2019 analysis
+	"Redefault Proj:PVCompCredit"		Proj:PVCompCredit	= {	UNDEFINED  }
+END
+;*************************************************************************
+
+
+;*************************************************************************
+RULELIST "BlastInputs_PVWInputs_Simplified_2016"  1 0 0 1
+	"Blast Proj:PVWInverterEff[1]"		Proj:PVWInverterEff[1]		= {	UNDEFINED  }
+	"Blast Proj:PVWInverterEff[2]"		Proj:PVWInverterEff[2]		= {	UNDEFINED  }
+	"Blast Proj:PVWInverterEff[3]"		Proj:PVWInverterEff[3]		= {	UNDEFINED  }
+	"Blast Proj:PVWInverterEff[4]"		Proj:PVWInverterEff[4]		= {	UNDEFINED  }
+	"Blast Proj:PVWInverterEff[5]"		Proj:PVWInverterEff[5]		= {	UNDEFINED  }
+	"Blast Proj:PVWArrayType[1]"			Proj:PVWArrayType[1]			= {	UNDEFINED  }
+	"Blast Proj:PVWArrayType[2]"			Proj:PVWArrayType[2]			= {	UNDEFINED  }
+	"Blast Proj:PVWArrayType[3]"			Proj:PVWArrayType[3]			= {	UNDEFINED  }
+	"Blast Proj:PVWArrayType[4]"			Proj:PVWArrayType[4]			= {	UNDEFINED  }
+	"Blast Proj:PVWArrayType[5]"			Proj:PVWArrayType[5]			= {	UNDEFINED  }
+END
+;*************************************************************************
+RULELIST "BlastInputs_PVWInputs_Simplified"  1 0 0 1
+	"Blast Proj:PVWInverterEff[1]"		Proj:PVWInverterEff[1]		= {	UNDEFINED  }
+	"Blast Proj:PVWInverterEff[2]"		Proj:PVWInverterEff[2]		= {	UNDEFINED  }
+	"Blast Proj:PVWInverterEff[3]"		Proj:PVWInverterEff[3]		= {	UNDEFINED  }
+	"Blast Proj:PVWInverterEff[4]"		Proj:PVWInverterEff[4]		= {	UNDEFINED  }
+	"Blast Proj:PVWInverterEff[5]"		Proj:PVWInverterEff[5]		= {	UNDEFINED  }
+; SAC 10/9/18 - prevent re-default of PVWArrayType for simplified input mode in 2019+ analysis - part of enabling 1- & 2-axis tracking (tic #1047)
+;	"Blast Proj:PVWArrayType[1]"			Proj:PVWArrayType[1]			= {	UNDEFINED  }
+;	"Blast Proj:PVWArrayType[2]"			Proj:PVWArrayType[2]			= {	UNDEFINED  }
+;	"Blast Proj:PVWArrayType[3]"			Proj:PVWArrayType[3]			= {	UNDEFINED  }
+;	"Blast Proj:PVWArrayType[4]"			Proj:PVWArrayType[4]			= {	UNDEFINED  }
+;	"Blast Proj:PVWArrayType[5]"			Proj:PVWArrayType[5]			= {	UNDEFINED  }
+END
+;*************************************************************************
+RULELIST "BlastInputs_PVWCalFlexInstall_1"  1 0 0 1
+	"Blast Proj:PVWArrayTiltInput[1]"	Proj:PVWArrayTiltInput[1]	= {	UNDEFINED  }
+	"Blast Proj:PVWArrayTiltPitch[1]"	Proj:PVWArrayTiltPitch[1]	= {	UNDEFINED  }
+	"Blast Proj:PVWArrayTiltDeg[1]"		Proj:PVWArrayTiltDeg[1]		= {	UNDEFINED  }
+	"Blast Proj:PVWAzm[1]"					Proj:PVWAzm[1]					= {	UNDEFINED  }
+END
+;*************************************************************************
+RULELIST "BlastInputs_PVWCalFlexInstall_2"  1 0 0 1
+	"Blast Proj:PVWArrayTiltInput[2]"	Proj:PVWArrayTiltInput[2]	= {	UNDEFINED  }
+	"Blast Proj:PVWArrayTiltPitch[2]"	Proj:PVWArrayTiltPitch[2]	= {	UNDEFINED  }
+	"Blast Proj:PVWArrayTiltDeg[2]"		Proj:PVWArrayTiltDeg[2]		= {	UNDEFINED  }
+	"Blast Proj:PVWAzm[2]"					Proj:PVWAzm[2]					= {	UNDEFINED  }
+END
+;*************************************************************************
+RULELIST "BlastInputs_PVWCalFlexInstall_3"  1 0 0 1
+	"Blast Proj:PVWArrayTiltInput[3]"	Proj:PVWArrayTiltInput[3]	= {	UNDEFINED  }
+	"Blast Proj:PVWArrayTiltPitch[3]"	Proj:PVWArrayTiltPitch[3]	= {	UNDEFINED  }
+	"Blast Proj:PVWArrayTiltDeg[3]"		Proj:PVWArrayTiltDeg[3]		= {	UNDEFINED  }
+	"Blast Proj:PVWAzm[3]"					Proj:PVWAzm[3]					= {	UNDEFINED  }
+END
+;*************************************************************************
+RULELIST "BlastInputs_PVWCalFlexInstall_4"  1 0 0 1
+	"Blast Proj:PVWArrayTiltInput[4]"	Proj:PVWArrayTiltInput[4]	= {	UNDEFINED  }
+	"Blast Proj:PVWArrayTiltPitch[4]"	Proj:PVWArrayTiltPitch[4]	= {	UNDEFINED  }
+	"Blast Proj:PVWArrayTiltDeg[4]"		Proj:PVWArrayTiltDeg[4]		= {	UNDEFINED  }
+	"Blast Proj:PVWAzm[4]"					Proj:PVWAzm[4]					= {	UNDEFINED  }
+END
+;*************************************************************************
+RULELIST "BlastInputs_PVWCalFlexInstall_5"  1 0 0 1
+	"Blast Proj:PVWArrayTiltInput[5]"	Proj:PVWArrayTiltInput[5]	= {	UNDEFINED  }
+	"Blast Proj:PVWArrayTiltPitch[5]"	Proj:PVWArrayTiltPitch[5]	= {	UNDEFINED  }
+	"Blast Proj:PVWArrayTiltDeg[5]"		Proj:PVWArrayTiltDeg[5]		= {	UNDEFINED  }
+	"Blast Proj:PVWAzm[5]"					Proj:PVWAzm[5]					= {	UNDEFINED  }
+END
+;*************************************************************************
+RULELIST "Force_PVWArrayType_to_FixedOpenRack"  1 0 0 0
+	"Force Proj:PVWArrayType[1] to 'Fixed (open rack)'"		Proj:PVWArrayType[1]		= {	"Fixed (open rack)"  }
+	"Force Proj:PVWArrayType[2] to 'Fixed (open rack)'"		Proj:PVWArrayType[2]		= {	"Fixed (open rack)"  }
+	"Force Proj:PVWArrayType[3] to 'Fixed (open rack)'"		Proj:PVWArrayType[3]		= {	"Fixed (open rack)"  }
+	"Force Proj:PVWArrayType[4] to 'Fixed (open rack)'"		Proj:PVWArrayType[4]		= {	"Fixed (open rack)"  }
+	"Force Proj:PVWArrayType[5] to 'Fixed (open rack)'"		Proj:PVWArrayType[5]		= {	"Fixed (open rack)"  }
+END
+;*************************************************************************
+  ; SAC 4/15/16 - blast user input PVRatedPower (for any 2016+ model - as this is no longer an input and its presence screws up PV compliance credit) 
+  ; LDH 8/22/16 - functionality was combined with RULELIST "Force_2016PVCreditOn"
+;RULELIST "ForceDefault_PVRatedPower"  1 0 0 0
+;	"Blast Proj:PVRatedPower"		Proj:PVRatedPower	= {	UNDEFINED  }
+;END
+RULELIST "Force_PVRatedPower_to_PVWDCSysTotal"  1 0 0 0
+	"Override Proj:PVRatedPower with PVWDCSysTotal"		Proj:PVRatedPower	= {	PVWDCSysTotal  }
+END
+;*************************************************************************
+RULELIST "BlastInputs_PVWArrayTiltPitch_1"  1 0 0 0
+	"Blast PVWArrayTiltPitch[1]"		Proj:PVWArrayTiltPitch[1]		= {	UNDEFINED  }
+END
+RULELIST "BlastInputs_PVWArrayTiltPitch_2"  1 0 0 0
+	"Blast PVWArrayTiltPitch[2]"		Proj:PVWArrayTiltPitch[2]		= {	UNDEFINED  }
+END
+RULELIST "BlastInputs_PVWArrayTiltPitch_3"  1 0 0 0
+	"Blast PVWArrayTiltPitch[3]"		Proj:PVWArrayTiltPitch[3]		= {	UNDEFINED  }
+END
+RULELIST "BlastInputs_PVWArrayTiltPitch_4"  1 0 0 0
+	"Blast PVWArrayTiltPitch[4]"		Proj:PVWArrayTiltPitch[4]		= {	UNDEFINED  }
+END
+RULELIST "BlastInputs_PVWArrayTiltPitch_5"  1 0 0 0
+	"Blast PVWArrayTiltPitch[5]"		Proj:PVWArrayTiltPitch[5]		= {	UNDEFINED  }
+END
+;*************************************************************************
+RULELIST "BlastInputs_PVWArrayTiltDeg_1"  1 0 0 0
+	"Blast PVWArrayTiltDeg[1]"		Proj:PVWArrayTiltDeg[1]		= {	UNDEFINED  }
+END
+RULELIST "BlastInputs_PVWArrayTiltDeg_2"  1 0 0 0
+	"Blast PVWArrayTiltDeg[2]"		Proj:PVWArrayTiltDeg[2]		= {	UNDEFINED  }
+END
+RULELIST "BlastInputs_PVWArrayTiltDeg_3"  1 0 0 0
+	"Blast PVWArrayTiltDeg[3]"		Proj:PVWArrayTiltDeg[3]		= {	UNDEFINED  }
+END
+RULELIST "BlastInputs_PVWArrayTiltDeg_4"  1 0 0 0
+	"Blast PVWArrayTiltDeg[4]"		Proj:PVWArrayTiltDeg[4]		= {	UNDEFINED  }
+END
+RULELIST "BlastInputs_PVWArrayTiltDeg_5"  1 0 0 0
+	"Blast PVWArrayTiltDeg[5]"		Proj:PVWArrayTiltDeg[5]		= {	UNDEFINED  }
+END
+;*************************************************************************
+
+
+;*************************************************************************  ; SAC 2/26/18 (tic #921)
+RULELIST  "Set_Proj_PVWDCSysScldTotRnd"  1 0 0 1
+   "Set Proj:PVWDCSysScldTotRnd-1"  Proj:PVWDCSysScldTotRnd = {
+         if (IfValidAnd( PVWDCSysSize[1] > 0 )==0) then  0
+         else  int( ((PVWDCSysSize[1] * ValidOr( PVWDCSizeMultiplier[1], 1 )) * 100) + 0.5 ) / 100  endif  }
+   "Set Proj:PVWDCSysScldTotRnd-2"  Proj:PVWDCSysScldTotRnd = {
+         if (PVWInputs < 1 .OR. IfValidAnd( PVWDCSysSize[2] > 0 )==0) then  UNCHANGED
+         else  PVWDCSysScldTotRnd + (int( ((PVWDCSysSize[2] * ValidOr( PVWDCSizeMultiplier[1], 1 )) * 100) + 0.5 ) / 100)  endif  }
+   "Set Proj:PVWDCSysScldTotRnd-3"  Proj:PVWDCSysScldTotRnd = {
+         if (PVWInputs < 1 .OR. IfValidAnd( PVWDCSysSize[3] > 0 )==0) then  UNCHANGED
+         else  PVWDCSysScldTotRnd + (int( ((PVWDCSysSize[3] * ValidOr( PVWDCSizeMultiplier[1], 1 )) * 100) + 0.5 ) / 100)  endif  }
+   "Set Proj:PVWDCSysScldTotRnd-4"  Proj:PVWDCSysScldTotRnd = {
+         if (PVWInputs < 1 .OR. IfValidAnd( PVWDCSysSize[4] > 0 )==0) then  UNCHANGED
+         else  PVWDCSysScldTotRnd + (int( ((PVWDCSysSize[4] * ValidOr( PVWDCSizeMultiplier[1], 1 )) * 100) + 0.5 ) / 100)  endif  }
+   "Set Proj:PVWDCSysScldTotRnd-5"  Proj:PVWDCSysScldTotRnd = {
+         if (PVWInputs < 1 .OR. IfValidAnd( PVWDCSysSize[5] > 0 )==0) then  UNCHANGED
+         else  PVWDCSysScldTotRnd + (int( ((PVWDCSysSize[5] * ValidOr( PVWDCSizeMultiplier[1], 1 )) * 100) + 0.5 ) / 100)  endif  }
+END
+;*************************************************************************  ; SAC 2/26/18 (tic #921)
+RULELIST  "Set_Proj_PVWDCSysScldTotRnd_by_PropDesignPVTot"  1 0 0 1
+   "Set Proj:PVWDCSysScldTotRnd-1"  Proj:PVWDCSysScldTotRnd = {
+         if (IfValidAnd( PVWDCSysSize[1] > 0 )==0) then  0
+         else  int( ((PVWDCSysSize[1] * ValidOr( ResultSummary[1]:PropDesignPVTot, 1 ) / PVWDCSysTotal) * 100) + 0.5 ) / 100  endif  }
+   "Set Proj:PVWDCSysScldTotRnd-2"  Proj:PVWDCSysScldTotRnd = {
+         if (PVWInputs < 1 .OR. IfValidAnd( PVWDCSysSize[2] > 0 )==0) then  UNCHANGED
+         else  PVWDCSysScldTotRnd + (int( ((PVWDCSysSize[2] * ValidOr( ResultSummary[1]:PropDesignPVTot, 1 ) / PVWDCSysTotal) * 100) + 0.5 ) / 100)  endif  }
+   "Set Proj:PVWDCSysScldTotRnd-3"  Proj:PVWDCSysScldTotRnd = {
+         if (PVWInputs < 1 .OR. IfValidAnd( PVWDCSysSize[3] > 0 )==0) then  UNCHANGED
+         else  PVWDCSysScldTotRnd + (int( ((PVWDCSysSize[3] * ValidOr( ResultSummary[1]:PropDesignPVTot, 1 ) / PVWDCSysTotal) * 100) + 0.5 ) / 100)  endif  }
+   "Set Proj:PVWDCSysScldTotRnd-4"  Proj:PVWDCSysScldTotRnd = {
+         if (PVWInputs < 1 .OR. IfValidAnd( PVWDCSysSize[4] > 0 )==0) then  UNCHANGED
+         else  PVWDCSysScldTotRnd + (int( ((PVWDCSysSize[4] * ValidOr( ResultSummary[1]:PropDesignPVTot, 1 ) / PVWDCSysTotal) * 100) + 0.5 ) / 100)  endif  }
+   "Set Proj:PVWDCSysScldTotRnd-5"  Proj:PVWDCSysScldTotRnd = {
+         if (PVWInputs < 1 .OR. IfValidAnd( PVWDCSysSize[5] > 0 )==0) then  UNCHANGED
+         else  PVWDCSysScldTotRnd + (int( ((PVWDCSysSize[5] * ValidOr( ResultSummary[1]:PropDesignPVTot, 1 ) / PVWDCSysTotal) * 100) + 0.5 ) / 100)  endif  }
+END
+;*************************************************************************
+
+
+;*************************************************************************  ; SAC 1/20/20 (tic #1189)
+RULELIST  "ForceSwitch_PVWCalFlexInstType_1"  1 0 1 1
+   "Set Proj:PVWCalFlexInstType[1]"    Proj:PVWCalFlexInstType[1]  =
+      {  if (PVWCalFlexInstall[1] < 1) then  0  else  1  endif  }
+   "Blast Proj:PVWCalFlexInstall[1]"   Proj:PVWCalFlexInstall[1]  = {  UNDEFINED  }
+END
+RULELIST  "ForceSwitch_PVWCalFlexInstType_2"  1 0 1 1
+   "Set Proj:PVWCalFlexInstType[2]"    Proj:PVWCalFlexInstType[2]  =
+      {  if (PVWCalFlexInstall[2] < 1) then  0  else  1  endif  }
+   "Blast Proj:PVWCalFlexInstall[2]"   Proj:PVWCalFlexInstall[2]  = {  UNDEFINED  }
+END
+RULELIST  "ForceSwitch_PVWCalFlexInstType_3"  1 0 1 1
+   "Set Proj:PVWCalFlexInstType[3]"    Proj:PVWCalFlexInstType[3]  =
+      {  if (PVWCalFlexInstall[3] < 1) then  0  else  1  endif  }
+   "Blast Proj:PVWCalFlexInstall[3]"   Proj:PVWCalFlexInstall[3]  = {  UNDEFINED  }
+END
+RULELIST  "ForceSwitch_PVWCalFlexInstType_4"  1 0 1 1
+   "Set Proj:PVWCalFlexInstType[4]"    Proj:PVWCalFlexInstType[4]  =
+      {  if (PVWCalFlexInstall[4] < 1) then  0  else  1  endif  }
+   "Blast Proj:PVWCalFlexInstall[4]"   Proj:PVWCalFlexInstall[4]  = {  UNDEFINED  }
+END
+RULELIST  "ForceSwitch_PVWCalFlexInstType_5"  1 0 1 1
+   "Set Proj:PVWCalFlexInstType[5]"    Proj:PVWCalFlexInstType[5]  =
+      {  if (PVWCalFlexInstall[5] < 1) then  0  else  1  endif  }
+   "Blast Proj:PVWCalFlexInstall[5]"   Proj:PVWCalFlexInstall[5]  = {  UNDEFINED  }
+END
+;*************************************************************************
+
+
+;************************************************************************* SAC 7/3/20 (CommunitySolar)
+RULELIST  "ForceOff_UseCommunitySolar"  1 0 1 1
+   "blast Proj:UseCommunitySolar"   Proj:UseCommunitySolar = {  UNDEFINED  }
+   "also blast CommunitySolar project-related details"   Proj:Action = {  EvalRulelist( "CommunitySolar_RedefaultPVInputs" )  }
+END
+;************************************************************************* SAC 6/10/20 (CommunitySolar)
+RULELIST  "CommunitySolar_BlastConflictingInputs"  1 0 1 0
+	 "Redefault Proj:SpecifyTargetDRtg" Proj:SpecifyTargetDRtg = {  0  }
+	 "Redefault Proj:ReducedPVReq"      Proj:ReducedPVReq      = {  0  }
+	 "Hardwire Proj:PVWInputs"          Proj:PVWInputs         = {  1  }  ; detailed
+	 "Hardwire Proj:PVSizeOption"       Proj:PVSizeOption      = {  2  }  ; std PV TDV
+	 "Hardwire Proj:PVWDCSysSize[1]"    Proj:PVWDCSysSize[1]   = {  1  }
+	 "Blast Proj:PVWDCSysSize[2]"       Proj:PVWDCSysSize[2]   = {  UNDEFINED  }
+	 "Blast Proj:PVWDCSysSize[3]"       Proj:PVWDCSysSize[3]   = {  UNDEFINED  }
+	 "Blast Proj:PVWDCSysSize[4]"       Proj:PVWDCSysSize[4]   = {  UNDEFINED  }
+	 "Blast Proj:PVWDCSysSize[5]"       Proj:PVWDCSysSize[5]   = {  UNDEFINED  }
+	 "Redefault Proj:BattMaxCap"        Proj:BattMaxCap        = {  0  }
+END
+;************************************************************************* SAC 6/10/20 (CommunitySolar)
+RULELIST  "CommunitySolar_RedefaultPVInputs"  1 0 0 1
+   "Redefault Proj:PVWInputs"             Proj:PVWInputs             = {  0  }
+   "Redefault Proj:PVWDCSysSize[1]"       Proj:PVWDCSysSize[1]       = {  0  }
+   "Redefault Proj:PVWModuleType[1]"      Proj:PVWModuleType[1]      = {  1  }
+   "Redefault Proj:PVWCalFlexInstType[1]" Proj:PVWCalFlexInstType[1] = {  0  }
+   "Blast Proj:PVWAzm[1]"                 Proj:PVWAzm[1]             = {  UNDEFINED  }
+   "Redefault Proj:PVWArrayTiltInput[1]"  Proj:PVWArrayTiltInput[1]  = {  0  }
+   "Blast Proj:PVWArrayTiltPitch[1]"      Proj:PVWArrayTiltPitch[1]  = {  UNDEFINED  }
+   "Blast Proj:PVWArrayTiltDeg[1]"        Proj:PVWArrayTiltDeg[1]    = {  UNDEFINED  }
+   "Redefault Proj:PVWArrayType[1]"       Proj:PVWArrayType[1]       = {  1  }
+   "Redefault Proj:PVWPwrElec[1]"         Proj:PVWPwrElec[1]         = {  0  }
+   "Blast Proj:PVWSolarAccess[1]"         Proj:PVWSolarAccess[1]     = {  UNDEFINED  }
+   "Blast Proj:PVWInverterEff[1]"         Proj:PVWInverterEff[1]     = {  UNDEFINED  }
+   "Blast Proj:PVWTempCoeff[1]"           Proj:PVWTempCoeff[1]       = {  UNDEFINED  }
+END
+;************************************************************************* SAC 6/10/20 (CommunitySolar)
+RULELIST  "CommunitySolar_SMUD_NSS_Wildflower"  1 0 1 1
+   "Hardwire Proj:PVWModuleType[1]"        Proj:PVWModuleType[1]       = {  "Premium"   }
+   "Hardwire Proj:PVWCalFlexInstType[1]"   Proj:PVWCalFlexInstType[1]  = {  "n/a"       }
+   "Hardwire Proj:PVWAzm[1]"               Proj:PVWAzm[1]              = {  180         }
+   "Hardwire Proj:PVWArrayTiltInput[1]"    Proj:PVWArrayTiltInput[1]   = {  "deg"       }
+   "Hardwire Proj:PVWArrayTiltPitch[1]"    Proj:PVWArrayTiltPitch[1]   = {  0           }
+   "Hardwire Proj:PVWArrayTiltDeg[1]"      Proj:PVWArrayTiltDeg[1]     = {  0           }
+   "Hardwire Proj:PVWArrayType[1]"         Proj:PVWArrayType[1]        = {  "Tracking (one axis)"  }
+   "Hardwire Proj:PVWPwrElec[1]"           Proj:PVWPwrElec[1]          = {  "- none -"   }
+   "Hardwire Proj:PVWSolarAccess[1]"       Proj:PVWSolarAccess[1]      = {  100          }
+   "Hardwire Proj:PVWInverterEff[1]"       Proj:PVWInverterEff[1]      = {  98.5         }
+   "Hardwire Proj:PVWTempCoeff[1]"         Proj:PVWTempCoeff[1]        = {  -0.001611    }
+END
+;*************************************************************************
+
+
+;*************************************************************************
+;*************************************************************************
+
+ENDFILE
+
