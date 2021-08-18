@@ -9,6 +9,7 @@ goto :error2
 copy "..\..\branches\RulesetDev_MFamRestruct\Rulesets\CA Res\CAR22 Screens.txt"  "Data\Rulesets\CA Res 2022\*.*"
 copy "..\..\branches\RulesetDev_MFamRestruct\Rulesets\CA Res\CAR13 ToolTips.txt" "Data\Rulesets\CA Res 2022\CAR22 ToolTips.txt"
 copy "..\..\branches\RulesetDev_MFamRestruct\Rulesets\CA Res\RTF\*.*" "Data\Rulesets\CA Res 2022\RTF\*.*"
+copy "..\..\branches\RulesetDev_MFamRestruct\Rulesets\shared\Screens*.txt" "Data\Rulesets\CA Res 2022\*.*"
 copy "..\..\branches\RulesetDev_MFamRestruct\Rulesets\CA Res\DHWDU2.txt" "CSE\*.*"
 goto :done2
 :error2
