@@ -10,6 +10,8 @@ copy "..\RulesetDev\Rulesets\T24N\T24N Screens.txt"  "..\CBECC-Com64\Data\Rulese
 copy "..\RulesetDev\Rulesets\T24N\T24N ToolTips.txt" "..\CBECC-Com64\Data\Rulesets\T24N_2019\T24N_2019 ToolTips.txt"
 copy "..\RulesetDev\Rulesets\T24N\*.jpg" "..\CBECC-Com64\Data\Rulesets\T24N_2019\*.*"
 copy "..\RulesetDev\Rulesets\T24N\RTF\*.*" "..\CBECC-Com64\Data\Rulesets\T24N_2019\RTF\*.*"
+copy "..\RulesetDev\Rulesets\shared\Screens*.txt" "..\CBECC-Com64\Data\Rulesets\T24N_2019\*.*"
+copy "..\RulesetDev\Rulesets\shared\*.jpg" "..\CBECC-Com64\Data\Rulesets\T24N_2022\*.*"
 rem copy "..\RulesetDev\Rulesets\CEC 2013 Nonres\CEC 2013 NonRes Defaults.dbd" "..\CBECC-Com\Data\Rulesets\T24N_2019\T24N_2019 Defaults.dbd"
 copy "..\RulesetDev\Rulesets\T24N\DHWDU2.txt" "..\CBECC-Com64\CSE\*.*"
 goto :done
