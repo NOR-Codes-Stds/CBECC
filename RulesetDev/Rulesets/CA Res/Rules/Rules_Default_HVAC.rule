@@ -635,6 +635,9 @@ RULELIST "Default_AllHVAC" 0 0 0 0
    "Set default HVACHtPump:TempLabels[2]"     HVACHtPump:TempLabels[2] = {  "@ 35°F:"  }
    "Set default HVACHtPump:TempLabels[3]"     HVACHtPump:TempLabels[3] = {  "@ 17°F:"  }
 
+   "Blast HVACHtPump:PerfDetailsErrMsg prior to defaulting"    HVACHtPump:PerfDetailsErrMsg = {  UNDEFINED  }   ; SAC 09/23/21
+   "Blast HVACHtPump:PerfDetailsError prior to defaulting"     HVACHtPump:PerfDetailsError  = {  UNDEFINED  }
+
 	"Call subordinate rulelist to default type-specific heat pump system data"
 		HVACHtPump:Action = {	switch (Local( Type ))
 											case  4 :  EvalRulelist( "Default_HtPump_SplitHeatPump"       , 1 )   				; "SplitHeatPump - Heating side of central split heat pump"
@@ -701,6 +704,12 @@ RULELIST "Default_AllHVAC" 0 0 0 0
             case 23 :  1  	   ; "SglPkgVertAirCond - Single package vertical A/C system"        ; SAC 6/24/20 (tic #1226)
             default :  0
          endswitch  }
+
+   "Reset HVACSys:AutoSizeCool[1] iff Autosized VCHP2"   HVACSys:AutoSizeCool[1] =        ; SAC 09/23/21 (VCHP2)
+      {  if (FloorAreaServed[1] > 0.5 .AND. Type == 2 .AND.
+             IfValidAnd( HtPumpSystem[1]:Type = 33 ) .AND.
+             IfValidAnd( HtPumpSystem[1]:AutoSize = 0 )) then  0
+         else  UNCHANGED  endif  }
 
 	"Call subordinate rulelist to set cooling system reporting variables"		; SAC 5/27/14
 		Proj:Action		= {	EvalRulelist( "SetupHVACCoolCF1RReportVariables" )  }
@@ -3707,7 +3716,8 @@ RULELIST "SetupHVACSys_Round2_common" 0 0 0 0
 	"Set HVACSys:HaveCooling"		HVACSys:HaveCooling	= {	if (Type < 1) then  0
 																				else if (Type == 2)
 																				then	if (NumHtPumpSystemTypes <= 0 .OR. LocalCompAssigned( HtPumpSystem[1] ) == 0) then  0
-																						else if (IfValidAnd( AutoSizeCool[1] > 0.5 ) .OR. IfValidAnd( ClSysCapacity > 1 ) .OR.
+																						else if (IfValidAnd( AutoSizeCool[1] > 0.5 ) .OR. IfValidAnd( HtPumpSystem[1]:Type = 33 ) .OR.
+                                                                           IfValidAnd( ClSysCapacity > 1 ) .OR.
 																									T24RCoolingEquipment:PropEqStd( "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", HtPumpSysTypeAbbrev ) > 0.5) then  1
 																						else  0
 																						endif endif
@@ -5175,6 +5185,17 @@ RULELIST "Default_HVACHeatPump" 0 0 0 0
    "Set HVACHtPump:ShowRefrigerant - whether or not to display Refrigerant"     HVACHtPump:ShowRefrigerant =   ; SAC 08/31/20 (tic #1003)
       {  if (Show4717COPs < 1 .AND. Type !=10 .AND. Type != 7 .AND. Type < 20 .AND. IsPackaged < 1)
          then  1  else  0  endif  }
+
+   "Set HVACHtPump:ShowPerfDetails - whether or not to show 'Performance Details' dialog tab"      HVACHtPump:ShowPerfDetails =     ; SAC 09/21/21
+      {  if (Type == 33) then  1  else  0  endif  }
+   "Set HVACHtPump:PerfDetailsMsgs[1]"    HVACHtPump:PerfDetailsMsgs[1] =
+      {  switch (ShowPerfDetails)
+            case  1 :  "(enter details on 'Performance Details Data' tab)"
+            default :  UNDEFINED  endswitch  }
+   "Set HVACHtPump:PerfDetailsMsgs[2]"    HVACHtPump:PerfDetailsMsgs[2] =
+      {  switch (ShowPerfDetails)
+            case  1 :  UNDEFINED
+            default :  "Performance Data entered on first tab"  endswitch  }
 
 ; SAC 1/8/16 - added code vintage-specific values for SEER input range check warning
 ; SAC 1/13/16 - removed check for heat pumps, since this requirement is NOT based on INSTALLED DATE (which is the focus of the CEC request to add it)
@@ -6853,7 +6874,7 @@ END
 RULELIST "Default_HtPump_VariableCapHeatPump2" 0 0 0 1
 ;*************************************************************************
 	"Default HVACHtPump:TotalCapacity"   	HVACHtPump:TotalCapacity  = {  UNDEFINED  }
-	"Set HVACHtPump:TypeDescrip"			HVACHtPump:TypeDescrip	= { "RTF\Ht_VCHP.rtf" }
+	"Set HVACHtPump:TypeDescrip"			HVACHtPump:TypeDescrip	= { "RTF\Ht_VCHPdetailed.rtf" }     ; SAC 09/22/21
    "Default AutoSize"         HVACHtPump:AutoSize        = {  if (IfValidAnd( Proj:EnableHPAutosize > 0 )) then  1  else  0  endif  }     ; VCHP2 - SAC 11/10/20
 
    "Default HSPF"				   HVACHtPump:HSPF				= {  8.2  }
@@ -6917,13 +6938,91 @@ RULELIST "Default_HtPump_VariableCapHeatPump2" 0 0 0 1
       {  if (IfValidAnd( Cap47 > 0 ) .AND. IfValidAnd( Cap05 > 0 ))
          then  Cap05 / Cap47
          else  UNDEFINED  endif  }
+
+   "Default HVACHtPump:Cap82"           HVACHtPump:Cap82          = {  UNDEFINED  }    ; SAC 09/22/21
+   "Default HVACHtPump:Cap95"           HVACHtPump:Cap95          = {  UNDEFINED  }
+   "Default HVACHtPump:Cap115"          HVACHtPump:Cap115         =     ; 115 deg defaults from CB, noting 33 = (115 - 82), 13 = (95 - 82) - SAC 09/22/21
+      {  if (IfValidAnd( Cap82 > 0 )==0 .OR. IfValidAnd( Cap95 > 0 )==0) then  UNDEFINED
+         else  Cap82 + ((33/13) * (Cap95 - Cap82))
+         endif  }
+   "Default HVACHtPump:COP82"           HVACHtPump:COP82          = {  UNDEFINED  }
+   "Default HVACHtPump:COP95"           HVACHtPump:COP95          = {  UNDEFINED  }
+   "Default HVACHtPump:COP115"          HVACHtPump:COP115         =
+      {  if (IfValidAnd( Cap82 > 0 )==0 .OR. IfValidAnd( Cap95 > 0 )==0 .OR.
+             IfValidAnd( COP82 > 0 )==0 .OR. IfValidAnd( COP95 > 0 )==0) then  UNDEFINED
+         else  Cap115 /
+               ((Cap82 / COP82) + ((33/13) * ((Cap95 / COP95) -
+                                              (Cap82 / COP82))))
+         endif  }
+
+   "Default HVACHtPump:CapMin82"        HVACHtPump:CapMin82       = {  UNDEFINED  }
+   "Default HVACHtPump:CapMin95"        HVACHtPump:CapMin95       = {  UNDEFINED  }
+   "Default HVACHtPump:CapMin115"       HVACHtPump:CapMin115      =                    ; SAC 09/23/21
+      {  if (IfValidAnd( CapMin95 < Cap95 ) .AND. IfValidAnd( Cap115 > 0 ))
+         then  Cap115 * CapMin95 / Cap95
+         else if (IfValidAnd( CapMin82 > 0 ) .AND. IfValidAnd( CapMin95 > 0 ))
+         then  CapMin82 + ((33/13) * (CapMin95 - CapMin82))
+         else  UNDEFINED  endif endif  }
+   "Default HVACHtPump:COPMin82"        HVACHtPump:COPMin82       = {  UNDEFINED  }
+   "Default HVACHtPump:COPMin95"        HVACHtPump:COPMin95       = {  UNDEFINED  }
+   "Default HVACHtPump:COPMin115"       HVACHtPump:COPMin115      =
+      {  if (IfValidAnd( CapMin82 > 0 )==0 .OR. IfValidAnd( CapMin95 > 0 )==0 .OR.
+             IfValidAnd( COPMin82 > 0 )==0 .OR. IfValidAnd( COPMin95 > 0 )==0) then  UNDEFINED
+         else  CapMin115 /
+               ((CapMin82 / COPMin82) + ((33/13) * ((CapMin95 / COPMin95) -
+                                                    (CapMin82 / COPMin82))))
+         endif  }
+
+   "Default HVACHtPump:Cap8295Ratio"    HVACHtPump:Cap8295Ratio   = 
+      {  if (IfValidAnd( Cap95 > 0 ) .AND. IfValidAnd( Cap82  > 0 ))
+         then  Cap82  / Cap95
+         else  UNDEFINED  endif  }
+   "Default HVACHtPump:Cap11595Ratio"   HVACHtPump:Cap11595Ratio  = 
+      {  if (IfValidAnd( Cap95 > 0 ) .AND. IfValidAnd( Cap115 > 0 ))
+         then  Cap115 / Cap95
+         else  UNDEFINED  endif  }
+
    "Default HVACHtPump:VCHPFanPwrHC[1]-h"    HVACHtPump:VCHPFanPwrHC[1] = {   0.1  }
    "Default HVACHtPump:VCHPFanPwrHC[2]-c"    HVACHtPump:VCHPFanPwrHC[2] = {   0.1  }
    "Default HVACHtPump:HtgSizingFactor"      HVACHtPump:HtgSizingFactor = {   1.2  }
    "Default HVACHtPump:ParElecExprs"         HVACHtPump:ParElecExprs    = {   "($tdboHrAv < 50) * 40"  }
 
-   "Override default HVACHtPump:TempLabels[2]"     HVACHtPump:TempLabels[2] = {  "@ 17°F:"  }    ; SAC 07/24/21
-   "Override default HVACHtPump:TempLabels[3]"     HVACHtPump:TempLabels[3] = {  "@  5°F:"  }
+   "Override HVACHtPump:TempLabels[1]"     HVACHtPump:TempLabels[1] = {  "@   47°F:"  }    ; SAC 07/24/21
+   "Override HVACHtPump:TempLabels[2]"     HVACHtPump:TempLabels[2] = {  "@   17°F:"  }
+   "Override HVACHtPump:TempLabels[3]"     HVACHtPump:TempLabels[3] = {  "@     5°F:"  }
+   "Set HVACHtPump:TempLabels[4]"          HVACHtPump:TempLabels[4] = {  "@   82°F:"  }    ; SAC 09/22/21
+   "Set HVACHtPump:TempLabels[5]"          HVACHtPump:TempLabels[5] = {  "@   95°F:"  }
+   "Set HVACHtPump:TempLabels[6]"          HVACHtPump:TempLabels[6] = {  "@ 115°F:"  }
+
+   "Set HVACHtPump:PerfDetailsErrMsg"     HVACHtPump:PerfDetailsErrMsg =         ; catch errors for display on screen - SAC 09/23/21
+      {  if (IfValidAnd( Cap47 > 0 )==0 .OR. IfValidAnd( CapMin47 > 0 )==0 .OR.
+             IfValidAnd( Cap17 > 0 )==0 .OR. IfValidAnd( CapMin17 > 0 )==0 .OR.
+             IfValidAnd( Cap05 > 0 )==0 .OR. IfValidAnd( CapMin05 > 0 )==0 .OR.
+             IfValidAnd( Cap82 > 0 )==0 .OR. IfValidAnd( CapMin82 > 0 )==0 .OR.
+             IfValidAnd( Cap95 > 0 )==0 .OR. IfValidAnd( CapMin95 > 0 )==0 .OR.
+             IfValidAnd( Cap115> 0 )==0 .OR. IfValidAnd( CapMin115> 0 )==0)
+         then  if (IfValidAnd( AutoSize > 0 ))
+               then  "Valid capacities must be entered for each combination of outdoor dry bulb and Min/Max speed (even w/ autosizing activated)"
+               else  "Valid capacities must be entered for each combination of outdoor dry bulb and Min/Max speed"
+               endif
+         else if (IfValidAnd( COP47 > 0 )==0 .OR. IfValidAnd( COPMin47 > 0 )==0 .OR.
+                  IfValidAnd( COP17 > 0 )==0 .OR. IfValidAnd( COPMin17 > 0 )==0 .OR.
+                  IfValidAnd( COP05 > 0 )==0 .OR. IfValidAnd( COPMin05 > 0 )==0 .OR.
+                  IfValidAnd( COP82 > 0 )==0 .OR. IfValidAnd( COPMin82 > 0 )==0 .OR.
+                  IfValidAnd( COP95 > 0 )==0 .OR. IfValidAnd( COPMin95 > 0 )==0 .OR.
+                  IfValidAnd( COP115> 0 )==0 .OR. IfValidAnd( COPMin115> 0 )==0)
+         then  "Valid COPs must be entered for each combination of outdoor dry bulb and Min/Max speed"
+         else if (IfValidAnd( CapMin05  > Cap05  )) then  "Capacity at 5°F and Min speed must be less than capacity @ Max speed"
+         else if (IfValidAnd( CapMin17  > Cap17  )) then  "Capacity at 17°F and Min speed must be less than capacity @ Max speed"
+         else if (IfValidAnd( CapMin47  > Cap47  )) then  "Capacity at 47°F and Min speed must be less than capacity @ Max speed"
+         else if (IfValidAnd( CapMin82  > Cap82  )) then  "Capacity at 82°F and Min speed must be less than capacity @ Max speed"
+         else if (IfValidAnd( CapMin95  > Cap95  )) then  "Capacity at 95°F and Min speed must be less than capacity @ Max speed"
+         else if (IfValidAnd( CapMin115 > Cap115 )) then  "Capacity at 115°F and Min speed must be less than capacity @ Max speed"
+         else  UNDEFINED  endif endif endif endif endif endif endif endif  }
+   "Set HVACHtPump:PerfDetailsError - flag indicating 'Performance Details' error"     HVACHtPump:PerfDetailsError =    ; SAC 09/23/21
+      {  if (LocalStatus( PerfDetailsErrMsg ) < 1) then  UNDEFINED
+         else if (strlen( PerfDetailsErrMsg ) < 1) then  UNDEFINED
+         else  1  endif endif  }
 
 ; RJH 2/13/20 tic #1176
    "Set HVACHtPump:SpeclFeatrs_ComplianceOptionVCHP"    HVACHtPump:SpeclFeatrs_ComplianceOptionVCHP = {
