@@ -47,12 +47,12 @@ RULELIST  "BudgetConversion_DHW" 1 0 1 0
 
    "Set Proj:StdDesignCompactDistYear - Title24 code year to base DHW compact distribution table look-ups on"                    ; SAC 01/22/21
       Proj:StdDesignCompactDistYear = {   if (AllowStdDesignFuel > 0 .AND. IfValidAnd( StdDesignCompactDistrib > 0 ) .AND.
-                                              (RunAbbrev == "s" .OR. RunAbbrev == "smf")) then  2019
+                                              (RunAbbrev == "s" .OR. (SMFFollowsStdDesignFuel .AND. RunAbbrev == "smf"))) then  2019
                                           else  StdDesignBase  endif  }
                         ;"dbg" Proj:Action = { PostMessageToLog( "just set StdDesignCompactDistYear to %g (inside BudgetConversion_DHW)", StdDesignCompactDistYear ) }
    "Set Proj:StdDesignDrnWtrHtRecYear - Title24 code year to base drain water heat recovery table look-ups on" 
       Proj:StdDesignDrnWtrHtRecYear = {   if (AllowStdDesignFuel > 0 .AND. IfValidAnd( StdDesignDrnWtrHtRecov > 0 ) .AND.
-                                              (RunAbbrev == "s" .OR. RunAbbrev == "smf")) then  2019
+                                              (RunAbbrev == "s" .OR. (SMFFollowsStdDesignFuel .AND. RunAbbrev == "smf"))) then  2019
                                           else  StdDesignBase  endif  }
    ; Proj:StdDesignCompactDistYear & Proj:StdDesignDrnWtrHtRecYear ALSO set in 'ProposedInput' rulelist - SAC 01/22/21
 
@@ -118,11 +118,27 @@ RULELIST  "BudgetConversion_DHW" 1 0 1 0
          else  EvalRulelist( "ForceDefault_DHWSys_HeaterMultFlt", 1 )  endif  }
 
       ; SAC 1/27/20 - added logic to prevent setup of CentralRecircGasBoiler DHWSys for DRtg runs
+      ; revised rule to handle conversion for DRtg run from CHPWH to old-style gas or elec
+      ; restructured logic a bit and added new case for central HPWHs in 2022+ codes - SAC 07/02/21 (tic #1275)
    "Setup Central Recirc Boiler when appropriate"     DHWSys:Action  =        ; SAC 12/30/19 (tic #862)
       {  if (Proj:SimulateStdDHW < 0.5 .OR. IfValidAnd( IsExisting > 0.5 ) .OR.
-             CentralDHW < 1 .OR. IfValidAnd( FloorAreaServed > 1 )==0 .OR. MFamDistType < 1 .OR.
-             (Proj:RunAbbrev != "s" .AND. Proj:RunAbbrev != "smf")) then  UNCHANGED
-         else  EvalRulelist( "BudgetConversion_DHWSys_CentralRecircGasBoiler", 1 )  endif  }
+             CentralDHW < 1 .OR. IfValidAnd( FloorAreaServed > 1 )==0) then  UNCHANGED
+         else if (Proj:RunAbbrev == "s" .AND. Proj:AnalysisVersion >= 220060 .AND.
+                  IfValidAnd( CentralElecDHW > 0 ))
+; regardless of recirc??
+         then  EvalRulelist( "BudgetConversion_DHWSys_CentralHPWH", 1 )
+         else if (MFamDistType < 1) then  UNCHANGED
+         else if (Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf")
+         then  EvalRulelist( "BudgetConversion_DHWSys_CentralRecircGasBoiler", 1 )
+         else if (Proj:RunAbbrev == "dr" .AND. IfValidAnd( CentralDHWTypeVal = 2 ))
+         then  EvalRulelist( "BudgetConversion_DHWSys_DRtg_Central", 1 )
+         else  UNCHANGED  endif endif endif endif endif  }
+
+
+
+   "Redefault this DHWSys"    DHWSys:Action = {  EvalRulelist( "ProposedInput_DHWEquipment", 1 )  }
+
+
 
 ; BLAST current DHWSolarSysRef
    "Set DHWSys:DHWSolarSysRef"    DHWSys:DHWSolarSysRef  = {  UNDEFINED  }       ; SAC 1/15/20 (tic #1013)
@@ -339,7 +355,7 @@ RULELIST  "BudgetConversion_DHW" 1 0 1 0
          else  UNDEFINED  endif  }
    "Position std design HPWH in largest cond Zone (if specified)"    Proj:Action =        ; SAC 01/22/21
       {  if (AllowStdDesignFuel > 0 .AND. IfValidAnd( StdDesignHPWHLocOverride > 0 ) .AND.
-             LocalCompAssigned( StdElecDHWHeater ))
+             LocalCompAssigned( StdElecDHWHeater ) .AND. (Proj:RunAbbrev == "s" .OR. (Proj:SMFFollowsStdDesignFuel .AND. Proj:RunAbbrev == "smf")))
          then  EvalRulelist( "BudgetConversion_DHW_StdHPWHToCondZone" )
          else  UNCHANGED  endif  }
 
@@ -2265,6 +2281,110 @@ RULELIST  "BudgetConversion_DHWSys_CentralRecircGasBoiler" 1 0 1 0
 END
 ;*************************************************************************
 
+;************************************************************************* ; central HPWH in 2022+ code std design - SAC 07/02/21 (tic #1275)
+RULELIST  "BudgetConversion_DHWSys_CentralHPWH" 1 0 1 0
+
+   "Set DHWSys:CentralDHWType to 'HPWH'"     DHWSys:CentralDHWType  = {  "HPWH"  }
+;   "Set DHWSys:MFamDistType to recirc"       DHWSys:MFamDistType    = {  "Multi-family: Recirculating with no control (continuous pumping)"  }
+   "Set DHWSys:IsStdLargeCHPWH flag"         DHWSys:IsStdLargeCHPWH = {  1  }    ; SAC 07/10/21 (tic #1275)
+
+   "Blast DHWSys:DHWHeater[1] assignment"    DHWSys:DHWHeater[1]  = {  UNDEFINED  }
+   "Blast DHWSys:DHWHeater[2] assignment"    DHWSys:DHWHeater[2]  = {  UNDEFINED  }
+   "Blast DHWSys:DHWHeater[3] assignment"    DHWSys:DHWHeater[3]  = {  UNDEFINED  }
+   "Blast DHWSys:DHWHeater[4] assignment"    DHWSys:DHWHeater[4]  = {  UNDEFINED  }
+   "Blast DHWSys:DHWHeater[5] assignment"    DHWSys:DHWHeater[5]  = {  UNDEFINED  }
+   "Blast DHWSys:DHWHeater[6] assignment"    DHWSys:DHWHeater[6]  = {  UNDEFINED  }
+
+   "Blast DHWSys:HeaterMult[1]"  DHWSys:HeaterMult[1]  = {  UNDEFINED  }
+   "Blast DHWSys:HeaterMult[2]"  DHWSys:HeaterMult[2]  = {  UNDEFINED  }
+   "Blast DHWSys:HeaterMult[3]"  DHWSys:HeaterMult[3]  = {  UNDEFINED  }
+   "Blast DHWSys:HeaterMult[4]"  DHWSys:HeaterMult[4]  = {  UNDEFINED  }
+   "Blast DHWSys:HeaterMult[5]"  DHWSys:HeaterMult[5]  = {  UNDEFINED  }
+   "Blast DHWSys:HeaterMult[6]"  DHWSys:HeaterMult[6]  = {  UNDEFINED  }
+
+   "Remove DHWSys:LoopHeater assignment"  DHWSys:LoopHeater  = {  UNDEFINED  }
+
+   ; set CHPWH data
+   "Set DHWSys:CHPWHSysDescrip"        DHWSys:CHPWHSysDescrip        = {  "Large Single Pass Primary"  }
+   "Set DHWSys:CHPWHCompType"          DHWSys:CHPWHCompType          = {  "generic  (26kW cap @ 40F)"  }
+   "Set DHWSys:CHPWHCompAutosizeSim"   DHWSys:CHPWHCompAutosizeSim   = {  1  }
+   "Set DHWSys:CHPWHNumComp"           DHWSys:CHPWHNumComp           = {  1  }
+   "Set DHWSys:CHPWHNumCompFlt"        DHWSys:CHPWHNumCompFlt        = {  1  }
+   "Set DHWSys:CHPWHTankSetpt"         DHWSys:CHPWHTankSetpt         = {  140  }
+   "Set DHWSys:CHPWHTankRVal"          DHWSys:CHPWHTankRVal          = {  16   }
+   "Blast DHWSys:CHPWHTotTankVol"      DHWSys:CHPWHTotTankVol        = {  UNDEFINED  }
+   "Blast DHWSys:CHPWHTankCount"       DHWSys:CHPWHTankCount         = {  UNDEFINED  }
+
+; retain tank and air source locations from Proposed model (but IsStdLargeCHPWH flag will impact sim settings) - SAC 07/10/21 (tic #1275)
+;   "Set DHWSys:CHPWHTankLoc"           DHWSys:CHPWHTankLoc           = {  "Outside"   }
+;;   "Set DHWSys:CHPWHTankZone"          DHWSys:CHPWHTankZone          = {  ""   }
+;   "Set DHWSys:CHPWHSrcAirLoc"         DHWSys:CHPWHSrcAirLoc         = {  "Outside"   }
+;;   "Set DHWSys:CHPWHSrcAirZone"        DHWSys:CHPWHSrcAirZone        = {  ""   }
+
+;   "Set DHWSys:CHPWHLoopTankType"      DHWSys:CHPWHLoopTankType      = {  "Large HPWH/Compressor"  }
+;   "Set DHWSys:CHPWHLoopTankCompType"  DHWSys:CHPWHLoopTankCompType  = {  "generic  (5kW cap @ 40F)"  }
+   "Set DHWSys:CHPWHLoopTankType"      DHWSys:CHPWHLoopTankType      = {  "Electric Resistance"  }
+   "Set DHWSys:CHPWHLoopTankCompCnt"   DHWSys:CHPWHLoopTankCompCnt   = {  1    }
+   "Set DHWSys:CHPWHLoopTankSetpt"     DHWSys:CHPWHLoopTankSetpt     = {  140  }
+   "Set DHWSys:CHPWHLoopTankRVal"      DHWSys:CHPWHLoopTankRVal      = {  16   }
+   "Set DHWSys:CHPWHLoopTankVol"       DHWSys:CHPWHLoopTankVol       = 
+      {  if (IfValidAnd( NumAssignedDUFracs > 48 ))
+         then  120  else  80  endif  }
+   "Set DHWSys:CHPWHLoopTankTankCnt"   DHWSys:CHPWHLoopTankTankCnt   = {  1  }
+   "Set DHWSys:CHPWHLoopTankResHtPwr"  DHWSys:CHPWHLoopTankResHtPwr  =              ; SAC 07/03/21 (tic #1275)
+      {  if (IfValidAnd( NumAssignedDUFracs > 0 ))
+         then  1.75 * 100 * NumAssignedDUFracs
+         else  UNDEFINED  endif  }
+
+; retain tank and air source locations from Proposed model (but IsStdLargeCHPWH flag will impact sim settings) - SAC 07/10/21 (tic #1275)
+;   "Set DHWSys:CHPWHLoopTankLoc"          DHWSys:CHPWHLoopTankLoc          = {  "Outside"   }
+;;   "Set DHWSys:CHPWHLoopTankZone"         DHWSys:CHPWHLoopTankZone         = {  ""   }
+;   "Set DHWSys:CHPWHLoopTankSrcAirLoc"    DHWSys:CHPWHLoopTankSrcAirLoc    = {  "Outside"   }
+;;   "Set DHWSys:CHPWHLoopTankSrcAirZone"   DHWSys:CHPWHLoopTankSrcAirZone   = {  ""   }
+END
+;*************************************************************************
+
+
+;************************************************************************* ; SAC 04/08/21
+RULELIST  "BudgetConversion_DHWSys_DRtg_Central" 1 0 1 0
+   "Set DHWSys:CentralDHWType to 'Other'"    DHWSys:CentralDHWType  = {  "Other"  } 
+
+   "Assign library heater as DHWSys:DHWHeater[1]"     DHWSys:DHWHeater[1]  =
+      {  if (IfValidAnd( Proj:AnalysisVersion >= 220000 ) .AND.
+             ( Proj:DRtgDesignFuel == 2 .OR.                                    ; Force Mixed Fuel
+               (Proj:DRtgDesignFuel == 3 .AND. Proj:DRtgDesignFuel_DHW == 2)))   ; Specify Fuel by Use / Gas
+         then  RuleLibrary( DHWHeater, "Std Cntrl Recirc Boiler" )
+         else  RuleLibrary( DHWHeater, "t24-DRtgElecResHtr" )  endif  }
+   "Blast DHWSys:DHWHeater[2] assignment"    DHWSys:DHWHeater[2]  = {  UNDEFINED  }
+   "Blast DHWSys:DHWHeater[3] assignment"    DHWSys:DHWHeater[3]  = {  UNDEFINED  }
+   "Blast DHWSys:DHWHeater[4] assignment"    DHWSys:DHWHeater[4]  = {  UNDEFINED  }
+   "Blast DHWSys:DHWHeater[5] assignment"    DHWSys:DHWHeater[5]  = {  UNDEFINED  }
+   "Blast DHWSys:DHWHeater[6] assignment"    DHWSys:DHWHeater[6]  = {  UNDEFINED  }
+
+   "Set DHWSys:HeaterMult[1]"    DHWSys:HeaterMult[1]  = {  1  }
+   "Blast DHWSys:HeaterMult[2]"  DHWSys:HeaterMult[2]  = {  UNDEFINED  }
+   "Blast DHWSys:HeaterMult[3]"  DHWSys:HeaterMult[3]  = {  UNDEFINED  }
+   "Blast DHWSys:HeaterMult[4]"  DHWSys:HeaterMult[4]  = {  UNDEFINED  }
+   "Blast DHWSys:HeaterMult[5]"  DHWSys:HeaterMult[5]  = {  UNDEFINED  }
+   "Blast DHWSys:HeaterMult[6]"  DHWSys:HeaterMult[6]  = {  UNDEFINED  }
+
+   "Remove DHWSys:LoopHeater assignment"  DHWSys:LoopHeater  = {  UNDEFINED  }
+
+   "Set DHWSys:DHWHeater[1]:HeaterType to handle lots of defaulting and UI - needed to differentiate original Elec/Gas ConsInst from new CSE model"  ; SAC 04/09/21
+      DHWSys:DHWHeater[1]:HeaterType  = {
+         if (DHWHeater[1]:HeaterElementType == 1 .AND. DHWHeater[1]:TankType == 10 .AND.
+             IfValidAnd( Proj:EnergyCodeYearNum >= 2019 ))
+         then  9
+         else  DHWHeater[1]:TankType
+         endif  }
+
+   "Set DHWSys:DHWHeater[1]:TankZone (for t24-DRtgElecResHtr)"    DHWSys:DHWHeater[1]:TankZone  =     ; SAC 04/09/21
+      {  if (DHWHeater[1]:HeaterElementType == 0)  ; Electric Resistance
+         then  ""  else  UNCHANGED  endif  }
+      ;   then  "NONE"  else  UNCHANGED  endif  }  - have to return EMPTY STRING to hardwire to '- none -'
+END
+;*************************************************************************
+
 
 ; SAC 1/11/16 - REPLACE first heater in MaxNewNCntrlDHWSys if it is NOT a DHWHeater object (could be an air-to-water heat pump) (tic 560)
 RULELIST  "BudgetConversion_DHWHeater_ImportFromLibrary" 1 0 1 1
@@ -2371,7 +2491,7 @@ RULELIST  "BudgetConversion_DHWHeater_TankType" 1 0 1 1
       then  9        ; "Consumer Instantaneous (UEF)-New"   ; SAC 8/2/17
       else  5        ; New -> Small Instantaneous
       endif endif
-    else if (ForceStdDesign < 0.5) then  UNCHANGED   ; Existing
+    else if (IfValidAnd( ForceStdDesign > 0.5 )==0) then  UNCHANGED   ; Existing
     else if (NewCntrlAreaServed >= 1)
     then  ; only reset if HeaterElementType is incompatible w/ current TankType
       switch (HeaterElementType)

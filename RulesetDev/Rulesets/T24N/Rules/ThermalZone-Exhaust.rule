@@ -40,20 +40,21 @@ RULE ThrmlZn:ExhSysRef
   INPUTCLASS
     Optional
   DEFAULT
-    if( LocalCompAssigned( VentSysRef ) )
+    if( IfValidAnd( ExhFlow > 0 ) .AND.
+        LocalCompAssigned( VentSysRef ) )
     then
       if( IfValidAnd( VentSysRef:Type = "Exhaust" ) .OR.
           ( IfValidAnd( VentSysRef:Type = "VentilationOnly" ) .AND. 
             IfValidAnd( VentSysRef:ExhSysType = "ExhaustOnly" ) ) .OR.
           ( IfValidAnd( VentSysRef:IsAllOA > 0 ) .AND. 
-            IfValidAnd( VentSysRef:ExhFanCap >= ExhFlow ) .AND.
-            IfValidAnd( ExhFlow > 0 ) ) )
+            ( IfValidAnd( VentSysRef:ExhFanCap >= ExhFlow ) .OR.
+              IfValidAnd( VentSysRef:RetFanCap >= ExhFlow ) ) ) )
       then // VentSys is a) Exhaust, b) VentOnly and not SupplyOnly, or 
-           //c) zone has ExhFlow and DOAS is 100% OA w/ ret fan
+         //c) zone has ExhFlow and DOAS is 100% OA w/ ret fan
         VentSysRef
-      else UNDEFINED
+      else UNCHANGED
       endif
-    else UNDEFINED
+    else UNCHANGED
     endif
   CHECKCODE : T24N_2016
     if( IsNewExh > 0 .AND. LocalCompAssigned( ExhSysRef ) = 0 .AND.
@@ -87,8 +88,11 @@ RULE ThrmlZn:ExhSysRef
     else UNCHANGED
     endif endif
   CHECKCODE
-    if( IsNewExh > 0 .AND. LocalCompAssigned( ExhSysRef ) = 0 .AND. HasUnknownHVAC = 0 )
-    then
+    if( ( Proj:IsNoMech = 0 .AND. Proj:IsNoAddMech = 0 ) .AND. 
+        LocalCompAssigned( ExhSysRef ) = 0 .AND. 
+        HasUnknownHVAC = 0 )
+    then // Scope includes Mechanical compliance and there is no ExhSys defined
+         // Ticket 3200: Fixed to look at Proj:NoMech props since there is no ExhSys spec'd
       if( ( LabArea + PrkgGarArea + CommKitArea ) > 0 )
       then // Only post error if IsNewMech or space has new HVAC system in existing building
         PostError("ThermalZone '%s' has space functions that classify it as a
@@ -99,8 +103,13 @@ RULE ThrmlZn:ExhSysRef
       then
         PostError("ThermalZone '%s' has a code-minimum exhaust flow required,
                    but no exhaust system has been specified.", Name)
+      else
+      if( ExhFlow > 0 )
+      then
+        PostError("ThermalZone '%s' has a design exhaust flow,
+                   but no exhaust system has been specified.", Name)
       else UNCHANGED
-      endif endif
+      endif endif endif
     else
     if( VentSrc = "Forced" .AND. 
         LocalCompAssigned( VentSysRef ) .AND. 
@@ -129,8 +138,16 @@ RULE ThrmlZn:ExhSysRef
     then // See Ticket 2921
       PostError("ThermalZone '%s' has an exhaust system specified,
                  but has no exhaust flow.", Name)
+    else
+    if( Type = "Unconditioned" .AND. 
+        LocalCompAssigned( ExhSysRef ) = 0 .AND. 
+        CodeExhFlow > 0 .AND.
+        HasUnknownHVAC = 0 )
+    then // Ticket 3200
+      PostError("ThermalZone '%s' has a code-minimum exhaust flow required,
+                   but no exhaust system has been specified.", Name)
     else UNCHANGED
-    endif endif endif
+    endif endif endif endif
   SIZING
     if( IfValidAnd( VentSysRef:Type = "VentilationOnly" ) )
     then VentSysRef
@@ -225,23 +242,20 @@ RULE ThrmlZn:ExhFlow
     else UNCHANGED
     endif
   CHECKCODE 
-    if( CodeVentFlow > 0 .AND. 
-        PropVentSysIsExh = 1 .AND.
-        VentFlow < ExhFlow * ( 1 - Proj:ExhTolMinLimNonRes ) .AND.
-        IfValidAnd( StoryRef:VentExhBalRat < ( 1 -Proj:ExhTolMinLimNonRes ) ) )
-    then 
-      PostWarning("ThermalZone '%s' design ventilation air flow is less than the
-                  design exhaust air flow. If the Story exhaust-to-ventilation
-                  balance is < %.2f, then infiltration to the zone is modeled.", 
-                  Name, 1 - Proj:ExhTolMinLimNonRes)
-    else UNCHANGED
-    endif
-  CHECKSIM
-    if( IsNewExh > 0 .AND. ExhFlow > 0 .AND. LocalCompAssigned( ExhSysRef ) = 0 
-        .AND. CodeExhFlow = 0 )
-    then // Only log CHECKSIM error if CHECKCODE is already thrown by CodeExhFlow
-      PostError("ThermalZone '%s' has exhaust flow defined, but no exhaust system
-                 specified.", Name)
+    if( ( Proj:IsNoMech = 0 .AND. Proj:IsNoAddMech = 0 ) .AND. 
+         HasUnknownHVAC = 0 )
+    then // Scope includes Mechanical compliance
+      if( CodeVentFlow > 0 .AND. 
+          PropVentSysIsExh = 1 .AND.
+          VentFlow < ExhFlow * ( 1 - Proj:ExhTolMinLimNonRes ) .AND.
+          IfValidAnd( StoryRef:VentExhBalRat < ( 1 -Proj:ExhTolMinLimNonRes ) ) )
+      then 
+        PostWarning("ThermalZone '%s' design ventilation air flow is less than the
+                    design exhaust air flow. If the Story exhaust-to-ventilation
+                    balance is < %.2f, then infiltration to the zone is modeled.", 
+                    Name, 1 - Proj:ExhTolMinLimNonRes)
+      else UNCHANGED
+      endif
     else UNCHANGED
     endif
   SIZING_PROPOSED
@@ -261,6 +275,23 @@ RULE ThrmlZn:ExhFlow
     endif    
   ANNUAL
     z:ExhFlow 
+ENDRULE
+
+RULE New ThrmlZn:ExhFlowWithMult
+  DATATYPE
+    Float
+  LONGFORM 
+    ExhaustFlowWithMultiplier
+  INPUTCLASS 
+    NotInput
+  UNITS
+    cfm
+  DEFAULT
+    ExhFlow * Mult  
+  SIZING
+    ExhFlow * Mult   
+  ANNUAL
+    ExhFlow * Mult
 ENDRULE
 
 // Primarily for labs, MinExhFlow, and MinExhACH
@@ -339,7 +370,9 @@ RULE ThrmlZn:ExhSrc
      'DirectOutsideAir' indicates a louver or other means of allowing untempered, 
      outside air to enter from the exterior to make-up for the exhaust.
      This results in the equivalent amount of exahust air to be infiltrated into the
-     zone in the simulation."
+     zone in the simulation. 'DirectOutsideAir' is the default for zones that require
+     outside air ventilation and use an exhaust fan as the VentilationSystem, or 
+     if the zone is not directly or indirectly conditioned."
   INPUTCLASS 
     Default
   OPTION
@@ -351,10 +384,16 @@ RULE ThrmlZn:ExhSrc
   DEFAULT
     if( ExhFlow > 0 .OR. IfValidAnd( PropVentSysIsExh > 0 ) )
     then
+      if( CondgStatus = 0 )
+      then "DirectOutsideAir"
+      else
       if( VentFlow > 0 .AND. IfValidAnd( PropVentSysIsExh > 0 ) )
       then "DirectOutsideAir"
+      else
+      if( VentFlow > ExhFlow )
+      then "VentilationSystem"
       else "TransferFromAdjacentZones"
-      endif
+      endif endif endif
     else "None"
     endif
 // Old rules prior to 2019.2.0
@@ -399,12 +438,12 @@ RULE ThrmlZn:ExhSrc
 ;   else UNCHANGED
 ;   endif
   SIZING_PROPOSED
-    if( ExhFlow > 0 .OR. 
-        PropVentSysIsExh > 0 .OR.
+    if( ( ExhFlow > 0 .OR. PropVentSysIsExh > 0 ) .OR.
         ( BaseSysNum > 0 .AND. BaseVentSysIsExh > 0 ) )
     then
-      if( VentFlow > 0 )
-      then // VentFlow is defined and therefore direct make-up air required
+      if( VentFlow > 0 .AND. 
+          ( PropVentSysIsExh > 0 .OR. BaseVentSysIsExh > 0 ) )
+      then // VentFlow is defined and therefore direct make-up air should be provided
         "DirectOutsideAir"
       else ExhSrc
       endif
@@ -619,7 +658,35 @@ RULE ThrmlZn:ExhFlowSim
     then ExhFlow * Mult
     else UNDEFINED
     endif
-  SIZING
+  SIZING_PROPOSED
+    if( ExhFlow > 0 )
+     then
+      if( HasUnknownHVAC > 0 )
+      then ExhFlow * Mult
+      else
+      if( LocalCompAssigned( ExhSysRef ) .AND. 
+          LocalCompAssigned( VentSysRef) )
+      then
+        if( IfValidAnd( VentSysRef:IsExhSys = 0 ) .AND.
+            IfValidAnd( ExhSysRef:Name = VentSysRef:Name ) )
+        then // Vent and Exh are the same system (i.e. DOAS) and it is not 
+             // an ExhSys. Remove ExhFlowSim so the flow is not double-counted
+          UNDEFINED
+        else
+          ExhFlow * Mult
+        endif
+      else
+      if( LocalCompAssigned( ExhSysRef ) )
+      then
+        if( IfValidAnd( ExhSysRef:IsExhSys > 0 ) )
+        then ExhFlow * Mult
+        else UNDEFINED
+        endif
+      else UNDEFINED
+      endif endif endif
+    else UNDEFINED
+    endif
+  SIZING_BASELINE
     if( ExhFlow > 0 )
     then ExhFlow * Mult
     else UNDEFINED

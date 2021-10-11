@@ -132,11 +132,13 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
 	"Default Proj:DwshFLOWF"				Proj:DwshFLOWF					= {	1    }
    ; SAC 12/6/18 - updated DHW draw profile include file to latest combined SFam/MFam (tic #?? no explicit ticket)
    ; SAC 2/28/19 - restored use of DHWDUSF & DHWDUMF for PRE-2019 analysis (to ensure equivalent results)
+   ; revised to DHWDU2.txt for 2019.2.0 and later releases - SAC 03/16/21
 	"Default Proj:CSE_DHWUseIncFile"		Proj:CSE_DHWUseIncFile		= {
       if (CSEDHWUseMethod == 1) then  UNDEFINED
+      else if (AnalysisVersion >= 190200) then "DHWDU2.txt"
       else if (EnergyCodeYearNum >= 2019) then  "DHWDU.txt"
       else if (IsMultiFamily < 0.5) then  "DHWDUSF.txt"  else  "DHWDUMF.txt"
-      endif endif endif  }
+      endif endif endif endif  }
 	"Default Proj:CSE_DHWUseIncFileHashID"	Proj:CSE_DHWUseIncFileHashID	= {
       if (CSEDHWUseMethod == 1) then  UNDEFINED
       else  17
@@ -946,6 +948,9 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
               (CentralHPWHCprsrType > 0 .OR. (HPWHBrand > 2 .AND. HPWHModel > 1)) )
          then  1  else  0  endif  }
 
+   "Set DHWHeater:IsNewAssignedHPWH - flag: this is a New HPWH assigned to one or more DHWSystems"    DHWHeater:IsNewAssignedHPWH =       ; SAC 02/05/21
+      {  if (HeaterElementType == 5 .AND. IfValidAnd( NewFlrAreaServed > 0 )) then  1  else  0  endif  }
+
    "Default DHWHeater:StandbyLossMult - for simulating insulation blanket on Elec WHs"  ; SAC 10/18/17
       DHWHeater:StandbyLossMult  = {
          if ((HeaterElementType == 5 .OR. (HeaterElementType == 0 .AND. ShowTankLocation > 0.5)) .AND.
@@ -954,7 +959,8 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
 
   ; SAC 12/22/18 - added 2019 Drain Water Heat Recovery (via new DWHX objects) // SAC 1/5/19 - renamed DWHRSys
       ; DWHRSys:Type,                           Default,   0,    1,   1,    1,  1,  1 BEMP_Sym,  1,  0,  0, "",                 0,  0,                           1003, "DWHRSys type"   
-   "Default DWHRSys:CSARatedEff"    DWHRSys:CSARatedEff  = {  43  }   ; SAC 1/5/19 - renamed from ...Effect(iveness) -> Eff(iciency)  / SAC 1/8/19 - converted units from frac to %
+   ; SAC 1/5/19 - renamed from ...Effect(iveness) -> Eff(iciency)  / SAC 1/8/19 - converted units from frac to %
+   "Default DWHRSys:CSARatedEff"    DWHRSys:CSARatedEff  = {  42  }   ; updated default efficiency from 43 to 42 (per guidance from CEC) - SAC 09/23/21
 ;DWHRSys:IsReferenced,                  NotInput,   0,    0,   0,    1,  1,  1 BEMP_Int,  1,  0,  0, "",                 0,  0,                           3008, "flag indicating whether the DWHRSys is referenced by a DHW system (that serves Zones/DUs)."
 
       ; DHWSys:DWHRSysRef[ALL],                 Default,   0,    1,   1,    1,  1,  1 BEMP_Obj,  3,  1,   1, "DWHRSys", 0, "",  1003, "DWHRSys equipment" 
@@ -1370,8 +1376,8 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
     else 0
     endif }
 
-"store BEMProc details"		DHWHeater:Action = {  if (IsUEF .AND. LocalStatus( EnergyFactor ) > 0.5 .AND. IfValidAnd( UEFNewCoef1 > 0 )==0)
-   then  StoreBEMProc( Format( "bogus UEFNewCoef1-%s-%g", Proj:RunAbbrev, ComponentIndex() ), 0 )  else  UNCHANGED  endif  }
+;"store BEMProc details"		DHWHeater:Action = {  if (IsUEF .AND. LocalStatus( EnergyFactor ) > 0.5 .AND. IfValidAnd( UEFNewCoef1 > 0 )==0)
+;   then  StoreBEMProc( Format( "bogus UEFNewCoef1-%s-%g", Proj:RunAbbrev, ComponentIndex() ), 0 )  else  UNCHANGED  endif  }
   "Calculate UEF Model from UEF New"  DHWHeater:UEFModel = {
      if( IsUEF .AND.
          LocalStatus( EnergyFactor ) > 0.5 )
@@ -1534,6 +1540,9 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
    "Set DHWSys:CHPWHLoopTankCompTypeLbl"    DHWSys:CHPWHLoopTankCompTypeLbl  =       ; SAC 6/1/20
       {  if (CentralDHWTypeVal != 2) then  UNDEFINED
          else  switch (CHPWHLoopTankType)
+                  case  1 :  if (IfValidAnd( Proj:EnableResearchMode > 0 ))
+                             then  "Res Control Scheme:"
+                             else  UNDEFINED  endif
                   case  2 :  "NEEA HPWH Brand/Model:"
                   case  3 :  "Commercial HPWH Model:"
                   case 10 :  "HPWH/Compressor Type:"
@@ -1569,6 +1578,12 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
          then  EvalRulelist( "ForceDefault_DHWSys_CHPWHNumCompFlt", 1 )
          else  UNCHANGED  endif  }
    "Default DHWSys:CHPWHNumCompFlt"   DHWSys:CHPWHNumCompFlt  = {  CHPWHNumComp  }
+
+   "Blast user-defined DHWSys:CHPWHLoopTankResCtrls and StdCHPWHLoopTankResCtrls if EnableResearchMode not activated"   DHWSys:Action  =     ; SAC 07/16/21 (tic #1275)
+      {  if (IfValidAnd( Proj:EnableResearchMode > 0 )==0 .AND. IfValidAnd( Proj:RunAbbrev == "u" ) .AND.
+             (LocalStatus( CHPWHLoopTankResCtrls ) > 4 .OR. LocalStatus( StdCHPWHLoopTankResCtrls ) > 4))
+         then  EvalRulelist( "ForceDefault_DHWSys_CHPWHLoopTankResCtrls", 1 )
+         else  UNCHANGED  endif  }
 
 ;   ; SAC 3/5/20 - added size defaulting by CHPWHCompType, w/ new Colmac defaulting to 10x Sanden (Colmac)
 ;   "Default DHWSys:CHPWHPrimTankVol - Central HPWH primary tank volume"    DHWSys:CHPWHPrimTankVol  =      ; removed CHPWHPrimTankVol defaulting - SAC 5/27/20
@@ -1661,6 +1676,13 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
    "Default DHWSys:CHPWHLoopTankRVal"     DHWSys:CHPWHLoopTankRVal   =     ; SAC 6/25/20
       {  if (CHPWHLoopTankShowDtls > 0 .AND. IfValidAnd( FloorAreaServed[1] > 0 )) then  16  else  UNDEFINED  endif  }
 
+   "Set DHWSys:CHPWHTankMinRVal"          DHWSys:CHPWHTankMinRVal    =     ; SAC 06/25/21
+      {  if (CentralDHWTypeVal == 2 .AND. CHPWHSysDescrip == 2 .AND.
+             IfValidAnd( FloorAreaServed[1] > 0 ) .AND. Proj:EnableResearchMode < 1) then  16  else  0  endif  }
+   "Set DHWSys:CHPWHLoopTankMinRVal"      DHWSys:CHPWHLoopTankMinRVal = 
+      {  if (CHPWHLoopTankShowDtls > 0 .AND.
+             IfValidAnd( FloorAreaServed[1] > 0 ) .AND. Proj:EnableResearchMode < 1) then  16  else  0  endif  }
+
    "Set DHWSys:CHPWHTankSetptEdit - flag indicating central HPWH tank setpoints are user editable"    DHWSys:CHPWHTankSetptEdit =      ; SAC 08/10/20   
       {  if (Proj:EnableResearchMode > 0.5 .OR. Proj:BypassRuleLimits > 0.5) then  1  else  UNDEFINED  endif  }
    "Blast DHWSys CHPWH tank setpoint(s) if user-defined but not editable"     DHWSys:Action =         ; SAC 08/10/20
@@ -1670,10 +1692,11 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
 
    "Default DHWSys:CHPWHTankSetpt"        DHWSys:CHPWHTankSetpt  =         ; SAC 7/1/20
       {  if (CentralDHWTypeVal == 2 .AND. CHPWHSysDescrip == 2 .AND. IfValidAnd( FloorAreaServed[1] > 0 )) then  140  else  UNDEFINED  endif  }
-   "Default DHWSys:CHPWHLoopTankSetpt"    DHWSys:CHPWHLoopTankSetpt  =     ; SAC 7/1/20   ; updated default to 140 - SAC 08/10/20
-      {  if (CHPWHLoopTankShowDtls > 0 .AND. IfValidAnd( FloorAreaServed[1] > 0 )) then  140  else  UNDEFINED  endif  }
+   "Default DHWSys:CHPWHLoopTankSetpt"    DHWSys:CHPWHLoopTankSetpt  =     ; SAC 7/1/20   ; updated default to 140 - SAC 08/10/20   ; updated default to 136 - SAC 07/15/21
+      {  if (CHPWHLoopTankShowDtls > 0 .AND. IfValidAnd( FloorAreaServed[1] > 0 )) then  136  else  UNDEFINED  endif  }
 
    ; fixed error check problems (a) CHPWHTankSetpt being checked when not editable, and (b) checks on Large systems not reporting properly - SAC 08/19/20   ; more tank vol checks - SAC 08/31/20
+   ; prevent certain error messages when CHPWHCompAutosizeSim flag set since autosizing will cover those data - SAC 07/05/21
    "Init DHWSys:CHPWHErrMsg"     DHWSys:CHPWHErrMsg = {  UNDEFINED  }
    "Set DHWSys:CHPWHErrMsg - part 1 (large)"       DHWSys:CHPWHErrMsg =
       {  if (IfValidAnd( CentralDHWTypeVal = 2 )==0) then  UNCHANGED
@@ -1684,10 +1707,10 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
                         (Proj:EnableResearchMode > 0.5 .AND. IfValidAnd( CHPWHNumCompFlt > 0 )==0))
                then  "Central HPWH input error:  Compressor/Heater Count must be > 0"
                else if (IfValidAnd( CHPWHTankSetpt  > 0 )==0 .AND. IfValidAnd( CHPWHTankSetptEdit > 0 )) then  "Central HPWH input error:  Tank Setpoint must be > 0"
-               else if (IfValidAnd( CHPWHTankCount  > 0 )==0) then  "Central HPWH input error:  Tank Count must be > 0"
+               else if (IfValidAnd( CHPWHTankCount  > 0 )==0 .AND. IfValidAnd( CHPWHCompAutosizeSim > 0 )==0) then  "Central HPWH input error:  Tank Count must be > 0"
                else if (IfValidAnd( CHPWHTotTankVol > 0 )==0) then  "Central HPWH input error:  Total Tank Volume must be > 0"
                else if (IfValidAnd( CHPWHTotTankVol >= CHPWHMinTotTankVol )==0) then  Format( "Central HPWH input error:  Total Tank Volume must be >= %g", ValidOr( CHPWHMinTotTankVol, 0 ) )
-               else if (IfValidAnd( CHPWHTankRVal  >= 16)==0) then  "Central HPWH input error:  Tank R-Value must be >= 16"
+               else if (IfValidAnd( CHPWHTankRVal   >= CHPWHTankMinRVal   )==0) then  Format( "Central HPWH input error:  Tank R-Value must be >= %g", CHPWHTankMinRVal )
                else if (IfValidAnd( CHPWHTankLoc    > 0 )==0) then  "Central HPWH input error:  Tank Location selection missing"
                else if (IfValidAnd( CHPWHTankLoc    = 2 ) .AND. LocalCompAssigned( CHPWHTankZone ) < 1) then  "Central HPWH input error:  Tank Zone (location) selection missing"
                else if (IfValidAnd( CHPWHSrcAirLoc  > 0 )==0) then  "Central HPWH input error:  Source Air From selection missing"
@@ -1758,8 +1781,8 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
                else if (IfValidAnd( CHPWHLoopTankSetpt   > 0 )==0 .AND. IfValidAnd( CHPWHTankSetptEdit > 0 )) then  "CHPWH Loop Tank input error:  Tank Setpoint must be > 0"
                else if (IfValidAnd( CHPWHLoopTankTankCnt > 0 )==0) then  "CHPWH Loop Tank input error:  Tank Count must be > 0"
                else if (IfValidAnd( CHPWHLoopTankVol     > 0 )==0) then  "CHPWH Loop Tank input error:  Total Tank Volume must be > 0"
-               else if (IfValidAnd( CHPWHLoopTankVol >= CHPWHLoopTankMinTankVol )==0) then  Format( "CHPWH Loop Tank input error:  Total Tank Volume must be >= %g", ValidOr( CHPWHLoopTankMinTankVol, 0 ) )
-               else if (IfValidAnd( CHPWHLoopTankRVal   >= 16)==0) then  "CHPWH Loop Tank input error:  Tank R-Value must be >= 16"
+               else if (IfValidAnd( CHPWHLoopTankVol  >= CHPWHLoopTankMinTankVol )==0) then  Format( "CHPWH Loop Tank input error:  Total Tank Volume must be >= %g", ValidOr( CHPWHLoopTankMinTankVol, 0 ) )
+               else if (IfValidAnd( CHPWHLoopTankRVal >= CHPWHLoopTankMinRVal    )==0) then  Format( "CHPWH Loop Tank input error:  Tank R-Value must be >= %g", CHPWHLoopTankMinRVal )
                else if (IfValidAnd( CHPWHLoopTankLoc     > 0 )==0) then  "CHPWH Loop Tank input error:  Tank Location selection missing"
                else if (IfValidAnd( CHPWHLoopTankLoc     = 2 ) .AND. LocalCompAssigned( CHPWHLoopTankZone   ) < 1) then  "CHPWH Loop Tank input error:  Tank Zone (location) selection missing"
                else  UNDEFINED  endif endif endif endif endif endif endif endif 
@@ -1772,8 +1795,8 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
                else if (IfValidAnd( CHPWHLoopTankSetpt   > 0 )==0 .AND. IfValidAnd( CHPWHTankSetptEdit > 0 )) then  "CHPWH Loop Tank input error:  Tank Setpoint must be > 0"
                else if (IfValidAnd( CHPWHLoopTankTankCnt > 0 )==0) then  "CHPWH Loop Tank input error:  Tank Count must be > 0"
                else if (IfValidAnd( CHPWHLoopTankVol     > 0 )==0) then  "CHPWH Loop Tank input error:  Total Tank Volume must be > 0"
-               else if (IfValidAnd( CHPWHLoopTankVol >= CHPWHLoopTankMinTankVol )==0) then  Format( "CHPWH Loop Tank input error:  Total Tank Volume must be >= %g", ValidOr( CHPWHLoopTankMinTankVol, 0 ) )
-               else if (IfValidAnd( CHPWHLoopTankRVal   >= 16)==0) then  "CHPWH Loop Tank input error:  Tank R-Value must be >= 16"
+               else if (IfValidAnd( CHPWHLoopTankVol  >= CHPWHLoopTankMinTankVol )==0) then  Format( "CHPWH Loop Tank input error:  Total Tank Volume must be >= %g", ValidOr( CHPWHLoopTankMinTankVol, 0 ) )
+               else if (IfValidAnd( CHPWHLoopTankRVal >= CHPWHLoopTankMinRVal    )==0) then  Format( "CHPWH Loop Tank input error:  Tank R-Value must be >= %g", CHPWHLoopTankMinRVal )
                else if (IfValidAnd( CHPWHLoopTankLoc     > 0 )==0) then  "CHPWH Loop Tank input error:  Tank Location selection missing"
                else if (IfValidAnd( CHPWHLoopTankLoc     = 2 ) .AND. LocalCompAssigned( CHPWHLoopTankZone   ) < 1) then  "CHPWH Loop Tank input error:  Tank Zone (location) selection missing"
                else if (IfValidAnd( CHPWHLoopTankSrcAirLoc  > 0 )==0) then  "CHPWH Loop Tank input error:  Source Air From selection missing"
@@ -1790,7 +1813,7 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
                else if (IfValidAnd( CHPWHLoopTankSetpt   > 0 )==0 .AND. IfValidAnd( CHPWHTankSetptEdit > 0 )) then  "CHPWH Loop Tank input error:  Tank Setpoint must be > 0"
                else if (CHPWHLoopTankShowDtls > 0 .AND. IfValidAnd( CHPWHLoopTankVol     > 0 )==0) then  "CHPWH Loop Tank input error:  Total Tank Volume must be > 0"
                else if (CHPWHLoopTankShowDtls > 0 .AND. IfValidAnd( CHPWHLoopTankTankCnt > 0 )==0) then  "CHPWH Loop Tank input error:  Tank Count must be > 0"
-               else if (CHPWHLoopTankShowDtls > 0 .AND. IfValidAnd( CHPWHLoopTankRVal  >= 16 )==0) then  "CHPWH Loop Tank input error:  Tank R-Value must be >= 16"
+               else if (CHPWHLoopTankShowDtls > 0 .AND. IfValidAnd( CHPWHLoopTankRVal  >= CHPWHLoopTankMinRVal )==0) then  Format( "CHPWH Loop Tank input error:  Tank R-Value must be >= %g", CHPWHLoopTankMinRVal )
                else if (IfValidAnd( CHPWHLoopTankLoc     > 0 )==0) then  "CHPWH Loop Tank input error:  Tank Location selection missing"
                else if (IfValidAnd( CHPWHLoopTankLoc     = 2 ) .AND. LocalCompAssigned( CHPWHLoopTankZone ) < 1) then  "CHPWH Loop Tank input error:  Tank Zone (location) selection missing"
                else if (IfValidAnd( CHPWHLoopTankSrcAirLoc  > 0 )==0) then  "CHPWH Loop Tank input error:  Source Air From selection missing"
@@ -2224,6 +2247,7 @@ RULELIST "PostProposedInput_CentralHPWH_LargeAndSmall" 1 0 1 0
    "Set DHWSys:CntrlHtrMultFlt[1]"     DHWSys:CntrlHtrMultFlt[1]  =           ; SAC 6/14/20 (tic #185)
       {  HeaterMultFlt[1]  }
 
+   "Set DHWSys:DHWHeater[1]:ShowTankLocation"   DHWSys:DHWHeater[1]:ShowTankLocation = { 1 }       ; SAC 07/11/21 (tic #1275)
    ; rules to setup both tank & air source locations - SAC 6/3/20
    "Set DHWSys:DHWHeater[1]:IsCentralHPWH flag"    DHWSys:DHWHeater[1]:IsCentralHPWH  = {  1  }              ; SAC 6/3/20
    "Set DHWSys:DHWHeater[1]:TankOutside"     DHWSys:DHWHeater[1]:TankOutside =
@@ -2540,6 +2564,8 @@ RULELIST "ProposedInput_DHWCompactDistribution_SFam" 0 0 0 0
             default :  UNDEFINED
          endswitch  }
 
+   "Default Proj:SFamCDSpecFixDists"   Proj:SFamCDSpecFixDists  = {  0  }     ; SAC 09/29/21 (tic #1277)
+
    "Default DHWSys:CDServesMBathFix"   DHWSys:CDServesMBathFix  = {  1  }
    "Default DHWSys:CDServesKitFix"     DHWSys:CDServesKitFix    = {  1  }
    "Default DHWSys:CDServesThirdFix"   DHWSys:CDServesThirdFix  = {  1  }
@@ -2578,9 +2604,11 @@ RULELIST "ProposedInput_DHWCompactDistribution_SFam" 0 0 0 0
          then  CDNumFlrsSrvd
          else  UNDEFINED  endif  }
 
+   ; added new scenario 10004 for when fixture distances are not entered - SAC 09/29/21
    "Set Proj:SFamCDWeightedDist"    Proj:SFamCDWeightedDist  = {
          if (IsMultiFamily > 0.5) then  10003
          else if (SFamCompactDistrib < 1) then  10000
+         else if (SFamCDSpecFixDists < 1) then  10004
          else if (SumAll( DHWSys:CDHaveRecircThird ) > 0)
          then  if (SumAll( DHWSys:CDRecircThirdFix ) == 0)
                then  10001
@@ -2592,7 +2620,7 @@ RULELIST "ProposedInput_DHWCompactDistribution_SFam" 0 0 0 0
                else  (SFamCDMBathFixDist * 0.4) +
                      (SFamCDKitFixDist   * 0.4) +
                      (SFamCDThirdFixDist * 0.2)    endif
-         endif endif endif  }    ; SAC 3/22/19 - updated logic for project-wide calcs
+         endif endif endif endif  }    ; SAC 3/22/19 - updated logic for project-wide calcs
 
    "Set Proj:SFamCDNumFloorsServed"    Proj:SFamCDNumFloorsServed  = {
          if (SumAll( DHWSys:CDHaveRecircThird ) > 0)
@@ -2632,16 +2660,27 @@ RULELIST "ProposedInput_DHWCompactDistribution_SFam" 0 0 0 0
                endif endif
          endif endif  }
 
-   "Default Proj:SFamUserSpecCmpctDist - whether or not user is specifying a custom Compactness Factor"  ; SAC 1/11/19
-      Proj:SFamUserSpecCmpctDist  = {  if (LocalStatus( SFamUserSpecCmpctDist ) < 1) then  0  else  UNCHANGED  endif  }
+; ignore - SAC 09/29/21 (tic #1277)
+;   "Default Proj:SFamUserSpecCmpctDist - whether or not user is specifying a custom Compactness Factor"  ; SAC 1/11/19
+;      Proj:SFamUserSpecCmpctDist  = {  if (LocalStatus( SFamUserSpecCmpctDist ) < 1) then  0  else  UNCHANGED  endif  }
    "Default Proj:SFamUserCompactFactor"  ; SAC 1/12/19
       Proj:SFamUserCompactFactor  = {
-         if (IfValidAnd( SFamUserSpecCmpctDist > 0 ) .AND. SFamCompactDistrib == 1) then  0.7
-         else  UNCHANGED  endif  }
+         switch (SFamCompactDistrib)
+            case  1 :  0.7
+            case  2 :  0.6
+            default :  UNDEFINED
+         endswitch  }
+      ; replaced old rule (below) w/ above - SAC 09/29/21 (tic #1277)
+      ;   if (IfValidAnd( SFamUserSpecCmpctDist > 0 ) .AND. SFamCompactDistrib == 1) then  0.7
+      ;   else  UNCHANGED  endif  }
 
-   "Set Proj:SFamCompactFactor"    Proj:SFamCompactFactor  = {
-         if (IfValidAnd( SFamUserSpecCmpctDist > 0 ) .AND.
-             IfValidAnd( SFamUserCompactFactor > 0 )) then  SFamUserCompactFactor
+   "Set Proj:SFamCompactFactor"    Proj:SFamCompactFactor  =      ; removed reference to SFamUserSpecCmpctDist and added SFamCDSpecFixDists - SAC 09/29/21 (tic #1277)
+      {  if (SFamCompactDistrib > 0 .AND.
+             IfValidAnd( SFamCDSpecFixDists < 1 ))
+         then  if (SFamCompactDistrib == 1) then  0.7
+               else if (IfValidAnd( SFamUserCompactFactor > 0 ))
+               then  SFamUserCompactFactor
+               else  1  endif endif
          else if (SFamCDWeightedDist >= 10000) then  1
          else if (IfValidAnd( SFamCDWeightedDist <= SFamCDQualifyDist )==0) then  10
          else if (SFamCompactDistrib == 1) then  0.7
@@ -2649,16 +2688,18 @@ RULELIST "ProposedInput_DHWCompactDistribution_SFam" 0 0 0 0
          endif endif endif endif  }
 
    ; added logic to keep CDModelCredit unchanged for Altered and Existing DHW systems - SAC 09/02/20 (tic #1187)
+   ; removed reference to SFamUserSpecCmpctDist and added SFamCDSpecFixDists - SAC 09/29/21 (tic #1277)
    "Set DHWSys:CDModelCredit"    DHWSys:CDModelCredit  = {
          if (Proj:SFamCompactDistrib < 1 .OR. IfValidAnd( CmpctDistAllowed > 0 )==0) then  0
          else if ((IfValidAnd( Proj:RunAbbrev == "s" ) .OR. IfValidAnd( Proj:RunAbbrev == "smf" ) .OR. IfValidAnd( Proj:RunAbbrev == "dr" )) .AND.
                   IfValidAnd( Status = 3 )==0) then  UNCHANGED
          else if (IfValidAnd( Proj:RunAbbrev == "s" )==0 .AND. IfValidAnd( Proj:RunAbbrev == "smf" )==0 .AND. IfValidAnd( Proj:RunAbbrev == "dr" )==0 .AND.
-                  IfValidAnd( Proj:SFamUserSpecCmpctDist > 0 ) .AND. IfValidAnd( Proj:SFamUserCompactFactor > 0 )) then  1
+                  IfValidAnd( Proj:SFamCDSpecFixDists < 1 ) .AND. IfValidAnd( Proj:SFamUserCompactFactor > 0 )) then  1
          else if (IsRecircSystem .AND. CDHaveThirdFix) then  1
          else if (IsRecircSystem < 1 .AND. (CDUseMBathFix > 0 .OR. CDUseKitFix > 0 .OR. CDHaveThirdFix)) then  1
          else  0  endif endif endif endif endif  }
 
+   ; removed reference to SFamUserSpecCmpctDist and added SFamCDSpecFixDists - SAC 09/29/21 (tic #1277)
    "Set DHWSys:CDDistMessage"       DHWSys:CDDistMessage  = {
          if (Proj:IsMultiFamily .AND. CentralDHW)
          then  "Compact Distribution Credit not available for central DHW systems"
@@ -2674,11 +2715,9 @@ RULELIST "ProposedInput_DHWCompactDistribution_SFam" 0 0 0 0
          then  "Compact Distribution Credit not available for the selected Dwelling Unit Distribution"
          else if (Proj:SFamCompactDistrib < 1)
          then  "Compact Distribution is selectable on Appliances/DHW tab of the Project dialog"
-         else if (IfValidAnd( Proj:SFamUserSpecCmpctDist > 0 ))
-         then  if (IfValidAnd( Proj:SFamUserCompactFactor > 0 ))
-               then  Format( "Compact Distribution:  User-specified compactness factor %g (not valid for compliance)", Proj:SFamUserCompactFactor )
-               else  "Compact Distribution:  Custom compactness factor missing from Appliances/DHW tab of Project dialog"
-               endif
+         else if (IfValidAnd( Proj:SFamCDSpecFixDists < 1 ) .AND.
+                  IfValidAnd( Proj:SFamCompactFactor < 1 ))
+         then  Format( "Compact Distribution:  Compactness factor %g (from Appliances/DHW tab of Project dialog)", Proj:SFamCompactFactor )
          else if (IfValidAnd( Proj:SFamCDWeightedDist > 10000 ))
          then  "No Compact Distribution Credit:  All fixture distances must be specified"
          else if (Proj:SFamCompactFactor == 10)
@@ -2688,14 +2727,12 @@ RULELIST "ProposedInput_DHWCompactDistribution_SFam" 0 0 0 0
          else  Format( "Expanded Compact Distribution credit:  Qualifies with compactness factor of %.2f", Proj:SFamCompactFactor )
          endif endif endif endif endif endif endif endif endif  }
 
+   ; removed reference to SFamUserSpecCmpctDist and added SFamCDSpecFixDists - SAC 09/29/21 (tic #1277)
    "Set Proj:SFamCDDistMessage"       Proj:SFamCDDistMessage  = {
          if (IsMultiFamily > 0.5 .OR. SFamCompactDistrib < 1)
          then  UNDEFINED
-         else if (IfValidAnd( SFamUserSpecCmpctDist > 0 ))
-         then  if (IfValidAnd( SFamUserCompactFactor > 0 ))
-               then  Format( "User-specified compactness factor %g (not valid for compliance)", SFamUserCompactFactor )
-               else  "Custom compactness factor missing or invalid"
-               endif
+         else if (IfValidAnd( Proj:SFamCDSpecFixDists < 1 ))
+         then  UNDEFINED
          else if (IfValidAnd( SFamCDWeightedDist = 10001 ) .OR. IfValidAnd( SFamCDWeightedDist = 10002 ))
          then  "Distances from water heater(s) to served fixtures must be specified for each DHW system"
          else if (IfValidAnd( SFamCompactFactor = 10 ))
@@ -3127,9 +3164,9 @@ RULELIST  "ForceDefault_CompactDistribution_SFam" 1 0 1 1
    "Set std design Proj:SFamCompactDistrib"    Proj:SFamCompactDistrib  =                 ; StdDesignCompactDistYear - SAC 01/22/21   ; StdDesignCompactDistVal - SAC 01/27/21
       {  if ( SumAcrossIf( DHWSys:IsStdDesignElec, DHWSys:IsExisting < 0.5 ) > 0 .OR.
               (AllowStdDesignFuel > 0 .AND. IfValidAnd( StdDesignCompactDistrib > 0 ) .AND.
-               (RunAbbrev == "s" .OR. RunAbbrev == "smf")) )
+               (RunAbbrev == "s" .OR. (Proj:SMFFollowsStdDesignFuel .AND. Proj:RunAbbrev == "smf"))) )
          then  if (AllowStdDesignFuel > 0 .AND. IfValidAnd( StdDesignCompactDistrib > 0 ) .AND.
-                   IfValidAnd( StdDesignCompactDistVal > 0 ) .AND. (RunAbbrev == "s" .OR. RunAbbrev == "smf"))
+                   IfValidAnd( StdDesignCompactDistVal > 0 ) .AND. (RunAbbrev == "s" .OR. (Proj:SMFFollowsStdDesignFuel .AND. Proj:RunAbbrev == "smf")))
                then  switch (StdDesignCompactDistVal)
                         case  1.0 :  "not compact"
                         case  0.7 :  "Basic Credit"
@@ -3145,12 +3182,15 @@ RULELIST  "ForceDefault_CompactDistribution_SFam" 1 0 1 1
          else  T24RClimateZoneCodeBase:DHWCompactDistrib( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignCompactDistYear, "BldgType", Proj:BldgTypeTblStr )
          endif  }
                         ;"dbg" Proj:Action = { PostMessageToLog( "just set SFamCompactDistrib to '%s', %s run, %g StdDesignCompactDistYear, %g StdDesignBase", EnumString( SFamCompactDistrib ), RunAbbrev, StdDesignCompactDistYear, StdDesignBase ) }
-   "Set std design Proj:SFamUserSpecCmpctDist"      Proj:SFamUserSpecCmpctDist  = 
-      {  if (SFamCompactDistrib == 2) then  1  else  0  endif  }
+   ;"Set std design Proj:SFamUserSpecCmpctDist"      Proj:SFamUserSpecCmpctDist  = 
+   ;   {  if (SFamCompactDistrib == 2) then  1  else  0  endif  }
+   ; replaced SFamUserSpecCmpctDist w/ SFamCDSpecFixDists - SAC 09/30/21 (tic #1277)
+   "Set std design Proj:SFamCDSpecFixDists"          Proj:SFamCDSpecFixDists  = 
+      {  if (SFamCompactDistrib == 2) then  0  else  UNCHANGED  endif  }
    "Set std design Proj:SFamUserCompactFactor"      Proj:SFamUserCompactFactor  =         ; StdDesignCompactDistVal - SAC 01/27/21
-      {  if (SFamUserSpecCmpctDist < 1) then  UNDEFINED
+      {  if (SFamCDSpecFixDists > 0) then  UNDEFINED
          else if (AllowStdDesignFuel > 0 .AND. IfValidAnd( StdDesignCompactDistrib > 0 ) .AND.
-                  IfValidAnd( StdDesignCompactDistVal > 0 ) .AND. (Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf"))
+                  IfValidAnd( StdDesignCompactDistVal > 0 ) .AND. (Proj:RunAbbrev == "s" .OR. (Proj:SMFFollowsStdDesignFuel .AND. Proj:RunAbbrev == "smf")))
          then  StdDesignCompactDistVal
          else  T24RClimateZoneCodeBase:ElecDHWCompactFactor( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignCompactDistYear, "BldgType", Proj:BldgTypeTblStr )
          endif endif  }
@@ -3159,7 +3199,7 @@ RULELIST  "ForceDefault_CompactDistribution_SFam" 1 0 1 1
       {  if (IfValidAnd( IsExisting < 1 )==0) then  UNCHANGED
          else if ( (IfValidAnd( IsStdDesignElec > 0 )    .AND. T24RClimateZoneCodeBase:ElecDHWCompactFactor( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignCompactDistYear, "BldgType", Proj:BldgTypeTblStr ) < 1) .OR.
                    (IfValidAnd( IsStdDesignElec > 0 )==0 .AND. T24RClimateZoneCodeBase:DHWCompactDistrib(    "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignCompactDistYear, "BldgType", Proj:BldgTypeTblStr ) != "not compact") .OR.
-                   (Proj:AllowStdDesignFuel > 0 .AND. IfValidAnd( Proj:StdDesignCompactDistrib > 0 ) .AND. (Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf") .AND. Proj:SFamCompactDistrib > 0) )
+                   (Proj:AllowStdDesignFuel > 0 .AND. IfValidAnd( Proj:StdDesignCompactDistrib > 0 ) .AND. (Proj:RunAbbrev == "s" .OR. (Proj:SMFFollowsStdDesignFuel .AND. Proj:RunAbbrev == "smf")) .AND. Proj:SFamCompactDistrib > 0) )
          then  EvalRulelist( "ForceDefault_CompactDistribution_SFam_DHWSys_ServeAll", 1 )
          else  EvalRulelist( "ForceDefault_CompactDistribution_SFam_DHWSys_NoCompact", 1 )
          endif endif  }
@@ -3349,6 +3389,13 @@ RULELIST  "ForceDefault_DHWSys_CHPWHNumCompFlt"  1 0 0 1
 END
 ;*************************************************************************
 
+;*************************************************************************  - SAC 07/16/21 (tic #1275)
+RULELIST  "ForceDefault_DHWSys_CHPWHLoopTankResCtrls"  1 0 0 1
+   "Restore default DHWSys:CHPWHLoopTankResCtrls"     DHWSys:CHPWHLoopTankResCtrls     = {  1  }
+   "Restore default DHWSys:StdCHPWHLoopTankResCtrls"  DHWSys:StdCHPWHLoopTankResCtrls  = {  1  }
+END
+;*************************************************************************
+
 ;*************************************************************************  - SAC 8/10/20
 RULELIST  "Blast_CHPWH_TankSetpoints"  1 0 0 1
    "Blast DHWSys:CHPWHTankSetpt"       DHWSys:CHPWHTankSetpt      = {  UNDEFINED  }
@@ -3415,9 +3462,9 @@ RULELIST  "SetupDemRespSched_DHWSys" 1 0 1 0
    "Set DHWSys:DRTempSetptSchRef:SchWeekRef[1-12]:SchDayWERef:Type"  for:#Mo=(1to12) DHWSys:DRTempSetptSchRef:SchWeekRef[#Mo]:SchDayWERef:Type  = {  "Temperature"  }
 
    "Set DHWSys:DRTempSetptSchRef:SchWeekRef[1-12]:SchDayWDRef:Hr[1-24]"  for:#Mo=(1to12) for:#Hr=(1to24) DHWSys:DRTempSetptSchRef:SchWeekRef[#Mo]:SchDayWDRef:Hr[#Hr]  =
-      {  T24RDemandResponseHPWH_Sched:Val( "Schedule", EnumString( DemRespControl ), "ClimateZone", Proj:ClimateZone, "Month", #Mo, "DayType", "Weekday", "Signal_Setpoint", "Setpoint", "Hour", #Hr )  }
+      {  T24RDemandResponseHPWH_Sched:Val( "CodeVint", Proj:EnergyCodeYearNum, "Schedule", EnumString( DemRespControl ), "ClimateZone", Proj:ClimateZone, "Month", #Mo, "DayType", "Weekday", "Signal_Setpoint", "Setpoint", "Hour", #Hr )  }
    "Set DHWSys:DRTempSetptSchRef:SchWeekRef[1-12]:SchDayWERef:Hr[1-24]"  for:#Mo=(1to12) for:#Hr=(1to24) DHWSys:DRTempSetptSchRef:SchWeekRef[#Mo]:SchDayWERef:Hr[#Hr]  =
-      {  T24RDemandResponseHPWH_Sched:Val( "Schedule", EnumString( DemRespControl ), "ClimateZone", Proj:ClimateZone, "Month", #Mo, "DayType", "Weekend", "Signal_Setpoint", "Setpoint", "Hour", #Hr )  }
+      {  T24RDemandResponseHPWH_Sched:Val( "CodeVint", Proj:EnergyCodeYearNum, "Schedule", EnumString( DemRespControl ), "ClimateZone", Proj:ClimateZone, "Month", #Mo, "DayType", "Weekend", "Signal_Setpoint", "Setpoint", "Hour", #Hr )  }
 
    ; DR Signal Sched
    "Create DHWSys:DRSignalSchRef"            DHWSys:DRSignalSchRef               = {  CreateComp( Sch, Name + "-DRSignalSch" )  }
@@ -3445,9 +3492,9 @@ RULELIST  "SetupDemRespSched_DHWSys" 1 0 1 0
    "Set DHWSys:DRSignalSchRef:SchWeekRef[1-12]:SchDayWERef:Type"   for:#Mo=(1to12) DHWSys:DRSignalSchRef:SchWeekRef[#Mo]:SchDayWERef:Type  = {  "Keyword"  }
 
    "Set DHWSys:DRSignalSchRef:SchWeekRef[1-12]:SchDayWDRef:Key[1-24]"  for:#Mo=(1to12) for:#Hr=(1to24) DHWSys:DRSignalSchRef:SchWeekRef[#Mo]:SchDayWDRef:Key[#Hr]  =
-      {  T24RDemandResponseHPWH_Sched:Val( "Schedule", EnumString( DemRespControl ), "ClimateZone", Proj:ClimateZone, "Month", #Mo, "DayType", "Weekday", "Signal_Setpoint", "Signal", "Hour", #Hr )  }
+      {  T24RDemandResponseHPWH_Sched:Val( "CodeVint", Proj:EnergyCodeYearNum, "Schedule", EnumString( DemRespControl ), "ClimateZone", Proj:ClimateZone, "Month", #Mo, "DayType", "Weekday", "Signal_Setpoint", "Signal", "Hour", #Hr )  }
    "Set DHWSys:DRSignalSchRef:SchWeekRef[1-12]:SchDayWERef:Key[1-24]"  for:#Mo=(1to12) for:#Hr=(1to24) DHWSys:DRSignalSchRef:SchWeekRef[#Mo]:SchDayWERef:Key[#Hr]  =
-      {  T24RDemandResponseHPWH_Sched:Val( "Schedule", EnumString( DemRespControl ), "ClimateZone", Proj:ClimateZone, "Month", #Mo, "DayType", "Weekend", "Signal_Setpoint", "Signal", "Hour", #Hr )  }
+      {  T24RDemandResponseHPWH_Sched:Val( "CodeVint", Proj:EnergyCodeYearNum, "Schedule", EnumString( DemRespControl ), "ClimateZone", Proj:ClimateZone, "Month", #Mo, "DayType", "Weekend", "Signal_Setpoint", "Signal", "Hour", #Hr )  }
 
 
 

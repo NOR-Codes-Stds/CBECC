@@ -434,6 +434,7 @@ RULE ResDHWSys:CentralSysType
     else  "Other"  endif
 ENDRULE
 
+; added logic to ensure CentralSysTypeVal = 0 for Non-Central systems - SAC 08/26/21
 RULE ResDHWSys:CentralSysTypeVal
   DESCRIPTION
     ""  
@@ -442,7 +443,8 @@ RULE ResDHWSys:CentralSysTypeVal
   INPUTCLASS
     NotInput   
   DEFAULT   
-    if (LocalStatus( CentralSysType ) < 1) then  0
+    if (IfValidAnd( CentralRecircType = "Non-Central" ) .OR.
+        LocalStatus( CentralSysType ) < 1) then  0
     else  switch (CentralSysType)
             case  "HPWH"  :  2
             case  "Other" :  1
@@ -933,6 +935,31 @@ ENDRULE
 // -----------------------------------------------------------------------------  SAC 1/9/20 - moved up from below to enable reference in TankVol rule (& RecircPumpPwr)
 // -------------- Residential DHW DwellUnit & Bedroom Counts -------------------
 //
+// added ResDHWSys NumHRRDUsServed & NumHtlMtlUnitsServed to aid in std design solar system sizing - SAC 05/03/21
+RULE NEW ResDHWSys:NumHRRDUsServed
+  DATATYPE
+    Float
+  LONGFORM
+    NumberOfHighRiseResidentialDwellingUnitsServed
+  DESCRIPTION
+    "Number of HRR dwelling units served by this DHW system (used for central systems)."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    SumRevRef( Spc:ResDHWSysRef, Spc:ResLivingUnitCntWithMult )
+ENDRULE
+RULE NEW ResDHWSys:NumHtlMtlUnitsServed
+  DATATYPE
+    Float
+  LONGFORM
+    NumberOfHotelMotelUnitsServed
+  DESCRIPTION
+    "Number of hotel/motel units served by this DHW system (used for central systems)."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    SumRevRef( Spc:ResDHWSysRef, Spc:HotelMotelGuestRmCntWithMult )
+ENDRULE
 RULE NEW ResDHWSys:NumDUsServed
   DATATYPE
     Float
@@ -943,8 +970,7 @@ RULE NEW ResDHWSys:NumDUsServed
   INPUTCLASS
     NotInput
   DEFAULT
-    SumRevRef( Spc:ResDHWSysRef, Spc:ResLivingUnitCntWithMult ) +
-    SumRevRef( Spc:ResDHWSysRef, Spc:HotelMotelGuestRmCntWithMult )
+    NumHRRDUsServed + NumHtlMtlUnitsServed
 ENDRULE
 ; SAC 1/9/20   - SAC 2/19/20 - fixed logic to correctly default for CentralSystemType = "HPWH" (where # heaters n/a)
 RULE NEW ResDHWSys:NumDUsServedPerHtr
@@ -965,6 +991,19 @@ RULE NEW ResDHWSys:NumDUsServedPerHtr
     endif endif
 ENDRULE
 
+; SAC 05/04/21
+RULE NEW ResDHWSys:NumHRRBedroomsServed
+  DATATYPE
+    Float
+  LONGFORM
+    NumberOfHighRiseResidentialBedroomsServed
+  DESCRIPTION
+    "Number of high-rise residential dwelling unit bedrooms served by this DHW system (used for central systems)."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    SumRevRef( Spc:ResDHWSysRef, Spc:ResLivingUnitBedroomCntWithMult )
+ENDRULE
 ; SAC 1/29/19
 RULE NEW ResDHWSys:NumBedroomsServed
   DATATYPE
@@ -976,8 +1015,7 @@ RULE NEW ResDHWSys:NumBedroomsServed
   INPUTCLASS
     NotInput
   DEFAULT
-    SumRevRef( Spc:ResDHWSysRef, Spc:ResLivingUnitBedroomCntWithMult ) +
-    SumRevRef( Spc:ResDHWSysRef, Spc:HotelMotelGuestRmCntWithMult )
+    NumHRRBedroomsServed + SumRevRef( Spc:ResDHWSysRef, Spc:HotelMotelGuestRmCntWithMult )
 ENDRULE
 ; SAC 1/9/20   - SAC 2/19/20 - fixed logic to correctly default for CentralSystemType = "HPWH" (where # heaters n/a)
 RULE NEW ResDHWSys:NumBedroomsServedPerHtr
@@ -1226,12 +1264,16 @@ RULE ResDHWSys:CentralHPWHLpTankCommModel
       ResDHWSys:CentralHPWHLpTankType
 ENDRULE
 
+; added elec res label - SAC 08/25/21
 RULE ResDHWSys:CentralHPWHLpTankCprsrTypeLabel
   INPUTCLASS
     NotInput
   DEFAULT
     if (CentralSysTypeVal != 2) then  UNDEFINED
     else  switch (CentralHPWHLpTankType)
+;             case  "Electric Resistance"   :  if (IfValidAnd( Proj:EnableResearchMode > 0 ))
+;                                              then  "Res Control Scheme:"
+;                                              else  UNDEFINED  endif
              case  "NEEA HPWH"             :  "NEEA HPWH Brand/Model:"
              case  "Commercial HPWH"       :  "Comm HPWH Brand/Model:"
              case  "Large HPWH/Compressor" :  "HPWH/Compressor Type:"
@@ -1260,6 +1302,12 @@ ENDRULE
 ;         then  EvalRulelist( "ForceDefault_DHWSys_CentralHPWHCprsrCntFlt", 1 )
 ;         else  UNCHANGED  endif  }
 ;   "Default ResDHWSys:CentralHPWHCprsrCntFlt"   ResDHWSys:CentralHPWHCprsrCntFlt  = {  CentralHPWHCprsrCnt  }
+
+;   "Blast user-defined DHWSys:CHPWHLoopTankResCtrls and StdCHPWHLoopTankResCtrls if EnableResearchMode not activated"   DHWSys:Action  =     ; SAC 07/16/21 (tic #1275)
+;      {  if (IfValidAnd( Proj:EnableResearchMode > 0 )==0 .AND. IfValidAnd( Proj:RunAbbrev == "u" ) .AND.
+;             (LocalStatus( CHPWHLoopTankResCtrls ) > 4 .OR. LocalStatus( StdCHPWHLoopTankResCtrls ) > 4))
+;         then  EvalRulelist( "ForceDefault_DHWSys_CHPWHLoopTankResCtrls", 1 )
+;         else  UNCHANGED  endif  }
 
 ; added CentralHPWHCprsrCap, CentralHPWHMinPriTankVol, CentralHPWHLpTankCprsrCap & CentralHPWHLpTankMinTankVol - SAC 08/31/20
 RULE NEW ResDHWSys:CentralHPWHCprsrCap
@@ -1465,6 +1513,28 @@ RULE ResDHWSys:CentralHPWHLpTankRVal
     else  UNDEFINED  endif
 ENDRULE
 
+RULE ResDHWSys:CentralHPWHTankMinRVal
+  DESCRIPTION
+    "Central HPWH storage tank insulation MINIMUM R-value"
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    16
+ENDRULE
+;      {  if (CentralDHWTypeVal == 2 .AND. CHPWHSysDescrip == 2 .AND.
+;             IfValidAnd( FloorAreaServed[1] > 0 ) .AND. Proj:EnableResearchMode < 1) then  16  else  0  endif  }
+
+RULE ResDHWSys:CentralHPWHLpTankMinRVal
+  DESCRIPTION
+    "Central HPWH loop tank insulation MINIMUM R-value"
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    16
+ENDRULE
+;      {  if (CHPWHLoopTankShowDtls > 0 .AND.
+;             IfValidAnd( FloorAreaServed[1] > 0 ) .AND. Proj:EnableResearchMode < 1) then  16  else  0  endif  }
+
 RULE ResDHWSys:CentralHPWHTankSetpt
   DESCRIPTION
     "Central HPWH storage tank setpoint temperature"
@@ -1487,7 +1557,7 @@ RULE ResDHWSys:CentralHPWHLpTankSetpt
     NotInput  IgnoreUserInput  "Removed prior to release of 2019.1.3"
   DEFAULT
     if (CentralHPWHLpTankShowDetails > 0 .AND. IfValidAnd( SysFlrArea > 0 ))
-    then  140    ; updated from 136 - SAC 07/31/20
+    then  136    ; updated from 136 - SAC 07/31/20  ; returned to 136 default - SAC 08/25/21
     else  UNDEFINED  endif
 ENDRULE
 
@@ -1513,7 +1583,7 @@ RULE ResDHWSys:CentralHPWHErrMsg
           else if (IfValidAnd( CentralHPWHPriTankVol > 0 )==0) then  "Central HPWH input error:  Total Tank Volume must be > 0"
           else if (IfValidAnd( CentralHPWHTankCnt  > 0 )==0) then  "Central HPWH input error:  Tank Count must be > 0"
           else if (IfValidAnd( CentralHPWHMinPriTankVol > CentralHPWHPriTankVol )) then  Format( "Central HPWH input error:  Total Tank Volume must be >= %g", CentralHPWHMinPriTankVol )
-          else if (IfValidAnd( CentralHPWHTankRVal  >= 16)==0) then  "Central HPWH input error:  Tank R-Value must be >= 16"
+          else if (IfValidAnd( CentralHPWHTankRVal  >= CentralHPWHTankMinRVal)==0) then  Format( "Central HPWH input error:  Tank R-Value must be >= %g", CentralHPWHTankMinRVal )
           else if (EnumValue( CentralHPWHTankLctn ) < 1) then  "Central HPWH input error:  Tank Location selection missing"
           else if (EnumValue( CentralHPWHAirSrc   ) < 1) then  "Central HPWH input error:  Source Air From selection missing"
           else  UNDEFINED  endif endif endif endif endif endif endif endif
@@ -1551,8 +1621,8 @@ RULE ResDHWSys:CentralHPWHErrMsg
           else if (IfValidAnd( CentralHPWHLpTankCprsrCnt > 0 )==0) then  "CHPWH Loop Tank input error:  Compressor/Heater Count must be > 0"
           else if (IfValidAnd( CentralHPWHLpTankVol     > 0 )==0) then   "CHPWH Loop Tank input error:  Total Tank Volume must be > 0"
           else if (IfValidAnd( CentralHPWHLpTankCnt > 0 )==0) then       "CHPWH Loop Tank input error:  Tank Count must be > 0"
-          else if (IfValidAnd( CentralHPWHLpTankMinTankVol > CentralHPWHLpTankVol )) then  Format( "CHPWH Loop Tank input error:  Total Tank Volume must be >= %g", CentralHPWHLpTankMinTankVol )
-          else if (IfValidAnd( CentralHPWHLpTankRVal   >= 16)==0) then   "CHPWH Loop Tank input error:  Tank R-Value must be >= 16"
+          else if (IfValidAnd( CentralHPWHLpTankMinTankVol > CentralHPWHLpTankVol )) then     Format( "CHPWH Loop Tank input error:  Total Tank Volume must be >= %g", CentralHPWHLpTankMinTankVol )
+          else if (IfValidAnd( CentralHPWHLpTankRVal   >= CentralHPWHLpTankMinRVal)==0) then  Format( "CHPWH Loop Tank input error:  Tank R-Value must be >= %g", CentralHPWHLpTankMinRVal )
           else if (EnumValue(  CentralHPWHLpTankLctn ) < 1) then         "CHPWH Loop Tank input error:  Tank Location selection missing"
           else if (CentralHPWHLpTankType = "Large HPWH/Compressor" .AND.
                    EnumValue(  CentralHPWHLpTankAirSrc ) < 1) then       "CHPWH Loop Tank input error:  Source Air From selection missing"
@@ -1577,7 +1647,7 @@ RULE ResDHWSys:CentralHPWHErrMsg
           else if (CentralHPWHLpTankShowDetails > 0 .AND.
                    IfValidAnd( CentralHPWHLpTankCnt > 0 )==0) then       "CHPWH Loop Tank input error:  Tank Count must be > 0"
           else if (CentralHPWHLpTankShowDetails > 0 .AND.
-                   IfValidAnd( CentralHPWHLpTankRVal >= 16 )==0) then    "CHPWH Loop Tank input error:  Tank R-Value must be >= 16"
+                   IfValidAnd( CentralHPWHLpTankRVal >= CentralHPWHLpTankMinRVal )==0) then  Format( "CHPWH Loop Tank input error:  Tank R-Value must be >= %g", CentralHPWHLpTankMinRVal )
           else if (EnumValue( CentralHPWHLpTankLctn ) < 1) then          "CHPWH Loop Tank input error:  Tank Location selection missing"
           else if (EnumValue( CentralHPWHLpTankAirSrc ) < 1) then        "CHPWH Loop Tank input error:  Source Air From selection missing"
           else  UNDEFINED  endif endif endif endif endif endif endif endif endif
@@ -1704,7 +1774,6 @@ ENDRULE
 ;             endswitch
 ;       else  UNDEFINED  endif
 ;   ENDRULE
-
 
 // -----------------------------------------------------------------
 // -------------- Recirculating Pump Horsepower --------------------  SAC 2/12/20 - recharacterized as Prescribed to remove from InputDataModel - converted to PumpPwr in LoadModelAdjustments
@@ -2158,6 +2227,7 @@ RULE ResDWHRSys:Type
     "Vertical"
 ENDRULE
 
+; updated default eff per CEC guidance from 43 to 42 - SAC 09/30/21
 RULE ResDWHRSys:CSARtdEff
   DESCRIPTION
     "The Canadian Standards Assoc. rated recovery efficiency."
@@ -2172,15 +2242,17 @@ RULE ResDWHRSys:CSARtdEff
   MAXIMUM
     99 
   DEFAULT
-    43
+    42
 ENDRULE
 
 
 // -----------------------------------------------------------------------------
 // -------------- Setup ResSpcDHWFeatures --------------------
+; HotelMotelGuestRmCnt - SAC 04/30/21 (tic #3242)
 RULE Proj:Action
   DEFAULT
-    if (SumAll( Spc:ResLivingUnitCnt ) > 0)
+    if (SumAll( Spc:ResLivingUnitCnt ) > 0 .OR.
+        SumAll( Spc:HotelMotelGuestRmCnt ) > 0)
     then  EvalRulelist( "Setup_ResSpcDHWFeatures" )
     else  UNCHANGED  endif
 ENDRULE
@@ -2599,6 +2671,59 @@ ENDRULE
 //ENDRULE
 
 
+// -----------------------------------------------------------------
+// ------------------ DEMAND RESPONSE HPWHs ------------------------  SAC 08/26/21
+RULE NEW ResWtrHtr:DemRespCompat
+  LONGFORM
+    DemandResponseCompatible
+  DATATYPE
+    Integer
+  DESCRIPTION
+    "whether this HPWH is demand responsive"
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (HtPumpWtrHtrNEEARtd .AND. EnumValue( HPWHModel ) > 100000)
+    then  HPWHData_NEEA:JA13( "Brand", HPWHBrand, "Model", HPWHModel )
+    else  0  endif
+ENDRULE
+
+RULE ResDHWSys:DemRespCompat
+  DEFAULT
+    if (CentralSysTypeVal > 0) then  0
+    else if (SumChildren( ResWtrHtr:DemRespCompat ) > 0)
+    then  1
+    else  0
+    endif endif
+  SIZING_BASELINE
+    0
+ENDRULE
+
+;   "reset DHWSys:DemResponsive if user-defined and not research mode"   DHWSys:Action =
+;      {  if (LocalStatus( DemResponsive ) > 5 .AND. IfValidAnd( Proj:EnableResearchMode > 0 )==0)
+;         then  EvalRulelist( "DHWSys_Blast_DemResponsive", 1 )  else  UNCHANGED  endif  }
+
+RULE ResDHWSys:DemResponsive
+  DEFAULT
+    DemRespCompat
+  SIZING_BASELINE
+    DemRespCompat
+ENDRULE
+
+; ResDHWSys:DemResponseCtrl  - allow to default via Enums
+
+RULE ResDHWSys:DemRespValid
+  DEFAULT
+    if (DemResponsive > 0 .AND. EnumValue( DemResponseCtrl ) > 0)
+    then  1
+    else  UNDEFINED  endif
+  SIZING_BASELINE
+    if (DemResponsive > 0 .AND. EnumValue( DemResponseCtrl ) > 0)
+    then  1
+    else  UNDEFINED  endif
+ENDRULE
+
+
 // -----------------------------------------------------------------------------
 // -------------- Total Water Heater Input Rating --------------------
 // 
@@ -2834,11 +2959,11 @@ RULE NEW ResWtrHtr:InputPerVol
 ENDRULE
 
 // *****************************************************
-RULE NEW ResWtrHtr:IsWtrHtrNewDsgn
+RULE NEW ResWtrHtr:IsWtrHtrNewEffDesignation
  DATATYPE
     Integer
   LONGFORM
-    IsWaterHeaterNewDesignation
+    IsWaterHeaterNewEfficiencyDesignation
   DESCRIPTION
     ""
   INPUTCLASS
@@ -2876,7 +3001,7 @@ RULE ResWtrHtr:IsUEFRtdSim
   INPUTCLASS
     NotInput
   DEFAULT
-    if( IfValidAnd( IsWtrHtrNewDsgn = 1) )
+    if( IfValidAnd( IsWtrHtrNewEffDesignation = 1) )
     then 0
     else
       if( ElementType = "Gas" .AND. (  TankCat = "Instantaneous" .OR.
@@ -5125,6 +5250,17 @@ ENDRULE
       ;     DHWSolarSys:Manufacturer
       ;     DHWSolarSys:Brand
       ;     DHWSolarSys:Model
+; added RULEs for Brand & Model to facilitate RESETS - SAC 08/26/21
+RULE DHWSolarSys:Brand 
+  RESETS
+    ResetThisWhenTheFollowingIsModified
+      Manufacturer
+ENDRULE
+RULE DHWSolarSys:Model 
+  RESETS
+    ResetThisWhenTheFollowingIsModified
+      Brand
+ENDRULE
 
 RULE DHWSolarSys:CertID 
   DESCRIPTION
@@ -5254,16 +5390,24 @@ ENDRULE
 ; SAC 2/24/20 - copied logic from 'Refresh_DHWSolarSys_ServedAreaDUsBRs' to enable Proposed model reporting
 RULE DHWSolarSys:DwellUnitsServed
   DESCRIPTION
-    "Number of dwelling units served by this DHWSolarSys (via ResDHWSys assignments)"
+    "Number of high-rise res dwelling units served by this DHWSolarSys (via ResDHWSys assignments)"
   DEFAULT
-    SumRevRef( ResDHWSys:DHWSolarSysRef, ResDHWSys:NumDUsServed )
+    SumRevRef( ResDHWSys:DHWSolarSysRef, ResDHWSys:NumHRRDUsServed )
 ENDRULE
 
 RULE DHWSolarSys:BedroomsServed
   DESCRIPTION
-    "Number of dwelling unit bedrooms served by this DHWSolarSys (via ResDHWSys assignments)"
+    "Number of high-rise res dwelling unit bedrooms served by this DHWSolarSys (via ResDHWSys assignments)"
   DEFAULT
-    SumRevRef( ResDHWSys:DHWSolarSysRef, ResDHWSys:NumBedroomsServed )
+    SumRevRef( ResDHWSys:DHWSolarSysRef, ResDHWSys:NumHRRBedroomsServed )
+ENDRULE
+
+; added to facilitate solar sys sizing for hotel/motel guest rooms - SAC 05/04/21
+RULE DHWSolarSys:GuestRoomsServed
+  DESCRIPTION
+    "Number of hotel/motel guest rooms served by this DHWSolarSys (via ResDHWSys assignments)"
+  DEFAULT
+    SumRevRef( ResDHWSys:DHWSolarSysRef, ResDHWSys:NumHtlMtlUnitsServed )
 ENDRULE
 
 // -----   end of:  DHWSolarSys   ----------------------------------------------
@@ -5532,6 +5676,33 @@ ENDRULE
 ;      UNCHANGED
 ;    endif
 ;ENDRULE
+
+; SAC 08/27/21
+RULE NEW ResDHWSys:IsAssignedCentralNoRecircElec
+  DATATYPE
+    Float
+  LONGFORM
+    IsAssignedCentralNoRecircElec
+  DESCRIPTION
+    "This system is assigned to DUs and is a central, no recirculation, all electric."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (IfValidAnd( CentralRecircType = "Central, no Recirculation" ) .AND.
+        IfValidAnd( CentralElecDHW > 0 ) .AND. IfValidAnd( NumDUsServed > 0 ) .AND.
+        IfValidAnd( Status = "Existing" )==0)
+    then  1
+    else  UNDEFINED  endif
+ENDRULE
+RULE Proj:Action
+  CHECKCODE
+    if (AnalysisType == "Title24Compliance" .AND.
+        SumAll( ResDHWSys:IsAssignedCentralNoRecircElec ) > 1)
+    then  PostError( "There can only be one central, all-electric, non-recirculation
+               residential DHW system in this model (%g defined in this model).",
+               SumAll( ResDHWSys:IsAssignedCentralNoRecircElec ) )
+    else  UNCHANGED  endif
+ENDRULE
 
 RULE NEW Proj:ResDHWBaselineRulelistName
   DATATYPE

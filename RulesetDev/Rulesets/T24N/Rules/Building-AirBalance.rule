@@ -838,11 +838,12 @@ RULE NEW Story:VentExhBalRat
     else if( ExhFlowForBal > CodeVentFlowForBal * Proj:ExhVentMultLimNonRes )
     then 
       PostWarning("The exhaust air flow for BuildingStory '%s' is greater than
-                  the code minimum total ventilation air flow. For zones with forced
-                  supply ventilation, the baseline ventilation flow for 
-                  spaces will be increased to be the same as the proposed up 
-                  to %.2f times the exhaust air flow, whichever is smaller.", 
-                  Name, Proj:ExhVentMultLimNonRes)
+                  the code minimum total ventilation. 
+                  For zones with forced supply ventilation, the baseline 
+                  ventilation flow for spaces will be increased to be 
+                  %.2f times the code minimum ventilation or %.2f times the 
+                  code minimum exhaust air flow, whichever greater.", 
+                  Name, Proj:ExhVentMultLimNonRes, ( 1.0 + Proj:ExhTolMinLimNonRes ) )
     else UNCHANGED
     endif endif 
 ENDRULE
@@ -1051,9 +1052,10 @@ RULE NEW Story:ExhVentMult
   DEFAULT
     if( ExhFlowForBal > CodeVentFlowForBal .AND.
         CodeVentFlowForBalRat > ( 1 + Proj:VentTolMaxLimNonRes ) )
-    then // Design exhaust flow is > pressurization limit, calculate the multiplier used to
-         //  uniformly increase the minimum standard ventilation rate up to the limit
-      Max( Min( VentFlowForBal, ExhFlowForBal * Proj:ExhVentMultLimNonRes ) 
+    then // Design exhaust flow is greater than code and design/code vent is greater than over-vent limit
+         // Calculate the multiplier used to uniformly increase the minimum 
+         // standard ventilation rate up to the limit
+      Max( Min( VentFlowForBal, CodeExhFlowForBal * Proj:ExhVentMultLimNonRes ) 
            / CodeVentFlowForBal / ( 1 + Proj:VentTolMaxLimNonRes ), 1 )
     else 1.0
     endif     
@@ -1143,6 +1145,104 @@ RULE NEW Bldg:GenExhFlow
   ANNUAL
     SumChildren( Story:GenExhFlow )
 ENDRULE
+
+// Check exhaust is greater than supply 
+// This calculation includes all space types
+// This is to prevent users taking credit from over exhaust to heat recovery unit
+
+
+RULE NEW ThrmlZn:VentSysExhFlowWithMult
+  DATATYPE
+    Float
+  LONGFORM
+    VentilationSystemExhaustFlowWithMultiplier
+  DESCRIPTION
+    "The amount of ventilation air that is exhausted i.e. returned
+     from the zone by the specified VentSysRef."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( LocalCompAssigned( VentSysRef ) .AND. 
+        IfValidAnd( VentFlow > 0 ) )
+    then
+      if( VentSysRef:Type = "VentilationOnly" )
+      then
+        if( VentSysRef:ExhSysType = "SupplyOnly" )
+        then 0
+        else VentFlowWithMult
+        endif
+      else
+      if( VentSysRef:Type = "Exhaust" .AND.
+          IfValidAnd( ExhSrc = "DirectOutsideAir" ) )
+      then VentFlowWithMult
+      else
+      if( IfValidAnd( VentSysRef:IsAllOA = 1 ) )
+      then VentFlowWithMult * VentSysRef:RetAirFlowRat
+      else 0
+      endif endif endif
+    else 0
+    endif
+ENDRULE
+
+RULE NEW ThrmlZn:ExhSysOAFlowWithMult
+  DATATYPE
+    Float
+  LONGFORM
+    ExhaustSystemOutdoorAirWithMultiplier
+  DESCRIPTION
+    "The amount of outdoor air brought into the zone directly
+     from the outside by the exhaust system."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( LocalCompAssigned( VentSysRef ) = 0 .AND. 
+        LocalCompAssigned( ExhSysRef ) .AND.
+        IfValidAnd( ExhSrc = "DirectOutsideAir" ) )
+    then ExhFlowWithMult
+    else 0
+    endif
+ENDRULE
+
+RULE NEW Story:SupOAFlow
+  DATATYPE
+    Float
+  LONGFORM
+    SupplyOutdoorAirFlow
+  DESCRIPTION
+    "The total amount of outdoor air supplied to zones on a Story."
+  INPUTCLASS
+    NotInput
+  UNITS
+    cfm
+  DEFAULT
+    SumRevRef( ThrmlZn:StoryRef, ThrmlZn:OASupFlowWithMult )
+ENDRULE
+
+RULE NEW Story:HtRcvryExhFlow
+  DATATYPE
+    Float
+  LONGFORM
+    HeatRecoveryExhaustFlow
+  DESCRIPTION
+    "The total amount of exhaust air flow that is run through a heat recovery system."
+  INPUTCLASS
+    NotInput
+  UNITS
+    cfm
+  DEFAULT
+    SumRevRef( ThrmlZn:StoryRef, ThrmlZn:HtRcvryExhFlowWithMult ) 
+  CHECKSIM
+    if( SupOAFlow * 1.01 < HtRcvryExhFlow )
+    then
+      PostError("For Story %s, the total heat recovery exhaust air flow is %.0f cfm. 
+                 This is %.0f cfm greater than the total supply outdoor
+                 air flow for the Story. Reduce the amount of air exhausted from
+                 or increase the outside air provided to the Story.",
+                 Name, HtRcvryExhFlow, HtRcvryExhFlow - SupOAFlow)
+    else UNCHANGED
+    endif
+ENDRULE
+
 
 
 

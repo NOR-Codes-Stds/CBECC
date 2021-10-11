@@ -1,3 +1,4 @@
+
 // Water Heating
 // For all Space Types with Hot Water Heating Rates
 //
@@ -79,6 +80,67 @@ RULE NEW FluidSys:InBldgSHW
     if( IsNewSHW .OR. IsExistingSHW ) then 1 else 0 endif
 ENDRULE
 
+// -----------------------------------------------------------------------------
+RULE NEW FluidSys:IsComboSpcWtrHtgSys
+  DATATYPE
+    Integer
+  LONGFORM
+    IsCombinedSpaceWaterHeatingSystem
+  DESCRIPTION
+    "A flag to identify whether the FluidSystem is a combined space and water heating
+     system."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( Type = "ServiceHotWater" .AND.
+        SumRevRef( CoilHtg:FluidSysRef, CoilHtg:CapHydronic ) > 0 )
+    then 1
+    else 0
+    endif
+ENDRULE
+
+RULE NEW FluidSeg:IsComboSpcWtrHtgSys
+  DATATYPE
+    Integer
+  LONGFORM
+    IsCombinedSpaceWaterHeatingSystem
+  DESCRIPTION
+    "A flag to identify whether the FluidSystem is a combined space and water heating
+     system."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IsSecSeg > 0 .AND.
+        FluidSys:IsComboSpcWtrHtgSys > 0 )
+    then 1
+    else 0
+    endif
+  CHECKCODE
+// Add checks to ensure combo space/water heating systems have a fluid segments
+// and pump for each heating coil. This is how it needs to be translated for E+.
+// Previously OS translator would create branches and branch pumps
+// See Ticket 3291
+    if( IsComboSpcWtrHtgSys > 0 )
+    then  
+      if( CountRefs( CoilHtg:FluidSegInRef ) > 1 )
+      then // FluidSeg is referenced by more than one coil
+        PostError("FluidSeg '%s' is part of a combined space/water heating system,
+                   and is referenced by more than one CoilHtg object. Every CoilHtg
+                   object must be connected to its own FluidSeg with a child Pump.", 
+                   Name)
+      else
+      if( Type = "SecondarySupply" .AND.
+          ChildCount( Pump ) < 1 )
+      then // FluidSeg for heating coil does not have a pump
+        PostError("FluidSeg '%s' is the secondary segment of a combined 
+                   space/water heating system, but does not have a Pump. Every CoilHtg
+                   object must be connected to its own FluidSeg with a child Pump.", 
+                   Name) 
+      else UNCHANGED
+      endif endif
+    else UNCHANGED
+    endif
+ENDRULE
 
 // -----------------------------------------------------------------------------
 RULE NEW FluidSeg:IsResAndCombo
@@ -95,14 +157,18 @@ RULE NEW FluidSeg:IsResAndCombo
     if( Parent(Type) = "ServiceHotWater" )
     then
       SumRevRef(Spc:SHWFluidSegRef, Spc:IsResAndCombo)
+    else if( Parent(Type) <> "ServiceHotWater" )
+    then 0
     else UNDEFINED
-    endif
+    endif endif
   SIZING
     if( Parent(Type) = "ServiceHotWater" )
     then
       SumRevRef(Spc:SHWFluidSegRef, Spc:IsResAndCombo)
+    else if( Parent(Type) <> "ServiceHotWater" )
+    then 0
     else UNDEFINED
-    endif
+    endif endif
   ANNUAL
     z:IsResAndCombo
 ENDRULE
@@ -125,8 +191,10 @@ RULE NEW FluidSys:IsResAndCombo
       then 1
       else 0
       endif
+    else if( Type <> "ServiceHotWater" )
+    then 0
     else UNDEFINED
-    endif
+    endif endif
   SIZING
     if( Type = "ServiceHotWater" )
     then
@@ -134,8 +202,10 @@ RULE NEW FluidSys:IsResAndCombo
       then 1
       else 0
       endif
+    else if( Type <> "ServiceHotWater" )
+    then 0
     else UNDEFINED
-    endif
+    endif endif
   ANNUAL
     z:IsResAndCombo
 ENDRULE
@@ -165,6 +235,65 @@ RULE NEW WtrHtr:IsResAndCombo
     z:IsResAndCombo
 ENDRULE
 
+// -----------------------------------------------------------------------------
+RULE WtrHtr:FluidSysHtg
+  DESCRIPTION
+    "A flag indicating whether or not the parent FluidSys is of Type HotWater or CondenserWater."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( FluidSys:Type = "HotWater" ) .OR. IfValidAnd( FluidSys:Type = "CondenserWater" ) )
+    then 1
+    else 0
+    endif
+  CHECKCODE
+    if( FluidSysHtg = 1 )
+    then
+      PostError("Water Heater '%s' is assigned to a HotWater or CondenserWater 
+                 fluid system.  Water heaters are only allowed on 
+                 ServiceHotWater fluid systems.  Use a conventional boiler to 
+                 provide space heating.", Name )
+    else UNCHANGED
+	  endif
+  SIZING
+    if( IfValidAnd( FluidSys:Type = "HotWater" ) .OR. IfValidAnd( FluidSys:Type = "CondenserWater" ) )
+    then 1
+    else 0
+    endif
+  ANNUAL
+    if( IfValidAnd( FluidSys:Type = "HotWater" ) .OR. IfValidAnd( FluidSys:Type = "CondenserWater" ) )
+    then 1
+    else 0
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:FluidSysSHW
+  DESCRIPTION
+    "A flag indicating whether or not the parent FluidSys is of Type ServiceHotWater."
+  DATATYPE
+    Integer
+  LONGFORM
+    FluidSystemServiceHotWater
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( FluidSys:Type = "ServiceHotWater" ) )
+    then 1
+    else 0
+    endif
+  SIZING
+    if( IfValidAnd( FluidSys:Type = "ServiceHotWater" ) )
+    then 1
+    else 0
+    endif
+  ANNUAL
+    if( IfValidAnd( FluidSys:Type = "ServiceHotWater" ) )
+    then 1
+    else 0
+    endif
+ENDRULE
+
 // -------------- Water Heater Status --------------------
 RULE WtrHtr:Status
   DESCRIPTION
@@ -183,20 +312,69 @@ RULE WtrHtr:Status
       "Existing" 
     endif             
   CHECKCODE
-    if ( Proj:ExcludeWtrHtg = 0 )
+    if( Proj:ExcludeWtrHtg = 0 )
     then
 	    if( ( Parent( IsNew ) = 1 .AND. Status != "New" ) .OR.
 	        ( Parent( IsExisting ) = 1 .AND. Status = "New" ) )
 	    then
 	      PostError("Water Heater '%s' has a Status of '%s', but the fluid system has a status of '%s'.
-	                   Please change the status of the fluid system or the water heater to be similar
-	                   for compliance analysis.", Name, Status, Parent (Status) )
+	                 Please change the status of the fluid system or the water heater to be similar
+	                 for compliance analysis.", Name, Status, Parent (Status) )
 	    else UNCHANGED
 	    endif
 	  else 
 	    UNCHANGED
 	  endif  
 ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:IsNew
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( FluidSysHtg = 1 ) then
+      if( Status = "New" .OR. Proj:IsNewMech ) then 1 else 0 endif
+    else UNCHANGED 
+    endif
+  SIZING
+    if( FluidSysHtg = 1 ) then
+      if( Status = "New" .OR. Proj:IsNewMech ) then 1 else 0 endif
+    else UNCHANGED 
+    endif
+  ANNUAL
+    if( FluidSysHtg = 1 ) then
+      if( Status = "New" .OR. Proj:IsNewMech ) then 1 else 0 endif
+    else UNCHANGED 
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:IsExisting
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( FluidSysHtg = 1 ) then
+      if( IsNew ) then 0 else 1 endif
+    else 0 
+    endif
+  SIZING
+    if( FluidSysHtg = 1 ) then
+      if( IsNew ) then 0 else 1 endif
+    else 0 
+    endif
+  ANNUAL
+    if( FluidSysHtg = 1 ) then
+      if( IsNew ) then 0 else 1 endif
+    else 0 
+    endif
+ENDRULE
+
 
 // -----------------------------------------------------------------------------
 RULE NEW WtrHtr:IsNewSHW
@@ -409,25 +587,6 @@ RULE NEW Proj:SHWFluidSysCnt
     SumChildren(FluidSys:SHWOnOff)
 ENDRULE
 
-// ---------- Count Water Heaters in Project --------------
-RULE NEW Proj:SHWWtrHtrCnt
-  DATATYPE
-    Integer
-  LONGFORM
-    ServiceHotWaterWaterHeaterCount
-  DESCRIPTION
-    "This is the count of the Water Heaters assigned to fluid system type Service Hot Water."
-  HELP
-    ""
-  REFERENCE 
-    ACM-5.9.1 Water Heating
-  INPUTCLASS
-    NotInput
-  DEFAULT
-    SumChildren(WtrHtr:CmbdMult)
-ENDRULE
-
-
 // -----------------------------------------------------------------------------
 RULE WtrHtr:Name
   SIZING_PROPOSED
@@ -460,7 +619,7 @@ RULE WtrHtr:Cnt
   DEFAULT
     1
   SIZING_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -485,10 +644,13 @@ RULE WtrHtr:Cnt
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      1
     else UNDEFINED
-    endif
+    endif endif
   SIZING_BASELINE
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -516,8 +678,11 @@ RULE WtrHtr:Cnt
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNCHANGED
     else UNDEFINED
-    endif
+    endif endif
  ANNUAL_PROPOSED
     zp:Cnt
   ANNUAL_BASELINE
@@ -531,12 +696,14 @@ RULE WtrHtr:CmbdMult
     "This is the total number of water heaters including fluid system 
      multipliers."
   DEFAULT
-    if( Parent(Type) = "ServiceHotWater" )
+    if( FluidSysSHW = 1 )
     then( Parent(Cnt) * Cnt )
+    else if( FluidSysHtg = 1 )
+    then 1
     else UNDEFINED
-    endif
+    endif endif
   SIZING_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -561,10 +728,13 @@ RULE WtrHtr:CmbdMult
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      1
     else UNDEFINED
-    endif
+    endif endif
   SIZING_BASELINE
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -592,8 +762,11 @@ RULE WtrHtr:CmbdMult
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      1
     else UNDEFINED
-    endif
+    endif endif
   ANNUAL_PROPOSED
     zp:CmbdMult
   ANNUAL_BASELINE
@@ -634,7 +807,7 @@ RULE FluidSys:AvailSchRef
   INPUTCLASS
     Default
   SIZING
-    if( FluidSys:Type = "ServiceHotWater" ) 
+    if( Type = "ServiceHotWater" ) 
     then RuleLibrary(Schedule, ("On"))
     else  UNCHANGED
     endif
@@ -666,7 +839,7 @@ RULE FluidSys:SHWSysCnt
     else UNDEFINED
     endif
   CHECKSIM
-    if ( Proj:ExcludeWtrHtg = 1 )
+    if( Proj:ExcludeWtrHtg = 1 )
     then UNCHANGED
     else
 	    if( Type = "ServiceHotWater" .AND. IfValidAnd( SHWSysCnt > 0 )==0 ) then
@@ -730,9 +903,19 @@ RULE WtrHtr:Type
 ;    HeatPumpPackaged
 ;    HeatPumpSplit
   DEFAULT
-    Conventional
+    if( FluidSysSHW = 1 )  
+    then
+      Conventional
+    else if( Parent(Type) = "HotWater" )
+    then
+      HeatPumpSplit
+    else if( Parent(Type) = "CondenserWater" )
+    then
+      HeatPumpSplit
+    else Conventional
+    endif endif endif
   CHECKCODE
-    if ( Proj:ExcludeWtrHtg = 1 )
+    if( Proj:ExcludeWtrHtg = 1 )
     then UNCHANGED
     else
 	    if( FuelSrc != "Electricity" .AND. Type <> "Conventional" )
@@ -743,7 +926,7 @@ RULE WtrHtr:Type
 	    endif
     endif
   SIZING_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -768,10 +951,13 @@ RULE WtrHtr:Type
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNCHANGED
     else UNDEFINED
-    endif
+    endif endif
   SIZING_BASELINE
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -799,15 +985,16 @@ RULE WtrHtr:Type
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      u:Type
     else UNDEFINED
-    endif
+    endif endif
   ANNUAL_PROPOSED
     zp:Type
   ANNUAL_BASELINE  
     zb:Type
 ENDRULE
-
-
 
 
 // -------------- Water Heater Fuel Source --------------------
@@ -821,13 +1008,16 @@ RULE WtrHtr:FuelSrc
   INPUTCLASS
     Required
   DEFAULT
-    if( FluidSys:Type = "ServiceHotWater" )
+    if( FluidSysSHW = 1 )
     then
       "Gas"
+    else if( FluidSysHtg = 1 )
+    then
+      "Electricity"
     else UNDEFINED
-    endif
+    endif endif
   CHECKCODE
-    if ( Proj:ExcludeWtrHtg = 1 )
+    if( Proj:ExcludeWtrHtg = 1 )
     then UNCHANGED
     else
 	    if( Proj:GasType = "None" .AND. FuelSrc = "Gas" .AND. Proj:ExcludeWtrHtg = 0 )
@@ -839,7 +1029,7 @@ RULE WtrHtr:FuelSrc
 	    endif
     endif
   SIZING_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -864,10 +1054,13 @@ RULE WtrHtr:FuelSrc
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNCHANGED
     else UNDEFINED
-    endif
+    endif endif
   SIZING_BASELINE
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -895,8 +1088,11 @@ RULE WtrHtr:FuelSrc
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      u:FuelSrc
     else UNDEFINED
-    endif
+    endif endif
   ANNUAL_PROPOSED
     zp:FuelSrc
   ANNUAL_BASELINE
@@ -906,8 +1102,6 @@ ENDRULE
 
 // -------------- Water Heater Fuel Source Report --------------
 RULE WtrHtr:FuelSrcRpt
-  RULESETS
-    T24N
   DESCRIPTION
     "Translates FuelSrc to FuelSrcRpt."
   INPUTCLASS
@@ -949,7 +1143,7 @@ RULE WtrHtr:ElecIgnit
   DEFAULT
     0
   SIZING_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -974,10 +1168,13 @@ RULE WtrHtr:ElecIgnit
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNCHANGED
     else UNDEFINED
-    endif
+    endif endif
   SIZING_BASELINE
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -1005,8 +1202,11 @@ RULE WtrHtr:ElecIgnit
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNCHANGED
     else UNDEFINED
-    endif
+    endif endif
   ANNUAL_PROPOSED
     zp:ElecIgnit
   ANNUAL_BASELINE
@@ -1027,7 +1227,7 @@ RULE WtrHtr:IsUEFRtd
   DEFAULT
     0
   SIZING_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -1052,10 +1252,13 @@ RULE WtrHtr:IsUEFRtd
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNCHANGED
     else UNDEFINED
-    endif
+    endif endif
   SIZING_BASELINE
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -1083,8 +1286,11 @@ RULE WtrHtr:IsUEFRtd
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      0
     else UNDEFINED
-    endif
+    endif endif
   ANNUAL_PROPOSED
     zp:IsUEFRtd
   ANNUAL_BASELINE
@@ -1108,13 +1314,16 @@ RULE NEW WtrHtr:BaseHtOutput
   UNITS
     Btu/hr
   DEFAULT
-    if( Parent(Type) = "ServiceHotWater" )
+    if( FluidSysSHW = 1 )
     then
       ValidOr( Parent(BaseNonResWtrHtrTotCap),0 ) * 0.60 / CmbdMult
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
   SIZING_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" ) 
+    if( FluidSysSHW = 1 ) 
     then
       if( IsResAndCombo )
       then
@@ -1138,10 +1347,13 @@ RULE NEW WtrHtr:BaseHtOutput
       else
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
   SIZING_BASELINE
-    if( Parent(Type) = "ServiceHotWater" ) 
+    if( FluidSysSHW = 1 ) 
     then
       if( IsResAndCombo )
       then
@@ -1177,8 +1389,11 @@ RULE NEW WtrHtr:BaseHtOutput
       else
         UNDEFINED
       endif endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
 ENDRULE
 
 
@@ -1196,14 +1411,14 @@ RULE NEW WtrHtr:BaseEngyInput
   UNITS
     Btu/hr
   DEFAULT
-    if( Parent(Type) = "ServiceHotWater" )
+    if( FluidSysSHW = 1 )
     then
       if( IsResAndCombo )
       then
         UNDEFINED
       else if( FuelSrc = "Gas" )
       then
-        if ( IfValidAnd( ThrmlEff >0 ) == 0 )
+        if( IfValidAnd( ThrmlEff >0 ) == 0 )
         then 
          BaseHtOutput / 0.80
         else
@@ -1217,10 +1432,13 @@ RULE NEW WtrHtr:BaseEngyInput
         ( BaseHtOutput - ValidOr(TankLoss,0) ) / ValidOr( HtPumpEF, 3 )
       else UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
   SIZING_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" ) 
+    if( FluidSysSHW = 1 ) 
     then
       if( IsResAndCombo )
       then
@@ -1247,10 +1465,13 @@ RULE NEW WtrHtr:BaseEngyInput
       else
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
   SIZING_BASELINE
-    if( Parent(Type) = "ServiceHotWater" ) 
+    if( FluidSysSHW = 1 ) 
     then
       if( IsResAndCombo )
       then
@@ -1277,8 +1498,11 @@ RULE NEW WtrHtr:BaseEngyInput
       else
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
 ENDRULE
 
 
@@ -1301,7 +1525,7 @@ RULE WtrHtr:InpPwr
 //    ResetThisWhenTheFollowingIsModified
 //      FuelSrc
   DEFAULT
-    if( Parent(Type) = "ServiceHotWater" )
+    if( FluidSysSHW = 1 )
     then 
       if( IsResAndCombo )
       then
@@ -1328,17 +1552,24 @@ RULE WtrHtr:InpPwr
           UNDEFINED
         endif endif
       endif endif
-    else
-      UNDEFINED
-    endif
+    else if( FluidSysHtg = 1 )
+    then
+      if( Proj:AutoHardSize = 1 .AND. LocalStatus(CapRtd) > 6 )
+      then
+        CapRtd / 3412 / 3                                      // Temporary COP = 3
+      else UNDEFINED
+      endif
+    else UNDEFINED
+    endif endif
   CHECKCODE
-    if ( Proj:ExcludeWtrHtg = 1 )
+    if( Proj:ExcludeWtrHtg = 1 .AND. FluidSysSHW = 1 )
     then UNCHANGED
     else		
 	    if( FuelSrc != "Electricity" )
 	    then
 	      UNCHANGED
-	    else if( (LocalStatus(InpPwr) < 1 ) .AND. FluidSys:Type = "ServiceHotWater" )
+//	    else if( (LocalStatus(InpPwr) < 1 ) .AND. FluidSysSHW = 1 )
+	    else if( (LocalStatus(InpPwr) < 1 ) )
 	    then
 	      PostError("All electric water heaters require a rated input.
 	                 Check values for water heater '%s'.", Name)
@@ -1355,7 +1586,7 @@ RULE WtrHtr:InpPwr
 	    endif endif endif
     endif
   SIZING_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" ) 
+    if( FluidSysSHW = 1 ) 
     then
       if( IsResAndCombo )
       then
@@ -1384,10 +1615,13 @@ RULE WtrHtr:InpPwr
       else
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNCHANGED
     else UNDEFINED
-    endif
+    endif endif
   SIZING_BASELINE
-    if( Parent(Type) = "ServiceHotWater" )
+    if( FluidSysSHW = 1 )
     then
       if( IsResAndCombo )
       then
@@ -1416,8 +1650,11 @@ RULE WtrHtr:InpPwr
       else
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      u:InpPwr
     else UNDEFINED
-    endif
+    endif endif
   ANNUAL    
     InpPwr
 ENDRULE
@@ -1470,7 +1707,7 @@ RULE WtrHtr:CapRtd
 //    ResetThisWhenTheFollowingIsModified
 //      InpPwr
   DEFAULT
-    if( Parent(Type) = "ServiceHotWater" )
+    if( FluidSysSHW = 1 )
     then 
       if( IsResAndCombo )
       then
@@ -1501,10 +1738,22 @@ RULE WtrHtr:CapRtd
         endif endif endif
       else UNDEFINED
       endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      if( Proj:AutoHardSize = 1
+         .AND. LocalCompAssigned(FluidSegInRef) ) then           // For PROPOSED AutoHardSizing only
+        if( Parent(Type) = "HotWater" ) then
+          FluidSegOutRef:CoilHtgCapHydronic / Parent(BlrCnt)     // Non-coincident total capacity of all heating coils over BlrCnt (includes boilers and water heaters)
+        else if( Parent(Type) = "CondenserWater" ) then
+          FluidSegOutRef:CoilHtExtractionLd / Parent(BlrCnt)
+        else UNDEFINED
+        endif endif  
+      else UNDEFINED
+      endif
     else UNDEFINED
-    endif
+    endif endif
   CHECKCODE
-    if ( Proj:ExcludeWtrHtg = 1 )
+    if( Proj:ExcludeWtrHtg = 1 .AND. FluidSysSHW = 1 )
     then UNCHANGED
     else
 	    if( LocalStatus(CapRtd) = 7 .AND. LocalStatus(InpPwr) = 7 .AND. 
@@ -1513,7 +1762,7 @@ RULE WtrHtr:CapRtd
 	      PostError("Water heater '%s' has user inputs for Input Rate specified 
 	                 in both Btu/hr and kW, and the values are inconsistent.  
 	                 Please delete one of these values.", Name)
-	    else if( (LocalStatus(CapRtd) < 1 .OR. CapRtd = 0) .AND. FluidSys:Type = "ServiceHotWater"  .AND.
+	    else if( (LocalStatus(CapRtd) < 1 .OR. CapRtd = 0 ) .AND. FluidSysSHW = 1 .AND.
 	         Type = "Conventional" .AND. FuelSrc = "Gas" )
 	    then
 	      PostError("All water heaters require a rated capacity.  Check input for 
@@ -1522,7 +1771,7 @@ RULE WtrHtr:CapRtd
 	    endif endif
 	  endif
   SIZING_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" )
+    if( FluidSysSHW = 1 )
     then
       if( IsResAndCombo )
       then
@@ -1562,10 +1811,13 @@ RULE WtrHtr:CapRtd
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      u:CapRtd
     else UNDEFINED
-    endif
+    endif endif
   SIZING_BASELINE
-    if( Parent(Type) = "ServiceHotWater" )
+    if( FluidSysSHW = 1 )
     then
       if( IsResAndCombo )
       then
@@ -1616,31 +1868,653 @@ RULE WtrHtr:CapRtd
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNCHANGED
     else UNDEFINED
-    endif    
+    endif endif    
   ANNUAL
     CapRtd
 ENDRULE
 
 
-// -------------- Water Heater Capacity Rated --------------
-RULE WtrHtr:CapRtdSim
+// -------------- Boiler Water Flow --------------------------------------------
+RULE WtrHtr:WtrFlowCap
   DESCRIPTION
-    "The simulates system type for SDD -> OS reverse translator."
+    "The water flow rate for a water heater used in space heating."
+  HELP
+    ""
+  INPUTCLASS
+    NotInput
+  MINIMUM
+    0
+  UNITS
+    gpm
+  REPORTPRECISION
+    1
   DEFAULT
-    if( Parent(Type) = "ServiceHotWater" .AND. IfValidAnd( CapRtd > 0 ) )
-    then
-      CapRtd * CmbdMult     //PROPOSED
+    if( FluidSysHtg = 1 ) then
+      if( IfValidAnd( CapRtd > 0 ) .AND.
+          IfValidAnd( ParentValid( DsgnSupWtrDelT ) > 0 ) ) then
+          // gpm = Btuh / 8.3365 (lb/gal) / 60 (min/hr) / Design loop dT
+        CapRtd/500.19/Parent(DsgnSupWtrDelT)
+      else UNDEFINED
+      endif
     else UNDEFINED
     endif
+  SIZING
+    if( IsBaseSys ) then
+      UNDEFINED   // AutoSize
+    else
+      u:WtrFlowCap
+    endif
+  ANNUAL
+    if( IsBaseSys ) then
+      CapRtdSim/500.19/Parent(DsgnSupWtrDelT)
+    else
+      z:WtrFlowCap
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:StdEvapInletAirDBTemp
+  DATATYPE
+    Float
+  LONGFORM
+    StandardEvaporatorInletAirDrybulbTemperature
+  DESCRIPTION
+    "The standard temperature at which the performance curves equal 1."
+  INPUTCLASS
+    NotInput
+  UNITS
+    F
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      if( IsMultipass = 1 )
+      then
+        40
+      else
+        67.5
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:StdEvapInletAirWBTemp
+  DATATYPE
+    Float
+  LONGFORM
+    StandardEvaporatorInletAirWetbulbTemperature
+  DESCRIPTION
+    "The standard temperature at which the performance curves equal 1."
+  INPUTCLASS
+    NotInput
+  UNITS
+    F
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      56.3
+    else UNDEFINED
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:StdCondInletWtrTemp
+  DATATYPE
+    Float
+  LONGFORM
+    StandardCondenserInletWaterTemperature
+  DESCRIPTION
+    "The standard temperature at which the performance curves equal 1."
+  INPUTCLASS
+    NotInput
+  UNITS
+    F
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      if( IsMultipass = 1 )
+      then
+        120
+      else
+        135.5
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE WtrHtr:RtdEvapInletAirDBTempF
+  INPUTCLASS
+    CondRequired
+  DESCRIPTION
+    "The temperature at which the rated performance was determined."
+  DEFAULT
+    if( Proj:AutoHardSize = 1 .AND. Type <> "Conventional" )
+      then StdEvapInletAirDBTemp
+    else UNDEFINED
+    endif
+  CHECKSIM
+    if( Proj:AutoHardSize = 1 )
+    then
+      UNCHANGED
+    else if( Type <> "Conventional" .AND. IsCommHtPumpWtrHtr = 1 )
+    then
+      if ( IfValidAnd( RtdEvapInletAirDBTempF > 32 ) .AND. 
+           IfValidAnd( RtdEvapInletAirDBTempF < 200 ) )
+      then UNCHANGED
+      else 
+	      PostError("Rated evaporator inlet air drybulb temperature is a required input 
+	                 for heat pump water heater '%s'.  Please enter the 
+	                 temperature used to determine the capacity and 
+	                 efficiency.", Name )
+	    endif
+    else UNCHANGED
+    endif endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE WtrHtr:RtdEvapInletAirWBTempF
+  INPUTCLASS
+    CondRequired
+  DESCRIPTION
+    "The temperature at which the rated performance was determined."
+  DEFAULT
+    if( Proj:AutoHardSize = 1 .AND. Type <> "Conventional" )
+    then StdEvapInletAirWBTemp
+//    else if( Type <> "Conventional" .AND. IsCommHtPumpWtrHtr = 1 )
+//    then StdEvapInletAirWBTemp    
+    else UNDEFINED
+    endif
+//    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE WtrHtr:RtdCondInletWtrTempF
+  INPUTCLASS
+    CondRequired
+  DESCRIPTION
+    "The temperature at which the rated performance was determined."
+  DEFAULT
+    if( Proj:AutoHardSize = 1 .AND. Type <> "Conventional" )
+    then StdCondInletWtrTemp
+//    else if( Type <> "Conventional" .AND. IsCommHtPumpWtrHtr = 1 )
+//    then StdCondInletWtrTemp    
+    else UNDEFINED
+    endif 
+//    endif
+  CHECKSIM
+    if( Proj:AutoHardSize = 1 )
+    then
+      UNCHANGED
+    else if( Type <> "Conventional" .AND. IsCommHtPumpWtrHtr = 1 )
+    then
+      if ( IfValidAnd( RtdCondInletWtrTempF > 32 ) .AND. 
+           IfValidAnd( RtdCondInletWtrTempF < 200 ) )
+      then UNCHANGED
+      else 
+	      PostError("Rated condenser inlet water temperature is a required input 
+	                 for heat pump water heater '%s'.  Please enter the 
+	                 temperature used to determine the capacity and 
+	                 efficiency.", Name )
+	    endif
+    else UNCHANGED
+    endif endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:RtdEvapInletAirDBTempC
+  DATATYPE
+    FLoat
+  LONGFORM
+    RatedEvaporatorInletAirDrybulbTemperatureCelsius
+  DESCRIPTION
+    "The temperature at which the rated performance was determined."
+  DEFAULT
+    if( LocalStatus( RtdEvapInletAirDBTempF ) > 0 )
+    then ( RtdEvapInletAirDBTempF - 32 ) * 5 / 9 
+    else UNCHANGED
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:RtdEvapInletAirWBTempC
+  DATATYPE
+    FLoat
+  LONGFORM
+    RatedEvaporatorInletAirWetbulbTemperatureCelsius
+  DESCRIPTION
+    "The temperature at which the rated performance was determined."
+  DEFAULT
+    if( LocalStatus( RtdEvapInletAirWBTempF ) > 0 )
+    then ( RtdEvapInletAirWBTempF - 32 ) * 5 / 9 
+    else UNCHANGED
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:RtdCondInletWtrTempC
+  DATATYPE
+    FLoat
+  LONGFORM
+    RatedCondenserInletAirDrybulbTemperatureCelsius
+  DESCRIPTION
+    "The temperature at which the rated performance was determined."
+  DEFAULT
+    if( LocalStatus( RtdCondInletWtrTempF ) > 0 )
+    then ( RtdCondInletWtrTempF - 32 ) * 5 / 9 
+    else UNCHANGED
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:CapfTempCrvType
+  DATATYPE
+    String
+  LONGFORM
+    CapacityFunctionofTemperatureCurveType
+  DESCRIPTION
+    "The curve type used to adjust heating capacity of heat pump water heaters 
+     as a function of air and water temperatures."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( Type <> "Conventional" )              //Heat Pump
+    then
+      "CrvDblQuad"
+      // Figure out a way to read this from the curve library
+    else UNDEFINED
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:COPfTempCrvType
+  DATATYPE
+    String
+  LONGFORM
+    CoefficientofPerformanceFunctionofTemperatureCurveType
+  DESCRIPTION
+    "The curve type used to adjust efficiency of heat pump water heaters 
+     as a function of air and water temperatures."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( Type <> "Conventional" )              //Heat Pump
+    then
+      "CrvDblQuad"
+      // Figure out a way to read this from the curve library
+    else UNDEFINED
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:CapfTempCrvCoef1
+  DATATYPE
+    Float
+  LONGFORM
+    CapacityFunctionofTemperatureCurveCoefficient1
+  DESCRIPTION
+    "Coefficient 1 of the curve used to adjust heating capacity of heat pump 
+     water heaters as a function of air and water temperatures."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( Type <> "Conventional" )              //Heat Pump
+    then
+      // Figure out a way to read this from the curve library
+      if( IsMultipass = 0 ) then
+        0.563000
+      else
+        0.866676
+      endif
+      // Figure out a way to read this from the curve library
+    else UNDEFINED
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:CapfTempCrvCoef2
+  DATATYPE
+    Float
+  LONGFORM
+    CapacityFunctionofTemperatureCurveCoefficient2
+  DESCRIPTION
+    "Coefficient 2 of the curve used to adjust heating capacity of heat pump 
+     water heaters as a function of air and water temperatures."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( Type <> "Conventional" )              //Heat Pump
+    then
+      // Figure out a way to read this from the curve library
+      if( IsMultipass = 0 ) then
+        0.043700
+      else
+        0.030503
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:CapfTempCrvCoef3
+  DATATYPE
+    Float
+  LONGFORM
+    CapacityFunctionofTemperatureCurveCoefficient3
+  DESCRIPTION
+    "Coefficient 3 of the curve used to adjust heating capacity of heat pump 
+     water heaters as a function of air and water temperatures."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( Type <> "Conventional" )              //Heat Pump
+    then
+      // Figure out a way to read this from the curve library
+      if( IsMultipass = 0 ) then
+        0.000039
+      else
+        0.000066
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:CapfTempCrvCoef4
+  DATATYPE
+    Float
+  LONGFORM
+    CapacityFunctionofTemperatureCurveCoefficient4
+  DESCRIPTION
+    "Coefficient 4 of the curve used to adjust heating capacity of heat pump 
+     water heaters as a function of air and water temperatures."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( Type <> "Conventional" )              //Heat Pump
+    then
+      // Figure out a way to read this from the curve library
+      if( IsMultipass = 0 ) then
+        0.005500
+      else
+        0.002806
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:CapfTempCrvCoef5
+  DATATYPE
+    Float
+  LONGFORM
+    CapacityFunctionofTemperatureCurveCoefficient5
+  DESCRIPTION
+    "Coefficient 5 of the curve used to adjust heating capacity of heat pump 
+     water heaters as a function of air and water temperatures."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( Type <> "Conventional" )              //Heat Pump
+    then
+      // Figure out a way to read this from the curve library
+      if( IsMultipass = 0 ) then
+        -0.000148
+      else
+        -0.000051
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:CapfTempCrvCoef6
+  DATATYPE
+    Float
+  LONGFORM
+    CapacityFunctionofTemperatureCurveCoefficient6
+  DESCRIPTION
+    "Coefficient 6 of the curve used to adjust heating capacity of heat pump 
+     water heaters as a function of air and water temperatures."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( Type <> "Conventional" )              //Heat Pump
+    then
+      // Figure out a way to read this from the curve library
+      if( IsMultipass = 0 ) then
+        -0.000145
+      else
+        -0.000134
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:COPfTempCrvCoef1
+  DATATYPE
+    Float
+  LONGFORM
+    CoefficientofPerformanceFunctionofTemperatureCurveCoefficient1
+  DESCRIPTION
+    "Coefficient 1 of the curve used to adjust heating efficiency of heat pump 
+     water heaters as a function of air and water temperatures."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( Type <> "Conventional" )              //Heat Pump
+    then
+      // Figure out a way to read this from the curve library
+      if( IsMultipass = 0 ) then
+        1.133200
+      else
+        1.921974
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:COPfTempCrvCoef2
+  DATATYPE
+    Float
+  LONGFORM
+    CoefficientofPerformanceFunctionofTemperatureCurveCoefficient2
+  DESCRIPTION
+    "Coefficient 2 of the curve used to adjust heating efficiency of heat pump 
+     water heaters as a function of air and water temperatures."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( Type <> "Conventional" )              //Heat Pump
+    then
+      // Figure out a way to read this from the curve library
+      if( IsMultipass = 0 ) then
+        0.063000
+      else
+        0.043998
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:COPfTempCrvCoef3
+  DATATYPE
+    Float
+  LONGFORM
+    CoefficientofPerformanceFunctionofTemperatureCurveCoefficient3
+  DESCRIPTION
+    "Coefficient 3 of the curve used to adjust heating efficiency of heat pump 
+     water heaters as a function of air and water temperatures."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( Type <> "Conventional" )              //Heat Pump
+    then
+      // Figure out a way to read this from the curve library
+      if( IsMultipass = 0 ) then
+        -0.000098
+      else
+        0.000019
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:COPfTempCrvCoef4
+  DATATYPE
+    Float
+  LONGFORM
+    CoefficientofPerformanceFunctionofTemperatureCurveCoefficient4
+  DESCRIPTION
+    "Coefficient 4 of the curve used to adjust heating efficiency of heat pump 
+     water heaters as a function of air and water temperatures."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( Type <> "Conventional" )              //Heat Pump
+    then
+      // Figure out a way to read this from the curve library
+      if( IsMultipass = 0 ) then
+        -0.009720
+      else
+        -0.031994
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:COPfTempCrvCoef5
+  DATATYPE
+    Float
+  LONGFORM
+    CoefficientofPerformanceFunctionofTemperatureCurveCoefficient5
+  DESCRIPTION
+    "Coefficient 5 of the curve used to adjust heating efficiency of heat pump 
+     water heaters as a function of air and water temperatures."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( Type <> "Conventional" )              //Heat Pump
+    then
+      // Figure out a way to read this from the curve library
+      if( IsMultipass = 0 ) then
+        -0.000021
+      else
+        0.000206
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:COPfTempCrvCoef6
+  DATATYPE
+    Float
+  LONGFORM
+    CoefficientofPerformanceFunctionofTemperatureCurveCoefficient1
+  DESCRIPTION
+    "Coefficient 6 of the curve used to adjust heating efficiency of heat pump 
+     water heaters as a function of air and water temperatures."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( Type <> "Conventional" )              //Heat Pump
+    then
+      // Figure out a way to read this from the curve library
+      if( IsMultipass = 0 ) then
+        -0.000686
+      else
+        -0.000459
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:CapRtdAdjFac
+  DATATYPE
+    Float
+  LONGFORM
+    CapacityRatedAdjustmentFactor
+  DESCRIPTION
+    "The capacity adjustment factor for non-standard rating conditions."
+  INPUTCLASS
+    NotInput
+  MINIMUM
+    0
+  DEFAULT
+    if( Type <> "Conventional" .AND. IsCommHtPumpWtrHtr = 1)
+    then
+        // x = RtdEvapInletAirDBTempC
+        // y = RtdCondInletWtrTempC
+      if( CapfTempCrvType = "CrvDblQuad" .AND.
+          IfValidAnd( RtdEvapInletAirDBTempC > -999 ) .AND.
+          IfValidAnd( RtdCondInletWtrTempC   > -999 ) )
+        // z = C1 + C2 ∗ x + C3 ∗ x2 + C4 ∗ y + C5 ∗ y2 + C6 ∗ xy
+      then
+        CapfTempCrvCoef1 + 
+        CapfTempCrvCoef2 * RtdEvapInletAirDBTempC + 
+        CapfTempCrvCoef3 * RtdEvapInletAirDBTempC**2 + 
+        CapfTempCrvCoef4 * RtdCondInletWtrTempC + 
+        CapfTempCrvCoef5 * RtdCondInletWtrTempC**2 + 
+        CapfTempCrvCoef6 * RtdEvapInletAirDBTempC * RtdCondInletWtrTempC 
+      else if( CapfTempCrvType = "CrvCubic" .AND.
+               IfValidAnd( RtdEvapInletAirDBTempC > -999 ) )
+        // y = C1 + C2 ∗ x + C3 ∗ x2 + C4 ∗ x3
+      then
+        CapfTempCrvCoef1 + 
+        CapfTempCrvCoef2 * RtdEvapInletAirDBTempC + 
+        CapfTempCrvCoef3 * RtdEvapInletAirDBTempC**2 + 
+        CapfTempCrvCoef4 * RtdEvapInletAirDBTempC**3 
+      else 1
+      endif endif
+    else 1
+    endif
+  CHECKSIM
+    if( Type <> "Conventional" )
+    then
+      if( IfValidAnd( CapRtdAdjFac > 0 ) )
+      then UNCHANGED
+      else
+	      PostError("A valid capacity adjustment factor for water heater '%s' 
+	                 has not been determined.  Check that rated temperatures 
+	                 have been entered.", Name)
+      endif
+    else UNCHANGED
+    endif
   SIZING_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" .AND. IfValidAnd( CapRtd > 0 ) )
+    if( FluidSysSHW = 1 )
     then
       if( IsResAndCombo )
       then
         if( Proj:ResComboDHWUserAndBaseline .OR. Proj:ResComboDHWPropOnly )
         then
-          CapRtd * CmbdMult
+          u:CapRtdAdjFac
         else if( Proj:ResComboDHWNone )
         then 
           UNDEFINED
@@ -1649,20 +2523,213 @@ RULE WtrHtr:CapRtdSim
         endif endif
       else if( Proj:SHWUserAndBaseline .OR. Proj:SHWPropOnly )
       then 
-        CapRtd * CmbdMult
+        u:CapRtdAdjFac
       else if( Proj:SHWBothBaseline )
       then 
-        CapRtd
+        1
       else if( Proj:SHWNone )
       then 
         UNDEFINED
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      u:CapRtdAdjFac
     else UNDEFINED
-    endif
+    endif endif
   SIZING_BASELINE
-    if( Parent(Type) = "ServiceHotWater" )
+    if( FluidSysSHW = 1 )
+    then
+      if( IsResAndCombo )
+      then
+        if( Proj:ResComboDHWUserAndBaseline .OR. Proj:ResComboDHWPropOnly )
+        then
+          u:CapRtdAdjFac
+        else if( Proj:ResComboDHWNone )
+        then 
+          UNDEFINED
+        else
+          UNDEFINED
+        endif endif
+      else if( Proj:SHWUserAndBaseline .OR. Proj:SHWPropOnly )
+      then 
+        1
+      else if( Proj:SHWBothBaseline )
+      then 
+        1
+      else if( Proj:SHWNone )
+      then 
+        UNDEFINED
+      else 
+        UNDEFINED
+      endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      if( IsExisting )
+      then zp:CapRtdAdjFac
+      else 1
+      endif
+    else UNDEFINED
+    endif endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:COPRtdAdjFac
+  DATATYPE
+    Float
+  LONGFORM
+    CoefficientOfPerformanceRatedAdjustmentFactor
+  DESCRIPTION
+    "The efficiency adjustment factor for non-standard rating conditions."
+  INPUTCLASS
+    NotInput
+  MINIMUM
+    0
+  DEFAULT
+    if( Type <> "Conventional" .AND. IsCommHtPumpWtrHtr = 1 )
+    then
+        // x = RtdEvapInletAirDBTempC
+        // y = RtdCondInletWtrTempC
+      if( COPfTempCrvType = "CrvDblQuad" .AND.
+          IfValidAnd( RtdEvapInletAirDBTempC > -999 ) .AND.
+          IfValidAnd( RtdCondInletWtrTempC   > -999 ) )
+        // z = C1 + C2 ∗ x + C3 ∗ x2 + C4 ∗ y + C5 ∗ y2 + C6 ∗ xy
+      then
+        COPfTempCrvCoef1 + 
+        COPfTempCrvCoef2 * RtdEvapInletAirDBTempC + 
+        COPfTempCrvCoef3 * RtdEvapInletAirDBTempC**2 + 
+        COPfTempCrvCoef4 * RtdCondInletWtrTempC + 
+        COPfTempCrvCoef5 * RtdCondInletWtrTempC**2 + 
+        COPfTempCrvCoef6 * RtdEvapInletAirDBTempC * RtdCondInletWtrTempC 
+      else if( COPfTempCrvType = "CrvCubic" .AND.
+               IfValidAnd( RtdEvapInletAirDBTempC > -999 ) )
+        // y = C1 + C2 ∗ x + C3 ∗ x2 + C4 ∗ x3
+      then
+        COPfTempCrvCoef1 + 
+        COPfTempCrvCoef2 * RtdEvapInletAirDBTempC + 
+        COPfTempCrvCoef3 * RtdEvapInletAirDBTempC**2 + 
+        COPfTempCrvCoef4 * RtdEvapInletAirDBTempC**3 
+      else 1
+      endif endif
+    else 1
+    endif
+  SIZING_PROPOSED
+    if( FluidSysSHW = 1 )
+    then
+      if( IsResAndCombo )
+      then
+        if( Proj:ResComboDHWUserAndBaseline .OR. Proj:ResComboDHWPropOnly )
+        then
+          u:COPRtdAdjFac
+        else if( Proj:ResComboDHWNone )
+        then 
+          UNDEFINED
+        else
+          UNDEFINED
+        endif endif
+      else if( Proj:SHWUserAndBaseline .OR. Proj:SHWPropOnly )
+      then 
+        u:COPRtdAdjFac
+      else if( Proj:SHWBothBaseline )
+      then 
+        1
+      else if( Proj:SHWNone )
+      then 
+        UNDEFINED
+      else 
+        UNDEFINED
+      endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      u:COPRtdAdjFac
+    else UNDEFINED
+    endif endif
+  SIZING_BASELINE
+    if( FluidSysSHW = 1 )
+    then
+      if( IsResAndCombo )
+      then
+        if( Proj:ResComboDHWUserAndBaseline .OR. Proj:ResComboDHWPropOnly )
+        then
+          u:COPRtdAdjFac
+        else if( Proj:ResComboDHWNone )
+        then 
+          UNDEFINED
+        else
+          UNDEFINED
+        endif endif
+      else if( Proj:SHWUserAndBaseline .OR. Proj:SHWPropOnly )
+      then 
+        1
+      else if( Proj:SHWBothBaseline )
+      then 
+        1
+      else if( Proj:SHWNone )
+      then 
+        UNDEFINED
+      else 
+        UNDEFINED
+      endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      if( IsExisting )
+      then zp:COPRtdAdjFac
+      else 1
+      endif
+    else UNDEFINED
+    endif endif
+ENDRULE
+
+// -------------- Water Heater Capacity Rated --------------
+RULE WtrHtr:CapRtdSim
+  DESCRIPTION
+    "The rated capacity adjusted for multiple units and for non-standard 
+     rating conditions."
+  DEFAULT
+    if( FluidSysSHW = 1 .AND. IfValidAnd( CapRtd > 0 ) .AND.
+        IfValidAnd( CapRtdAdjFac != 0 ) )
+    then
+      CapRtd * CmbdMult / CapRtdAdjFac    // SHW
+    else if( FluidSysHtg = 1 .AND. IfValidAnd( CapRtd > 0 ) .AND.
+             IfValidAnd( CapRtdAdjFac != 0 ) )
+    then
+      CapRtd / CapRtdAdjFac               // Space Heating
+    else UNDEFINED
+    endif endif
+  SIZING_PROPOSED
+    if( FluidSysSHW = 1 .AND. IfValidAnd( CapRtd > 0 ) )
+    then
+      if( IsResAndCombo )
+      then
+        if( Proj:ResComboDHWUserAndBaseline .OR. Proj:ResComboDHWPropOnly )
+        then
+          CapRtd * CmbdMult / CapRtdAdjFac
+        else if( Proj:ResComboDHWNone )
+        then 
+          UNDEFINED
+        else
+          UNDEFINED
+        endif endif
+      else if( Proj:SHWUserAndBaseline .OR. Proj:SHWPropOnly )
+      then 
+        CapRtd * CmbdMult / CapRtdAdjFac
+      else if( Proj:SHWBothBaseline )
+      then 
+        CapRtd / CapRtdAdjFac
+      else if( Proj:SHWNone )
+      then 
+        UNDEFINED
+      else 
+        UNDEFINED
+      endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      CapRtd / CapRtdAdjFac
+    else UNDEFINED
+    endif endif
+  SIZING_BASELINE
+    if( FluidSysSHW = 1 )
     then
       if( IsResAndCombo )
       then
@@ -1683,17 +2750,42 @@ RULE WtrHtr:CapRtdSim
         zb:CapRtd
       else if( Proj:SHWPropOnly )
       then 
-        zp:CapRtd * u:CmbdMult  
+        zp:CapRtdSim
       else if( Proj:SHWNone )
       then 
         UNDEFINED                                   // no DHW modeled
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      if( IsExisting )
+      then zp:CapRtdSim
+      else CapRtd
+      endif
     else UNDEFINED
-    endif    
+    endif endif    
   ANNUAL
     CapRtdSim
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE WtrHtr:COPSim
+  DESCRIPTION
+    "The COP adjusted for non-standard rating conditions."
+  DEFAULT
+    if( IfValidAnd( COP > 0 ) .AND. IfValidAnd( COPRtdAdjFac != 0 ) )
+    then
+      COP / COPRtdAdjFac       //PROPOSED
+    else UNDEFINED
+    endif
+  SIZING_PROPOSED
+    COPSim
+  SIZING_BASELINE
+    if( IsExisting )
+    then zp:COPSim
+    else COP
+    endif
 ENDRULE
 
 // ---------- Water Heater Outlet Fluid Segment Reference Check --------------
@@ -1708,19 +2800,30 @@ RULE WtrHtr:FluidSegOutRef
   INPUTCLASS
     CondRequired
   CHECKSIM
-    if ( Proj:ExcludeWtrHtg = 1 )
+    if( Proj:ExcludeWtrHtg = 1 .AND. FluidSysSHW = 1 )
     then UNCHANGED
     else
 	    if( LocalStatus( FluidSegOutRef ) < 1 )
 	    then
 	      PostError("The outlet fluid segment of water heater '%s' must be assigned to a 
 	                 Service Hot Water system", Name)
-	    else if( FluidSegOutRef:ParentFluidSysType != "ServiceHotWater" )
+	    else if( FluidSysSHW = 1
+	             .AND. FluidSegOutRef:ParentFluidSysType != "ServiceHotWater" )
 	    then
 	      PostError("The outlet fluid segment of water heater '%s' must belong to a 
 	                 Service Hot Water system", Name)
+	    else if( Parent(Type) = "HotWater"
+	             .AND. FluidSegOutRef:ParentFluidSysType != "HotWater" )
+	    then
+	      PostError("The outlet fluid segment of water heater '%s' must belong to a 
+	                 Hot Water system", Name)
+	    else if( Parent(Type) = "CondenserWater"
+	             .AND. FluidSegOutRef:ParentFluidSysType != "CondenserWater" )
+	    then
+	      PostError("The outlet fluid segment of water heater '%s' must belong to a 
+	                 Condenser Water system", Name)
 	    else UNCHANGED
-	    endif endif
+	    endif endif endif endif
     endif
 ENDRULE
 
@@ -1736,22 +2839,71 @@ RULE WtrHtr:FluidSegMakeupRef
   INPUTCLASS
     CondRequired
   CHECKSIM
-    if ( Proj:ExcludeWtrHtg = 1 )
+    if( Proj:ExcludeWtrHtg = 1 .AND. FluidSysSHW = 1 )
     then UNCHANGED
-    else
-	    if( LocalStatus( FluidSegMakeupRef ) < 1 )
-	    then
-	      PostError("The makeup fluid segment of water heater '%s' must be assigned to a 
-	                 Service Hot Water system", Name)
-	    else if( FluidSegMakeupRef:ParentFluidSysType != "ServiceHotWater" )
-	    then
-	      PostError("The makeup fluid segment of water heater '%s' must belong to a 
-	                 Service Hot Water system", Name)
-	    else UNCHANGED
-	    endif endif
-    endif
+    else if( Parent(Type) <> "ServiceHotWater" .AND. LocalStatus( FluidSegMakeupRef ) > 0 )
+    then
+	    PostError( "Water heater '%s' is not assigned to a Service Hot Water 
+	                system and should not have a Makeup fluid segment assigned but 
+	                should have an inlet fluid segment assigned instead.", Name )
+    else if( Parent(Type) = "ServiceHotWater" .AND. LocalStatus( FluidSegMakeupRef ) < 1 )
+    then
+	    PostError("The water heater '%s' must have a makeup fluid segment assigned", Name)
+//    else if( FluidSegMakeupRef:ParentFluidSysType != "ServiceHotWater" )
+//    then
+//	    PostError("The makeup fluid segment of water heater '%s' must belong to a 
+//	               Service Hot Water system", Name)
+	  else UNCHANGED
+	  endif endif endif // endif
 ENDRULE
 
+
+// ---------- Water Heater Inlet Fluid Segment Reference Check --------------
+RULE WtrHtr:FluidSegInRef
+  DESCRIPTION
+    "Checking that the water heater inlet fluid segment is referenced 
+     correctly for water heaters not doing Service Water Heating."
+  HELP
+    ""
+  REFERENCE 
+    ACM-5.9.1 Water Heating
+  INPUTCLASS
+    CondRequired
+  CHECKSIM
+    if( FluidSysSHW = 1 .AND. LocalStatus( FluidSegInRef ) > 0 )
+    then
+	    PostError( "Water heater '%s' is assigned to a Service Hot Water 
+	                system and should have a Makeup fluid segment assigned but 
+	                has an inlet fluid segment assigned instead.", Name )
+	  else if( FluidSysHtg = 1 .AND. LocalStatus( FluidSegInRef ) < 1 )
+	  then
+	    PostError( "Water heater '%s' must have an inlet fluid segment 
+	                assigned", Name )
+	  else UNCHANGED
+	  endif endif
+ENDRULE
+
+
+// ---------- Water Heater Inlet Fluid Segment Reference Check --------------
+RULE WtrHtr:FluidSegInRefSim
+  DESCRIPTION
+    "Water heaters can have either a makeup fluid segment connection or an inlet
+     fluid segment.  This variable passes either one to simulation using a 
+     single XML name."
+  HELP
+    ""
+  REFERENCE 
+    ACM-5.9.1 Water Heating
+  INPUTCLASS
+    NotInput
+  SIZING
+    if( FluidSysSHW = 1 )
+    then FluidSegMakeupRef
+    else if( FluidSysHtg = 1 )
+    then FluidSegInRef
+    else UNCHANGED
+    endif endif
+ENDRULE
 
 
 // -------------- Fluid Segment Water Heater Storage Capacity --------------------
@@ -1761,7 +2913,8 @@ RULE NEW FluidSeg:WtrHtrInstantChk
   LONGFORM
     WaterHeaterInstantaneousCheck
   DESCRIPTION
-    "Checks the number of instantaneous water heaters on each fluid segment."
+    "Checks the number of instantaneous water heaters on each service water 
+     heating fluid segment."
   HELP
     ""
   REFERENCE 
@@ -1779,6 +2932,7 @@ RULE NEW FluidSeg:WtrHtrInstantChk
 ENDRULE
 
 
+// -----------------------------------------------------------------------------
 RULE WtrHtr:StorCap
   DESCRIPTION
     "This is the water heater's storage capacity."
@@ -1793,7 +2947,7 @@ RULE WtrHtr:StorCap
   REPORTPRECISION
     2
   DEFAULT
-    if( Parent(Type) = "ServiceHotWater" )
+    if( FluidSysSHW = 1 )
     then
       if( IsResAndCombo )
       then
@@ -1812,10 +2966,19 @@ RULE WtrHtr:StorCap
       else
         UNDEFINED
       endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      if( Proj:AutoHardSize = 1 .AND. LocalCompAssigned(FluidSegInRef) ) then           // For PROPOSED AutoHardSizing only
+        if( IfValidAnd( CapRtd ) > 0 )
+        then CapRtd/3.412       // 1 gal/kW
+        else 0
+        endif
+      else UNDEFINED
+      endif
     else UNDEFINED
-    endif
+    endif endif
   CHECKCODE
-    if ( Proj:ExcludeWtrHtg = 1 )
+    if( Proj:ExcludeWtrHtg = 1 .AND. FluidSysSHW = 1 )
     then UNCHANGED
     else
 	    if( LocalStatus( StorCap ) < 1 )
@@ -1832,7 +2995,7 @@ RULE WtrHtr:StorCap
 	    endif
 	  endif
   SIZING_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -1857,10 +3020,13 @@ RULE WtrHtr:StorCap
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      StorCap
     else UNDEFINED
-    endif
+    endif endif
   SIZING_BASELINE
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -1878,7 +3044,7 @@ RULE WtrHtr:StorCap
         endif endif endif
       else if( Proj:SHWPropOnly )
       then
-        u:StorCap
+        StorCap
       else if( Proj:SHWUserAndBaseline .OR. Proj:SHWBothBaseline )
       then
         BaseHtOutput / 0.60 * 0.40 / ( ( DsgnSupWtrTemp - 55 ) * 1 * 8.2877 ) 
@@ -1888,8 +3054,11 @@ RULE WtrHtr:StorCap
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      StorCap
     else UNDEFINED
-    endif 
+    endif endif 
   ANNUAL
     z:StorCap
 ENDRULE
@@ -1906,7 +3075,7 @@ RULE WtrHtr:StorCapSim
     else UNDEFINED
     endif
   SIZING_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -1931,10 +3100,13 @@ RULE WtrHtr:StorCapSim
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      StorCap
     else UNDEFINED
-    endif
+    endif endif
   SIZING_BASELINE
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -1962,17 +3134,22 @@ RULE WtrHtr:StorCapSim
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      StorCap
     else UNDEFINED
-    endif 
+    endif endif 
   ANNUAL
     StorCapSim
 ENDRULE
 
-RULE NEW WtrHtr:IsWtrHtrNewDsgn
+
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:IsWtrHtrNewEffDesignation
  DATATYPE
     Integer
   LONGFORM
-    IsWaterHeaterNewDesignation
+    IsWaterHeaterNewEfficiencyDesignation
   DESCRIPTION
     ""
   INPUTCLASS
@@ -1984,10 +3161,10 @@ RULE NEW WtrHtr:IsWtrHtrNewDsgn
     else if( Status = "Existing" .AND. IfValidAnd( IsUEFRtd = 0 )  )
     then
       1       // Do not change modeling inputs
-    else if ( Status = "New" .AND. IfValidAnd( IsUEFRtd = 1 )  )  
+    else if( Status = "New" .AND. IfValidAnd( IsUEFRtd = 1 )  )  
     then
       0        // Do not change modeling inputs
-    else if ( Status = "New" .AND. IfValidAnd( IsUEFRtd = 0 )  ) 
+    else if( Status = "New" .AND. IfValidAnd( IsUEFRtd = 0 )  ) 
     then
       2
     else
@@ -2004,13 +3181,13 @@ RULE NEW WtrHtr:IsWtrHtrNewDsgn
 //    else UNCHANGED
 //    endif
   SIZING_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
         if( Proj:ResComboDHWUserAndBaseline .OR. Proj:ResComboDHWPropOnly )
         then
-          u:IsWtrHtrNewDsgn
+          u:IsWtrHtrNewEffDesignation
         else if( Proj:ResComboDHWNone )
         then 
           UNDEFINED
@@ -2019,7 +3196,7 @@ RULE NEW WtrHtr:IsWtrHtrNewDsgn
         endif endif
       else if( Proj:SHWUserAndBaseline .OR. Proj:SHWPropOnly )
       then
-        u:IsWtrHtrNewDsgn
+        u:IsWtrHtrNewEffDesignation
       else if( Proj:SHWBothBaseline )
       then
         0        
@@ -2029,16 +3206,19 @@ RULE NEW WtrHtr:IsWtrHtrNewDsgn
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
   SIZING_BASELINE
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
         if( Proj:ResComboDHWPropOnly )
         then
-          u:IsWtrHtrNewDsgn
+          u:IsWtrHtrNewEffDesignation
         else if( Proj:ResComboDHWUserAndBaseline .OR. Proj:ResComboDHWNone )
         then 
           UNDEFINED
@@ -2047,7 +3227,7 @@ RULE NEW WtrHtr:IsWtrHtrNewDsgn
         endif endif
       else if( Proj:SHWPropOnly )
       then
-        u:IsWtrHtrNewDsgn
+        u:IsWtrHtrNewEffDesignation
       else if( Proj:SHWUserAndBaseline .OR. Proj:SHWBothBaseline )
       then
         UNDEFINED               
@@ -2057,12 +3237,15 @@ RULE NEW WtrHtr:IsWtrHtrNewDsgn
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
   ANNUAL_PROPOSED
-    zp:IsWtrHtrNewDsgn
+    zp:IsWtrHtrNewEffDesignation
   ANNUAL_BASELINE
-    zb:IsWtrHtrNewDsgn
+    zb:IsWtrHtrNewEffDesignation
 ENDRULE
 
 
@@ -2081,7 +3264,7 @@ RULE NEW WtrHtr:UEFRtdVal
     NotInput
   DEFAULT
 //   if( IfValidAnd( IsUEFRtd = 0 ) )
-    if( IfValidAnd( IsWtrHtrNewDsgn = 1) )
+    if( IfValidAnd( IsWtrHtrNewEffDesignation = 1) )
     then 0
    else if( FuelSrc = "Gas" )
       then
@@ -2128,10 +3311,10 @@ RULE NEW WtrHtr:UEFRtdVal
     endif endif endif
   CHECKCODE
 //    if( IfValidAnd( IsUEFRtd = 1 ) .AND. IfValidAnd( UEFRtdVal = 0) )
-    if ( Proj:ExcludeWtrHtg = 1 )
+    if( Proj:ExcludeWtrHtg = 1 .AND. FluidSysSHW = 1 )
     then UNCHANGED
     else
-      if( IfValidAnd( IsWtrHtrNewDsgn = 0 ) .AND. IfValidAnd( UEFRtdVal = 0) )
+      if( IfValidAnd( IsWtrHtrNewEffDesignation = 0 ) .AND. IfValidAnd( UEFRtdVal = 0) )
       then
       PostWarning("Water heater '%s' has the flag set to indicate that 
                    it is UEF rated, but the volume and input ratings do 
@@ -2142,7 +3325,7 @@ RULE NEW WtrHtr:UEFRtdVal
       endif
     endif
   SIZING_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -2167,10 +3350,13 @@ RULE NEW WtrHtr:UEFRtdVal
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
   SIZING_BASELINE
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -2195,8 +3381,11 @@ RULE NEW WtrHtr:UEFRtdVal
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
   ANNUAL_PROPOSED
     zp:UEFRtdVal
   ANNUAL_BASELINE
@@ -2272,7 +3461,7 @@ RULE WtrHtr:SubType
       UNDEFINED
    endif endif
   CHECKSIM    // This really belongs somewhere else
-    if( Parent(Type) = "ServiceHotWater" )
+    if( FluidSysSHW = 1 )
     then
       if( ChildCount(Pump) > 0 )
       then
@@ -2281,13 +3470,16 @@ RULE WtrHtr:SubType
                  and proposed design.",Name)
       else UNCHANGED
       endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNCHANGED
     else UNCHANGED
-    endif
+    endif endif
   SIZING_PROPOSED
     if( IfValidAnd( Type <> "Conventional" ) )
     then
       SubType
-    else if( Parent(Type) = "ServiceHotWater" )  
+    else if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -2312,13 +3504,16 @@ RULE WtrHtr:SubType
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif endif
+    endif endif endif
   SIZING_BASELINE
     if( IfValidAnd( Type <> "Conventional" ) )
     then
       UNDEFINED
-    else if( Parent(Type) = "ServiceHotWater" )  
+    else if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -2346,8 +3541,11 @@ RULE WtrHtr:SubType
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif endif
+    endif endif endif
   ANNUAL_PROPOSED
     zp:SubType
   ANNUAL_BASELINE  
@@ -2370,14 +3568,17 @@ RULE NEW WtrHtr:IsInstant
   INPUTCLASS
     NotInput
   DEFAULT
-    if( Parent(Type) = "ServiceHotWater" )
+    if( FluidSysSHW = 1 )
     then
       if( SubType = "Instantaneous" )
       then 1
       else 0
       endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
 ENDRULE
 
 // -------------- Water Heater Size --------------------
@@ -2417,7 +3618,7 @@ RULE WtrHtr:Size
     else UNDEFINED
     endif
   SIZING_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -2480,10 +3681,13 @@ RULE WtrHtr:Size
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
   SIZING_BASELINE
-    if( Parent(Type) = "ServiceHotWater" )
+    if( FluidSysSHW = 1 )
     then
       if( IsResAndCombo )
       then
@@ -2549,8 +3753,11 @@ RULE WtrHtr:Size
       else
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif    
+    endif endif    
   ANNUAL_PROPOSED
     zp:Size
   ANNUAL_BASELINE
@@ -2574,7 +3781,7 @@ RULE NEW WtrHtr:SizeFuelType
   INPUTCLASS
     NotInput
   DEFAULT
-    if( Parent(Type) = "ServiceHotWater" )
+    if( FluidSysSHW = 1 )
     then
       if( Type <> "Conventional" )
       then UNDEFINED
@@ -2612,15 +3819,18 @@ RULE NEW WtrHtr:SizeFuelType
         endif
       else "Other"
       endif endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
 ENDRULE
 
 // -----------------------------------------------------------------------------
 RULE WtrHtr:UEF
   DESCRIPTION
     "Uniform Energy Factor (UEF) is the newest measure of water heater 
-    overall efficiency. UEF is determined by the Department of Energy�s 
+    overall efficiency. UEF is determined by the Department of Energy’s 
     test method outlined in 10 CFR Part 430, Subpart B, Appendix E"
   HELP
     ""
@@ -2733,7 +3943,7 @@ RULE WtrHtr:UEF
         endif endif
     endif
   SIZING_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -2768,11 +3978,13 @@ RULE WtrHtr:UEF
       else
         UNDEFINED
       endif endif endif endif
-    else
+    else if( FluidSysHtg = 1 )
+    then
       UNDEFINED
-    endif
+    else UNDEFINED
+    endif endif
   SIZING_BASELINE
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -2807,8 +4019,11 @@ RULE WtrHtr:UEF
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
   ANNUAL
     z:UEF
 ENDRULE
@@ -2875,7 +4090,7 @@ RULE WtrHtr:FlowRt
       endif
     endif
   SIZING_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -2910,11 +4125,13 @@ RULE WtrHtr:FlowRt
       else
         UNDEFINED
       endif endif endif endif
-    else
+    else if( FluidSysHtg = 1 )
+    then 
       UNDEFINED
-    endif
+    else UNDEFINED
+    endif endif
   SIZING_BASELINE
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -2949,8 +4166,11 @@ RULE WtrHtr:FlowRt
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
   ANNUAL
     z:FlowRt
 ENDRULE
@@ -3038,7 +4258,7 @@ RULE WtrHtr:FirstHrRating
       endif
     endif
   SIZING_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -3063,8 +4283,11 @@ RULE WtrHtr:FirstHrRating
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
   SIZING_BASELINE
     UNDEFINED
   ANNUAL_PROPOSED
@@ -3314,8 +4537,8 @@ RULE WtrHtr:UEFMdl
   INPUTCLASS
     NotInput
   DEFAULT
-    if( Parent(Type) = "ServiceHotWater" .AND. IfValidAnd( UEFRtdVal >= 10 ) .AND.
-        IfValidAnd( UEF >0 ) )
+    if( FluidSysSHW = 1 .AND. IfValidAnd( UEFRtdVal >= 10 ) .AND.
+        IfValidAnd( UEF > 0 ) )
     then
       switch ( UEFRtdVal  )
       case 10:  // Consumer Gas-Fired Storage Water Heater
@@ -3346,8 +4569,8 @@ RULE WtrHtr:UEFMdlCalcRE
   INPUTCLASS
     NotInput
   DEFAULT
-    if( Parent(Type) = "ServiceHotWater" .AND. IfValidAnd( UEFRtdVal >= 10 ) .AND.
-        IfValidAnd( UEFMdl >0 ) )
+    if( FluidSysSHW = 1 .AND. IfValidAnd( UEFRtdVal >= 10 ) .AND.
+        IfValidAnd( UEFMdl > 0 ) )
     then
       switch ( UEFRtdVal  )
       case 10:  // Consumer Gas-Fired Storage Water Heater
@@ -3389,8 +4612,8 @@ RULE WtrHtr:UEFMdlCalcThrmlEff
   INPUTCLASS
     NotInput
   DEFAULT
-    if( Parent(Type) = "ServiceHotWater" .AND. IfValidAnd( UEFRtdVal >= 10 ) .AND.
-        IfValidAnd( UEFMdl >0 ) )
+    if( FluidSysSHW = 1 .AND. IfValidAnd( UEFRtdVal >= 10 ) .AND.
+        IfValidAnd( UEFMdl > 0 ) )
     then
       switch ( UEFRtdVal  )
       case 10:  // Consumer Gas-Fired Storage Water Heater
@@ -3473,7 +4696,7 @@ RULE WtrHtr:RE
   REPORTPRECISION
     2
   DEFAULT
-    if( Parent(Type) = "ServiceHotWater" .AND. IfValidAnd( UEFRtdVal < 10 ) )
+    if( FluidSysSHW = 1 .AND. IfValidAnd( UEFRtdVal < 10 ) )
     then
       if( IfValidAnd( ThrmlEff > 0 ) )
       then
@@ -3501,7 +4724,7 @@ RULE WtrHtr:RE
           UNDEFINED
         endif  
       endif endif
-    else if( Parent(Type) = "ServiceHotWater" .AND. IfValidAnd( UEFRtdVal >= 10 ) )
+    else if( FluidSysSHW = 1 .AND. IfValidAnd( UEFRtdVal >= 10 ) )
     then
       if( Proj:AutoEffInput = 1 )
       then
@@ -3571,7 +4794,7 @@ RULE WtrHtr:RE
     else UNCHANGED
     endif endif endif
   SIZING_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -3666,11 +4889,13 @@ RULE WtrHtr:RE
       else
         UNDEFINED
       endif endif endif endif
-    else
+    else if( FluidSysHtg = 1 )
+    then
       UNDEFINED
-    endif
+    else UNDEFINED
+    endif endif
   SIZING_BASELINE
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -3709,8 +4934,11 @@ RULE WtrHtr:RE
         UNDEFINED
       else UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
   ANNUAL
     z:RE
 ENDRULE
@@ -3722,8 +4950,8 @@ RULE WtrHtr:UEFMdlCalcEF
   INPUTCLASS
     NotInput
   DEFAULT
-    if( Parent(Type) = "ServiceHotWater" .AND. IfValidAnd( UEFRtdVal >= 10 ) .AND.
-        IfValidAnd( UEFMdl >0 ) )
+    if( FluidSysSHW = 1 .AND. IfValidAnd( UEFRtdVal >= 10 ) .AND.
+        IfValidAnd( UEFMdl > 0 ) )
     then
       switch ( UEFRtdVal  )
       case 10:  // Consumer Gas-Fired Storage Water Heater
@@ -3757,7 +4985,7 @@ RULE WtrHtr:UEFMdlCalcEF
     else UNDEFINED
     endif
   SIZING_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -3782,10 +5010,13 @@ RULE WtrHtr:UEFMdlCalcEF
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
   SIZING_BASELINE
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -3810,8 +5041,11 @@ RULE WtrHtr:UEFMdlCalcEF
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
 ENDRULE
 
 
@@ -3906,7 +5140,7 @@ RULE NEW WtrHtr:EFFormula
     then
       if( Type <> "Conventional" )
       then UNDEFINED
-      else if ( IfValidAnd(CapRtd > 0 ) )
+      else if( IfValidAnd(CapRtd > 0 ) )
       then
 	      if( SubType = "Storage" .AND. FuelSrc = "Gas" .AND. ( (CapRtdSim / CmbdMult) <= 75000) )
 	      then 
@@ -4136,7 +5370,7 @@ RULE WtrHtr:EF
       endif endif endif endif endif
    endif
   SIZING_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -4171,11 +5405,13 @@ RULE WtrHtr:EF
       else
         UNDEFINED
       endif endif endif endif
-    else
+    else if( FluidSysHtg = 1 )
+    then
       UNDEFINED
-    endif
+    else UNDEFINED
+    endif endif
   SIZING_BASELINE
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -4212,8 +5448,11 @@ RULE WtrHtr:EF
         UNDEFINED
       else UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
   ANNUAL
     z:EF
 ENDRULE
@@ -4348,7 +5587,7 @@ RULE WtrHtr:ThrmlEff
   REPORTPRECISION
     2
   DEFAULT
-    if( Parent(Type) = "ServiceHotWater" )
+    if( FluidSysSHW = 1 )
     then
       if( IfValidAnd( UEFRtdVal < 10 ) )
       then
@@ -4400,8 +5639,11 @@ RULE WtrHtr:ThrmlEff
         endswitch  
       else UNDEFINED
       endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
   CHECKCODE
     if( Proj:ExcludeWtrHtg = 1 )
     then
@@ -4434,7 +5676,7 @@ RULE WtrHtr:ThrmlEff
       endif endif endif endif endif
     endif
   SIZING_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" .AND. Type = "Conventional" )  
+    if( FluidSysSHW = 1 .AND. Type = "Conventional" )  
     then
       if( IsResAndCombo )
       then
@@ -4498,7 +5740,7 @@ RULE WtrHtr:ThrmlEff
     else UNDEFINED
     endif
   SIZING_BASELINE
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -4559,8 +5801,11 @@ RULE WtrHtr:ThrmlEff
       then UNDEFINED
       else UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
   ANNUAL
     z:ThrmlEff
 ENDRULE
@@ -4572,8 +5817,8 @@ RULE WtrHtr:UEFMdlCalcStdbyLoss
   INPUTCLASS
     NotInput
   DEFAULT
-    if( Parent(Type) = "ServiceHotWater" .AND. IfValidAnd( UEFRtdVal >= 10 ) .AND.
-        IfValidAnd( UEFMdl >0 ).AND. IfValidAnd( ThrmlEff > 0 ) )  
+    if( FluidSysSHW = 1 .AND. IfValidAnd( UEFRtdVal >= 10 ) .AND.
+        IfValidAnd( UEFMdl > 0 ).AND. IfValidAnd( ThrmlEff > 0 ) )  
     then
       switch ( UEFRtdVal  )
       case 10:  // Consumer Gas-Fired Storage Water Heater
@@ -4607,7 +5852,7 @@ ENDRULE
 // -------------- Water Heater Maximum Temperature Limit --------------------
 RULE WtrHtr:MaxTempLimit
   DESCRIPTION
-    "The temperature (�F) at which the tank water becomes dangerously hot and
+    "The temperature (°F) at which the tank water becomes dangerously hot and
      is vented through boiling or an automatic safety. The tank temperature
      will never exceed the maximum. Any extra heat added to the tank is
      immediately vented. Note: The maximum temperature must be greater than
@@ -4623,12 +5868,20 @@ RULE WtrHtr:MaxTempLimit
   REPORTPRECISION
     0
   DEFAULT
-    if( FluidSys:Type = "ServiceHotWater" )
-    then 180
-    else UNDEFINED
+	  if( Type = "Conventional" ) 
+	  then 180
+	  else 150
+	  endif
+  SIZING_PROPOSED
+	  if( Type = "Conventional" ) 
+	  then 180
+	  else 150
+	  endif
+  SIZING_BASELINE
+    if( IsExisting )
+    then zp:MaxTempLimit
+    else 180
     endif
-  SIZING
-    180
   ANNUAL
     z:MaxTempLimit
 ENDRULE
@@ -4649,9 +5902,13 @@ RULE WtrHtr:CtrlType
   UNITS
   DEFAULT
     if( FluidSys:Type = "ServiceHotWater" )
-    then "Cycle"
+    then
+      "Cycle"
+    else if( FluidSysHtg = 1 )
+    then
+      "Cycle"
     else UNDEFINED
-    endif
+    endif endif
   SIZING
     if( FluidSys:Type = "ServiceHotWater" )
     then
@@ -4659,8 +5916,11 @@ RULE WtrHtr:CtrlType
       then "Modulate"
       else "Cycle"
       endif
+    else if( FluidSysHtg = 1 )
+    then
+      "Cycle"
     else UNDEFINED
-    endif
+    endif endif
   ANNUAL
     z:CtrlType
 ENDRULE
@@ -4720,7 +5980,7 @@ RULE WtrHtr:DraftFanPwr
   DEFAULT 
     0
   SIZING_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" )
+    if( FluidSysSHW = 1 )
     then
       if( IsResAndCombo )
       then
@@ -4745,10 +6005,13 @@ RULE WtrHtr:DraftFanPwr
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
   SIZING_BASELINE
-    if( Parent(Type) = "ServiceHotWater" )
+    if( FluidSysSHW = 1 )
     then
       if( IsResAndCombo )
       then
@@ -4776,8 +6039,11 @@ RULE WtrHtr:DraftFanPwr
       else 
         UNDEFINED
       endif endif endif endif
-   else UNDEFINED
-   endif    
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
+    else UNDEFINED
+    endif endif    
   ANNUAL
     z:DraftFanPwr
 ENDRULE
@@ -4800,7 +6066,7 @@ RULE WtrHtr:PilotEnergy
   REPORTPRECISION
     0
   SIZING
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( FuelSrc = "Gas" .AND. SubType = "Instantaneous" .AND. 
           ElecIgnit = 0 )
@@ -4809,9 +6075,11 @@ RULE WtrHtr:PilotEnergy
       else
         UNDEFINED
       endif
-    else 
+    else if( FluidSysHtg = 1 )
+    then
       UNDEFINED
-    endif
+    else UNDEFINED
+    endif endif
   ANNUAL
     z:PilotEnergy  
 ENDRULE
@@ -4875,7 +6143,7 @@ RULE WtrHtr:OffCycleFuelSrc
   INPUTCLASS
     NotInput  IgnoreUserInput  "WtrHtr:OffCycleFuelSrc removed in transition from 2013 version 3c to 3e and 2016.2.0 to 2016.2.1"
   SIZING
-    if( Parent(Type) = "ServiceHotWater" .AND. IfValidAnd( PilotEnergy > 0 ) )  
+    if( FluidSysSHW = 1 .AND. IfValidAnd( PilotEnergy > 0 ) )  
     then "Gas"
     else UNDEFINED
     endif
@@ -4901,7 +6169,7 @@ RULE WtrHtr:OnCyclePrstcLoss
   REPORTPRECISION
     0
   SIZING
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( ElecIgnit = 1 .AND. IfValidAnd(DraftFanPwr > 0) .AND. FuelSrc != "Electricity" )
       then 
@@ -4909,8 +6177,11 @@ RULE WtrHtr:OnCyclePrstcLoss
       else
         0
       endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else 0
-    endif
+    endif endif
   ANNUAL
     z:OnCyclePrstcLoss
 ENDRULE
@@ -5008,7 +6279,7 @@ RULE WtrHtr:StdbyLossFrac
   DESCRIPTION
     "The tank standby loss fraction for storage tanks."
   HELP
-    "The value listed in the Commission�s Appliance Database of
+    "The value listed in the Commission’s Appliance Database of
      Certified Water Heaters"
   REFERENCE 
     ACM-5.9.1 Water Heating
@@ -5019,7 +6290,7 @@ RULE WtrHtr:StdbyLossFrac
   MAXIMUM
     0.09 
   DEFAULT
-    if( Parent(Type) = "ServiceHotWater" )
+    if( FluidSysSHW = 1 )
     then
       if( Proj:AutoEffInput = 1 )
       then
@@ -5041,8 +6312,11 @@ RULE WtrHtr:StdbyLossFrac
         endif endif endif endif
       else UNDEFINED
       endif
+    else if( FluidSysHtg = 1 )
+    then
+      (0.3 + 27 / StorCap) / 100
     else UNDEFINED
-    endif
+    endif endif
   CHECKCODE  // add checkcode for Comm Sto HtPump Wtr Htr
     if( FluidSys:Type = "ServiceHotWater" .AND. Proj:ExcludeWtrHtg = 0 .AND.
        IfValidAnd( UEFRtdVal < 10) )
@@ -5064,7 +6338,7 @@ RULE WtrHtr:StdbyLossFrac
     else UNCHANGED
     endif
   SIZING_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" )
+    if( FluidSysSHW = 1 )
     then
       if( IsResAndCombo )
       then
@@ -5107,10 +6381,13 @@ RULE WtrHtr:StdbyLossFrac
       else
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      StdbyLossFrac
     else UNDEFINED
-    endif
+    endif endif
   SIZING_BASELINE
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -5159,8 +6436,11 @@ RULE WtrHtr:StdbyLossFrac
       else
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
   ANNUAL
     z:StdbyLossFrac
 ENDRULE
@@ -5182,7 +6462,7 @@ RULE WtrHtr:StdbyLoss
     0
   DEFAULT        // For standby loss calcs, we use 70F and 8.25 #/gal  
                  // because these values are specified in the Federal standards
-    if( Parent(Type) = "ServiceHotWater" .AND. IfValidAnd( StdbyLossFracReq = 1 )  )
+    if( FluidSysSHW = 1 .AND. IfValidAnd( StdbyLossFracReq = 1 )  )
     then
       if( LocalStatus(StdbyLossFrac) > 0 )
       then
@@ -5211,11 +6491,14 @@ RULE WtrHtr:StdbyLoss
           UNDEFINED
         endif endif endif endif 
       endif
+    else if( FluidSysHtg = 1 )
+    then
+      (0.3 + 27 / StorCap) / 100 * 8.25 * 70 * StorCap
     else
       UNDEFINED
-    endif      
+    endif endif
   SIZING_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -5266,10 +6549,13 @@ RULE WtrHtr:StdbyLoss
       else
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      u:StdbyLoss
     else UNDEFINED
-    endif
+    endif endif
   SIZING_BASELINE
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -5322,8 +6608,11 @@ RULE WtrHtr:StdbyLoss
       else
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
   ANNUAL
     z:StdbyLoss
 ENDRULE
@@ -5383,8 +6672,7 @@ RULE NEW WtrHtr:MinHPEF
     then 
       if( LocalStatus( StorCap ) > 0 )
         then PrpHPWtrHtrUAEF:MinHPEF("StorCapRng", StorCap)
-      else
-        UNDEFINED
+      else UNDEFINED
       endif    
     else UNDEFINED
     endif
@@ -5448,7 +6736,7 @@ RULE NEW WtrHtr:MinHPUA
   LONGFORM
     MinimumHeatPumpUA
   DESCRIPTION
-    "Minimum Heat Pump Energy Factor"
+    "Minimum Heat Pump UA Value"
   INPUTCLASS
     NotInput
   DEFAULT
@@ -5484,7 +6772,7 @@ RULE NEW WtrHtr:MaxHPUA
   LONGFORM
     MaximumHeatPumpUA
   DESCRIPTION
-    "Minimum Heat Pump Energy Factor"
+    "Minimum Heat Pump UA Value"
   INPUTCLASS
     NotInput
   DEFAULT
@@ -5673,7 +6961,7 @@ RULE WtrHtr:COP
    UNITS
     Btu/Btu
   DEFAULT
-    if( Parent(Type) = "ServiceHotWater" )
+    if( FluidSysSHW = 1 )
     then
       if( IsCommHtPumpWtrHtr = 1 )
       then
@@ -5685,12 +6973,15 @@ RULE WtrHtr:COP
         endif
       else if( Type <> "Conventional" .AND. IfValidAnd ( CapRtd > 0 ) .AND. IfValidAnd( CprsrPwr > 0 ) )
       then
-        CapRtd / 3.412 / CprsrPwr    // This may differ from COP from Manufacturer�s specification because we are assuming the tank losses. 
+        CapRtd / 3.412 / CprsrPwr    // This may differ from COP from Manufacturer’s specification because we are assuming the tank losses. 
       else UNDEFINED
       endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif  
-   CHECKCODE
+    endif endif  
+  CHECKCODE
     if( Proj:ExcludeWtrHtg = 1 )
     then
       UNCHANGED
@@ -5702,7 +6993,7 @@ RULE WtrHtr:COP
       endif
    endif
   SIZING_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -5735,11 +7026,13 @@ RULE WtrHtr:COP
       else
         UNDEFINED
       endif endif endif endif
-    else
-      UNDEFINED
-    endif
+    else if( FluidSysHtg = 1 )
+    then
+      COP
+    else UNDEFINED
+    endif endif
   SIZING_BASELINE
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -5774,8 +7067,11 @@ RULE WtrHtr:COP
         UNDEFINED
       else UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
   ANNUAL
     z:COP
 ENDRULE
@@ -5783,13 +7079,13 @@ ENDRULE
 //  DEFAULT
 //    if( Type <> "Conventional" .AND. IfValidAnd ( CapRtd > 0 ) .AND. IfValidAnd( CprsrPwr > 0 ) .AND. IsCommHtPumpWtrHtr = 0 )
 //    then
-//      CapRtd / 3.412 / CprsrPwr    // This may differ from COP from Manufacturer�s specification because we are assuming the tank losses. 
+//      CapRtd / 3.412 / CprsrPwr    // This may differ from COP from Manufacturer’s specification because we are assuming the tank losses. 
 //    else UNDEFINED
 //    endif  
 //  SIZING
 //    if( Type <> "Conventional" .AND. IfValidAnd ( CapRtd > 0 ) .AND. IfValidAnd( CprsrPwr > 0 ) .AND. IsCommHtPumpWtrHtr = 0 )
 //    then 
-//      CapRtd / 3.412 / CprsrPwr      // This may differ from COP from Manufacturer�s specification because we are assuming the tank losses. 
+//      CapRtd / 3.412 / CprsrPwr      // This may differ from COP from Manufacturer’s specification because we are assuming the tank losses. 
 //    else UNDEFINED
 //    endif  
 //  ANNUAL
@@ -5836,7 +7132,7 @@ RULE WtrHtr:CndsrPumpPwr
     if( Type <> "Conventional" )
     then 
       if( u:Type = "HeatPumpSplit" )
-    then
+      then
         InpPwr * 0.06 * 1000
       else 0
       endif
@@ -5874,8 +7170,6 @@ RULE WtrHtr:CndsrPumpPwrSim
      UNDEFINED
     endif    
 ENDRULE
-
-
 
 
 // -------------- Heat Pump Water Heater Condenser Fan Flow -----------------
@@ -6035,7 +7329,7 @@ RULE NEW WtrHtr:UEFMdlTankOffCycleLossCoef
   INPUTCLASS
     NotInput
   UNITS
-    Btu/hr-�F
+    Btu/hr-°F
   DEFAULT
     if( IfValidAnd( UEFRtdVal >= 10 ) )
     then
@@ -6075,7 +7369,7 @@ RULE NEW WtrHtr:UEFMdlTankOffCycleLossCoef
     else 0.4
     endif
   SIZING_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -6100,10 +7394,13 @@ RULE NEW WtrHtr:UEFMdlTankOffCycleLossCoef
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
   SIZING_BASELINE
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -6128,8 +7425,11 @@ RULE NEW WtrHtr:UEFMdlTankOffCycleLossCoef
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
 ENDRULE
 
 
@@ -6146,11 +7446,11 @@ RULE WtrHtr:TankOffCycleLossCoef
   INPUTCLASS
     NotInput  IgnoreUserInput  "WtrHtr:TankOffCycleLossCoef removed in transition from 2013 version 3c to 3e and 2016.2.0 to 2016.2.1"
   UNITS
-    Btu/hr-�F
+    Btu/hr-°F
   REPORTPRECISION
     0
   SIZING_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -6210,10 +7510,13 @@ RULE WtrHtr:TankOffCycleLossCoef
       else
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
   SIZING_BASELINE
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -6278,8 +7581,11 @@ RULE WtrHtr:TankOffCycleLossCoef
       else
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
   ANNUAL
     z:TankOffCycleLossCoef
 ENDRULE
@@ -6291,7 +7597,7 @@ RULE WtrHtr:TankOffCycleLossCoefSim
   HELP
     ""
   SIZING_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -6357,10 +7663,13 @@ RULE WtrHtr:TankOffCycleLossCoefSim
       else
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
   SIZING_BASELINE
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -6429,8 +7738,11 @@ RULE WtrHtr:TankOffCycleLossCoefSim
       else
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif
+    endif endif
   ANNUAL
     z:TankOffCycleLossCoefSim
 ENDRULE
@@ -6448,7 +7760,7 @@ RULE WtrHtr:TankOnCycleLossCoef
   INPUTCLASS
     NotInput
   UNITS
-    Btu/hr-�F
+    Btu/hr-°F
   SIZING
     z:TankOffCycleLossCoef
   ANNUAL
@@ -6731,15 +8043,15 @@ RULE WtrHtr:MinInletAirTempCprsrOper
   SIZING
     if( Type <> "Conventional" )
     then 
-      20
+      25
     else UNDEFINED
     endif  
   ANNUAL
     if( Type <> "Conventional" )
     then
-     MinInletAirTempCprsrOper
+      MinInletAirTempCprsrOper
     else
-     UNDEFINED
+      UNDEFINED
     endif
 ENDRULE
 
@@ -6766,9 +8078,13 @@ RULE WtrHtr:HIR_fPLRCrvRef
   INPUTCLASS
     Prescribed
   SIZING
-    UNDEFINED
+    if( Type <> "Conventional" )
+    then
+      RuleLibrary(CrvCubic, "Constant1Cubic")
+    else UNDEFINED
+    endif
   ANNUAL
-    UNDEFINED
+    z:HIR_fPLRCrvRef
 ENDRULE
 
 
@@ -6784,7 +8100,11 @@ RULE WtrHtr:Cap_fTempCrvRef
   SIZING
     if( Type <> "Conventional" )
     then
-      RuleLibrary(CrvDblQuad, "WtrHtrHtPumpQRatio_fTdbTdbSI")
+      if( IsMultipass = 0 ) then
+        RuleLibrary(CrvDblQuad, "WtrHtrHtPumpQRatio_fTdbTdbSI")
+      else
+        RuleLibrary(CrvDblQuad, "MultipassWtrHtrHtPumpQRatio_fTdbTdbSI")
+      endif
     else UNDEFINED
     endif
   ANNUAL 
@@ -6804,7 +8124,11 @@ RULE WtrHtr:COP_fTempCrvRef
   SIZING
     if( Type <> "Conventional" )
     then
-      RuleLibrary(CrvDblQuad, "WtrHtrHtPumpCOP_fTdbTdbSI")
+      if( IsMultipass = 0 ) then
+        RuleLibrary(CrvDblQuad, "WtrHtrHtPumpCOP_fTdbTdbSI")
+      else
+        RuleLibrary(CrvDblQuad, "MultipassWtrHtrHtPumpCOP_fTdbTdbSI")
+      endif
     else UNDEFINED
     endif
   ANNUAL 
@@ -6818,7 +8142,8 @@ RULE NEW WtrHtr:NewComDHWHtr
   LONGFORM
     NewCommercialDomesticHotWaterHeater
   DESCRIPTION
-    "This is the count of new Water Heaters in the building."
+    "This is the count of new Water Heaters in the building being used for 
+     service water heating."
   HELP
     ""
   REFERENCE 
@@ -6826,18 +8151,18 @@ RULE NEW WtrHtr:NewComDHWHtr
   INPUTCLASS
     NotInput
   DEFAULT
-    if( Status = "New" .AND. IfValidAnd(CmbdMult > 0))
-    then( 1 * CmbdMult )
+    if( Status = "New" .AND. IfValidAnd(CmbdMult > 0) .AND. FluidSysSHW = 1 )
+    then CmbdMult
     else 0
     endif
   SIZING
-    if( Status = "New" .AND. IfValidAnd(CmbdMult > 0))
-    then( 1 * CmbdMult )
+    if( Status = "New" .AND. IfValidAnd(CmbdMult > 0) .AND. FluidSysSHW = 1 )
+    then CmbdMult
     else 0
     endif
   ANNUAL
-    if( Status = "New" .AND. IfValidAnd(CmbdMult > 0))
-    then( 1 * CmbdMult )
+    if( Status = "New" .AND. IfValidAnd(CmbdMult > 0) .AND. FluidSysSHW = 1 )
+    then CmbdMult
     else 0
     endif
 ENDRULE
@@ -6862,16 +8187,14 @@ ENDRULE
 
 // -------------- Water Heater Type Report --------------
 RULE WtrHtr:WtrHtrTypeRpt
-  RULESETS
-    T24N
   INPUTCLASS
     NotInput
   ANNUAL_PROPOSED
     if( IfValidAnd( Type <> "Conventional" ) )
     then
-      if ( Type = "HeatPumpPackaged" )
+      if( Type = "HeatPumpPackaged" )
       then "Heat-Pump Packaged"
-      else if (Type = "HeatPumpSplit" )
+      else if(Type = "HeatPumpSplit" )
       then "Heat-Pump Split"
       else u:Type
       endif endif
@@ -6887,8 +8210,6 @@ ENDRULE
 
 // ----------------- Efficiency for Report -------------------------------------
 RULE WtrHtr:EffRpt
-  RULESETS
-    T24N
   INPUTCLASS
     NotInput
   ANNUAL_PROPOSED
@@ -6913,8 +8234,6 @@ ENDRULE
 
 // ----------------- Standby Loss for Report -----------------------------------
 RULE WtrHtr:StdbyLossRpt
-  RULESETS
-    T24N
   INPUTCLASS
     NotInput
   ANNUAL_PROPOSED
@@ -6930,8 +8249,6 @@ ENDRULE
 
 // ----------------- RE for Report -----------------------------------
 RULE WtrHtr:RERpt
-  RULESETS
-    T24N
   INPUTCLASS
     NotInput
   ANNUAL_PROPOSED
@@ -6946,12 +8263,10 @@ ENDRULE
 
 // -------------- Water Heater Rated Capacity for Report --------------
 RULE WtrHtr:CapRtdRpt
-  RULESETS
-    T24N
   INPUTCLASS
     NotInput
   ANNUAL_PROPOSED
-    if ( Proj:ExcludeWtrHtg )
+    if( Proj:ExcludeWtrHtg .AND. FluidSysHtg = 0 )
     then
       UNDEFINED
     else if ( IfValidAnd(InpPwr > 0) .AND. IfValidAnd(CapRtdSim > 0) )
@@ -6959,7 +8274,7 @@ RULE WtrHtr:CapRtdRpt
 	    if( IfValidAnd( Type <> "Conventional" ) )
 	    then
 	      Format("%s (kW)", FltToStr( u:InpPwr, 1 ) ) 
-	    else if ( FuelSrc = "Electricity")
+	    else if( FuelSrc = "Electricity")
 	    then
 	      Format("%s (kW)", FltToStr( u:InpPwr, 1 ) ) 
 	    else
@@ -7088,7 +8403,7 @@ RULE WtrHtr:ProdType
           "Commercial"
         else if( Type <> "Conventional" )
         then
-          if ( IsCommHtPumpWtrHtr = 1 )
+          if( IsCommHtPumpWtrHtr = 1 )
           then "Commercial"
           else UNDEFINED    
           endif    
@@ -7099,7 +8414,7 @@ RULE WtrHtr:ProdType
     else UNDEFINED
     endif endif
   ANNUAL_PROPOSED
-    if( Parent(Type) = "ServiceHotWater" )  
+    if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
       then
@@ -7124,8 +8439,11 @@ RULE WtrHtr:ProdType
       else 
         UNDEFINED
       endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
     else UNDEFINED
-    endif  
+    endif endif  
   ANNUAL_BASELINE
     UNDEFINED
 ENDRULE
@@ -7148,7 +8466,7 @@ RULE NEW WtrHtr:InvalidProdType
     then
       if( ProdType = "Large" )
       then 1
-      else if (ProdType = "Small")
+      else if(ProdType = "Small")
       then 2
       else 0
       endif endif
@@ -7159,8 +8477,6 @@ ENDRULE
 
 // -------------- Water Heater First Hour Rating for Report --------------
 RULE WtrHtr:FirstHrRatingRpt
-  RULESETS
-    T24N
   INPUTCLASS
     NotInput
   ANNUAL_PROPOSED
@@ -7177,8 +8493,6 @@ ENDRULE
 
 // -------------- Water Heater Flow Rate for Report --------------
 RULE WtrHtr:FlowRtRpt
-  RULESETS
-    T24N
   INPUTCLASS
     NotInput
   ANNUAL_PROPOSED
@@ -7196,8 +8510,6 @@ ENDRULE
 
 // -------------- Heat Pump Water Heater Storage Tank Location for Report --------------
 RULE WtrHtr:TankZnRpt
-  RULESETS
-    T24N
   INPUTCLASS
     NotInput
   ANNUAL_PROPOSED
@@ -7214,8 +8526,6 @@ ENDRULE
 
 // -------------- Heat Pump Water Heater Storage Tank Location for Report --------------
 RULE WtrHtr:CprsrZnRpt
-  RULESETS
-    T24N
   INPUTCLASS
     NotInput
   ANNUAL_PROPOSED
@@ -7261,3 +8571,283 @@ ENDRULE
 //    else UNCHANGED
 //    endif
 //ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE WtrHtr:MaxInletAirTempCprsrOper
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      201
+    else UNDEFINED
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE WtrHtr:FanPlcmt
+  INPUTCLASS
+    NotInput
+  OPTION
+    DrawThrough
+    BlowThrough  
+  DEFAULT
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      DrawThrough
+    else UNDEFINED
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE WtrHtr:EvapFanPwrInCOP
+  INPUTCLASS
+    NotInput
+  OPTION
+    Yes
+    No
+  DEFAULT
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      "Yes"
+    else UNDEFINED
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE WtrHtr:CndsrPumpPwrInCOP
+  INPUTCLASS
+    NotInput
+  OPTION
+    Yes
+    No
+  DEFAULT
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      "Yes"
+    else UNDEFINED
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE WtrHtr:CndsrPumpHtInCapAndCOP
+  INPUTCLASS
+    NotInput
+  OPTION
+    Yes
+    No
+  DEFAULT
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      "Yes"
+    else UNDEFINED
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE WtrHtr:CndsrPumpHtFracToWtr
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      0.2
+    else UNDEFINED
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE WtrHtr:CrankcaseHtrMaxT
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      50
+    else UNDEFINED
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE WtrHtr:IsMultipass
+  DESCRIPTION
+    "Shows whether a heat pump water heater is a multipass unit, commonly used 
+     for space heating applications."
+  DEFAULT
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      if( FluidSysHtg = 1 )
+      then 1
+      else 0
+      endif
+    else UNDEFINED
+    endif
+  CHECKCODE
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      if( IsMultipass = 1 .AND. IsCommHtPumpWtrHtr = 0)
+      then
+        PostError("Multipass is only allowed for commerical heat pump water heaters.
+                   Water Heater '%s' is not a commercial heat pump water heater.", Name )
+      else UNCHANGED
+	    endif
+	 else UNCHANGED
+	 endif  
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE WtrHtr:Cap_fAirFlowFracCrvRef
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      RuleLibrary(CrvQuad, "Constant1Quad")
+    else UNDEFINED
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE WtrHtr:Cap_fWtrFlowFracCrvRef
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      RuleLibrary(CrvQuad, "Constant1Quad")
+    else UNDEFINED
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE WtrHtr:COP_fAirFlowFracCrvRef
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      RuleLibrary(CrvQuad, "Constant1Quad")
+    else UNDEFINED
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE WtrHtr:COP_fWtrFlowFracCrvRef
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      RuleLibrary(CrvQuad, "Constant1Quad")
+    else UNDEFINED
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE WtrHtr:WtrHtrSetPtTemp
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      135
+    else UNDEFINED
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE WtrHtr:CapRtdSupp
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      CapRtd
+    else UNDEFINED
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE WtrHtr:SrcFluidSegInRef
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    UNDEFINED
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE WtrHtr:SrcFluidSegOutRef
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    UNDEFINED
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE WtrHtr:FanPwr_fPLRCvRef
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      RuleLibrary(CrvCubic, "Constant1Cubic")
+    else UNDEFINED
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE WtrHtr:FanEff_fPLRCvRef
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      RuleLibrary(CrvQuad, "Constant1Quad")
+    else UNDEFINED
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE WtrHtr:TankDeadBandTempHtPump
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+     5
+    else UNDEFINED
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE WtrHtr:TankDeadBandTempInternal
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      2
+    else UNDEFINED
+    endif
+ENDRULE
+

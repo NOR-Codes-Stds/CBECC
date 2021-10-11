@@ -305,11 +305,12 @@ RULE ThrmlZn:VentSysRef
         then PriAirCondgSysRef[1] // Default to the PriAirCondgSys specified
         else UNDEFINED // PriAirCondgSys is not capable of being VentSys
         endif
-      else
-      if( IfValidAnd( ExhFlow > 0 ) .AND. LocalCompAssigned( ExhSysRef ) )
-      then ExhSysRef
+// Removed this since Exhaust systems are no longer always considered the ventilation system
+;      else
+;      if( IfValidAnd( ExhFlow > 0 ) .AND. LocalCompAssigned( ExhSysRef ) )
+;      then ExhSysRef
       else UNDEFINED
-      endif endif
+      endif ;endif
     else UNDEFINED
     endif
 ENDRULE
@@ -682,6 +683,24 @@ RULE NEW ThrmlZn:HighRiseResVentIsBalanced
     endif
 ENDRULE
 
+RULE ThrmlZn:HighRiseResVentType
+  DESCRIPTION
+    "For high-rise residential zones, a description of the ventilation"
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( HighRiseResVentIsExh > 0 ) )
+    then "ExhaustOnly"
+    else 
+    if( IfValidAnd( HighRiseResVentIsSup > 0 ) )
+    then "SupplyOnly"
+    else
+    if( IfValidAnd( HighRiseResVentIsBalanced > 0 ) )
+    then "Balanced"
+    else UNDEFINED
+    endif endif endif
+ENDRULE
+
 
 // ********** Ventilation by DOAS ******************************************
 RULE ThrmlZn:VentByPriAirCondgSys[1]
@@ -887,6 +906,7 @@ RULE NEW Spc:IncludeInBal
   DEFAULT : T24N_2016
     if( VentIsRequired = 0 .OR.
         IsRes > 0 .OR. // Residential spaces excluded from balance 
+        IfValidAnd( IsResCommon > 0 ) .OR. // Residential common spaces excluded from balance 
         LabArea > 0 .OR. // Lab spaces excluded from balance
         PrkgGarArea > 0 .OR. // Parking garage spaces excluded from balance
         IfValidAnd( IsNewVent = 0 ) .OR. // Ventilation system is existing
@@ -899,6 +919,7 @@ RULE NEW Spc:IncludeInBal
     if( VentIsRequired = 0 .OR.
         IsCond = 0 .OR. // Is not directly or indirectly conditioned
         IsRes > 0 .OR. // Residential spaces excluded from balance 
+        IfValidAnd( IsResCommon > 0 ) .OR. // Residential common spaces excluded from balance 
         LabArea > 0 .OR. // Lab spaces excluded from balance
         PrkgGarArea > 0 .OR. // Parking garage spaces excluded from balance
         HlthCareArea > 0 .OR. // Healthcare areas are excluded from balance
@@ -1536,9 +1557,13 @@ RULE ThrmlZn:VentSpecMthdSim
     else "Sum"
     endif endif endif
   SIZING : T24N
+    if( ( ValidOr( VentPerAreaFlowSim, 0 ) + ValidOr( VentPerPersonFlowSim, 0 ) ) = 0 ) 
+    then "NoVentilation"
+    else
     if( BaseSysNum > 0 )
     then
-      if( VentSrc != "Forced" .OR. ( VentSrc = "Forced" .AND. BaseVentSysIsExh > 0 ) )
+      if( VentSrc != "Forced" .OR. 
+          ( VentSrc = "Forced" .AND. BaseVentSysIsExh > 0 ) )
       then "NoVentilation" // NoVentilation or vent is modeled as infiltration
       else
       if( VentStd = "Other" )
@@ -1552,7 +1577,7 @@ RULE ThrmlZn:VentSpecMthdSim
     if( VentStd = "Other" )
     then VentSpecMthd // Set equal to user input
     else "Maximum"
-    endif endif endif
+    endif endif endif endif
   DEFAULT : S901G ECBC
     if( VentSrc != "Forced" .OR. ( VentSrc = "Forced" .AND. PropVentSysIsExh > 0 ) )
     then "NoVentilation" 
@@ -2876,17 +2901,17 @@ RULE Spc:VentFlow
       if( VentFlow < CodeVentFlow * ( 1 - VentTolMinLimRes ) )
       then // Ventilation is less than code minimum
         PostError("The design ventilation air flow for high-rise residential space '%s' is %.0f cfm. 
-                   This is less than the code minimum required ( %.0f cfm ).
+                   This is less than the code minimum, %.0f cfm.
                    Increase design ventilation inputs so the total ventilation air delivered
                    to the space matches the code required flow.",
-                   Name, VentFlow, CodeVentFlow * ( 1.0 - Proj:VentTolMinLimRes ) )
+                   Name, VentFlow, CodeVentFlow )
       else
       if( VentFlow > CodeVentFlow * ( 1 + VentTolMaxLimRes ) )
       then // Ventilation is greater than code minimum
         PostWarning("The design ventilation air flow for high-rise residential space '%s' is %.0f cfm.
                      This this is greater than the code minimum, %.0f cfm. The standard design
                      ventilation will be limited to %.0f percent of the code minimum.", 
-                     Name, VentFlow, CodeVentFlow * ( 1 + VentTolMaxLimRes ),
+                     Name, VentFlow, CodeVentFlow,
                      ( 1 + VentTolMaxLimRes ) * 100 )
       else UNCHANGED
       endif endif
@@ -2896,17 +2921,17 @@ RULE Spc:VentFlow
       if( VentFlow < CodeVentFlow * ( 1 - VentTolMinLimNonRes ) )
       then // Ventilation is less than code minimum
         PostError("The design ventilation air flow for hotel/motel guestroom space '%s' is %.0f cfm. 
-                   This is less than the code minimum required ( %.0f cfm ).
+                   This is less than the code minimum, %.0f cfm.
                    Increase design ventilation inputs so the total ventilation air delivered
                    to the space matches the code required flow.",
-                   Name, VentFlow, CodeVentFlow * ( 1.0 - Proj:VentTolMinLimNonRes ) )
+                   Name, VentFlow, CodeVentFlow )
       else // Ventilation is greater than code minimum
       if( VentFlow > CodeVentFlow * ( 1 + VentTolMaxLimNonRes ) )
       then // Ventilation is greater than code minimum
         PostWarning("The design ventilation air flow for hotel/motel guestroom space '%s' is %.0f cfm.
                      This this is greater than the code minimum, %.0f cfm. The standard design
                      ventilation will be limited to %.0f percent of the code minimum.", 
-                     Name, VentFlow, CodeVentFlow * ( 1 + VentTolMaxLimNonRes ),
+                     Name, VentFlow, CodeVentFlow,
                      ( 1 + VentTolMaxLimNonRes ) * 100 )
       else UNCHANGED
       endif endif

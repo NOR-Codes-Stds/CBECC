@@ -496,7 +496,10 @@ RULE NEW FluidSys:IsPriSec
     endif
   CHECKSIM : T24N_2016
     UNCHANGED
-  CHECKSIM
+  CHECKSIM : T24N
+    if( Proj:IsNoMech > 0 .OR. ( Proj:IsNoAddMech > 0 .AND. IsNew > 0 ) .OR. CompOptDHW = 0 )
+    then UNCHANGED // Partial compliance w/o mechanical or DHW
+    else
     if( FluidSys:IsPriSec > 0 )
     then // Is primary/secondary configuration, see also Pump:OperCtrl
       PostWarning("FluidSystem '%s' is configured with primary/secondary pumping
@@ -504,7 +507,7 @@ RULE NEW FluidSys:IsPriSec
                    simulation engine, this configuration results in unexpected 
                    plant simulation behavior.", Name)
     else UNCHANGED
-    endif
+    endif endif
   SIZING
     if( ( SumChildrenIf( FluidSeg:NumCoilHtgComp, FluidSeg:Type = "SecondarySupply" ) +
           SumChildrenIf( FluidSeg:NumCoilClgComp, FluidSeg:Type = "SecondarySupply" ) ) > 0 )
@@ -660,16 +663,23 @@ RULE NEW FluidSeg:TotPriEquipCap
       else
       if( FluidSys:Type = "CondenserWater" )
       then
+        Max(
         Max( ( SumRevRef( HtRej:FluidSegInRef, HtRej:CapRtd ) + // return side
                SumRevRef( HtRej:FluidSegOutRef, HtRej:CapRtd ) ), // supply side  
              ( SumRevRef( Blr:FluidSegInRef, Blr:CapRtd ) + // return side
                SumRevRef( Blr:FluidSegOutRef, Blr:CapRtd ) ) // supply side  
-           ) 
+          ), 
+             ( SumRevRef( WtrHtr:FluidSegInRef, WtrHtr:CapRtd ) + // return side
+               SumRevRef( WtrHtr:FluidSegOutRef, WtrHtr:CapRtd ) ) // supply side  
+          ) 
       else
       if( FluidSys:Type = "HotWater" )
       then
-        SumRevRef( Blr:FluidSegInRef, Blr:CapRtd ) + // return side
-        SumRevRef( Blr:FluidSegOutRef, Blr:CapRtd ) // supply side    
+        Max( ( SumRevRef( Blr:FluidSegInRef, Blr:CapRtd ) + // return side
+               SumRevRef( Blr:FluidSegOutRef, Blr:CapRtd ) ), // supply side    
+             ( SumRevRef( WtrHtr:FluidSegInRef, WtrHtr:CapRtd ) + // return side
+               SumRevRef( WtrHtr:FluidSegOutRef, WtrHtr:CapRtd ) ) // supply side  
+          ) 
       else 0
       endif endif endif
     else
@@ -682,7 +692,7 @@ RULE NEW FluidSeg:TotPriEquipCap
     if( Parent(Type) <> "ServiceHotWater" ) then
       if( Type = "PrimarySupply" .AND. u:TotPriEquipCap <= 0 ) then
         PostError("Fluid system '%s' has no primary equipment assigned.  Primary 
-                   equipment (chillers, boilers, cooling towers) must be 
+                   equipment (chillers, boilers, water heaters, cooling towers) must be 
                    assigned.", Parent(Name))
       else UNCHANGED
       endif
@@ -700,16 +710,23 @@ RULE NEW FluidSeg:TotPriEquipCap
       else
       if( FluidSys:Type = "CondenserWater" )
       then
+        Max(
         Max( ( SumRevRef( HtRej:FluidSegInRef, HtRej:CapRtd ) + // return side
                SumRevRef( HtRej:FluidSegOutRef, HtRej:CapRtd ) ), // supply side  
              ( SumRevRef( Blr:FluidSegInRef, Blr:CapRtd ) + // return side
-               SumRevRef( Blr:FluidSegOutRef, Blr:CapRtd ) ) // supply side  
+               SumRevRef( Blr:FluidSegOutRef, Blr:CapRtd ) ) // supply side
+           ),  
+             ( SumRevRef( WtrHtr:FluidSegInRef, WtrHtr:CapRtd ) + // return side
+               SumRevRef( WtrHtr:FluidSegOutRef, WtrHtr:CapRtd ) ) // supply side  
            ) 
       else
       if( FluidSys:Type = "HotWater" )
       then
-        SumRevRef( Blr:FluidSegInRef, Blr:CapRtd ) + // return side
-        SumRevRef( Blr:FluidSegOutRef, Blr:CapRtd ) // supply side    
+        Max( ( SumRevRef( Blr:FluidSegInRef, Blr:CapRtd ) + // return side
+               SumRevRef( Blr:FluidSegOutRef, Blr:CapRtd ) ), // supply side    
+             ( SumRevRef( WtrHtr:FluidSegInRef, WtrHtr:CapRtd ) + // return side
+               SumRevRef( WtrHtr:FluidSegOutRef, WtrHtr:CapRtd ) ) // supply side  
+          ) 
       else 0
       endif endif endif
     else
@@ -1850,8 +1867,12 @@ RULE NEW FluidSeg:PumpCnt
     then 
       PostError("FluidSegment '%s' has more than one child Pump object.
                  This is currently not supported.", Name)
+    else if( Type = "MakeupFluid" .AND. PumpCnt > 0 )
+    then 
+      PostError("Makeup FluidSegment '%s' has child Pump object.
+                 This is currently not supported. Remove the pump.", Name)
     else UNCHANGED
-    endif  
+    endif endif
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -1868,6 +1889,25 @@ RULE NEW Blr:PumpCnt
     if( PumpCnt > 1 )
     then 
       PostError("Boiler '%s' has more than one child Pump object.
+                 This is currently not supported.", Name)
+    else UNCHANGED
+    endif  
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:PumpCnt
+  DATATYPE
+    Integer
+  LONGFORM
+    PumpCount
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    ChildCount( Pump )
+  CHECKSIM
+    if( PumpCnt > 1 )
+    then 
+      PostError("WtrHtr '%s' has more than one child Pump object.
                  This is currently not supported.", Name)
     else UNCHANGED
     endif  
@@ -1990,6 +2030,18 @@ RULE NEW Blr:PumpCntVarSpd
 ENDRULE
 
 // -----------------------------------------------------------------------------
+RULE NEW WtrHtr:PumpCntVarSpd
+  DATATYPE
+    Integer
+  LONGFORM
+    PumpCountVariableSpeed
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    SumChildren( Pump:PumpVarSpdFlag )
+ENDRULE
+
+// -----------------------------------------------------------------------------
 RULE NEW Chlr:PumpCntVarSpd
   DATATYPE
     Integer
@@ -2068,6 +2120,18 @@ ENDRULE
 
 // -----------------------------------------------------------------------------
 RULE NEW Blr:PumpCntConstantSpd
+  DATATYPE
+    Integer
+  LONGFORM
+    PumpCountConstantSpeed
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    SumChildren( Pump:PumpConstantSpdFlag )
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:PumpCntConstantSpd
   DATATYPE
     Integer
   LONGFORM
@@ -2188,10 +2252,14 @@ RULE NEW FluidSys:SysPumpCnt
   INPUTCLASS 
     NotInput
   DEFAULT
-    SumChildren( Blr:PumpCnt ) +
-    SumChildren( Chlr:PumpCnt ) +
-    SumChildren( HtRej:PumpCnt ) +
-    SumChildren( ThrmlEngyStor:PumpCnt )
+    if( Type != "ServiceHotWater" ) then
+      SumChildren( Blr:PumpCnt ) +
+      SumChildren( WtrHtr:PumpCnt ) +
+      SumChildren( Chlr:PumpCnt ) +
+      SumChildren( HtRej:PumpCnt ) +
+      SumChildren( ThrmlEngyStor:PumpCnt )
+    else 0
+    endif
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -2204,10 +2272,14 @@ RULE NEW FluidSys:SysPumpCntVarSpd
   INPUTCLASS 
     NotInput
   DEFAULT
-    SumChildren( Blr:PumpCntVarSpd ) +
-    SumChildren( Chlr:PumpCntVarSpd ) +
-    SumChildren( HtRej:PumpCntVarSpd ) +
-    SumChildren( ThrmlEngyStor:PumpCntVarSpd )
+    if( Type != "ServiceHotWater" ) then
+      SumChildren( Blr:PumpCntVarSpd ) +
+      SumChildren( WtrHtr:PumpCntVarSpd ) +
+      SumChildren( Chlr:PumpCntVarSpd ) +
+      SumChildren( HtRej:PumpCntVarSpd ) +
+      SumChildren( ThrmlEngyStor:PumpCntVarSpd )
+    else 0
+    endif
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -2220,10 +2292,14 @@ RULE NEW FluidSys:SysPumpCntConstantSpd
   INPUTCLASS 
     NotInput
   DEFAULT
-    SumChildren( Blr:PumpCntConstantSpd ) +
-    SumChildren( Chlr:PumpCntConstantSpd ) +
-    SumChildren( HtRej:PumpCntConstantSpd ) +
-    SumChildren( ThrmlEngyStor:PumpCntConstantSpd )
+    if( Type != "ServiceHotWater" ) then
+      SumChildren( Blr:PumpCntConstantSpd ) +
+      SumChildren( WtrHtr:PumpCntConstantSpd ) +
+      SumChildren( Chlr:PumpCntConstantSpd ) +
+      SumChildren( HtRej:PumpCntConstantSpd ) +
+      SumChildren( ThrmlEngyStor:PumpCntConstantSpd )
+    else 0
+    endif
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -2236,6 +2312,9 @@ RULE NEW FluidSys:PumpCheck
     NotInput
   CHECKSIM
     if( Type != "ServiceHotWater" ) then
+      if( Proj:IsNoMech > 0 .OR. ( Proj:IsNoAddMech > 0 .AND. IsNew > 0 ) )
+      then UNCHANGED // Partial compliance w/o mechanical
+      else
       if( PriPumpCnt > 0 .AND. SysPumpCnt > 0 ) then
         if( Type = "ChilledWater" ) then
           PostError("Fluid System '%s' has pumps that are children of both the  
@@ -2244,8 +2323,8 @@ RULE NEW FluidSys:PumpCheck
                      segments.", Name)
         else if( Type = "HotWater" ) then
           PostError("Fluid System '%s' has pumps that are children of both the  
-                     boiler and a primary fluid segment.  This is not allowed.
-                     Remove the pumps from the boiler(s) or the primary fluid
+                     boiler/water heater and a primary fluid segment.  This is not allowed. 
+                     Remove the pumps from the boiler(s)/water heater(s) or the primary fluid
                      segments.", Name)
         else if( Type = "CondenserWater" ) then
           PostError("Fluid System '%s' has pumps that are children of both the  
@@ -2275,7 +2354,11 @@ RULE NEW FluidSys:PumpCheck
                    Speed Type to be consistent.", Name)
       else UNCHANGED
       endif endif endif endif endif
+      endif
     else if( Type = "ServiceHotWater" ) then
+      if( Proj:CompOptDHW = 0 )
+      then UNCHANGED // Partial compliance w/o DHW
+      else
       if( CoilHtgCapHydronic > 0 .AND. Proj:ExcptCondWtrHtr = "Yes" ) then
         PostError("Service hot water fluid system '%s' has been specified
                    to provide both service hot water and space heating.  In  
@@ -2306,6 +2389,7 @@ RULE NEW FluidSys:PumpCheck
                    Remove the pump.", Name)
       else UNCHANGED
       endif endif endif endif endif
+      endif
     else UNCHANGED
     endif endif
 ENDRULE
@@ -2616,12 +2700,14 @@ RULE FluidSys:CommonPipeSim
     CommonPipe
     TwoWayCommonPipe
   DEFAULT
-    if( IfValidAnd(SecLoopCnt > 0) .AND. IfValidAnd(SecPumpCnt > 0) )
+    if( IfValidAnd( SecLoopCnt > 0 ) .AND. 
+        IfValidAnd( SecPumpCnt > 0 ) )
     then "CommonPipe"
     else UNDEFINED
     endif
   SIZING
-    if( IfValidAnd(SecLoopCnt > 0) .AND. IfValidAnd(SecPumpCnt > 0) )
+    if( IfValidAnd( SecLoopCnt > 0 ) .AND. 
+        IfValidAnd( SecPumpCnt > 0 ) )
     then "CommonPipe"    // CommonPipe should generally not be used for SHW systems
     else UNDEFINED // Let default translator rules take over
     endif
@@ -2761,5 +2847,47 @@ RULE FluidSys:CtrlRpt
       "Type not properly defined"
     endif endif endif endif endif endif
 ENDRULE
+
+RULE FluidSys:SysCtrlRpt[1]
+  DESCRIPTION
+    "A text string describing the zone system controls for reporting"
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+    if( LocalStatus( CtrlType ) > 0 ) then
+       if( CtrlType = "DDC" ) then 
+       "DDC Controls"
+       else "NA"
+       endif
+    else
+      "NA" 
+    endif
+ENDRULE
+
+        
+RULE FluidSys:SysCtrlRpt[2]
+  DESCRIPTION
+    "A text string describing the zone system controls for reporting"
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+    if( LocalStatus( TempCtrl ) > 0 ) then
+       if( TempCtrl = "Fixed" ) then 
+         "Fixed Temperature Control"
+       else if( TempCtrl = "Scheduled" ) then
+         "Scheduled Temperature Control"
+       else if( TempCtrl = "OutsideAirReset" ) then
+         "Outside Air Reset Temperature Control"
+       else if( TempCtrl = "WetBulbReset" ) then
+         "Wet Bulb Reset Temperature Control"
+       else if( TempCtrl = "FixedDualSetpoint" ) then
+         "Fixed Dual Setpoint Temperature Control"
+       else "NA"
+       endif endif endif endif endif
+    else
+      "NA" 
+    endif        
+ENDRULE        
+        
 
 

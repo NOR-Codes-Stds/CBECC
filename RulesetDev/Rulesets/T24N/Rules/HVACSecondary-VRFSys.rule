@@ -674,12 +674,15 @@ RULE VRFSys:SEER
     else
     if( IfValidAnd( CodeMinSEER > 0 ) .AND. 
         IfValidAnd( SEER > 0 ) = 0 )
-    then PostError("VRF system '%s' must be specified with AHRI rated SEER", Name)
+    then
+      PostError("VRF system '%s' must be specified with AHRI rated SEER", Name)
     else 
-    if( IfValidAnd( SEER < CodeMinSEER ) )
-    then PostError("SEER of VRF system '%s' is less than the code minimum required efficiency 
-                    of SEER-%.1f. Select the bypass of efficiency check
-                    if this is not applicable.", Name, CodeMinSEER)
+    if( IfValidAnd( CodeMinSEER > 0 ) .AND.
+        IfValidAnd( SEER < CodeMinSEER ) )
+    then 
+      PostError("SEER of VRF system '%s' is less than the code minimum required efficiency 
+                 of SEER-%.1f. Select the bypass of efficiency check
+                 if this is not applicable.", Name, CodeMinSEER)
     else UNCHANGED 
     endif endif endif
 ENDRULE
@@ -691,7 +694,7 @@ RULE VRFSys:EER
   INPUTCLASS : T24N_2016
     Prescribed
   INPUTCLASS
-    Required
+    CondRequired
   COMMONMINIMUM
     9
   COMMONMAXIMUM
@@ -720,14 +723,18 @@ RULE VRFSys:EER
          // Or a new healthcare system w/ BypassMinEff checked
       UNCHANGED
     else
-    if( IfValidAnd( CodeMinEER > 0 ) .AND. 
+    if( ( IfValidAnd( CodeMinEER > 0 ) .OR. IfValidAnd( CodeMinSEER > 0 ) ) .AND. 
         IfValidAnd( EER > 0 ) = 0 )
-    then PostError("VRF system '%s' must be specified with AHRI rated EER", Name)
+    then
+      PostError("VRF system '%s' must be specified with AHRI rated EER, 
+                 even if cooling capacity is <65kBtu/hr.", Name)
     else 
-    if( IfValidAnd( EER < CodeMinEER ) )
-    then PostError("EER of VRF system '%s' is less than the code minimum required efficiency 
-                    of EER-%.1f. Select the bypass of efficiency check
-                    if this is not applicable.", Name, CodeMinSEER)
+    if( IfValidAnd( CodeMinEER > 0 ) .AND.
+        IfValidAnd( EER < CodeMinEER ) )
+    then
+      PostError("EER of VRF system '%s' is less than the code minimum required efficiency 
+                 of EER-%.1f. Select the bypass of efficiency check
+                 if this is not applicable.", Name, CodeMinSEER)
     else UNCHANGED 
     endif endif endif
 ENDRULE
@@ -925,7 +932,8 @@ RULE VRFSys:HSPF
     then
       PostError("VRF system '%s' must be specified with AHRI rated HSPF.", Name )
     else 
-    if( IfValidAnd( HSPF < CodeMinHSPF ) )
+    if( IfValidAnd( CodeMinHSPF > 0 ) .AND.
+        IfValidAnd( HSPF < CodeMinHSPF ) )
     then 
       PostError("HSPF of  VRF system '%s' is less than the code minimum required 
                  efficiency of HSPF-%.1f. Select the bypass of efficiency
@@ -942,7 +950,7 @@ RULE VRFSys:COP
   INPUTCLASS : T24N_2016
     Prescribed
   INPUTCLASS
-    Required
+    CondRequired
   COMMONMINIMUM
     2
   COMMONMAXIMUM
@@ -971,12 +979,14 @@ RULE VRFSys:COP
     then 
       UNCHANGED
     else
-    if( IfValidAnd( CodeMinCOP > 0 ) .AND. 
+    if( ( IfValidAnd( CodeMinCOP > 0 ) .OR. IfValidAnd( CodeMinHSPF > 0 ) ) .AND. 
         IfValidAnd( COP > 0 ) = 0 )
     then
-      PostError("VRF system '%s' must be specified with AHRI rated COP.", Name )
+      PostError("VRF system '%s' must be specified with AHRI rated COP, 
+                 even if cooling capacity is <65kBtu/hr.", Name )
     else 
-    if( IfValidAnd( COP < CodeMinCOP ) )
+    if( IfValidAnd( CodeMinCOP > 0 ) .AND. 
+        IfValidAnd( COP < CodeMinCOP ) )
     then 
       PostError("COP of  VRF system '%s' is less than the code minimum required 
                  efficiency of COP-%.1f. Select the bypass of efficiency
@@ -2029,6 +2039,19 @@ ENDRULE
 
 // *********************** Additional PERF1 reporting rules ******************
 
+RULE VRFSys:ClgEffUnitRpt
+  DESCRIPTION
+    "A text string for reporting the cooling efficiency unit of VRF system."
+  INPUTCLASS 
+    NotInput
+  ANNUAL
+    if( IfValidAnd( EER > 0 ) )
+    then "EER"
+    else "NA"
+    endif
+ENDRULE
+
+
 RULE VRFSys:ClgEffRpt
   DESCRIPTION
     "A text string for reporting the cooling efficiency of VRF system."
@@ -2036,10 +2059,23 @@ RULE VRFSys:ClgEffRpt
     NotInput
   ANNUAL
     if( IfValidAnd( EER > 0 ) )
-    then Format("EER-%s", FltToStr( EERRnd, EERRndScl ) )
+    then Format( FltToStr( EERRnd, EERRndScl ) )
     else "NA"
     endif
 ENDRULE
+
+RULE VRFSys:HtgEffUnitRpt
+  DESCRIPTION
+    "A text string for reporting the heating efficiency unit of VRF system."
+  INPUTCLASS 
+    NotInput
+  ANNUAL
+    if( IfValidAnd( COP > 0 ) )
+    then "COP"
+    else "NA"
+    endif
+ENDRULE
+
 
 RULE VRFSys:HtgEffRpt
   DESCRIPTION
@@ -2048,7 +2084,7 @@ RULE VRFSys:HtgEffRpt
     NotInput
   ANNUAL
     if( IfValidAnd( COP > 0 ) )
-    then Format("COP-%s", FltToStr( COPRnd, COPRndScl ) )
+    then Format( FltToStr( COPRnd, COPRndScl ) )
     else "NA"
     endif
 ENDRULE
@@ -2066,9 +2102,9 @@ RULE NEW VRFSys:WinInterlockRptFlag
   INPUTCLASS
     NotInput 
   ANNUAL
-    if ( SumRevRef( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:WinInterlockRptFlag ) = 0 )
+    if ( MaxRevRef( ZnSys:VRFSysRef, ZnSys:WinInterlockRptFlag ) = 0 )
     then 0
-    else if ( SumRevRef( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:WinInterlockRptFlag ) > 0 )
+    else if ( MaxRevRef( ZnSys:VRFSysRef, ZnSys:WinInterlockRptFlag ) > 0 )
     then 1
     else -1
     endif endif 
@@ -2089,3 +2125,21 @@ RULE VRFSys:OperableWinInterlockRpt
     else "No"
     endif endif 
 ENDRULE
+
+// =======================VRF System Heat Recovery Reporting=====================
+RULE VRFSys:SysCtrlRpt
+  DESCRIPTION
+    "A text string describing the vrf system controls for reporting"
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+    if( LocalStatus( HtRcvry ) > 0 ) then
+       if( HtRcvry = "Yes" ) then 
+       "Heat Recovery"
+       else "NA"
+       endif
+    else
+      "NA" 
+    endif
+ENDRULE
+

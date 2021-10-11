@@ -167,7 +167,7 @@ RULE NEW ThrmlZn:TotSysZnCodeExhFlowSim
     if( ExhFlow > 0 .AND. 
         IfValidAnd( TotSysZnCodeExhFlowSim > 0 ) )
     then UNCHANGED
-    else UNDEFINED
+    else 0
     endif
   ANNUAL  
     z:TotSysZnCodeExhFlowSim
@@ -233,10 +233,7 @@ RULE NEW ThrmlZn:ExhSysFanPwrAdj
         PriAirCondgSysRef[1]:TotExhSysFanPwrAdj
       else
       if( LabArea > 0 .AND. Bldg:LabExhFlow > 10000 )
-      then
-        // Lab exhaust has separate power allowance based on 140.9(c)3.
-        // This is used to determine if the value should be 0.85 or 0.65 W/cfm
-        PriAirCondgSysRef[1]:TotExhSysFanPwrAdj
+      then 0 // Lab exhaust fan power limit per 140.9(c)3. See ThrmlZn:BaseExhSysPwrIdx rule below
       else
         // Calculate baseline exhaust fan power using 140.4(c) fan power allowance rules
         // For process and residential cases, see ExhTotStaticPress rules below
@@ -283,16 +280,37 @@ RULE NEW ThrmlZn:ExhSysPwrIdx
     else 0
     endif
   ANNUAL
+    UNCHANGED
+ENDRULE
+
+// Set the baseline exhaust fan power index when it applies, such as:
+// Labs subject to 140.9(c)3
+// HRR exhaust systems
+// Hotel/motel guestrooms
+
+RULE NEW ThrmlZn:BaseExhSysPwrIdx
+  DATATYPE
+    Float
+  LONGFORM
+    BaselineExhaustSystemPowerIndex
+  DESCRIPTION
+    "The exhaust system power per unit of flow for the baseline
+     exhaust system that serves the zone, if applicable."  
+  INPUTCLASS
+    NotInput
+  UNITS
+    W/cfm
+  ANNUAL
     if( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 )
     then // Defined W/cfm for baseline systems that use this method  
       if( LabArea > 0 ) 
       then
         if( Bldg:LabExhFlow > 10000 )
         then // Trigger lab exhaust fan power limit per 140.9(c)3
-          if( ExhSysFanPwrAdj > 0 )
-          then // Lab system has pressure drop credits
+          if( IfValidAnd( ExhFiltersPwrAdj > 0 ) )
+          then // Lab system has ExhFilters PD credit
             0.85
-          else // Lab system has NO pressure drop credits
+          else // Lab system has NO ExhFilters PD credit
             0.65
           endif
         else // Use 140.4(c) BHP allowance rules
@@ -300,10 +318,15 @@ RULE NEW ThrmlZn:ExhSysPwrIdx
         endif
       else
       if( PrkgGarArea > 0 )
-      then // Parking garage system
-        if( ExhCtrlMthd = "COControl" )
-        then 0.35 * 0.125 // Reduction for CO controls
-        else 0.35
+      then // Parking garage system. 
+        if( HasUnknownHVAC > 0 )
+        then // Set default fan power if HasUnknownHVAC is set
+          if( ExhCtrlMthd = "COControl" )
+          then 0.35 * 0.125 // Reduction for CO controls
+          else 0.35
+          endif
+        else // Ticket 3061: Baseline parking fan power = proposed, use ExhSysPwrIdx
+          UNDEFINED 
         endif
       else
 // Rule used for 2019.2.0 ACM release
@@ -316,7 +339,7 @@ RULE NEW ThrmlZn:ExhSysPwrIdx
         if( BaseVentSysIsExh = 3 )
         then // Hotel/Motel Guestroom
           0.58 
-        else ValidOr( ExhSysPwrIdx, 0 )
+        else 0
         endif endif
       else  
 // Ticket 3040/3057: Baseline HRR ventilation to be same as proposed up to 1.20 W/cfm. 
@@ -333,13 +356,12 @@ RULE NEW ThrmlZn:ExhSysPwrIdx
       if( BaseVentSysIsExh = 3 )
       then // Hotel/Motel Guestroom
         0.58 
-      else // Same as proposed
-        ValidOr( ExhSysPwrIdx, 0 )
+      else
+        0
       endif endif endif endif endif
-    else UNCHANGED
+    else 0
     endif
 ENDRULE
-
 
 // Proposed zone exhaust fan motor HP for simulation
 // Zone exhaust fan motor performance index, for determining motor efficiency
@@ -366,12 +388,15 @@ RULE NEW ThrmlZn:ExhFanMtrPerfIdx
   ANNUAL
     if( ExhFlow > 0 )
     then
+      if( IfValidAnd( BaseExhSysPwrIdx > 0 ) )
+      then StdElecMtrSize:MotorHPIndex( "InputMotorHP", BaseExhSysPwrIdx * ExhFlow / 745.6 )
+      else 
       if( IfValidAnd( PropExhSysTotFanMtrHP > 0 ) ) 
       then // Use proposed motor HP.  This won't work perfectly for AirSys with 2 motors of different MtrHP.
         StdElecMtrSize:MotorHPIndex( "InputMotorHP", PropExhSysTotFanMtrHP )
       else
         StdElecMtrSize:MotorHPIndex( "InputMotorHP", ExhSysPwrIdx * ExhFlow / 745.6 )
-      endif
+      endif endif
     else UNCHANGED
     endif     
 ENDRULE
@@ -463,14 +488,14 @@ RULE ThrmlZn:ExhTotEff
     else UNDEFINED
     endif 
   DEFAULT
-    if( ExhFlow > 0 .AND.
+    if( IfValidAnd( ExhFlowSim > 0 ) .AND.
         IfValidAnd( ExhFanFlowEff > 0 ) .AND.
         IfValidAnd( ExhFanMtrEff > 0 ) )
     then ExhFanFlowEff * ExhFanMtrEff
     else UNDEFINED
     endif 
   ANNUAL
-    if( ExhFlow > 0 .AND. 
+    if( IfValidAnd( ExhFlowSim > 0 ) .AND.
         IfValidAnd( ExhFanFlowEff > 0 ) .AND.
         IfValidAnd( ExhFanMtrEff > 0 ) )
     then ExhFanFlowEff * ExhFanMtrEff
@@ -496,16 +521,13 @@ RULE NEW ThrmlZn:ExhFanMtrBHP
   ANNUAL
     if( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 )
     then 
-      if( Bldg:LabExhFlow > 10000 .OR. ( CommKitArea + IsRes ) > 0 )
-      then // Kit and Res zones, and Lab buildings with > 10000cfm ExhFlow
-           // Separate fan power allowances, see ExhTotStaticPress below
-// Ticket 3061: PrkgGarArea removed from criteria for separate fan power allowance
+      if( IfValidAnd( BaseExhSysPwrIdx > 0 ) )
+      then // If BaseExhSysPwrIdx is defined (see above), BHP is not used
         UNDEFINED
       else
-      if( IfValidAnd( ZnToSysPropExhFanPwrRat > 0 ) .AND. IsRes = 0 )
+      if( IfValidAnd( ZnToSysPropExhFanPwrRat > 0 ) )
       then
         // Calculate baseline exahust fan power using 140.4(c) fan power allowance rules
-        // For process and residential cases, see ExhTotStaticPress rules below
         ExhSysFanPwrAdj * ZnToSysPropExhFanPwrRat
       else // Same as proposed, calculate BHP from ExhSysPwrIdx
       if( IfValidAnd( ExhSysPwrIdx > 0 ) .AND. IfValidAnd( ExhFanMtrEff > 0 ) )
@@ -521,22 +543,6 @@ RULE NEW ThrmlZn:ExhFanMtrBHP
       ExhSysPwrIdx * ExhFlow / 745.6 * ExhFanMtrEff
     else UNDEFINED
     endif endif
-ENDRULE
-// Baseline zone exhaust fan efficiency
-RULE NEW ThrmlZn:ExhFanFlowEff
-  ANNUAL : T24N_2016
-    UNCHANGED
-  ANNUAL
-    if( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 )
-    then // Use baseline assumptions
-      if( LabArea > 0 )
-      then 0.62
-      else if( CommKitArea > 0 )
-      then 0.5
-      else 0.65 // Standard assumption for other systems
-      endif endif
-    else UNCHANGED
-    endif
 ENDRULE
 
 // Zone exhaust fan total static pressure
@@ -571,8 +577,7 @@ RULE ThrmlZn:ExhTotStaticPress
       else if( PrkgGarArea > 0 .AND. VentSrc = "Forced" )
       then // Use proposed or 0.35 W/cfm equiv if not defined
         ValidOr( ExhTotStaticPress, 1.6085 )
-// Ticket 3061: Make baseline control same as proposed
-;     then // Parking garage system, 0.35 W/cfm, assume TotEff is 0.54
+// Default for parking garage system, 0.35 W/cfm, assume TotEff is 0.54
 ;       0.35 * 0.54 / 0.1175 = 1.6085 inH20
       else if( IsRes > 0 .AND. VentSrc = "Forced" )
       then // Residential space, 0.58 W/cfm, assume TotEff is 0.54
@@ -583,11 +588,11 @@ RULE ThrmlZn:ExhTotStaticPress
     else ExhTotStaticPress
     endif
   SIZING
-    if( ExhFlow > 0 .AND. BaseSysNum > 0 .AND. IsNewExh != 0 )
+    if( IfValidAnd( ExhFlowSim > 0 ) .AND. BaseSysNum > 0 .AND. IsNewExh != 0 )
     then // Fan power is set to near 0 for sizing.
       0 // Was 0.00001 since previously using 0 could cause E+ sim failures. See GC 618 for background
     else
-    if( ExhFlow > 0 )
+    if( IfValidAnd( ExhFlowSim > 0 ) )
     then ExhTotStaticPress
     else UNDEFINED
     endif endif
@@ -597,7 +602,7 @@ RULE ThrmlZn:ExhTotStaticPress
     else z:ExhTotStaticPress
     endif
   ANNUAL
-    if( ExhFlow > 0 )
+    if( IfValidAnd( ExhFlowSim > 0 ) )
     then
       if( BaseSysNum > 0 .AND. IsNewExh != 0 )
       then // Use baseline assumptions
@@ -607,14 +612,9 @@ RULE ThrmlZn:ExhTotStaticPress
         else
         if( LabArea > 0 ) 
         then
-          if( Bldg:LabExhFlow > 10000 .AND. IfValidAnd( ExhSysPwrIdx > 0 ) )
+          if( Bldg:LabExhFlow > 10000 )
           then // Trigger lab exhaust fan power limit per 140.9(c)3
-            if( ExhSysFanPwrAdj > 0 )
-            then // Lab system has pressure drop credits. Assume TotEff = proposed or 0.54
-              ExhSysPwrIdx * ValidOr( ExhTotEff, 0.54 ) / 0.1175
-            else // Lab system has NO pressure drop credits. Assume TotEff is 0.54
-              ExhSysPwrIdx * ValidOr( ExhTotEff, 0.54 ) / 0.1175
-            endif
+            BaseExhSysPwrIdx * ValidOr( ExhTotEff, 0.54 ) / 0.1175
           else // Use 140.4(c) BHP allowance rules
           if( IfValidAnd( ExhFanMtrBHP > 0 ) )
           then // Use fraction of fan power allowance that is assigned for zone
@@ -622,16 +622,16 @@ RULE ThrmlZn:ExhTotStaticPress
           else 0
           endif endif
         else
-        if( PrkgGarArea > 0 .AND. IfValidAnd( ExhSysPwrIdx > 0 ) )
-        then // Parking garage system
-          ExhSysPwrIdx * ValidOr( ExhTotEff, 0.54 ) / 0.1175
+        if( PrkgGarArea > 0 .AND. IfValidAnd( BaseExhSysPwrIdx > 0 ) )
+        then // Parking garage, not defined in proposed so use default
+          BaseExhSysPwrIdx * ValidOr( ExhTotEff, 0.54 ) / 0.1175
         else
-        if( IsRes > 0 .AND. VentSrc = "Forced" .AND. IfValidAnd( ExhSysPwrIdx > 0 ) )
+        if( IsRes > 0 .AND. VentSrc = "Forced" .AND. IfValidAnd( BaseExhSysPwrIdx > 0 ) )
         then
           // Residential space, 0.58 W/cfm, assume TotEff = proposed or 0.54
           // For baseline Res systems, TotNonSysFanPwrAdj only includes credit for
-          // FullyDuctedExhPDAdj. MERVGTE16PDAdj to SupFanBHP. See Ticket  
-          ( ExhSysPwrIdx * ValidOr( ExhTotEff, 0.54 ) / 0.1175 ) +
+          // FullyDuctedExhPDAdj. MERVGTE16PDAdj to SupFanBHP.
+          ( BaseExhSysPwrIdx * ValidOr( ExhTotEff, 0.54 ) / 0.1175 ) +
           ( ExhSysFanPwrAdj * ExhFanFlowEff / ExhFlow / ( 0.1175 / 745.6 ) )
         else
         if( IfValidAnd( ExhFanMtrBHP > 0 ) )
@@ -640,7 +640,7 @@ RULE ThrmlZn:ExhTotStaticPress
   ;     else if( PropExhSysTotFanMtrHP > 1.0 )
   ;     then // Proposed exhaust system fan HP is > 1 HP
   ;     0.75
-        else // Non-process exahust, use proposed or 0 if not defined
+        else // Non-process exhaust, use proposed or 0 if not defined
           ValidOr( zp:ExhTotStaticPress, 0 ) 
         endif endif endif endif endif
       else // Based on proposed 
@@ -715,7 +715,7 @@ RULE NEW ThrmlZn:ExhFanMtrBHP
   ANNUAL
     if( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 )
     then // Use baseline assumptions
-      ExhFlow * ExhTotStaticPress * ( 0.1175 / 745.6 ) / ExhFanFlowEff  
+      ExhFlow * ValidOr( ExhTotStaticPress, 0 ) * ( 0.1175 / 745.6 ) / ExhFanFlowEff  
     else UNDEFINED // Exhaust system MtrBHP defined at system components
     endif
 ENDRULE
@@ -790,7 +790,6 @@ RULE NEW ThrmlZn:ExhFanMtrEff
     if( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 )
     then // Use baseline assumptions
       if( ( LabArea + CommKitArea ) > 0 )
-// Ticket 3061: PrkgGarArea removed from criteria for separate fan power allowance
       then // Is a covered process exhaust system
         StdElecMtrPerf:MotorEfficiency("MotorHPIndex", ExhFanMtrPerfIdx) 
       else // Use default assumption for simulating general exhaust, 60% fan, 90% motor
@@ -821,7 +820,7 @@ RULE ThrmlZn:ExhTotEff
   ANNUAL : T24N_2016
     z:ExhTotEff
   ANNUAL
-    if( ExhFlow > 0 .AND.
+    if( IfValidAnd( ExhFlowSim > 0 ) .AND.
         IfValidAnd( ExhFanFlowEff > 0 ) .AND. 
         IfValidAnd( ExhFanMtrEff > 0 ) )
     then ExhFanFlowEff * ExhFanMtrEff
@@ -873,19 +872,19 @@ RULE ThrmlZn:ExhFanName
   INPUTCLASS 
     NotInput
   DEFAULT
-    if( ExhFlow > 0 )
+    if( IfValidAnd( ExhFlowSim > 0 ) )
     then Format("%s PropExhFan", Name)
     else UNDEFINED
     endif
   SIZING_PROPOSED
-    if( ExhFlow > 0 )
+    if( IfValidAnd( ExhFlowSim > 0 ) )
     then Format("%s PropExhFan", Name)
     else UNDEFINED
     endif 
   SIZING_BASELINE
-    if( ExhFlow > 0 )
+    if( IfValidAnd( ExhFlowSim > 0 ) )
     then
-      if( BaseSysNum > 0 .AND. ExhFlow > 0 )
+      if( BaseSysNum > 0 .AND. ExhFlowSim > 0 )
       then Format("%s BaseExhFan", Name)
       else zp:ExhFanName
       endif  
@@ -903,7 +902,7 @@ RULE ThrmlZn:ExhFanEndUseCat
     General         
     ProcessMotors
   DEFAULT 
-    if( IfValidAnd( ExhFlow > 0 ) )
+    if( IfValidAnd( ExhFlowSim > 0 ) )
     then 
       if( Type = "Unconditioned" )
       then "ProcessMotors"
@@ -912,7 +911,7 @@ RULE ThrmlZn:ExhFanEndUseCat
     else UNDEFINED
     endif
   SIZING
-    if( ExhFlow > 0 )
+    if( IfValidAnd( ExhFlowSim > 0 ) )
     then 
       if( Type = "Unconditioned" )
       then "ProcessMotors"
@@ -921,7 +920,7 @@ RULE ThrmlZn:ExhFanEndUseCat
     else UNDEFINED
     endif
   ANNUAL
-    if( ExhFlow > 0 )
+    if( IfValidAnd( ExhFlowSim > 0 ) )
     then 
       if( Type = "Unconditioned" )
       then "ProcessMotors"

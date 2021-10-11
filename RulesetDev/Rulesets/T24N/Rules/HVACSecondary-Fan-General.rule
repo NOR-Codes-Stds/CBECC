@@ -578,13 +578,33 @@ RULE AirSys:AirSeg:Fan:CtrlMthd
 ;    VariablePitch  (Not supported for ZnSys)
 ;    TwoSpeed
   DEFAULT
-    switch( AirSys:Type )
-      case "PVAV"    : "VariableSpeedDrive"
-      case "VAV"     : "VariableSpeedDrive"
-      case "SZVAVAC" : "VariableSpeedDrive"
-      case "SZVAVHP" : "VariableSpeedDrive"
-      default        : "ConstantVolume"
-    endswitch
+    if( IfValidAnd( AirSys:IsExhSys > 0 ) )
+    then
+      if( IfValidAnd( AirSys:ExhSysType = "Laboratory" ) .AND.
+          IfValidAnd( AirSys:LabArea > 0 ) .AND.
+          IfValidAnd( AirSys:ExhCtrlMthd = "VariableFlowVariableSpeedFan" ) )
+      then "VariableSpeedDrive"
+      else
+      if( IfValidAnd( AirSys:ExhSysType = "CommercialKitchen" ) .AND.
+          IfValidAnd( AirSys:CommKitArea > 0 ) .AND.
+          IfValidAnd( AirSys:ExhCtrlMthd = "VariableFlowVariableSpeedFan" ) )
+      then "VariableSpeedDrive"
+      else
+      if( IfValidAnd( AirSys:ExhSysType = "ParkingGarage" ) .AND.
+          IfValidAnd( AirSys:PrkgGarArea > 0 ) .AND.
+          IfValidAnd( AirSys:ExhCtrlMthd = "COControl" ) )
+      then "VariableSpeedDrive"
+      else "ConstantVolume"
+      endif endif endif
+    else
+      switch( AirSys:Type )
+        case "PVAV"    : "VariableSpeedDrive"
+        case "VAV"     : "VariableSpeedDrive"
+        case "SZVAVAC" : "VariableSpeedDrive"
+        case "SZVAVHP" : "VariableSpeedDrive"
+        default        : "ConstantVolume"
+       endswitch
+     endif
   CHECKSIM
     if( BypassCheckSim > 0 )
     then UNCHANGED
@@ -701,7 +721,26 @@ RULE NEW ZnSys:HasSysFlowProp
 ENDRULE
 RULE ZnSys:Fan:CtrlMthd
   DEFAULT
-    "ConstantVolume"
+    if( IfValidAnd( ZnSys:IsExhSys > 0 ) )
+    then
+      if( IfValidAnd( ZnSys:ExhSysType = "Laboratory" ) .AND.
+          IfValidAnd( ZnSys:LabArea > 0 ) .AND.
+          IfValidAnd( ZnSys:ExhCtrlMthd = "VariableFlowVariableSpeedFan" ) )
+      then "VariableSpeedDrive"
+      else
+      if( IfValidAnd( ZnSys:ExhSysType = "CommercialKitchen" ) .AND.
+          IfValidAnd( ZnSys:CommKitArea > 0 ) .AND.
+          IfValidAnd( ZnSys:ExhCtrlMthd = "VariableFlowVariableSpeedFan" ) )
+      then "VariableSpeedDrive"
+      else
+      if( IfValidAnd( ZnSys:ExhSysType = "ParkingGarage" ) .AND.
+          IfValidAnd( ZnSys:PrkgGarArea > 0 ) .AND.
+          IfValidAnd( ZnSys:ExhCtrlMthd = "COControl" ) )
+      then "VariableSpeedDrive"
+      else "ConstantVolume"
+      endif endif endif
+    else "ConstantVolume"
+    endif
   CHECKSIM
     if( BypassCheckSim > 0 )
     then UNCHANGED
@@ -824,6 +863,8 @@ RULE AirSys:AirSeg:Fan:FlowMin
     CondRequired
   UNITS 
     cfm
+  MINIMUM
+    0
   REPORTPRECISION
     0
   DEFAULT
@@ -863,8 +904,25 @@ RULE AirSys:AirSeg:Fan:FlowMin
                       AirSys:Name, Name )
       else UNCHANGED
       endif 
+    else
+    if( (AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" ) .AND. 
+        AirSeg:Type = "Supply" )
+    then
+      if( ValidOr( FlowMin, 0 ) < AirSys:SysMinVentFlow * ( 1 - Proj:VentTolMinLimNonRes - 0.005 ) )
+      then
+        PostError("The min. flow of Fan '%s' is %.0f cfm, which is less
+                   than the system minimum ventilation flow of %.0f cfm.", 
+                   Name, FlowMin, AirSys:SysMinVentFlow )
+      else 
+      if( ValidOr( FlowMin, 0 ) < ValidOr( FlowCap, 0 ) * 0.2 * 0.99 )
+      then
+        PostWarning("The min. flow of Fan '%s' is %.0f cfm, which is
+                     less than 20 percent of flow capacity, %.0f cfm.", 
+                     Name, FlowMin, FlowCap )
+      else UNCHANGED
+      endif endif
     else UNCHANGED
-    endif endif
+    endif endif endif
   CHECKSIM
     if( BypassCheckSim > 0 )
     then UNCHANGED
@@ -883,9 +941,16 @@ RULE AirSys:AirSeg:Fan:FlowMin
       then // FlowMin is greater than supply fan FlowCap
         PostWarning("Total min. flow of Fan '%s' is greater than the fan min. flow.
                      The min. fan flow will be reset to equal the fan capacity.", 
-                     Name) 
+                     Name)
+      else
+      if( AirSys:IsVAVSys > 0 .AND. 
+          CtrlMthd = "VariableSpeedDrive" .AND.
+          IfValidAnd( FlowMin > 0 ) = 0 ) 
+      then
+        PostError("Fan '%s' is 'VariableSpeed' and the the minimum flow is 0 cfm 
+                   or not defined.", Name)
       else UNCHANGED
-      endif endif
+      endif endif endif
     else UNCHANGED
     endif endif
   SIZING
@@ -1074,7 +1139,21 @@ RULE Fan:FlowCapSim
     0
   DEFAULT
     if( IfValidAnd( FlowCap >= 0 ) )
-    then FlowCap * SysCnt
+    then
+      if( ParentComp = "AirSys" ) 
+      then 
+        if( Parent( Type ) = "Return" .AND. IfValidAnd( AirSys:SupFanCap > 0 ) )
+        then
+          // The return fan capacity is set to be equal to the supply fan capacity
+          // to fix the issue that the supply flow is limited by the return flow
+          // The simulated return flow rate will still be equal to the calculated
+          // SupFanCap * RetAirFlowRat, where RetAirAirFlowRat is calculated from user
+          // return fan flow
+          AirSys:SupFanCap * SysCnt 
+        else FlowCap * SysCnt
+        endif
+      else FlowCap * SysCnt
+      endif
     else 0
     endif
   SIZING
@@ -1084,7 +1163,16 @@ RULE Fan:FlowCapSim
     // divided by Fan:SysCnt. 
   ANNUAL
     if( IfValidAnd( FlowCap >= 0 ) )
-    then FlowCap * SysCnt
+    then
+      if( ParentComp = "AirSys" ) 
+      then 
+        if( Parent( Type ) = "Return" .AND. IfValidAnd( AirSys:SupFanCap > 0 ) )
+        then // See above
+          AirSys:SupFanCap * SysCnt 
+        else FlowCap * SysCnt
+        endif
+      else FlowCap * SysCnt
+      endif
     else 0
     endif
 ENDRULE
@@ -1177,6 +1265,21 @@ RULE NEW AirSys:RetFanCap
     SumChildrenIf( AirSeg:FanFlowCap, AirSeg:Type = "Return" )
   ANNUAL
     SumChildrenIf( AirSeg:FanFlowCap, AirSeg:Type = "Return" )
+  CHECKSIM
+    if( LocalCompAssigned( HtRcvryRef ) .AND. 
+        SumChildren( HtRcvry:RcvryFromExhSys ) = 0 .AND. 
+        ( RetFanCap + ExhFanCap ) = 0 )
+    then
+      PostError("AirSystem '%s' has no return/exhaust fan. A return/exhaust
+                 fan is required for the system with heat recovery.",Name)
+    else
+    if( Type != "Exhaust" .AND. ( RetFanCap + ExhFanCap ) > SupFanCap )
+    then
+      PostWarning("AirSystem '%s' has return/exhaust flow greater than supply flow
+                   which is not supported by EnergyPlus. The return/exhaust flow
+                   will be set equal to the supply flow", Name)
+    else UNCHANGED  
+    endif endif
 ENDRULE
 
 RULE NEW AirSys:ReliefFanCap
@@ -1760,14 +1863,12 @@ RULE ZnSys:RtdPwr
     endif
 ENDRULE
 
-RULE NEW ZnSys:RtdPwrIdx
-  DATATYPE
-    Float
-  LONGFORM
-    RatedPowerIndex
+RULE ZnSys:RtdPwrIdx
   DESCRIPTION
-    "The rated input power of the exhaust, supply, or HRV/ERV fan
-     system, divided by the system flow rate."
+    "The rated power per flow for the 'VentilationOnly' system."
+  HELP
+    "For reporting purposes. This value equals the rated input power divided by the
+     rated ventilation flow (supply or exhaust) capacity of the system."
   INPUTCLASS 
     NotInput       
   UNITS 
