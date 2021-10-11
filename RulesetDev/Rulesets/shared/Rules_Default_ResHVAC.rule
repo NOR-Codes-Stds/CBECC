@@ -637,6 +637,9 @@ RULELIST "Default_AllHVAC" 0 0 0 0
    "Set default ResHtPumpSys:TempLabels[2]"     ResHtPumpSys:TempLabels[2] = {  "@ 35°F:"  }
    "Set default ResHtPumpSys:TempLabels[3]"     ResHtPumpSys:TempLabels[3] = {  "@ 17°F:"  }
 
+   "Blast HVACHtPump:PerfDetailsErrMsg prior to defaulting"    ResHtPumpSys:PerfDetailsErrMsg = {  UNDEFINED  }   ; SAC 09/23/21
+   "Blast HVACHtPump:PerfDetailsError prior to defaulting"     ResHtPumpSys:PerfDetailsError  = {  UNDEFINED  }
+
 	"Call subordinate rulelist to default type-specific heat pump system data"
 		ResHtPumpSys:Action = {	switch (Local( Type ))
 											case  4 :  EvalRulelist( "Default_HtPump_SplitHeatPump"       , 1 )   				; "SplitHeatPump - Heating side of central split heat pump"
@@ -703,6 +706,12 @@ RULELIST "Default_AllHVAC" 0 0 0 0
             case 23 :  1  	   ; "SglPkgVertAirCond - Single package vertical A/C system"        ; SAC 6/24/20 (tic #1226)
             default :  0
          endswitch  }
+
+   "Reset HVACSys:AutoSizeCool[1] iff Autosized VCHP2"   ResHVACSys:AutoSizeCool[1] =        ; SAC 09/23/21 (VCHP2)
+      {  if (FloorAreaServed[1] > 0.5 .AND. Type == 2 .AND.
+             IfValidAnd( HtPumpSystem[1]:Type = 33 ) .AND.
+             IfValidAnd( HtPumpSystem[1]:AutoSize = 0 )) then  0
+         else  UNCHANGED  endif  }
 
 	"Call subordinate rulelist to set cooling system reporting variables"		; SAC 5/27/14
 		Proj:Action		= {	EvalRulelist( "SetupHVACCoolCF1RReportVariables" )  }
@@ -3709,7 +3718,7 @@ RULELIST "SetupHVACSys_Round2_common" 0 0 0 0
 	"Set ResHVACSys:HaveCooling"		ResHVACSys:HaveCooling	= {	if (Type < 1) then  0
 																				else if (Type == 2)
 																				then	if (NumHtPumpSystemTypes <= 0 .OR. LocalCompAssigned( HtPumpSystem[1] ) == 0) then  0
-																						else if (IfValidAnd( AutoSizeCool[1] > 0.5 ) .OR. IfValidAnd( ClSysCapacity > 1 ) .OR.
+																						else if (IfValidAnd( AutoSizeCool[1] > 0.5 ) .OR. IfValidAnd( HtPumpSystem[1]:Type = 33 ) .OR. IfValidAnd( ClSysCapacity > 1 ) .OR.
 																									T24RCoolingEquipment:PropEqStd( "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", HtPumpSysTypeAbbrev ) > 0.5) then  1
 																						else  0
 																						endif endif
@@ -3720,6 +3729,7 @@ RULELIST "SetupHVACSys_Round2_common" 0 0 0 0
 																						else  0
 																						endif endif endif 
 																				endif endif  } 
+																				
 	"Set ResHVACSys:ServesCooling"	ResHVACSys:ServesCooling = {	if (HaveCooling .AND. FloorAreaServed[1] > 0.5) then  1  else  0  endif  }    ; SAC 5/14/19
 
 	"Set ResHVACSys:HaveHtPump"		ResHVACSys:HaveHtPump	= {	if (Type == 2 .AND. HaveHeating .AND. HaveCooling) then  1  else  0  endif  }
@@ -5177,6 +5187,17 @@ RULELIST "Default_HVACHeatPump" 0 0 0 0
       {  if (Show4717COPs < 1 .AND. Type !=10 .AND. Type != 7 .AND. Type < 20 .AND. IsPackaged < 1)
          then  1  else  0  endif  }
 
+   "Set ResHtPumpSys:ShowPerfDetails - whether or not to show 'Performance Details' dialog tab"      ResHtPumpSys:ShowPerfDetails =     ; SAC 09/21/21
+      {  if (Type == 33) then  1  else  0  endif  }
+   "Set ResHtPumpSys:PerfDetailsMsgs[1]"    ResHtPumpSys:PerfDetailsMsgs[1] =
+      {  switch (ShowPerfDetails)
+            case  1 :  "(enter details on 'Performance Details Data' tab)"
+            default :  UNDEFINED  endswitch  }
+   "Set ResHtPumpSys:PerfDetailsMsgs[2]"    ResHtPumpSys:PerfDetailsMsgs[2] =
+      {  switch (ShowPerfDetails)
+            case  1 :  UNDEFINED
+            default :  "Performance Data entered on first tab"  endswitch  }
+            
 ; SAC 1/8/16 - added code vintage-specific values for SEER input range check warning
 ; SAC 1/13/16 - removed check for heat pumps, since this requirement is NOT based on INSTALLED DATE (which is the focus of the CEC request to add it)
 ;	"Set ResHtPumpSys:MinSEER_1501"		ResHtPumpSys:MinSEER_1501		= {	if (IsAvailable < 0.5 .OR. Proj:StandardsVersion < 2015) then  UNDEFINED
@@ -5970,12 +5991,13 @@ END
 //;         default :   PostMessageToLog( "  DHWSysRpt '%s' DHWSysIdx (%g)", Name, DHWSysIdx )
 //;         endswitch
 //;   endif endif  }
+//   ; remove reference to SFamUserSpecCmpctDist - now valid for compliance analysis - SAC 09/29/21 (tic #1277)
 //   "Set ResDHWSysRpt:CompactDistribDescrip"     ResDHWSysRpt:CompactDistribDescrip  =     ; SAC 5/13/19 - to facilitate 2019 HERS reporting   
 //      {  if (ParentComponentType() == "DHWSys" .OR. Proj:EnergyCodeYearNum < 2019)
 //         then  if (Proj:EnergyCodeYearNum < 2019 .AND. IfValidAnd( DHWSysRef:HERSCheck:Compact > 0 ))
 //               then  "Basic"
 //               else if (Proj:EnergyCodeYearNum >= 2019)
-//               then  if (Proj:SFamCompactDistrib > 0 .AND. IfValidAnd( Proj:SFamUserSpecCmpctDist > 0 )==0 .AND.
+//               then  if (Proj:SFamCompactDistrib > 0 .AND.
 //                         IfValidAnd( Proj:SFamCompactFactor > 0 ) .AND. IfValidAnd( Proj:SFamCompactFactor < 1 ))
 //                     then  switch (Proj:SFamCompactDistrib)
 //                              case  1 :  "Basic"
@@ -5986,7 +6008,6 @@ END
 //               else  UNDEFINED  endif endif
 //         else  if (ParentComponentType() != "DwellUnit" .OR. IfValidAnd( DHWSysIdx > 0 )==0) then  UNDEFINED
 //               else if (ParentRef( DwellUnitTypeRef:CompactDistrib ) > 0 .AND.
-//                        ParentRef( DwellUnitTypeRef:UsrSpecCmpctDist ) = 0 .AND.
 //                        ParentRef( DwellUnitTypeRef:CompactFactor ) > 0 .AND. ParentRef( DwellUnitTypeRef:CompactFactor ) < 1)
 //               then  switch (DHWSysIdx)
 //                        case  1 :   if (ParentRef( DwellUnitTypeRef:CDCompatible[1] ) < 1) then  UNDEFINED
@@ -6007,8 +6028,7 @@ END
 //      {  if (ParentComponentType() == "DHWSys" .OR. Proj:EnergyCodeYearNum < 2019)
 //         then  DHWSysRef:HERSCheck:Compact
 //         else  if (ParentComponentType() != "DwellUnit" .OR. IfValidAnd( DHWSysIdx > 0 )==0) then  0
-//               else if (ParentRef( DwellUnitTypeRef:CompactDistrib ) < 2 .OR.
-//                        ParentRef( DwellUnitTypeRef:UsrSpecCmpctDist ) > 0) then  0
+//               else if (ParentRef( DwellUnitTypeRef:CompactDistrib ) < 2 ) then  0
 //               else if (ParentRef( DwellUnitTypeRef:CompactFactor ) > 0 .AND. ParentRef( DwellUnitTypeRef:CompactFactor ) < 1)
 //               then  switch (DHWSysIdx)
 //                        case  1 :  if (ParentRef( DwellUnitTypeRef:CDCompatible[1] ) > 0) then  1  else  0  endif
@@ -6854,7 +6874,7 @@ END
 RULELIST "Default_HtPump_VariableCapHeatPump2" 0 0 0 1
 ;*************************************************************************
 	"Default ResHtPumpSys:TotalCapacity"   	ResHtPumpSys:TotalCapacity  = {  UNDEFINED  }
-	"Set ResHtPumpSys:TypeDescrip"			ResHtPumpSys:TypeDescrip	= { "RTF\Ht_VCHP.rtf" }
+	"Set ResHtPumpSys:TypeDescrip"			ResHtPumpSys:TypeDescrip	= { "RTF\Ht_VCHPdetailed.rtf" }     ; SAC 09/22/21
    "Default AutoSize"         ResHtPumpSys:AutoSize        = {  if (IfValidAnd( Proj:EnableHPAutosize > 0 )) then  1  else  0  endif  }     ; VCHP2 - SAC 11/10/20
 
    "Default HSPF"				   ResHtPumpSys:HSPF				= {  8.2  }
@@ -6918,13 +6938,91 @@ RULELIST "Default_HtPump_VariableCapHeatPump2" 0 0 0 1
       {  if (IfValidAnd( Cap47 > 0 ) .AND. IfValidAnd( Cap05 > 0 ))
          then  Cap05 / Cap47
          else  UNDEFINED  endif  }
+
+   "Default ResHtPumpSys:Cap82"           ResHtPumpSys:Cap82          = {  UNDEFINED  }    ; SAC 09/22/21
+   "Default ResHtPumpSys:Cap95"           ResHtPumpSys:Cap95          = {  UNDEFINED  }
+   "Default ResHtPumpSys:Cap115"          ResHtPumpSys:Cap115         =     ; 115 deg defaults from CB, noting 33 = (115 - 82), 13 = (95 - 82) - SAC 09/22/21
+      {  if (IfValidAnd( Cap82 > 0 )==0 .OR. IfValidAnd( Cap95 > 0 )==0) then  UNDEFINED
+         else  Cap82 + ((33/13) * (Cap95 - Cap82))
+         endif  }
+   "Default ResHtPumpSys:COP82"           ResHtPumpSys:COP82          = {  UNDEFINED  }
+   "Default ResHtPumpSys:COP95"           ResHtPumpSys:COP95          = {  UNDEFINED  }
+   "Default ResHtPumpSys:COP115"          ResHtPumpSys:COP115         =
+      {  if (IfValidAnd( Cap82 > 0 )==0 .OR. IfValidAnd( Cap95 > 0 )==0 .OR.
+             IfValidAnd( COP82 > 0 )==0 .OR. IfValidAnd( COP95 > 0 )==0) then  UNDEFINED
+         else  Cap115 /
+               ((Cap82 / COP82) + ((33/13) * ((Cap95 / COP95) -
+                                              (Cap82 / COP82))))
+         endif  }
+
+   "Default ResHtPumpSys:CapMin82"        ResHtPumpSys:CapMin82       = {  UNDEFINED  }
+   "Default ResHtPumpSys:CapMin95"        ResHtPumpSys:CapMin95       = {  UNDEFINED  }
+   "Default ResHtPumpSys:CapMin115"       ResHtPumpSys:CapMin115      =                    ; SAC 09/23/21
+      {  if (IfValidAnd( CapMin95 < Cap95 ) .AND. IfValidAnd( Cap115 > 0 ))
+         then  Cap115 * CapMin95 / Cap95
+         else if (IfValidAnd( CapMin82 > 0 ) .AND. IfValidAnd( CapMin95 > 0 ))
+         then  CapMin82 + ((33/13) * (CapMin95 - CapMin82))
+         else  UNDEFINED  endif endif  }
+   "Default ResHtPumpSys:COPMin82"        ResHtPumpSys:COPMin82       = {  UNDEFINED  }
+   "Default ResHtPumpSys:COPMin95"        ResHtPumpSys:COPMin95       = {  UNDEFINED  }
+   "Default ResHtPumpSys:COPMin115"       ResHtPumpSys:COPMin115      =
+      {  if (IfValidAnd( CapMin82 > 0 )==0 .OR. IfValidAnd( CapMin95 > 0 )==0 .OR.
+             IfValidAnd( COPMin82 > 0 )==0 .OR. IfValidAnd( COPMin95 > 0 )==0) then  UNDEFINED
+         else  CapMin115 /
+               ((CapMin82 / COPMin82) + ((33/13) * ((CapMin95 / COPMin95) -
+                                                    (CapMin82 / COPMin82))))
+         endif  }
+
+   "Default ResHtPumpSys:Cap8295Ratio"    ResHtPumpSys:Cap8295Ratio   = 
+      {  if (IfValidAnd( Cap95 > 0 ) .AND. IfValidAnd( Cap82  > 0 ))
+         then  Cap82  / Cap95
+         else  UNDEFINED  endif  }
+   "Default ResHtPumpSys:Cap11595Ratio"   ResHtPumpSys:Cap11595Ratio  = 
+      {  if (IfValidAnd( Cap95 > 0 ) .AND. IfValidAnd( Cap115 > 0 ))
+         then  Cap115 / Cap95
+         else  UNDEFINED  endif  }
+
    "Default ResHtPumpSys:VCHPFanPwrHC[1]-h"    ResHtPumpSys:VCHPFanPwrHC[1] = {   0.1  }
    "Default ResHtPumpSys:VCHPFanPwrHC[2]-c"    ResHtPumpSys:VCHPFanPwrHC[2] = {   0.1  }
    "Default ResHtPumpSys:HtgSizingFactor"      ResHtPumpSys:HtgSizingFactor = {   1.2  }
    "Default ResHtPumpSys:ParElecExprs"         ResHtPumpSys:ParElecExprs    = {   "($tdboHrAv < 50) * 40"  }
 
-   "Override default ResHtPumpSys:TempLabels[2]"     ResHtPumpSys:TempLabels[2] = {  "@ 17°F:"  }    ; SAC 07/24/21
-   "Override default ResHtPumpSys:TempLabels[3]"     ResHtPumpSys:TempLabels[3] = {  "@  5°F:"  }
+   "Override ResHtPumpSys:TempLabels[1]"     ResHtPumpSys:TempLabels[1] = {  "@   47°F:"  }    ; SAC 07/24/21
+   "Override ResHtPumpSys:TempLabels[2]"     ResHtPumpSys:TempLabels[2] = {  "@   17°F:"  }
+   "Override ResHtPumpSys:TempLabels[3]"     ResHtPumpSys:TempLabels[3] = {  "@     5°F:"  }
+   "Set ResHtPumpSys:TempLabels[4]"          ResHtPumpSys:TempLabels[4] = {  "@   82°F:"  }    ; SAC 09/22/21
+   "Set ResHtPumpSys:TempLabels[5]"          ResHtPumpSys:TempLabels[5] = {  "@   95°F:"  }
+   "Set ResHtPumpSys:TempLabels[6]"          ResHtPumpSys:TempLabels[6] = {  "@ 115°F:"  }
+
+   "Set ResHtPumpSys:PerfDetailsErrMsg"     ResHtPumpSys:PerfDetailsErrMsg =         ; catch errors for display on screen - SAC 09/23/21
+      {  if (IfValidAnd( Cap47 > 0 )==0 .OR. IfValidAnd( CapMin47 > 0 )==0 .OR.
+             IfValidAnd( Cap17 > 0 )==0 .OR. IfValidAnd( CapMin17 > 0 )==0 .OR.
+             IfValidAnd( Cap05 > 0 )==0 .OR. IfValidAnd( CapMin05 > 0 )==0 .OR.
+             IfValidAnd( Cap82 > 0 )==0 .OR. IfValidAnd( CapMin82 > 0 )==0 .OR.
+             IfValidAnd( Cap95 > 0 )==0 .OR. IfValidAnd( CapMin95 > 0 )==0 .OR.
+             IfValidAnd( Cap115> 0 )==0 .OR. IfValidAnd( CapMin115> 0 )==0)
+         then  if (IfValidAnd( AutoSize > 0 ))
+               then  "Valid capacities must be entered for each combination of outdoor dry bulb and Min/Max speed (even w/ autosizing activated)"
+               else  "Valid capacities must be entered for each combination of outdoor dry bulb and Min/Max speed"
+               endif
+         else if (IfValidAnd( COP47 > 0 )==0 .OR. IfValidAnd( COPMin47 > 0 )==0 .OR.
+                  IfValidAnd( COP17 > 0 )==0 .OR. IfValidAnd( COPMin17 > 0 )==0 .OR.
+                  IfValidAnd( COP05 > 0 )==0 .OR. IfValidAnd( COPMin05 > 0 )==0 .OR.
+                  IfValidAnd( COP82 > 0 )==0 .OR. IfValidAnd( COPMin82 > 0 )==0 .OR.
+                  IfValidAnd( COP95 > 0 )==0 .OR. IfValidAnd( COPMin95 > 0 )==0 .OR.
+                  IfValidAnd( COP115> 0 )==0 .OR. IfValidAnd( COPMin115> 0 )==0)
+         then  "Valid COPs must be entered for each combination of outdoor dry bulb and Min/Max speed"
+         else if (IfValidAnd( CapMin05  > Cap05  )) then  "Capacity at 5°F and Min speed must be less than capacity @ Max speed"
+         else if (IfValidAnd( CapMin17  > Cap17  )) then  "Capacity at 17°F and Min speed must be less than capacity @ Max speed"
+         else if (IfValidAnd( CapMin47  > Cap47  )) then  "Capacity at 47°F and Min speed must be less than capacity @ Max speed"
+         else if (IfValidAnd( CapMin82  > Cap82  )) then  "Capacity at 82°F and Min speed must be less than capacity @ Max speed"
+         else if (IfValidAnd( CapMin95  > Cap95  )) then  "Capacity at 95°F and Min speed must be less than capacity @ Max speed"
+         else if (IfValidAnd( CapMin115 > Cap115 )) then  "Capacity at 115°F and Min speed must be less than capacity @ Max speed"
+         else  UNDEFINED  endif endif endif endif endif endif endif endif  }
+   "Set ResHtPumpSys:PerfDetailsError - flag indicating 'Performance Details' error"     ResHtPumpSys:PerfDetailsError =    ; SAC 09/23/21
+      {  if (LocalStatus( PerfDetailsErrMsg ) < 1) then  UNDEFINED
+         else if (strlen( PerfDetailsErrMsg ) < 1) then  UNDEFINED
+         else  1  endif endif  }
 
 ; RJH 2/13/20 tic #1176
    "Set ResHtPumpSys:SpeclFeatrs_ComplianceOptionVCHP"    ResHtPumpSys:SpeclFeatrs_ComplianceOptionVCHP = {
@@ -8598,17 +8696,26 @@ RULELIST "Setup_HVACSys_Cool_SplitAirCond" 1 0 1 0
 																										then	0.96 ; verified, CID
 																										else	0.90 ; not verified
 																										endif endif endif  }
-
+   ; moved up from below to set iff existing equipment where ClSysCFMperTon & ClSysSEER invalid but SEERValid for StdCoolingType - SAC 09/13/21 (user/CEC support)
+   "Set ResHVACSys:ClSysCFMperTon"        ResHVACSys:ClSysCFMperTon  =
+      {  if (Proj:RunScope != 2 .OR. Status != 1 .OR.
+             ( IfValidAnd( ClSysSEER > 0 )==0 .AND. IfValidAnd( ClSysCFMperTon > 0 )==0 .AND.
+               T24RCoolingEquipment:SEERValid( "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", EnumString( StdCoolingType ) ) ))
+         then  T24RClimateZoneCodeBase:CFMperTon( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )
+         else  UNCHANGED  endif  }
 ; SAC 12/26/14 - replaced logic triggering use of existing/verified properties to reflect OVERALL cooling equipment beter/equal/worse status (rather than only a comparison of SEER)
-	"Set ResHVACSys:ClSysSEER"						ResHVACSys:ClSysSEER			= {	if (Proj:RunScope == 2 .AND. Status == 2 .AND. IsVerified .AND.
-																										CoolEqpVsStandard >= 0 .AND.		; => equal or better than standard
-																										MaxRevRef( ResZn:AltHVACSystem, ResZn:VerifExistingSEER ) > 5)
-																								then	MaxRevRef( ResZn:AltHVACSystem, ResZn:VerifExistingSEER )
-																								else
-																									if (Proj:RunScope == 2 .AND. Status == 1) then UNCHANGED
-																									else
-																										T24RCoolingEquipment:SEER( "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", EnumString( StdCoolingType ) )  
-																									endif endif  }
+	"Set ResHVACSys:ClSysSEER"						ResHVACSys:ClSysSEER			=     ; added logic to ensure SEER lookup for existing equipment where ClSysSEER invalid but SEERValid for StdCoolingType - SAC 09/13/21 (user/CEC support)
+      {  if (Proj:RunScope == 2 .AND. Status == 2 .AND. IsVerified .AND.
+             CoolEqpVsStandard >= 0 .AND.		; => equal or better than standard
+             MaxRevRef( ResZn:AltHVACSystem, ResZn:VerifExistingSEER ) > 5)
+         then	MaxRevRef( ResZn:AltHVACSystem, ResZn:VerifExistingSEER )
+         else
+            if (Proj:RunScope != 2 .OR. Status != 1 .OR.
+                ( IfValidAnd( ClSysSEER > 0 )==0 .AND.
+                  T24RCoolingEquipment:SEERValid( "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", EnumString( StdCoolingType ) ) ))
+            then  T24RCoolingEquipment:SEER(      "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", EnumString( StdCoolingType ) )
+            else  UNCHANGED
+            endif endif  }
 
 	"Set ResHVACSys:ClSysEER"						ResHVACSys:ClSysEER				= {
 											if (Proj:RunScope == 2 .AND. Status == 2 .AND. IsVerified .AND.
@@ -8636,7 +8743,7 @@ RULELIST "Setup_HVACSys_Cool_SplitAirCond" 1 0 1 0
 ;																									endif endif  }
 ; mjb 1/30/15 - mods to look up std. CFMperTon from T24RClimateZoneCodeBase
 ;	"Set ResHVACSys:ClSysCFMperTon"				ResHVACSys:ClSysCFMperTon		= {	if (Proj:RunScope == 2 .AND. Status == 1) then UNCHANGED else 350 endif  }
-	"Set ResHVACSys:ClSysCFMperTon"				ResHVACSys:ClSysCFMperTon		= {	if (Proj:RunScope == 2 .AND. Status == 1) then UNCHANGED else T24RClimateZoneCodeBase:CFMperTon( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr ) endif  }
+;	"Set ResHVACSys:ClSysCFMperTon"				ResHVACSys:ClSysCFMperTon		= {	if (Proj:RunScope == 2 .AND. Status == 1) then UNCHANGED else T24RClimateZoneCodeBase:CFMperTon( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr ) endif  }
 
 ;	"debug HVAC"			ResHVACSys:Action = { PostWarning( "Setup_HVACSys_Cool_SplitAirCond  ResHVACSys: '%s'  ClSysSEER: %g   ClSysEER: %g",  Name, ClSysSEER, ClSysEER )  }
 END
