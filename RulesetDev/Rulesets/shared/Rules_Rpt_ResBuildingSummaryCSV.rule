@@ -287,6 +287,159 @@ END
 ;*************************************************************************
 
 
+; ported from BudgetConversion - SAC 10/20/21 (MFam)
+;*************************************************************************
+RULELIST "SetupWallWindowDoorAreaTotals"  1 0 0 0
+;*************************************************************************
+  ; SAC 12/6/13 - fix for GC issue #239 - only include New/Altered door area in ResExtWall:TotDoorArea
+  ; SAC 7/16/14 - moved up from below to set before ResExtWall:AreaByWallType[*]
+; JP 10/9/19 only count the new doors (Tic #877)
+"Set ResExtWall:TotDoorArea"	ResExtWall:TotDoorArea	= {if (ResProj:EnergyCodeYearNum = 2019 .AND. IfValidAnd( Proj:AnalysisVersion <= 190101 ))
+										                               then SumChildrenIf( ResDr:Area, ResDr:Status > 1 )
+                                                   else SumChildrenIf( ResDr:Area, ResDr:Status == 3)  endif}
+
+; mjb-10/24/13	E+A+A only assign AreaByWallType for New Walls, then rest of wall transformations should flow correctly
+; SAC 2/26/14 - updated logic to include new Cons:Type options
+; SAC 7/14/14 - revised logic to add NEW WINDOW area (times win area mult) for Altered or Existing walls w/ NEW windows
+; SAC 7/16/14 - altered logic again to also add in new door area ... for Altered or Existing walls w/ NEW doors
+	;"debug message"		ResExtWall:Action		= {	if (LocalCompAssigned( Construction ) == 0 ) then  PostMessageToLog( "ResExtWall '%s':  No Construction assigned", Name )
+	;															else	switch( Construction:Type )
+	;																		case  0 :	if (IsNew > 0.5) then  PostMessageToLog( "ResExtWall '%s':  Wood framed area %g", Name, Area )		; "Wood Framed Wall"  
+	;																						else  PostMessageToLog( "ResExtWall '%s':  Wood framed area based on New window area %g * WinAreaMult %g = %g", Name, TotWinArea[2], ValidOr( Proj:CondNewWinAreaMult, 0 ),
+	;																												(TotWinArea[2] * ValidOr( Proj:CondNewWinAreaMult, 0 )) )  endif
+	;																		default :	UNCHANGED	endswitch  endif  }
+	"Set ResExtWall:AreaByWallType[1] - wood framed"		ResExtWall:AreaByWallType[1]		= {	if( LocalCompAssigned( Construction ) == 0 ) then  0
+																														else	switch( Construction:Type )
+																																	case  0 :	if (IsNew > 0.5) then  Area		; "Wood Framed Wall"  
+																																					else  (TotWinArea[2] * ValidOr( Proj:CondNewWinAreaMult, 0 )) + TotDoorArea  endif
+																																	case  5 :	if (IsNew > 0.5) then  Area		; "SIPS Wall"  
+																																					else  (TotWinArea[2] * ValidOr( Proj:CondNewWinAreaMult, 0 )) + TotDoorArea  endif
+																																	default :	0	endswitch  endif  }
+																											;			if( LocalCompAssigned( Construction ) == 0 .OR. IsNew == 0 ) then  0
+																											;			else	switch( Construction:Type )
+																											;						case  0 :	Area		; "Wood Framed Wall"  
+																											;						default :	0	endswitch  endif  }
+	"Set ResExtWall:AreaByWallType[2] - steel framed"		ResExtWall:AreaByWallType[2]		= {	if( LocalCompAssigned( Construction ) == 0 ) then  0
+																														else	switch( Construction:Type )
+																																	case  1 :	if (IsNew > 0.5) then  Area		; "Steel Framed Wall" 
+																																					else  (TotWinArea[2] * ValidOr( Proj:CondNewWinAreaMult, 0 )) + TotDoorArea  endif
+																																	default :	0	endswitch  endif  }
+																											;			if( LocalCompAssigned( Construction ) == 0 .OR. IsNew == 0 ) then  0
+																											;			else	switch( Construction:Type )
+																											;						case  1 :	Area		; "Steel Framed Wall" 
+																											;						default :	0	endswitch  endif  }
+	"Set ResExtWall:AreaByWallType[3] - concrete/CMU"		ResExtWall:AreaByWallType[3]		= {	if( LocalCompAssigned( Construction ) == 0 ) then  0
+																														else if ( Construction:Type == 2 .OR. Construction:Type == 3 .OR. Construction:Type == 4 .OR.   ; "Concrete / ICF / Brick" or "Hollow Unit Masonry" or "Adobe / Strawbale / Log"
+																																	 Construction:Type == 9 )				; "No Frame (concrete/CMU)"
+																														then	if (IsNew > 0.5) then  Area	
+																																else  (TotWinArea[2] * ValidOr( Proj:CondNewWinAreaMult, 0 )) + TotDoorArea  endif
+																														else	0  endif endif  }
+																											;			if( LocalCompAssigned( Construction ) == 0 .OR. IsNew == 0 ) then  0
+																											;			else	switch( Construction:Type )
+																											;						case  2 :	Area		; "Concrete / ICF / Brick"	
+																											;						case  3 :	Area		; "Hollow Unit Masonry"	
+																											;						case  4 :	Area		; "Adobe / Strawbale / Log"
+																											;						case  5 :	Area		; "SIPS Wall"
+																											;						case  9 :	Area		; "No Frame (concrete/CMU)"
+																											;						default :	0	endswitch  endif  }
+
+; mjb-10/29/13	E+A+A add window area when there are no new walls
+	"Set ResExtWall:TotWinAreaByWallType[1] - wood framed"	ResExtWall:TotWinAreaByWallType[1]	= {	if (AreaByWallType[1] > 0) then  TotWinArea[1]  else  0  endif  }
+	"Set ResExtWall:TotWinAreaByWallType[2] - steel framed"	ResExtWall:TotWinAreaByWallType[2]	= {	if (AreaByWallType[2] > 0) then  TotWinArea[1]  else  0  endif  }
+	"Set ResExtWall:TotWinAreaByWallType[3] - concrete/CMU"	ResExtWall:TotWinAreaByWallType[3]	= {	if (AreaByWallType[3] > 0) then  TotWinArea[1]  else  0  endif  }
+	"Set ResExtWall:NewWinAreaByWallType[1] - wood framed"	ResExtWall:NewWinAreaByWallType[1]	= {	if (AreaByWallType[1] > 0) then  TotWinArea[2] + TotWinArea[4]  else  0  endif  }
+	"Set ResExtWall:NewWinAreaByWallType[2] - steel framed"	ResExtWall:NewWinAreaByWallType[2]	= {	if (AreaByWallType[2] > 0) then  TotWinArea[2] + TotWinArea[4]  else  0  endif  }
+	"Set ResExtWall:NewWinAreaByWallType[3] - concrete/CMU"	ResExtWall:NewWinAreaByWallType[3]	= {	if (AreaByWallType[3] > 0) then  TotWinArea[2] + TotWinArea[4]  else  0  endif  }
+; SAC 2/27/14 - RESTORED ABOVE LOGIC which should now be valid since we only operate on the sum of the wall/window/door areas
+;  ; SAC 12/6/13 - fix to prevent Existing windows from getting included in WinAreaByWallType values - resulting in window copies...
+;	"Set ResExtWall:WinAreaByWallType[1] - wood framed"	ResExtWall:WinAreaByWallType[1]	= { TotWinArea[2] }
+;	"Set ResExtWall:WinAreaByWallType[2] - steel framed"	ResExtWall:WinAreaByWallType[2]	= { TotWinArea[2] }
+;	"Set ResExtWall:WinAreaByWallType[3] - concrete/CMU"	ResExtWall:WinAreaByWallType[3]	= { TotWinArea[2] }
+
+; SAC 2/27/14 - RESTORED ORIGINAL LOGIC which should now be valid since we only operate on the sum of the wall/window/door areas
+	"Set ResExtWall:DoorAreaByWallType[1] - wood framed"	ResExtWall:DoorAreaByWallType[1]	= {	if (AreaByWallType[1] > 0) then  TotDoorArea  else  0  endif  }	;  TotDoorArea  }
+	"Set ResExtWall:DoorAreaByWallType[2] - steel framed"	ResExtWall:DoorAreaByWallType[2]	= {	if (AreaByWallType[2] > 0) then  TotDoorArea  else  0  endif  }	;  TotDoorArea  }
+	"Set ResExtWall:DoorAreaByWallType[3] - concrete/CMU"	ResExtWall:DoorAreaByWallType[3]	= {	if (AreaByWallType[3] > 0) then  TotDoorArea  else  0  endif  }	;  TotDoorArea  }
+
+  ; SAC 2/26/14 - added 4th array element rules for all Zone & Garage ExtWall*AreaByWallType[] properties to track TOTALS across all wall types
+	"Set Zone:ExtWallAreaByWallType[1] - wood framed"			Zone:ExtWallAreaByWallType[1]			= {	SumChildren( ResExtWall:AreaByWallType[1]    )  }
+	"Set Zone:ExtWallAreaByWallType[2] - steel framed"			Zone:ExtWallAreaByWallType[2]			= {   SumChildren( ResExtWall:AreaByWallType[2]    )  }
+	"Set Zone:ExtWallAreaByWallType[3] - concrete/CMU"			Zone:ExtWallAreaByWallType[3]			= {   SumChildren( ResExtWall:AreaByWallType[3]    )  }
+  ; SAC 7/23/14 - added rules to sum into ExtWallArea.. the area of NEW Skylts (which will get modeled as windows in the std design) (GC #329)
+	"Set Zone:ExtWallAreaByWallType[1] - wood framed - add new Skylt area"	Zone:ExtWallAreaByWallType[1]	= {	if (ExtWallAreaByWallType[1] >= ExtWallAreaByWallType[2] .AND. ExtWallAreaByWallType[1] >= ExtWallAreaByWallType[3])
+																																					then  ExtWallAreaByWallType[1] + SumChildren( CathedralCeiling:ChildAreaSum[2] ) + SumChildren( CathedralCeiling:ChildAreaSum[4] )   else  UNCHANGED  endif  }
+	"Set Zone:ExtWallAreaByWallType[2] - steel framed - add new Skylt area"	Zone:ExtWallAreaByWallType[2]	= {	if (ExtWallAreaByWallType[2] > ExtWallAreaByWallType[1] .AND. ExtWallAreaByWallType[2] >= ExtWallAreaByWallType[3])
+																																					then  ExtWallAreaByWallType[2] + SumChildren( CathedralCeiling:ChildAreaSum[2] ) + SumChildren( CathedralCeiling:ChildAreaSum[4] )   else  UNCHANGED  endif  }
+	"Set Zone:ExtWallAreaByWallType[3] - concrete/CMU - add new Skylt area"	Zone:ExtWallAreaByWallType[3]	= {	if (ExtWallAreaByWallType[3] > ExtWallAreaByWallType[1] .AND. ExtWallAreaByWallType[3] > ExtWallAreaByWallType[2])
+																																					then  ExtWallAreaByWallType[3] + SumChildren( CathedralCeiling:ChildAreaSum[2] ) + SumChildren( CathedralCeiling:ChildAreaSum[4] )   else  UNCHANGED  endif  }
+	"Set Zone:ExtWallAreaByWallType[4] - total"					Zone:ExtWallAreaByWallType[4]			= {   ExtWallAreaByWallType[1] + ExtWallAreaByWallType[2] + ExtWallAreaByWallType[3]  }
+
+	"Set Zone:ExtWallWinAreaByWallType[1] - wood framed"		Zone:ExtWallWinAreaByWallType[1]		= {   SumChildren( ResExtWall:NewWinAreaByWallType[1] )  }
+	"Set Zone:ExtWallWinAreaByWallType[2] - steel framed"		Zone:ExtWallWinAreaByWallType[2]		= {   SumChildren( ResExtWall:NewWinAreaByWallType[2] )  }
+	"Set Zone:ExtWallWinAreaByWallType[3] - concrete/CMU"		Zone:ExtWallWinAreaByWallType[3]		= {   SumChildren( ResExtWall:NewWinAreaByWallType[3] )  }
+	"Set Zone:ExtWallWinAreaByWallType[4] - total"				Zone:ExtWallWinAreaByWallType[4] 	= {   ExtWallWinAreaByWallType[1] + ExtWallWinAreaByWallType[2] + ExtWallWinAreaByWallType[3]  }
+; JP 10/9/19 added the area of NEW Skylts to the windows (tic #877)
+	"Set Zone:ExtWallWinAreaByWallType[1] - wood framed - add new Skylt area"	Zone:ExtWallWinAreaByWallType[1]	= { if (ResProj:EnergyCodeYearNum = 2019 .AND. IfValidAnd( Proj:AnalysisVersion <= 190101 ))
+										then UNCHANGED else if (ExtWallAreaByWallType[1] >= ExtWallAreaByWallType[2] .AND. ExtWallAreaByWallType[1] >= ExtWallAreaByWallType[3])
+										then  ExtWallWinAreaByWallType[1] + SumChildren( CathedralCeiling:ChildAreaSum[2] ) + SumChildren( CathedralCeiling:ChildAreaSum[4] )   else  UNCHANGED  endif endif }
+	"Set Zone:ExtWallWinAreaByWallType[2] - steel framed - add new Skylt area"	Zone:ExtWallWinAreaByWallType[2]	= { if (ResProj:EnergyCodeYearNum = 2019 .AND. IfValidAnd( Proj:AnalysisVersion <= 190101 ))
+										then UNCHANGED else if (ExtWallAreaByWallType[2] > ExtWallAreaByWallType[1] .AND. ExtWallAreaByWallType[2] >= ExtWallAreaByWallType[3])
+										then  ExtWallWinAreaByWallType[2] + SumChildren( CathedralCeiling:ChildAreaSum[2] ) + SumChildren( CathedralCeiling:ChildAreaSum[4] )   else  UNCHANGED  endif  endif}
+	"Set Zone:ExtWallWinAreaByWallType[3] - concrete/CMU - add new Skylt area"	Zone:ExtWallWinAreaByWallType[3]	= { if (ResProj:EnergyCodeYearNum = 2019 .AND. IfValidAnd( Proj:AnalysisVersion <= 190101 ))
+										then UNCHANGED else if (ExtWallAreaByWallType[3] > ExtWallAreaByWallType[1] .AND. ExtWallAreaByWallType[3] > ExtWallAreaByWallType[2])
+										then  ExtWallWinAreaByWallType[3] + SumChildren( CathedralCeiling:ChildAreaSum[2] ) + SumChildren( CathedralCeiling:ChildAreaSum[4] )   else  UNCHANGED  endif  endif}
+  "Set Zone:ExtWallWinAreaByWallType[4] - total"	Zone:ExtWallWinAreaByWallType[4]			= {   ExtWallAreaByWallType[1] + ExtWallAreaByWallType[2] + ExtWallAreaByWallType[3]  }
+
+	"Set Zone:ExtWallDoorArea"											Zone:ExtWallDoorArea						= {   SumChildren( ResExtWall:TotDoorArea )  }
+	"Set Zone:ExtWallDoorAreaByWallType[1] - wood framed"		Zone:ExtWallDoorAreaByWallType[1]	= {   SumChildren( ResExtWall:DoorAreaByWallType[1] )  }
+	"Set Zone:ExtWallDoorAreaByWallType[2] - steel framed"	Zone:ExtWallDoorAreaByWallType[2]	= {   SumChildren( ResExtWall:DoorAreaByWallType[2] )  }
+	"Set Zone:ExtWallDoorAreaByWallType[3] - concrete/CMU"	Zone:ExtWallDoorAreaByWallType[3]	= {   SumChildren( ResExtWall:DoorAreaByWallType[3] )  }
+	"Set Zone:ExtWallDoorAreaByWallType[4] - total"				Zone:ExtWallDoorAreaByWallType[4] 	= {   ExtWallDoorAreaByWallType[1] + ExtWallDoorAreaByWallType[2] + ExtWallDoorAreaByWallType[3]  }
+  ; SAC 7/23/14 - adjust std wall area up to ensure adequate size to handle all New windows/doors (GC #329)
+	"Set Zone:ExtWallAreaByWallType[4] - rev if necessary"	Zone:ExtWallAreaByWallType[4]			= {   if (ExtWallAreaByWallType[4] >= (ExtWallWinAreaByWallType[4] + ExtWallDoorAreaByWallType[4] + SumChildren( CathedralCeiling:ChildAreaSum[2] ) + SumChildren( CathedralCeiling:ChildAreaSum[4] ) + 0.001))
+																																		then  UNCHANGED  else			  (ExtWallWinAreaByWallType[4] + ExtWallDoorAreaByWallType[4] + SumChildren( CathedralCeiling:ChildAreaSum[2] ) + SumChildren( CathedralCeiling:ChildAreaSum[4] ) + 0.001)   endif  }
+
+; SAC 9/19/19 - OtherZone rules (MFamProto)
+	"Set OtherZone:ExtWallAreaByWallType[1] - wood framed"		OtherZone:ExtWallAreaByWallType[1]		= {	SumChildren( ResExtWall:AreaByWallType[1]    )  }
+	"Set OtherZone:ExtWallAreaByWallType[2] - steel framed"		OtherZone:ExtWallAreaByWallType[2]		= {   SumChildren( ResExtWall:AreaByWallType[2]    )  }
+	"Set OtherZone:ExtWallAreaByWallType[3] - concrete/CMU"		OtherZone:ExtWallAreaByWallType[3]		= {   SumChildren( ResExtWall:AreaByWallType[3]    )  }
+  ; SAC 7/23/14 - added rules to sum into ExtWallArea.. the area of NEW Skylts (which will get modeled as windows in the std design) (GC #329)
+	"Set OtherZone:ExtWallAreaByWallType[1] - wood framed - add new Skylt area"	OtherZone:ExtWallAreaByWallType[1]	= {	if (ExtWallAreaByWallType[1] >= ExtWallAreaByWallType[2] .AND. ExtWallAreaByWallType[1] >= ExtWallAreaByWallType[3])
+																																					then  ExtWallAreaByWallType[1] + SumChildren( CathedralCeiling:ChildAreaSum[2] ) + SumChildren( CathedralCeiling:ChildAreaSum[4] )   else  UNCHANGED  endif  }
+	"Set OtherZone:ExtWallAreaByWallType[2] - steel framed - add new Skylt area"	OtherZone:ExtWallAreaByWallType[2]	= {	if (ExtWallAreaByWallType[2] > ExtWallAreaByWallType[1] .AND. ExtWallAreaByWallType[2] >= ExtWallAreaByWallType[3])
+																																					then  ExtWallAreaByWallType[2] + SumChildren( CathedralCeiling:ChildAreaSum[2] ) + SumChildren( CathedralCeiling:ChildAreaSum[4] )   else  UNCHANGED  endif  }
+	"Set OtherZone:ExtWallAreaByWallType[3] - concrete/CMU - add new Skylt area"	OtherZone:ExtWallAreaByWallType[3]	= {	if (ExtWallAreaByWallType[3] > ExtWallAreaByWallType[1] .AND. ExtWallAreaByWallType[3] > ExtWallAreaByWallType[2])
+																																					then  ExtWallAreaByWallType[3] + SumChildren( CathedralCeiling:ChildAreaSum[2] ) + SumChildren( CathedralCeiling:ChildAreaSum[4] )   else  UNCHANGED  endif  }
+	"Set OtherZone:ExtWallAreaByWallType[4] - total"				OtherZone:ExtWallAreaByWallType[4]		= {   ExtWallAreaByWallType[1] + ExtWallAreaByWallType[2] + ExtWallAreaByWallType[3]  }
+
+	"Set OtherZone:ExtWallWinAreaByWallType[1] - wood framed"	OtherZone:ExtWallWinAreaByWallType[1]	= {   SumChildren( ResExtWall:NewWinAreaByWallType[1] )  }
+	"Set OtherZone:ExtWallWinAreaByWallType[2] - steel framed"	OtherZone:ExtWallWinAreaByWallType[2]	= {   SumChildren( ResExtWall:NewWinAreaByWallType[2] )  }
+	"Set OtherZone:ExtWallWinAreaByWallType[3] - concrete/CMU"	OtherZone:ExtWallWinAreaByWallType[3]	= {   SumChildren( ResExtWall:NewWinAreaByWallType[3] )  }
+	"Set OtherZone:ExtWallWinAreaByWallType[4] - total"			OtherZone:ExtWallWinAreaByWallType[4] 	= {   ExtWallWinAreaByWallType[1] + ExtWallWinAreaByWallType[2] + ExtWallWinAreaByWallType[3]  }
+	"Set OtherZone:ExtWallDoorArea"										OtherZone:ExtWallDoorArea					= {   SumChildren( ResExtWall:TotDoorArea )  }
+	"Set OtherZone:ExtWallDoorAreaByWallType[1] - wood framed"	OtherZone:ExtWallDoorAreaByWallType[1]	= {   SumChildren( ResExtWall:DoorAreaByWallType[1] )  }
+	"Set OtherZone:ExtWallDoorAreaByWallType[2] - steel framed"	OtherZone:ExtWallDoorAreaByWallType[2]	= {   SumChildren( ResExtWall:DoorAreaByWallType[2] )  }
+	"Set OtherZone:ExtWallDoorAreaByWallType[3] - concrete/CMU"	OtherZone:ExtWallDoorAreaByWallType[3]	= {   SumChildren( ResExtWall:DoorAreaByWallType[3] )  }
+	"Set OtherZone:ExtWallDoorAreaByWallType[4] - total"			OtherZone:ExtWallDoorAreaByWallType[4] = {   ExtWallDoorAreaByWallType[1] + ExtWallDoorAreaByWallType[2] + ExtWallDoorAreaByWallType[3]  }
+  ; SAC 7/23/14 - adjust std wall area up to ensure adequate size to handle all New windows/doors (GC #329)
+	"Set OtherZone:ExtWallAreaByWallType[4] - rev if necessary"	OtherZone:ExtWallAreaByWallType[4]		= {   if (ExtWallAreaByWallType[4] >= (ExtWallWinAreaByWallType[4] + ExtWallDoorAreaByWallType[4] + SumChildren( CathedralCeiling:ChildAreaSum[2] ) + SumChildren( CathedralCeiling:ChildAreaSum[4] ) + 0.001))
+																																		then  UNCHANGED  else			  (ExtWallWinAreaByWallType[4] + ExtWallDoorAreaByWallType[4] + SumChildren( CathedralCeiling:ChildAreaSum[2] ) + SumChildren( CathedralCeiling:ChildAreaSum[4] ) + 0.001)   endif  }
+
+	"Set Garage:ExtWallAreaByWallType[1] - wood framed"		Garage:ExtWallAreaByWallType[1]     = {   SumChildren( ResExtWall:AreaByWallType[1]    )  }
+	"Set Garage:ExtWallAreaByWallType[2] - steel framed"		Garage:ExtWallAreaByWallType[2]     = {   SumChildren( ResExtWall:AreaByWallType[2]    )  }
+	"Set Garage:ExtWallAreaByWallType[3] - concrete/CMU"		Garage:ExtWallAreaByWallType[3]     = {   SumChildren( ResExtWall:AreaByWallType[3]    )  }
+	"Set Garage:ExtWallAreaByWallType[4] - total"				Garage:ExtWallAreaByWallType[4]     = {   ExtWallAreaByWallType[1] + ExtWallAreaByWallType[2] + ExtWallAreaByWallType[3]  }
+;	"Set Garage:ExtWallWinAreaByWallType[1] - wood framed"	Garage:ExtWallWinAreaByWallType[1]  = {   SumChildren( ResExtWall:WinAreaByWallType[1] )  }
+;	"Set Garage:ExtWallWinAreaByWallType[2] - steel framed"	Garage:ExtWallWinAreaByWallType[2]  = {   SumChildren( ResExtWall:WinAreaByWallType[2] )  }
+;	"Set Garage:ExtWallWinAreaByWallType[3] - concrete/CMU"	Garage:ExtWallWinAreaByWallType[3]  = {   SumChildren( ResExtWall:WinAreaByWallType[3] )  }
+	"Set Garage:ExtWallDoorAreaByWallType[1] - wood framed"	Garage:ExtWallDoorAreaByWallType[1] = {   SumChildren( ResExtWall:DoorAreaByWallType[1] )  }
+	"Set Garage:ExtWallDoorAreaByWallType[2] - steel framed"	Garage:ExtWallDoorAreaByWallType[2] = {   SumChildren( ResExtWall:DoorAreaByWallType[2] )  }
+	"Set Garage:ExtWallDoorAreaByWallType[3] - concrete/CMU"	Garage:ExtWallDoorAreaByWallType[3] = {   SumChildren( ResExtWall:DoorAreaByWallType[3] )  }
+	"Set Garage:ExtWallDoorAreaByWallType[4] - total"			Garage:ExtWallDoorAreaByWallType[4] = {   ExtWallDoorAreaByWallType[1] + ExtWallDoorAreaByWallType[2] + ExtWallDoorAreaByWallType[3]  }
+END
+;*************************************************************************
+
+
 ; SAC 10/22/14 - split out HERS/Special features rules out of 'Reporting_SummarizeModel' and into this new rulelist 'Reporting_HERS_SpecialFeaturesSummary'
 ;*************************************************************************
 RULELIST  "Reporting_HERS_SpecialFeaturesSummary" 1 0 0 0
