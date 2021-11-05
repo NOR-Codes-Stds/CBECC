@@ -107,6 +107,19 @@ END
 RULELIST "CSE_SimulationPrep" 1 0 0 1
 ;   Rules which are executed immediately prior to performing a CSE simulation
 ;*************************************************************************
+   "Eval either Res or Com CSE sim prep rules"  Proj:Action =
+      {  if (IsSFamResRuleset)
+         then  EvalRulelist( "CSE_SimulationPrep_Res" )
+         else if (ComponentCount( ResProj ) < 1 .OR. IfValidAnd( ResDwellUnits > 0 )==0)
+         then  EvalRulelist( "CSE_SimulationPrep_Com" )
+         else  EvalRulelist( "CSE_SimulationPrep_Res" )  endif endif  }
+END
+
+
+;*************************************************************************
+RULELIST "CSE_SimulationPrep_Res" 1 0 0 1
+;   Rules which are executed immediately prior to performing a CSE simulation
+;*************************************************************************
 
 ;"dbg" ResProj:Action = { PostMessageToLog( "in CSE_SimulationPrep rulelist for run %s, deleting some objects (now Including cseEXPORTFILEs)", ResProj:RunAbbrev ) }
 	"Blast all cseIZXFER components"						ResProj:Action	= {	DeleteAllComps( cseIZXFER )  }
@@ -119,11 +132,10 @@ RULELIST "CSE_SimulationPrep" 1 0 0 1
 
 
 	; Create meters for tracking electric and fuel use
-	"Create site-wide Elec meter"			Proj:CSE_ElecMETER		= {	if ( ResProj:Fuel_HaveElec < 0.5) then  UNDEFINED
-																							else  CreateComp( cseMETER, "MtrElec" )  endif  }
-	"Create site-wide NatGas meter"		Proj:CSE_NatGasMETER		= {	if ( ResProj:Fuel_HaveNatGas < 0.5) then  UNDEFINED
+	"Create site-wide Elec meter"			Proj:CSE_ElecMETER		= {	CreateComp( cseMETER, "MtrElec" )  }
+	"Create site-wide NatGas meter"		Proj:CSE_NatGasMETER		= {	if ( IfValidAnd( Fuel_HaveNatGas > 0.5 )==0) then  UNDEFINED
 																							else  CreateComp( cseMETER, "MtrNatGas" )  endif  }
-	"Create site-wide <other> meter"		Proj:CSE_OtherFuelMETER	= {	if ( ResProj:Fuel_HaveOther < 0.5) then  UNDEFINED
+	"Create site-wide <other> meter"		Proj:CSE_OtherFuelMETER	= {	if ( IfValidAnd( Fuel_HaveOther > 0.5 )==0) then  UNDEFINED
 																							else  CreateComp( cseMETER, "MtrOther" )  endif  }
 
 
@@ -376,11 +388,11 @@ RULELIST "CSE_SimulationPrep" 1 0 0 1
 	"Setup CSE Zones and Internal Gains data"		ResProj:Action	= {	EvalRulelist( "CSE_SimulationPrep_Zones_IntGains" )  }		; SAC 5/16/16
 
 ; SAC 4/14/16 - MOVED UP HERE from below so that DHWSYS objects in place to be referenced by gain objects during their setup
-	"Init ResProj:CSE_DHWSizingRunReqd"	ResProj:CSE_DHWSizingRunReqd	= {	0  }		; SAC 07/01/21
-	"Init ResProj:CSE_DHWPreRunReqd"	   ResProj:CSE_DHWPreRunReqd	   = {	0  }		; SAC 3/22/16
+	"Init Proj:CSE_DHWSizingRunReqd"	Proj:CSE_DHWSizingRunReqd	= {	0  }		; SAC 07/01/21
+	"Init Proj:CSE_DHWPreRunReqd"	   Proj:CSE_DHWPreRunReqd	   = {	0  }		; SAC 3/22/16
 	; Create and setup CSE DHW objects - SAC 7/6/15
    ; SAC 7/29/18 - removed all logic pertaining to DHWCalcMethod (related to transition from T24DHW DLLs to CSE)
-	"Setup CSE DHW objects"			ResProj:Action		= {	EvalRulelist( "CSE_SimulationPrep_DHW" )  }
+	"Setup CSE DHW objects"			Proj:Action		= {	EvalRulelist( "CSE_SimulationPrep_DHW" )  }
 
 	"Setup CSE Zones and Internal Gains data - part2"		ResProj:Action	= {	EvalRulelist( "CSE_SimulationPrep_Zones_IntGains_part2" )  }		; SAC 5/16/16
 
@@ -393,34 +405,41 @@ RULELIST "CSE_SimulationPrep" 1 0 0 1
 
 	; Create and setup CSE PVARRAY objects - SAC 1/27/16
 	; SAC 10/6/16 - allow PV sim regardless of *DesignRating* settings for 2019 analysis
-	"Delete all csePVARRAY objects"		      ResProj:Action = {  DeleteAllComps( csePVARRAY )  }
-   "Delete any/all PolyLp children of Proj"  ResProj:Action = {  DeleteChildren( PolyLp )  }    ; past UI-defined PVArray PolyLp objects - SAC 3/4/17
+	"Delete all csePVARRAY objects"		      Proj:Action = {  DeleteAllComps( csePVARRAY )  }
+   "Delete any/all PolyLp children of Proj"  Proj:Action = {  DeleteChildren( PolyLp )  }    ; past UI-defined PVArray PolyLp objects - SAC 3/4/17
    ; revised logic to include Std Design PV system for 2019+ codes - SAC 1/9/18   ; prevent generating PV inputs when setting PV results via scaling fixed results - SAC 7/16/20
-	"Setup CSE csePVARRAY objects"		      ResProj:Action	= {
-         if ( (EnergyCodeYearNum < 2019 .AND.
-               (IfValidAnd( AllowDesignRating > 0.5 )==0 .OR. IfValidAnd( DesignRatingCalcs > 0.5 )==0)) .OR.
-              IfValidAnd( PVWDCSysTotal > 0 )==0 )
+	"Setup CSE csePVARRAY objects"		      Proj:Action	= {
+         if ( IsSFamResRuleset .AND.
+              ( (IfValidAnd( ResProj:EnergyCodeYearNum >= 2019 )==0 .AND.
+                 (IfValidAnd( ResProj:AllowDesignRating > 0.5 )==0 .OR. IfValidAnd( ResProj:DesignRatingCalcs > 0.5 )==0)) .OR.
+                IfValidAnd( ResProj:PVWDCSysTotal > 0 )==0 ) )
          then  UNCHANGED
-         else if ((( ResProj:RunAbbrev == "s"  .OR. ResProj:RunAbbrev == "S" .OR. ResProj:RunAbbrev == "smf") .AND. EnergyCodeYearNum < 2019) .OR.
+         else if ( IsComRuleset .AND.
+                   ( EngyCodeYearNum < 2019 .OR. SumAll( PVArray:DCSysSize ) < 0.1 ) )
+         then  UNCHANGED
+         else if ((( ResProj:RunAbbrev == "s"  .OR. ResProj:RunAbbrev == "S" .OR. ResProj:RunAbbrev == "smf") .AND. IfValidAnd( ResProj:EnergyCodeYearNum < 2019 )) .OR.
                     ResProj:RunAbbrev == "dr" .OR. ResProj:RunAbbrev == "DR")
          then  UNCHANGED		; prevent PVARRAY in std (<2019) and design rtg runs
          else if ( ResProj:RunAbbrev != "s" .AND. ResProj:RunAbbrev != "S" .AND. ResProj:RunAbbrev != "smf" .AND.
-                  CommunitySolarProjID > 0 .AND. CommunitySolarSim == 0) then  UNCHANGED
-         else	EvalRulelist( "CSE_SimulationPrep_PV" )  endif endif endif  }
-
+                   IfValidAnd( CommunitySolarProjID > 0 ) .AND. IfValidAnd( CommunitySolarSim == 0 )) then  UNCHANGED
+         else	EvalRulelist( "CSE_SimulationPrep_PV" )  endif endif endif endif  }
 
    ; Create and setup CSE BATTERY object - SAC 12/14/16
-   "Delete all cseBATTERY objects"         ResProj:Action = {  DeleteAllComps( cseBATTERY )  }
-   "Delete CSE IMPORTFILE object used to support simulation of battery control"  ResProj:BattCtrlImportFile  = {
+   "Delete all cseBATTERY objects"         Proj:Action = {  DeleteAllComps( cseBATTERY )  }
+   "Delete CSE IMPORTFILE object used to support simulation of battery control"  Proj:BattCtrlImportFile  = {
          if (LocalCompAssigned( BattCtrlImportFile )) then  DeleteComp()  else  UNCHANGED  endif  }
    ; SAC 4/28/17 - revised logic to enable battery simulation in 2016 runs
-   "Create and setup cseBATTERY object"   ResProj:Action = {
-         if ( IfValidAnd( PVWDCSysTotal > 0 )==0 .OR. IfValidAnd( SimulateBattery > 0 )==0 )
+   "Create and setup cseBATTERY object"   Proj:Action = {
+         if ( Proj:IsSFamResRuleset .AND.
+              ( IfValidAnd( ResProj:PVWDCSysTotal > 0 )==0 .OR. IfValidAnd( SimulateBattery > 0 )==0 ) )
+         then  UNCHANGED
+         else if ( Proj:IsComRuleset .AND.
+                   ( ComponentCount( csePVARRAY ) < 1 .OR. SumAll( Batt:MaxCap ) < 0.1 ) )
          then  UNCHANGED
          else if ( ResProj:RunAbbrev == "s"  .OR. ResProj:RunAbbrev == "S" .OR. ResProj:RunAbbrev == "smf" .OR.
                   ResProj:RunAbbrev == "dr" .OR. ResProj:RunAbbrev == "DR")
          then  UNCHANGED      ; prevent BATTERY in std and design rtg runs (??)
-         else  EvalRulelist( "CSE_SimulationPrep_Battery" )  endif endif  }
+         else  EvalRulelist( "CSE_SimulationPrep_Battery" )  endif endif endif  }
 
    "Clear and setup Shade objects"     Proj:Action =
       {  if (IsSFamResRuleset)
@@ -629,7 +648,7 @@ END
 ;*************************************************************************
 RULELIST "CSE_Defaulting_Project" 1 0 0 1
 ;*************************************************************************
-	"Create cseTOP component (if none exists)"	ResProj:Action = {	if (ComponentCount( cseTOP ) > 0) then  UNCHANGED
+	"Create cseTOP component (if none exists)"	Proj:Action = {	if (ComponentCount( cseTOP ) > 0) then  UNCHANGED
 																						else  CreateComp( cseTOP, "CSE run" )  endif  }
 
 	"Default cseTOP:repHdrL"		cseTOP:repHdrL	= {	if (strlen( Global( Proj:RunTitle ) ) > 0) then  Global( Proj:RunTitle )
@@ -820,9 +839,9 @@ RULELIST "CSE_Defaulting_Project" 1 0 0 1
 	"Set Proj:CSE_DefineString[20]"	Proj:CSE_DefineString[20]	= { "hourval( 0.018, 0.010, 0.009, 0.008, 0.015, 0.023, 0.026, 0.047, 0.077, 0.083, 0.074, 0.061, 0.051, 0.043, 0.039, 0.039, 0.052, 0.058, 0.056, 0.052, 0.047, 0.044, 0.040, 0.028 )" }
 
 	; DHW use #define values 21-33 - left undefined if not using new DHW use profiles - SAC 3/15/16
-	"Set Proj:CSE_Define*[21-33] depending on DHW Use mechanism"		ResProj:Action	= {
-														if (CSEDHWUseMethod == 1)	then	EvalRulelist( "CSE_BlastDHWUseInclude" )
-																							else	EvalRulelist( "CSE_SetDHWUseInclude"   )  endif  }
+	"Set Proj:CSE_Define*[21-33] depending on DHW Use mechanism"		ResProj:Action	= {   EvalRulelist( "CSE_SetDHWUseInclude"   )  }
+									;					if (CSEDHWUseMethod == 1)	then	EvalRulelist( "CSE_BlastDHWUseInclude" )
+									;														else	EvalRulelist( "CSE_SetDHWUseInclude"   )  endif  }
 
 	; Internal Gains #define values 34-60 - left undefined for IntGainsMethod < 2016 - SAC 4/13/16
 	"Set Proj:CSE_Define*[34-60] depending on IntGainsMethod"		ResProj:Action	= {
