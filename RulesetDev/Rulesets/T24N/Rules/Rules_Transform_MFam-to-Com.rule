@@ -48,10 +48,10 @@ RULELIST  "Transform_ResConsAssm_to_ConsAssm_TESTING" 1 0 1 0
       {  if (LocalCompAssigned( MatchingConsAssmRef ) > 0) then  UNCHANGED
          else  EvalRulelist( "Transform_ResConsAssm_to_ConsAssm", 1 )  endif  } 
 
-   "Eval Transform_ResMat_to_Mat on every Mat object w/ MatchingResMatRef assigned"    Mat:Action  =
-      {  if (LocalCompAssigned( MatchingResMatRef ) > 0)
-         then  EvalRulelist( "Transform_ResMat_to_Mat", 1 )
-         else  UNCHANGED  endif  }
+;   "Eval Transform_ResMat_to_Mat on every Mat object w/ MatchingResMatRef assigned"    Mat:Action  =
+;      {  if (LocalCompAssigned( MatchingResMatRef ) > 0)
+;         then  EvalRulelist( "Transform_ResMat_to_Mat", 1 )
+;         else  UNCHANGED  endif  }
 
    "Evaluate normal defaulting rules"     Proj:Action = {  EvalRulelist( "rl_DEFAULT" )  }
 
@@ -67,37 +67,71 @@ RULELIST  "Transform_ResConsAssm_to_ConsAssm" 1 0 1 0
 ;   to (layer-by-layer) ConsAssm (and subordinate Mats) for simulation in E+
 ;*************************************************************************
 
-   "Create ConsAssm to store data matching this ResConsAssm"   ResConsAssm:MatchingConsAssmRef  =
+"dbg" ResConsAssm:Action = { PostMessageToLog( "   processing 'Transform_ResConsAssm_to_ConsAssm' on ResConsAssm '%s'", Name ) }
+
+   "Create ConsAssm matching this ResConsAssm"              ResConsAssm:MatchingConsAssmRef  =
       {  CreateComp( ConsAssm, Name + "-com" )  }
+   "Set cross-reference from ConsAssm to this ResConsAssm"  ResConsAssm:MatchingConsAssmRef:MatchingResConsAssmRef  = {  Name  }
 
-
+   ;"Create Mat layer consistent w/ ResConsAssm:(Cavity/Frame)PathMats[*]"  for:#Lyr=(1to10)
+   ;   ResConsAssm:CavityPathMats[#Lyr]:MatchingMatRef  =
    "Create Mat layer consistent w/ ResConsAssm:(Cavity/Frame)PathMats[*]"  for:#Lyr=(1to10)
-      ResConsAssm:CavityPathMats[#Lyr]:MatchingMatRef  =
+      ResConsAssm:MatchingConsAssmRef:MatRef[#Lyr]  =
          {  if (NumLayerMats < #Lyr .OR. LocalCompAssigned( CavityPathMats[#Lyr]:MatchingMatRef ) > 0)
             then  UNCHANGED   ; non-existent layer or already transformed
+            else if (IfValidAnd( NumPaths = 1 ) .AND. LocalCompAssigned( CavityPathMats[#Lyr] ))
+            then  if (IfValidAnd( CavityPathMats[#Lyr]:Thickness > 0 ))
+                  then  AssignOrCreateComp( Mat, CavityPathMats[#Lyr]:Name + "-com",
+											"ThrmlCndct", CavityPathMats[#Lyr]:Conductivity, "SpecHt", CavityPathMats[#Lyr]:SpecHeat,
+                                 "Dens",       CavityPathMats[#Lyr]:Density,      "Thkns",  CavityPathMats[#Lyr]:Thickness )
+                  else  AssignOrCreateComp( Mat, Format( "%s-thck%sin-com", CavityPathMats[#Lyr]:Name, FltToStr( Thickness[#Lyr], 1, 1, 0, 1 ) ),
+											"ThrmlCndct", CavityPathMats[#Lyr]:Conductivity, "SpecHt", CavityPathMats[#Lyr]:SpecHeat,
+                                 "Dens",       CavityPathMats[#Lyr]:Density,      "Thkns",  Thickness[#Lyr] )
+                  endif
             else if (IfValidAnd( NumPaths = 2 ) .AND. IfValidAnd( CavityPathMats[#Lyr] = FramePathMats[#Lyr] ))
-            then  CreateComp( Mat, CavityPathMats[#Lyr]:Name + "-com" )
-            else  UNCHANGED    ; could be cavity/frame layer...
-            endif endif  }
-   "Set ResMat->Mat reference to facilitate defaulting"  for:#Lyr=(1to10)
-      ResConsAssm:CavityPathMats[#Lyr]:MatchingMatRef:MatchingResMatRef  =
-         {  if (NumLayerMats < #Lyr .OR. LocalCompAssigned( CavityPathMats[#Lyr]:MatchingMatRef ) > 0)
-            then  UNCHANGED   ; non-existent layer or already transformed
-            else if (IfValidAnd( CavityPathMats[#Lyr] = FramePathMats[#Lyr] ))
-            then  CavityPathMats[#Lyr]:Name
-            else  UNCHANGED 
-            endif endif  }
+            then  if (IfValidAnd( CavityPathMats[#Lyr]:Thickness > 0 ))
+                  then  AssignOrCreateComp( Mat, CavityPathMats[#Lyr]:Name + "-com",
+											"ThrmlCndct", CavityPathMats[#Lyr]:Conductivity, "SpecHt", CavityPathMats[#Lyr]:SpecHeat,
+                                 "Dens",       CavityPathMats[#Lyr]:Density,      "Thkns",  CavityPathMats[#Lyr]:Thickness )
+                  else  AssignOrCreateComp( Mat, Format( "%s-thck%sin-com", CavityPathMats[#Lyr]:Name, FltToStr( Thickness[#Lyr], 1, 1, 0, 1 ) ),
+											"ThrmlCndct", CavityPathMats[#Lyr]:Conductivity, "SpecHt", CavityPathMats[#Lyr]:SpecHeat,
+                                 "Dens",       CavityPathMats[#Lyr]:Density,      "Thkns",  Thickness[#Lyr] )
+                  endif
+            else if (IfValidAnd( NumPaths = 2 ) .AND. IfValidAnd( FrameCavityLayerMat[1] = #Lyr ))
+            then  CreateComp( Mat, Name + "-cav/frm1-com" )    ; this layer is combo of cavity & frame layer #1
+
+            else if (IfValidAnd( NumPaths = 2 ) .AND. IfValidAnd( FrameCavityLayerMat[2] = #Lyr ))
+            then  CreateComp( Mat, Name + "-cav/frm2-com" )    ; this layer is combo of cavity & frame layer #2
+            else  UNCHANGED    ; error??
+            endif endif endif endif endif  }
+
+   "Set Mat layer CodeCat for FrameCavityLayerMat[*]"  for:#Lyr=(1to10)  for:#FCLyr=(1to2)
+      ResConsAssm:MatchingConsAssmRef:MatRef[#Lyr]:CodeCat  =
+         {  if (NumLayerMats < #Lyr .OR. IfValidAnd( NumPaths = 1 )) then  UNCHANGED 
+            else if (IfValidAnd( NumPaths = 2 ) .AND. IfValidAnd( FrameCavityLayerMat[#FCLyr] = #Lyr ))
+            then  "Composite"
+            else  UNCHANGED  endif endif  }
 
 
-;  RULE NEW ResConsAssm:MatchingCavFrmMatRef
-;  
-;  
-;     MaterialLibItem = PDef: "none"  (0)
-;     CavityPathMats[1] = RVal: "Gypsum Board-2"
-;     CavityPathMats[3] = RVal: "Concrete"
-;     FramePathMats[2] = RVal: "SoftWood-2"
-;     NumLayerMats = RVal: 3
-;     FrameLayerMapIdx[1] = RVal: 2
+
+;      <Mat>
+;        <Name>Stucco - 7/8 in.</Name>
+;        <RVal>0.18</RVal>
+;        <ThrmlCndct>0.405</ThrmlCndct>
+;        <SpecHt>0.2</SpecHt>
+;        <Dens>115.81</Dens>
+;        <Thkns>0.88</Thkns>
+;      </Mat>
+
+
+;   "Set ResMat->Mat reference to facilitate defaulting"  for:#Lyr=(1to10)
+;      ResConsAssm:CavityPathMats[#Lyr]:MatchingMatRef:MatchingResMatRef  =
+;         {  if (NumLayerMats < #Lyr .OR. LocalCompAssigned( CavityPathMats[#Lyr]:MatchingMatRef ) > 0)
+;            then  UNCHANGED   ; non-existent layer or already transformed
+;            else if (IfValidAnd( CavityPathMats[#Lyr] = FramePathMats[#Lyr] ))
+;            then  CavityPathMats[#Lyr]:MatchingMatRef:Name
+;            else  UNCHANGED 
+;            endif endif  }
 
 
 
