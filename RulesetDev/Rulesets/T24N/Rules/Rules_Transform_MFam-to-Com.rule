@@ -50,11 +50,13 @@ RULELIST  "Transform_ResConsAssm_to_ConsAssm_TESTING" 1 0 1 0
 
 ;   "Eval Transform_ResMat_to_Mat on every Mat object w/ MatchingResMatRef assigned"    Mat:Action  =
 ;      {  if (LocalCompAssigned( MatchingResMatRef ) > 0)
-;         then  EvalRulelist( "Transform_ResMat_to_Mat", 1 )
+;         then  if (IfValidAnd( ResMatMapping = 1 ))   ; Properties
+;               then  EvalRulelist( "Transform_ResMat_to_Mat_Properties", 1 )
+;               else  UNCHANGED  endif
 ;         else  UNCHANGED  endif  }
 
-;   "store BEMProc details file for comparison"  Proj:Action = {  StoreBEMProc( "after1 ResConsAssm_to_ConsAssm", 0 )  }
-;   "Evaluate normal defaulting rules"     Proj:Action = {  EvalRulelist( "rl_DEFAULT" )  }
+   "store BEMProc details file for comparison"  Proj:Action = {  StoreBEMProc( "after1 ResConsAssm_to_ConsAssm", 0 )  }
+   "Evaluate normal defaulting rules"     Proj:Action = {  EvalRulelist( "rl_DEFAULT" )  }
 
    "store BEMProc details file for comparison"  Proj:Action = {  StoreBEMProc( "after2 ResConsAssm_to_ConsAssm", 0 )  }
 
@@ -80,38 +82,92 @@ RULELIST  "Transform_ResConsAssm_to_ConsAssm" 1 0 1 0
       ResConsAssm:MatchingConsAssmRef:MatRef[#Lyr]  =
          {  if (NumLayerMats < #Lyr .OR. LocalCompAssigned( CavityPathMats[#Lyr]:MatchingMatRef ) > 0)
             then  UNCHANGED   ; non-existent layer or already transformed
-            else if (IfValidAnd( NumPaths = 1 ) .AND. LocalCompAssigned( CavityPathMats[#Lyr] ))
-            then  if (IfValidAnd( CavityPathMats[#Lyr]:Thickness > 0 ))
-                  then  AssignOrCreateComp( Mat, CavityPathMats[#Lyr]:Name + "-com",
-											"ThrmlCndct", CavityPathMats[#Lyr]:Conductivity, "SpecHt", CavityPathMats[#Lyr]:SpecHeat,
-                                 "Dens",       CavityPathMats[#Lyr]:Density,      "Thkns",  CavityPathMats[#Lyr]:Thickness )
-                  else  AssignOrCreateComp( Mat, Format( "%s-thck%sin-com", CavityPathMats[#Lyr]:Name, FltToStr( Thickness[#Lyr], 1, 1, 0, 1 ) ),
-											"ThrmlCndct", CavityPathMats[#Lyr]:Conductivity, "SpecHt", CavityPathMats[#Lyr]:SpecHeat,
-                                 "Dens",       CavityPathMats[#Lyr]:Density,      "Thkns",  Thickness[#Lyr] )
-                  endif
-            else if (IfValidAnd( NumPaths = 2 ) .AND. IfValidAnd( CavityPathMats[#Lyr] = FramePathMats[#Lyr] ))
-            then  if (IfValidAnd( CavityPathMats[#Lyr]:Thickness > 0 ))
-                  then  AssignOrCreateComp( Mat, CavityPathMats[#Lyr]:Name + "-com",
-											"ThrmlCndct", CavityPathMats[#Lyr]:Conductivity, "SpecHt", CavityPathMats[#Lyr]:SpecHeat,
-                                 "Dens",       CavityPathMats[#Lyr]:Density,      "Thkns",  CavityPathMats[#Lyr]:Thickness )
-                  else  AssignOrCreateComp( Mat, Format( "%s-thck%sin-com", CavityPathMats[#Lyr]:Name, FltToStr( Thickness[#Lyr], 1, 1, 0, 1 ) ),
-											"ThrmlCndct", CavityPathMats[#Lyr]:Conductivity, "SpecHt", CavityPathMats[#Lyr]:SpecHeat,
-                                 "Dens",       CavityPathMats[#Lyr]:Density,      "Thkns",  Thickness[#Lyr] )
-                  endif
+            else if ( ( IfValidAnd( NumPaths = 1 ) .AND. LocalCompAssigned( CavityPathMats[#Lyr] ) .AND.
+                        IfValidAnd( FrameCavityLayerMat[1] = #Lyr )==0 .AND.
+                        IfValidAnd( FrameCavityLayerMat[2] = #Lyr )==0 ) .OR.
+                      ( IfValidAnd( NumPaths = 2 ) .AND. IfValidAnd( CavityPathMats[#Lyr] = FramePathMats[#Lyr] ) ) )            
+            then  ; DEFINE MAT BASED ON CavityPathMats[#Lyr]
+                  if (IfValidAnd( CavityPathMats[#Lyr]:Thickness > 0 ))
+                  then  if (IfValidAnd( CavityPathMats[#Lyr]:RValPerInch > 0 ))
+                        then  AssignOrCreateComp( Mat, CavityPathMats[#Lyr]:Name + "-com",
+                                 "CodeCat", "Specify Properties",  "UserRVal", (CavityPathMats[#Lyr]:Thickness * CavityPathMats[#Lyr]:RValPerInch),
+											"UserThrmlCndct", CavityPathMats[#Lyr]:Conductivity, "UserSpecHt", CavityPathMats[#Lyr]:SpecHeat,
+                                 "UserDens",       CavityPathMats[#Lyr]:Density,      "UserThkns",  CavityPathMats[#Lyr]:Thickness )
+                        else if (IfValidAnd( CavityPathMats[#Lyr]:Resistance > 0 ))
+                        then  AssignOrCreateComp( Mat, CavityPathMats[#Lyr]:Name + "-com",
+                                 "CodeCat", "Specify Properties",  "UserRVal", CavityPathMats[#Lyr]:Resistance,
+											"UserThrmlCndct", CavityPathMats[#Lyr]:Conductivity, "UserSpecHt", CavityPathMats[#Lyr]:SpecHeat,
+                                 "UserDens",       CavityPathMats[#Lyr]:Density,      "UserThkns",  CavityPathMats[#Lyr]:Thickness )
+                        else  AssignOrCreateComp( Mat, CavityPathMats[#Lyr]:Name + "-com",
+                                 "CodeCat", "Specify Properties",
+											"UserThrmlCndct", CavityPathMats[#Lyr]:Conductivity, "UserSpecHt", CavityPathMats[#Lyr]:SpecHeat,
+                                 "UserDens",       CavityPathMats[#Lyr]:Density,      "UserThkns",  CavityPathMats[#Lyr]:Thickness )   endif endif
+                  else if (IfValidAnd( Thickness[#Lyr] > 0 ))
+                  then  if (IfValidAnd( CavityPathMats[#Lyr]:RValPerInch > 0 ))
+                        then  AssignOrCreateComp( Mat, Format( "%s-thck%sin-com", CavityPathMats[#Lyr]:Name, FltToStr( Thickness[#Lyr], 1, 1, 0, 1 ) ),
+                                 "CodeCat", "Specify Properties",  "UserRVal", (Thickness[#Lyr] * CavityPathMats[#Lyr]:RValPerInch),
+											"UserThrmlCndct", CavityPathMats[#Lyr]:Conductivity, "UserSpecHt", CavityPathMats[#Lyr]:SpecHeat,
+                                 "UserDens",       CavityPathMats[#Lyr]:Density,      "UserThkns",  Thickness[#Lyr] )
+                        else if (IfValidAnd( CavityPathMats[#Lyr]:Resistance > 0 ))
+                        then  AssignOrCreateComp( Mat, Format( "%s-thck%sin-com", CavityPathMats[#Lyr]:Name, FltToStr( Thickness[#Lyr], 1, 1, 0, 1 ) ),
+                                 "CodeCat", "Specify Properties",  "UserRVal", CavityPathMats[#Lyr]:Resistance,
+											"UserThrmlCndct", CavityPathMats[#Lyr]:Conductivity, "UserSpecHt", CavityPathMats[#Lyr]:SpecHeat,
+                                 "UserDens",       CavityPathMats[#Lyr]:Density,      "UserThkns",  Thickness[#Lyr] )
+                        else  AssignOrCreateComp( Mat, Format( "%s-thck%sin-com", CavityPathMats[#Lyr]:Name, FltToStr( Thickness[#Lyr], 1, 1, 0, 1 ) ),
+                                 "CodeCat", "Specify Properties",
+											"UserThrmlCndct", CavityPathMats[#Lyr]:Conductivity, "UserSpecHt", CavityPathMats[#Lyr]:SpecHeat,
+                                 "UserDens",       CavityPathMats[#Lyr]:Density,      "UserThkns",  Thickness[#Lyr] )   endif endif
+                  else  UNCHANGED  ; error - no thickness defined, either in the ResMat or ResConsAssm[layer]
+                  endif endif
             else if (IfValidAnd( NumPaths = 2 ) .AND. IfValidAnd( FrameCavityLayerMat[1] = #Lyr ))
             then  CreateComp( Mat, Name + "-cav/frm1-com" )    ; this layer is combo of cavity & frame layer #1
-
             else if (IfValidAnd( NumPaths = 2 ) .AND. IfValidAnd( FrameCavityLayerMat[2] = #Lyr ))
             then  CreateComp( Mat, Name + "-cav/frm2-com" )    ; this layer is combo of cavity & frame layer #2
+            else if (IfValidAnd( NumPaths = 1 ) .AND. IfValidAnd( FrameCavityLayerMat[1] = #Lyr ))
+            then  CreateComp( Mat, Name + "-ins/fur1-com" )    ; this layer is combo of insulation & furring layer #1
+            else if (IfValidAnd( NumPaths = 1 ) .AND. IfValidAnd( FrameCavityLayerMat[2] = #Lyr ))
+            then  CreateComp( Mat, Name + "-ins/fur2-com" )    ; this layer is combo of insulation & furring layer #2
             else  UNCHANGED    ; error??
+            endif endif endif endif endif endif  }
+
+   "Set Mat layer ResMatMapping for FrameCavityLayerMat[*]"  for:#Lyr=(1to10)
+      ResConsAssm:MatchingConsAssmRef:MatRef[#Lyr]:ResMatMapping  =
+         {  if (NumLayerMats < #Lyr) then  UNCHANGED 
+            else if (IfValidAnd( NumPaths = 2 ) .AND. IfValidAnd( FrameCavityLayerMat[1] = #Lyr ))
+            then  "FrameCavity1"
+            else if (IfValidAnd( NumPaths = 2 ) .AND. IfValidAnd( FrameCavityLayerMat[2] = #Lyr ))
+            then  "FrameCavity2"
+            else if (IfValidAnd( NumPaths = 1 ) .AND. IfValidAnd( FrameCavityLayerMat[1] = #Lyr ))
+            then  "FurringInsul1"
+            else if (IfValidAnd( NumPaths = 1 ) .AND. IfValidAnd( FrameCavityLayerMat[2] = #Lyr ))
+            then  "FurringInsul2"
+            else  "Properties"
             endif endif endif endif endif  }
 
-   "Set Mat layer CodeCat for FrameCavityLayerMat[*]"  for:#Lyr=(1to10)  for:#FCLyr=(1to2)
+   "Set Mat layer CodeCat for FrameCavityLayerMat[*]"  for:#Lyr=(1to10)
       ResConsAssm:MatchingConsAssmRef:MatRef[#Lyr]:CodeCat  =
-         {  if (NumLayerMats < #Lyr .OR. IfValidAnd( NumPaths = 1 )) then  UNCHANGED 
-            else if (IfValidAnd( NumPaths = 2 ) .AND. IfValidAnd( FrameCavityLayerMat[#FCLyr] = #Lyr ))
-            then  "Composite"
-            else  UNCHANGED  endif endif  }
+         {  switch (EnumString( MatchingConsAssmRef:MatRef[#Lyr]:ResMatMapping ))
+               case  "Properties"    :  "Specify Properties"
+               case  "FrameCavity1"  :  "Composite"
+               case  "FrameCavity2"  :  "Composite"
+               case  "FurringInsul1" :  "Composite"      ; ???
+               case  "FurringInsul2" :  "Composite"      ; ???
+               default  :  UNCHANGED  ; error?
+            endswitch  }
+; HOW TO HANDLE CONCRETE constructions w/ wood furring??  Like Composite or some other (non-properties) method?
+
+
+; Concrete Insul/Furring layer
+;	"Set Cons:FrameCavityLayerMat[1]"	Cons:FrameCavityLayerMat[1]	= {	if (Furring2Layer < 1 .AND. (FurringInsul2Layer < 1 .OR. FurringInsul2Layer == 100401 .OR.
+;                                                                                       (FurringInsul2Layer == 900 .AND. IfValidAnd( FurringInsul2LayerRVal > 0 )==0))) then  0
+;																									else if (InsideFinishLayer > 0.1) then  2
+;																									else  1  endif endif  }
+;	"Set Cons:FrameCavityLayerMat[2]"	Cons:FrameCavityLayerMat[2]	= {	if (FurringLayer < 1 .AND. (FurringInsulLayer < 1 .OR. FurringInsulLayer == 100401 .OR.
+;                                                                                      (FurringInsulLayer == 900 .AND. IfValidAnd( FurringInsulLayerRVal > 0 )==0))) then  0
+;																									else if (InsideFinishLayer > 0.1 .AND. FrameCavityLayerMat[1] > 0) then  4
+;																									else if (InsideFinishLayer > 0.1 .OR.  FrameCavityLayerMat[1] > 0) then  3
+;																									else  2  endif endif endif  }
+
 
 
 ; RJH experimentation starts HERE
@@ -755,14 +811,39 @@ END
 
 
 ;*************************************************************************
-RULELIST  "Transform_ResMat_to_Mat" 1 0 1 0
+RULELIST  "Transform_ResMat_to_Mat_Properties" 1 0 1 0
 ;   Rules to transform a fully defaulted ResMat object
 ;   to (Com) Mat for simulation in E+
 ;*************************************************************************
 
-   "Set Mat:ThrmlCndct"    Mat:ThrmlCndct  =
+;   Mat:CodeCat  should already be set to  "Specify Properties"
+
+   "Set Mat:UserRVal"          Mat:UserRVal  =
+      {  if (IfValidAnd( MatchingResMatRef:Thickness   > 0 ) .AND.
+             IfValidAnd( MatchingResMatRef:RValPerInch > 0 ))
+         then  MatchingResMatRef:Thickness * MatchingResMatRef:RValPerInch
+         else if (IfValidAnd( MatchingResMatRef:Resistance > 0 ))
+         then  MatchingResMatRef:Resistance
+         else  UNCHANGED  endif endif  }
+
+   "Set Mat:UserThrmlCndct"    Mat:UserThrmlCndct  =
       {  if (IfValidAnd( MatchingResMatRef:Conductivity > 0 ))
          then  MatchingResMatRef:Conductivity
+         else  UNCHANGED  endif  }
+
+   "Set Mat:UserSpecHt"       Mat:UserSpecHt  =
+      {  if (IfValidAnd( MatchingResMatRef:SpecHeat > 0 ))
+         then  MatchingResMatRef:SpecHeat
+         else  UNCHANGED  endif  }
+
+   "Set Mat:UserDens"         Mat:UserDens  =
+      {  if (IfValidAnd( MatchingResMatRef:Density > 0 ))
+         then  MatchingResMatRef:Density
+         else  UNCHANGED  endif  }
+
+   "Set Mat:UserThkns"        Mat:UserThkns  =
+      {  if (IfValidAnd( MatchingResMatRef:Thickness > 0 ))
+         then  MatchingResMatRef:Thickness
          else  UNCHANGED  endif  }
 
 
