@@ -1,7 +1,7 @@
 echo off
   echo --------------------------------------------
   echo Compiling 2022 ruleset...
-BEMCompiler19r.exe --bemBaseTxt="../RulesetDev/Rulesets/CA Res/CAR13 BEMBase.txt" --bemEnumsTxt="../RulesetDev/Rulesets/CA Res/CAR22 BEMEnums.txt" --bemBaseBin="Data/Rulesets/CA Res 2022/CAR22 BEMBase.bin" --rulesTxt="../RulesetDev/Rulesets/CA Res/Rules/Rules-2022.txt" --rulesBin="Data/Rulesets/CA Res 2022.bin" --rulesLog="../RulesetDev/Rulesets/CA Res/Rules/Rules-2022 Log.out" --compileDM --compileRules
+BEMCompiler22r.exe --bemBaseTxt="../RulesetDev/Rulesets/CA Res/CAR13 BEMBase.txt" --bemEnumsTxt="../RulesetDev/Rulesets/CA Res/CAR22 BEMEnums.txt" --bemBaseBin="Data/Rulesets/CA Res 2022/CAR22 BEMBase.bin" --rulesTxt="../RulesetDev/Rulesets/CA Res/Rules/Rules-2022.txt" --rulesBin="Data/Rulesets/CA Res 2022.bin" --rulesLog="../RulesetDev/Rulesets/CA Res/Rules/Rules-2022 Log.out" --compileDM --compileRules
 echo BEMCompiler19r.exe returned (%ERRORLEVEL%) for CA Res 2022
 if %ERRORLEVEL%==0 goto :copyfiles2
 goto :error2
