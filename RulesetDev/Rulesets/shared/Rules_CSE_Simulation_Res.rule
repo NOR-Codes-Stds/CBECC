@@ -116,6 +116,11 @@ RULELIST "CSE_SimulationPrep" 1 0 0 1
 END
 
 
+; new additions to split CSE simulations between (all minus PV-Batt) vs. (PV-batt only)
+;   Proj:CSE_ExcludePVBattFromSim - Flag indicating PV & Battery should be EXCLUDED from simulation   ; SAC 01/12/22 (MFam)
+;   Proj:CSE_SimPVBattOnly        - Flag indicating simulation should include ONLY PV & Battery       ; SAC 01/12/22 (MFam)
+
+
 ;*************************************************************************
 RULELIST "CSE_SimulationPrep_Res" 1 0 0 1
 ;   Rules which are executed immediately prior to performing a CSE simulation
@@ -128,11 +133,311 @@ RULELIST "CSE_SimulationPrep_Res" 1 0 0 1
 
 	"Perform CSE simulation engine defaulting"		ResProj:Action = {	EvalRulelist( "CSE_Defaulting_Project" )  }
 
-	"Setup CSE Construction/Layers/Materials data"	ResProj:Action	= {	EvalRulelist( "CSE_SimulationPrep_Cons" )  }		; SAC 5/16/16
-
+	"Setup CSE Construction/Layers/Materials data"	ResProj:Action	=
+      {  if (IfValidAnd( Proj:CSE_SimPVBattOnly > 0 )) then  UNCHANGED
+         else  EvalRulelist( "CSE_SimulationPrep_Cons" )  endif  }		; SAC 5/16/16
 
 	; Create meters for tracking electric and fuel use
 	"Create site-wide Elec meter"			Proj:CSE_ElecMETER		= {	CreateComp( cseMETER, "MtrElec" )  }
+
+   "call subordinate rulelist to setup most DHW, zone & HVAC objects, if not simulating only PV & Battery"     Proj:Action =     ; SAC 01/12/22
+      {  if (IfValidAnd( CSE_SimPVBattOnly > 0 )) then  UNCHANGED
+         else  EvalRulelist( "CSE_SimulationPrep_DHW_Zones_HVAC" )  endif  }
+
+   ; clear out existing CSE PV/Battery objects
+	"Delete all csePVARRAY objects"		      Proj:Action = {  DeleteAllComps( csePVARRAY )  }
+   "Delete any/all PolyLp children of Proj"  Proj:Action = {  DeleteChildren( PolyLp )  }    ; past UI-defined PVArray PolyLp objects - SAC 3/4/17
+   "Delete all cseBATTERY objects"         Proj:Action = {  DeleteAllComps( cseBATTERY )  }
+   "Delete CSE IMPORTFILE object used to support simulation of battery control"  Proj:BattCtrlImportFile  = {
+         if (LocalCompAssigned( BattCtrlImportFile )) then  DeleteComp()  else  UNCHANGED  endif  }
+
+   "call subordinate rulelist to setup both PV & Battery objects, if not excluded from simulation"    Proj:Action =     ; SAC 01/12/22
+      {  if (IfValidAnd( CSE_ExcludePVBattFromSim > 0 )) then  UNCHANGED
+         else  EvalRulelist( "CSE_SimulationPrep_PVandBattery" )  endif  }
+
+   "Clear and setup Shade objects"     Proj:Action =
+      {  if (IsSFamResRuleset)
+         then  EvalRulelist( "CSE_SimulationPrep_Shades" )
+         else  UNCHANGED  endif  }
+
+  ; Create and default EXPORT definitions to output hourly energy use results
+; SAC 1/29/20 - TO RESTORE (??)
+;   "Create ResProj:CSE_EnergyUseFile"  ResProj:CSE_EnergyUseFile  = {   CreateComp( cseEXPORTFILE, "xf-hrlyenergyuse" )  }    ; SAC 1/28/20 (tic #1013)
+;   "Set ResProj:CSE_EnergyUseFile:xfFileName"   ResProj:CSE_EnergyUseFile:xfFileName  =
+;      {  ValidOr( ProjFileNameNoExt, "" ) + ValidOr( RunIDProcFile, "" ) + ".csv"  }
+   "Create site-wide Elec export"         Proj:CSE_ElecEXPORT			= {	if (LocalCompAssigned( CSE_ElecMETER ) < 0.5) then  UNDEFINED
+																									else  CreateComp( cseEXPORT, "ExportElec" )  endif  }
+
+;   "Set Proj:CSE_ElecEXPORT:exExportfile"    Proj:CSE_ElecEXPORT:exExportfile    = {  CSE_EnergyUseFile:Name  }
+   "Set Proj:CSE_ElecEXPORT:exExportfile"    Proj:CSE_ElecEXPORT:exExportfile    = {  "Primary"  }
+	"Set Proj:CSE_ElecEXPORT:exType"				Proj:CSE_ElecEXPORT:exType				= {	"MTR"     }
+	"Set Proj:CSE_ElecEXPORT:exFreq"				Proj:CSE_ElecEXPORT:exFreq				= {	"HOUR"    }
+	"Set Proj:CSE_ElecEXPORT:exMeter"			Proj:CSE_ElecEXPORT:exMeter			= {	Local( Proj:CSE_ElecMETER )  }
+	"Set Proj:CSE_ElecEXPORT:exBtuSf"			Proj:CSE_ElecEXPORT:exBtuSf			= {	1000      }
+	"Set Proj:CSE_ElecEXPORT:exDayBeg_x"		Proj:CSE_ElecEXPORT:exDayBeg_x		= {	"Jan 1"   }
+	"Set Proj:CSE_ElecEXPORT:exDayEnd_x"		Proj:CSE_ElecEXPORT:exDayEnd_x		= {	"Dec 31"  }
+
+	"Delete all cseREPORTCOL objects"	ResProj:Action = {	DeleteAllComps( cseREPORTCOL )  }
+	"Delete all cseREPORT objects"		ResProj:Action = {	DeleteAllComps( cseREPORT )  }
+
+   "call subordinate rulelist to setup remaininf export & report objects, if not simulating only PV & Battery"    Proj:Action =     ; SAC 01/12/22
+      {  if (IfValidAnd( CSE_SimPVBattOnly > 0 )) then  UNCHANGED
+         else  EvalRulelist( "CSE_SimulationPrep_MetersAndReports" )  endif  }
+
+END
+;*************************************************************************
+
+
+;*************************************************************************
+RULELIST "CSE_Defaulting_Project" 1 0 0 1
+;*************************************************************************
+	"Create cseTOP component (if none exists)"	Proj:Action = {	if (ComponentCount( cseTOP ) > 0) then  UNCHANGED
+																						else  CreateComp( cseTOP, "CSE run" )  endif  }
+
+	"Default cseTOP:repHdrL"		cseTOP:repHdrL	= {	if (strlen( Global( Proj:RunTitle ) ) > 0) then  Global( Proj:RunTitle )
+																		else if (strlen( Global( ResProj:SimReportHeader ) ) > 0) then  ResProj:SimReportHeader
+																		else  "CA Res Simulation"  endif endif  }
+
+   ; SAC 4/22/19 - revised to remove any leading directory/path info, since 
+	;"Default cseTOP:wfName"			cseTOP:wfName	= {	Global( ResProj:WeatherFileName )  }
+	"Default cseTOP:wfName"			cseTOP:wfName	= {	Format( "%s.%s", SplitPath( Global( ResProj:WeatherFileName ), 3 ), SplitPath( Global( ResProj:WeatherFileName ), 4 ) )  }
+
+   "Set cseTOP:runTitle - written to report footers, export headers, and in the title lines of INP, LOG, and ERR reports"     ; SAC 10/05/20
+      cseTOP:runTitle = {  if (IfValidAnd( Proj:CSE_SimPVBattOnly > 0 ))
+                           then  if (GlobalStatus( Proj:RunTitle ) > 0)
+                                 then  Format( "%s  /  %s (PV-Batt only)  /  %s", Proj:RunTitle, ResProj:RunID, Proj:ProjFileName )
+                                 else  Format( "(RunTitle not specified)  /  %s (PV-Batt only)  /  %s", ResProj:RunID, Proj:ProjFileName )  endif
+                           else  if (GlobalStatus( Proj:RunTitle ) > 0)
+                                 then  Format( "%s  /  %s  /  %s", Proj:RunTitle, ResProj:RunID, Proj:ProjFileName )
+                                 else  Format( "(RunTitle not specified)  /  %s  /  %s", ResProj:RunID, Proj:ProjFileName )  endif  endif  }
+   "Set cseTOP:runTitle (2) - concatenate Path"     ; SAC 10/05/20
+      cseTOP:runTitle = {  if (GlobalStatus( ResProj:ProcessingPath ) > 0) then  runTitle + "  /  " + ResProj:ProcessingPath
+                           else if (GlobalStatus( ResProj:ModelPath ) > 0) then  runTitle + "  /  " + ResProj:ModelPath
+                           else if (GlobalStatus( ResProj:BatchPath ) > 0) then  runTitle + "  /  " + ResProj:BatchPath
+                           else  UNCHANGED  endif endif endif  }
+   "Set cseTOP:runTitle (3) - replace any backslashes w/ forward to ensure not interpretted as formatting chars"     ; SAC 10/05/20
+      cseTOP:runTitle = {  ReplaceInString( "\", "/" )  }
+;   "Set cseTOP:runTitle (2) - concatenate Path"     ; SAC 10/05/20
+;      cseTOP:runTitle = {  if (GlobalStatus( ResProj:ProcessingPath ) > 0) then  runTitle + Format( "  /  %s", ResProj:ProcessingPath )
+;                           else if (GlobalStatus( ResProj:ModelPath ) > 0) then  runTitle + Format( "  /  %s", ResProj:ModelPath )
+;                           else if (GlobalStatus( ResProj:BatchPath ) > 0) then  runTitle + Format( "  /  %s", ResProj:BatchPath )
+;                           else  UNCHANGED  endif endif endif  }
+; removed as not effecting export CSV header as expected - SAC 10/05/20
+;   "Set cseTOP:runSerial - serial # for the simulation. Increments on each run in a session; appears in report footers"       ; SAC 10/05/20
+;      cseTOP:runSerial = { if (IfValidAnd( ResProj:RunNumber >= 0 )) then  ResProj:RunNumber  else  UNDEFINED  endif  }
+
+;	"Default cseTOP:begDay=Jan 1                     //
+;	"Default cseTOP:endDay=Dec 31                    //
+	"Default cseTOP:ebTolHour"		cseTOP:ebTolHour	= {	0.001  }
+	"Default cseTOP:ebTolDay"     cseTOP:ebTolDay	= {	0.001  }
+	"Default cseTOP:ebTolMon"     cseTOP:ebTolMon	= {	0.001  }
+	"Default cseTOP:ebTolSubHr"   cseTOP:ebTolSubHr	= {	0.001  }
+
+;	"Default cseTOP:jan1DOW"		cseTOP:jan1DOW		= {	"TUE"  }
+   ; SAC 7/29/18 - removed all logic pertaining to DHWCalcMethod (related to transition from T24DHW DLLs to CSE)
+	"Default cseTOP:jan1DOW"      cseTOP:jan1DOW		= {	"THU"  }
+
+	; SAC 1/15/15 - call subordinate rulelists to setup simulation speed inputs based on ResProj:SimSpeedOption
+	"Setup simulation speed settings"	ResProj:Action	= {	switch (SimSpeedOption)
+																				case  0 :  EvalRulelist( "CSE_SimSpeedOption_Compliance" )
+																				case  1 :  EvalRulelist( "CSE_SimSpeedOption_Quick"      )
+																				case  2 :  EvalRulelist( "CSE_SimSpeedOption_Custom"     )
+																				default :  UNCHANGED
+																			endswitch  }
+
+;	"Default cseTOP:skyModel"     cseTOP:skyModel	= {	"anisotropic"  }
+;	"Default cseTOP:dflExH"			cseTOP:dflExH		= {	5.158  }					; Exterior combined surface coefficient for regular walls  (5.160 for FL vs. 5.158 for BESTEST ???)
+;	"Default cseTOP:windF"			cseTOP:windF		= {	0.25   }					; site located exactly at weather station with wind at 0.2m below top of building
+  ; SAC 1/13/13 - write out ResProj:FrontOrientation as cseTOP:bldgAzm
+	"Default cseTOP:bldgAzm"		cseTOP:bldgAzm		= {   ResProj:FrontOrientation  }
+
+   ; SAC 7/29/18 - removed all logic pertaining to DHWCalcMethod (related to transition from T24DHW DLLs to CSE)
+	"Default cseTOP:dt"           cseTOP:dt			= {	"YES"  }
+; file I/O must be altered to output these items w/OUT bounding double quotes
+;	"Default cseTOP:dtBegDay"     cseTOP:dtBegDay	= {	"Mar 08"  }		; 2009 calendar "In 2009, daylight saving time began at 2:00 a.m. (02:00) on Sunday, March 8, and it ended at 2:00 a.m. (02:00) on Sunday, November 1."
+;	"Default cseTOP:dtEndDay"     cseTOP:dtEndDay	= {	"Nov 01"  }
+
+; SAC 12/6/16 - inserted some new run ID #defines up top
+   ;   <RunDateFmt>10:27, Wed, Sep 14, 2016</RunDateFmt>
+   ;   <RunID>User</RunID>
+   ;   <AnalysisType>Proposed and Standard</AnalysisType>
+   ;   <CompCodeBase>CA2016</CompCodeBase>
+   ;   <StdDesignBase>CA2016</StdDesignBase>
+   ;   <StandardsVersion>Compliance 2017</StandardsVersion>
+   ;   <DesignRatingBase>RESNET2014</DesignRatingBase>
+	"Set Proj:CSE_DefineName[1]"		Proj:CSE_DefineName[1]		= {	"RunDateFmt"  }
+	"Set Proj:CSE_DefineType[1]"		Proj:CSE_DefineType[1]		= {	 3  }		; #define type: 0-name only, 1-float, 2-string w/ quotes, 3-string no quotes
+	"Set Proj:CSE_DefineString[1]"	Proj:CSE_DefineString[1]	= {	 Proj:RunDateFmt   }
+	"Set Proj:CSE_DefineName[2]"		Proj:CSE_DefineName[2]		= {	"RunID"  }
+	"Set Proj:CSE_DefineType[2]"		Proj:CSE_DefineType[2]		= {	 3  }
+	"Set Proj:CSE_DefineString[2]"	Proj:CSE_DefineString[2]	= {
+         switch (ResProj:RunAbbrev)
+           case "u"     :  Format( "          %5.0f   // User",             0 )
+           case "pp"    :  Format( "          %5.0f   // PrelimProp",       1 )
+           case "pp-N"  :  Format( "          %5.0f   // PrelimProp-North", 2 )
+           case "pp-E"  :  Format( "          %5.0f   // PrelimProp-East",  3 )
+           case "pp-S"  :  Format( "          %5.0f   // PrelimProp-South", 4 )
+           case "pp-W"  :  Format( "          %5.0f   // PrelimProp-West",  5 )
+           case "smf"   :  Format( "          %5.0f   // StdMixedFuel",     6 )
+           case "p"     :  Format( "          %5.0f   // Proposed",         7 )
+           case "p-N"   :  Format( "          %5.0f   // Proposed-North",   8 )
+           case "p-E"   :  Format( "          %5.0f   // Proposed-East",    9 )
+           case "p-S"   :  Format( "          %5.0f   // Proposed-South",  10 )
+           case "p-W"   :  Format( "          %5.0f   // Proposed-West",   11 )
+           case "zs"    :  Format( "          %5.0f   // Standard",        12 )  ; SAC 01/13/22
+           case "s"     :  Format( "          %5.0f   // Standard",        12 )
+           case "dr"    :  Format( "          %5.0f   // DesignRating",    13 )
+           case "pfx"   :  Format( "          %5.0f   // PropFlex",        14 )
+           case "pfx-N" :  Format( "          %5.0f   // PropFlex-North",  15 )
+           case "pfx-E" :  Format( "          %5.0f   // PropFlex-East",   16 )
+           case "pfx-S" :  Format( "          %5.0f   // PropFlex-South",  17 )
+           case "pfx-W" :  Format( "          %5.0f   // PropFlex-West",   18 )
+           default      :  Format( "          %5.0f   // unknown",        999 )
+         endswitch  }
+	"Set Proj:CSE_DefineName[3]"		Proj:CSE_DefineName[3]		= {	"AnalysisType"  }
+	"Set Proj:CSE_DefineType[3]"		Proj:CSE_DefineType[3]		= {	 3  }
+	"Set Proj:CSE_DefineString[3]"	Proj:CSE_DefineString[3]	= {	 Format(  "   %5.0f   // %s", ResProj:ResAnalysisType, EnumString( ResProj:ResAnalysisType ) )  }
+	"Set Proj:CSE_DefineName[4]"		Proj:CSE_DefineName[4]	   = {   "CompCodeBase" }
+	"Set Proj:CSE_DefineType[4]"		Proj:CSE_DefineType[4]	   = {	 3  }
+	"Set Proj:CSE_DefineString[4]"	Proj:CSE_DefineString[4]   = {    Format(  "   %5.0f   // %s", ResProj:CompCodeBase, EnumString( ResProj:CompCodeBase ) )  }
+	"Set Proj:CSE_DefineName[5]"		Proj:CSE_DefineName[5]	   = {   "StdDesignBase"  }
+	"Set Proj:CSE_DefineType[5]"		Proj:CSE_DefineType[5]	   = {	 3  }
+	"Set Proj:CSE_DefineString[5]"	Proj:CSE_DefineString[5]   = {    Format(   "  %5.0f   // %s", ResProj:StdDesignBase, EnumString( ResProj:StdDesignBase ) )  }
+	"Set Proj:CSE_DefineName[6]"		Proj:CSE_DefineName[6]	   = {   "StandardsVersion" }
+	"Set Proj:CSE_DefineType[6]"		Proj:CSE_DefineType[6]	   = {    3  }
+	"Set Proj:CSE_DefineString[6]"	Proj:CSE_DefineString[6]   =
+      {  if (IsComRuleset)
+         then  Format(     "%4.0f   // %s", ResProj:StdsVersionYr,    EnumString(    Proj:StandardsVersion ) )
+         else  Format(     "%4.0f   // %s", ResProj:StandardsVersion, EnumString( ResProj:StandardsVersion ) )  endif  }
+	"Set Proj:CSE_DefineName[7]"		Proj:CSE_DefineName[7]	   = {   "DesignRatingBase" }
+	"Set Proj:CSE_DefineType[7]"		Proj:CSE_DefineType[7]	   = {    3  }
+	"Set Proj:CSE_DefineString[7]"	Proj:CSE_DefineString[7]   = {    if (IsComRuleset) then  "   0   // n/a"
+                                                                      else  Format(     "%4.0f   // %s", ResProj:DesignRatingBase, EnumString( ResProj:DesignRatingBase ) )  endif  }
+	"Set Proj:CSE_DefineName[8]"		Proj:CSE_DefineName[8]	   = {   "ClimateZone" }
+	"Set Proj:CSE_DefineType[8]"		Proj:CSE_DefineType[8]	   = {    3  }
+	"Set Proj:CSE_DefineString[8]"	Proj:CSE_DefineString[8]   = {    Format( "    %5.0f   // %s", ClimateZone, EnumString( ClimateZone ) ) }
+      ; reserved for future - CSE_Define*[9]
+
+   ; SAC 4/3/17 - PreCooling
+	"Set Proj:CSE_DefineName[10]"		Proj:CSE_DefineName[10]	   = {   if (ResProj:PreCl_DataValid < 1 .OR. ResProj:IsPropFlexRun < 1) then  UNDEFINED  else  "PCset"  endif }
+	"Set Proj:CSE_DefineType[10]"		Proj:CSE_DefineType[10]	   = {   if (ResProj:PreCl_DataValid < 1 .OR. ResProj:IsPropFlexRun < 1) then  UNDEFINED  else   3       endif }
+	"Set Proj:CSE_DefineString[10]"	Proj:CSE_DefineString[10]  = {   if (ResProj:PreCl_DataValid < 1 .OR. ResProj:IsPropFlexRun < 1) then  UNDEFINED  else   ResProj:PreCl_PCsetTstat  endif }
+
+; 1/3/13 - added design day #defines
+	"Set Proj:CSE_DefineName[11]"		Proj:CSE_DefineName[11]		= {	"DD1"  }
+	"Set Proj:CSE_DefineType[11]"		Proj:CSE_DefineType[11]		= {	3  }		; #define type: 0-name only, 1-float, 2-string w/ quotes, 3-string no quotes
+	"Set Proj:CSE_DefineString[11]"	Proj:CSE_DefineString[11]	= {	T24RClimateZoneDesignDay:DD1( "WeatherFileSet", ResProj:WeatherFileSet, "ClimateZone", Proj:ClimateZone )  }  ; "Jun 30"  }
+	"Set Proj:CSE_DefineName[12]"		Proj:CSE_DefineName[12]		= {	"CD1"  }
+	"Set Proj:CSE_DefineType[12]"		Proj:CSE_DefineType[12]		= {	3  }		; #define type: 0-name only, 1-float, 2-string w/ quotes, 3-string no quotes
+	"Set Proj:CSE_DefineString[12]"	Proj:CSE_DefineString[12]	= {	T24RClimateZoneDesignDay:CD1( "WeatherFileSet", ResProj:WeatherFileSet, "ClimateZone", Proj:ClimateZone )  }  ; "Jul 10"  }
+	"Set Proj:CSE_DefineName[13]"		Proj:CSE_DefineName[13]		= {	"HD1"  }
+	"Set Proj:CSE_DefineType[13]"		Proj:CSE_DefineType[13]		= {	3  }		; #define type: 0-name only, 1-float, 2-string w/ quotes, 3-string no quotes
+	"Set Proj:CSE_DefineString[13]"	Proj:CSE_DefineString[13]	= {	T24RClimateZoneDesignDay:HD1( "WeatherFileSet", ResProj:WeatherFileSet, "ClimateZone", Proj:ClimateZone )  }  ; "Dec 03"  }
+	
+	"Set Proj:CSE_DefineName[14]"		Proj:CSE_DefineName[14]	   = { "SEASONCHANGESETPT" }
+	"Set Proj:CSE_DefineType[14]"		Proj:CSE_DefineType[14]	   = {	1  }
+	"Set Proj:CSE_DefineFloat[14]"	Proj:CSE_DefineFloat[14]   =              ; SAC 2/7/20 (tic #1175)
+      {  if (IfValidAnd( ResProj:EnableResearchMode > 0.5 ) .AND. GlobalStatus( ResProj:PropSeasonChangeSetpt ) > 0 .AND.
+	          (IfValidAnd( ResProj:RunAbbrev = "p" ) .OR. IfValidAnd( ResProj:RunAbbrev = "u" )))
+	      then  ResProj:PropSeasonChangeSetpt
+	      else  ResProj:SeasonChangeSetpt  endif  }
+
+	"Set Proj:CSE_DefineName[15]"		Proj:CSE_DefineName[15]	   = { "FANVENTLOCKOUTTEMP" }
+	"Set Proj:CSE_DefineType[15]"		Proj:CSE_DefineType[15]	   = {	1  }
+	"Set Proj:CSE_DefineFloat[15]"	Proj:CSE_DefineFloat[15]   =              ; SAC 2/7/20 (tic #1175)
+      {  if (IfValidAnd( ResProj:EnableResearchMode > 0.5 ) .AND. GlobalStatus( ResProj:PropFanVentLockoutTemp ) > 0 .AND.
+	          (IfValidAnd( ResProj:RunAbbrev = "p" ) .OR. IfValidAnd( ResProj:RunAbbrev = "u" )))
+	      then  ResProj:PropFanVentLockoutTemp
+	      else  ResProj:FanVentLockoutTemp  endif  }
+
+	"Set Proj:CSE_DefineName[16]"		Proj:CSE_DefineName[16]	   = { "ISSEASONCOOLING" }
+	"Set Proj:CSE_DefineType[16]"		Proj:CSE_DefineType[16]	   = {	3 }
+	"Set Proj:CSE_DefineString[16]"	Proj:CSE_DefineString[16]  =              ; SAC 2/7/20 (tic #1175)
+      {  if (IfValidAnd( ResProj:EnableResearchMode > 0.5 ) .AND. GlobalStatus( ResProj:PropIsSeasCoolingExp ) > 0 .AND.
+	          (IfValidAnd( ResProj:RunAbbrev = "p" ) .OR. IfValidAnd( ResProj:RunAbbrev = "u" )))
+	      then  ResProj:PropIsSeasCoolingExp
+	      else  "(@weather.taDbAvg07 > SEASONCHANGESETPT)"  endif  }
+
+	"Set Proj:CSE_DefineName[17]"		Proj:CSE_DefineName[17]	   = { "FANVENTAVAIL" }
+	"Set Proj:CSE_DefineType[17]"		Proj:CSE_DefineType[17]	   = {	3 }
+	"Set Proj:CSE_DefineString[17]"	Proj:CSE_DefineString[17]  =              ; SAC 1/10/20 (tic #1175)
+	   {  if (IfValidAnd( ResProj:EnableResearchMode > 0.5 ) .AND. GlobalStatus( ResProj:ClVentFanAvailExp ) > 0 .AND.
+	          (IfValidAnd( ResProj:RunAbbrev = "p" ) .OR. IfValidAnd( ResProj:RunAbbrev = "u" )))
+	      then  ResProj:ClVentFanAvailExp
+	      else  "(@weather.taDbAvg07 > FANVENTLOCKOUTTEMP)"  endif  }       ; <<== insert new default expression HERE
+
+	"Set Proj:CSE_DefineName[18]"		Proj:CSE_DefineName[18]	   = { "WINDOWVENTAVAIL" }
+	"Set Proj:CSE_DefineType[18]"		Proj:CSE_DefineType[18]	   = {	3 }
+	; replaced 2019.2.0+ WVA of "($hour < 24 && ($hour > 12 || $radDiff+$radbeam > .01))" -with- "(!@Top.autoSizing && ($hour < 24 && ($hour > 12 || $radDiff+$radbeam > .01)))" from BAW - SAC 7/13/20
+	"Set Proj:CSE_DefineString[18]"	Proj:CSE_DefineString[18]  =              ; SAC 2/7/20 (tic #1175)      ; SAC 2/13/20 - installed mod for 2019.2.0+ (tic #1175)     ; enable 19.2.0+ mod for 2019.1.3 - SAC 7/15/20
+      {  if (IfValidAnd( ResProj:EnableResearchMode > 0.5 ) .AND. GlobalStatus( ResProj:PropWindowVentAvailExp ) > 0 .AND.
+	          (IfValidAnd( ResProj:RunAbbrev = "p" ) .OR. IfValidAnd( ResProj:RunAbbrev = "u" )))
+	      then  ResProj:PropWindowVentAvailExp
+	      else if (IfValidAnd( Proj:AnalysisVersion >= 190103 ))
+	      then  "(!@Top.autoSizing && ($hour < 24 && ($hour > 12 || $radDiff+$radbeam > .01)))"
+	      else  "($hour < 24 && ($hour > 12 || $radDiff > 1))"  endif endif  }
+
+	; SAC 7/6/15
+	"Set Proj:CSE_DefineName[19]"		Proj:CSE_DefineName[19]		= { "HWUSEF_WD" }
+	"Set Proj:CSE_DefineType[19]"		Proj:CSE_DefineType[19]		= {	3 }
+	"Set Proj:CSE_DefineString[19]"	Proj:CSE_DefineString[19]	= { "hourval( 0.014, 0.008, 0.009, 0.011, 0.020, 0.044, 0.089, 0.107, 0.089, 0.066, 0.052, 0.038, 0.036, 0.033, 0.032, 0.026, 0.042, 0.048, 0.052, 0.047, 0.042, 0.039, 0.036, 0.022 )" }
+
+	"Set Proj:CSE_DefineName[20]"		Proj:CSE_DefineName[20]		= { "HWUSEF_WE" }
+	"Set Proj:CSE_DefineType[20]"		Proj:CSE_DefineType[20]		= {	3 }
+	"Set Proj:CSE_DefineString[20]"	Proj:CSE_DefineString[20]	= { "hourval( 0.018, 0.010, 0.009, 0.008, 0.015, 0.023, 0.026, 0.047, 0.077, 0.083, 0.074, 0.061, 0.051, 0.043, 0.039, 0.039, 0.052, 0.058, 0.056, 0.052, 0.047, 0.044, 0.040, 0.028 )" }
+
+	; DHW use #define values 21-33 - left undefined if not using new DHW use profiles - SAC 3/15/16
+	"Set Proj:CSE_Define*[21-33] depending on DHW Use mechanism"		ResProj:Action	=
+      {  if (IfValidAnd( Proj:CSE_SimPVBattOnly > 0 ))
+         then  EvalRulelist( "CSE_BlastDHWUseInclude" )
+         else  EvalRulelist( "CSE_SetDHWUseInclude"   )  endif  }
+									;					if (CSEDHWUseMethod == 1)	then	EvalRulelist( "CSE_BlastDHWUseInclude" )
+									;														else	EvalRulelist( "CSE_SetDHWUseInclude"   )  endif  }
+
+	; Internal Gains #define values 34-60 - left undefined for IntGainsMethod < 2016 - SAC 4/13/16
+	"Set Proj:CSE_Define*[34-60] depending on IntGainsMethod"		ResProj:Action	= {
+														if (IntGainsMethod == 2016)	then	EvalRulelist( "CSE_Set2016InternalGains" )
+																								else	EvalRulelist( "CSE_BlastInternalGains"   )  endif  }
+
+   ; SAC 11/4/18 - VCHP
+	"Set Proj:CSE_DefineName[61]"		Proj:CSE_DefineName[61]	   = { "FVCHPC" }
+	"Set Proj:CSE_DefineType[61]"		Proj:CSE_DefineType[61]	   = {	3  }
+	"Set Proj:CSE_DefineString[61]"	Proj:CSE_DefineString[61]  = { "0.95		// VCHP cooling input energy factor" }
+	"Set Proj:CSE_DefineName[62]"		Proj:CSE_DefineName[62]	   = { "FVCHPH" }
+	"Set Proj:CSE_DefineType[62]"		Proj:CSE_DefineType[62]	   = {	3  }
+	"Set Proj:CSE_DefineString[62]"	Proj:CSE_DefineString[62]  = { "0.88		// VCHP heating input energy factor" }
+
+	"Set Proj:CSE_DefineName[63]"		Proj:CSE_DefineName[63]	   = { "NumCntrlWHtrs( s)" }     ; SAC 12/4/19 - to facilitate central electric DHWSys heater autosizing
+	"Set Proj:CSE_DefineType[63]"		Proj:CSE_DefineType[63]	   = {   3  }
+;	"Set Proj:CSE_DefineString[63]"	Proj:CSE_DefineString[63]  = { "max( 1, @DHWSYS[ s].loadMax / (15400 * @DHWSYS[ s].loadMaxDur))" }
+	"Set Proj:CSE_DefineString[63]"	Proj:CSE_DefineString[63]  = { "tofloat( 1+fix(@DHWSYS[ s].loadMax / (15400. * @DHWSYS[ s].loadMaxDur)))" }
+
+	"Set Proj:CSE_DefineName[64]"		Proj:CSE_DefineName[64]	   = { "RunFileName" }
+	"Set Proj:CSE_DefineType[64]"		Proj:CSE_DefineType[64]	   = {   3  }
+	"Set Proj:CSE_DefineString[64]"	Proj:CSE_DefineString[64]  = { ValidOr( ProjFileNameNoExt, "" ) + ValidOr( RunIDProcFile, "" )  }
+
+	"Set Proj:CSE_DefineName[65]"		Proj:CSE_DefineName[65]	   = { UNDEFINED }      ; next #define goes here...
+	"Set Proj:CSE_DefineType[65]"		Proj:CSE_DefineType[65]	   = { UNDEFINED }
+	"Set Proj:CSE_DefineFloat[65]"	Proj:CSE_DefineFloat[65]   = { UNDEFINED }
+	"Set Proj:CSE_DefineString[65]"	Proj:CSE_DefineString[65]  = { UNDEFINED }
+
+
+   "Set cseTOP:heatDsTDbO"       cseTOP:heatDsTDbO		= {	T24RClimateZoneDesignDay:HtgDesign( "WeatherFileSet", ResProj:WeatherFileSet, "ClimateZone", Proj:ClimateZone )  }
+   "Set cseTOP:coolDsDay_x"      cseTOP:coolDsDay_x	= {	"DD1"  }   ; trailing '_x' in property name causes output string to NOT be enclosed in double quotes
+
+	; SAC 5/1/14 - added logic to prevent output of ventAvail_x when CFIClVent not selected @ the project level (mainly to turn off for Std design run - GC #298)
+   "Set cseTOP:ventAvail_x"      cseTOP:ventAvail_x	= {	if ( ResProj:CSEVentAvailZonal) then  "zonal"    ; SAC 7/12/20
+                                                            else if (SumAll( ResHVACSys:CFIClVentFlow ) > 1 .AND. ResProj:UnitClVentOption == 3)
+																				then  "FANVENTAVAIL ? RSYSOAV : WholeBuilding "		; turns off window ventilation during cooling mode, but leaves it on in case of overheating in heating mode.  Only the OAV system runs in cooling mode.
+																				else  UNDEFINED  endif endif  }   ; SAC 8/26/13 - OAV
+END
+;*************************************************************************
+
+
+;************************************************************************* SAC 01/12/22
+RULELIST "CSE_SimulationPrep_DHW_Zones_HVAC" 1 0 0 1
+;*************************************************************************
+	; Create meters for tracking electric and fuel use
 	"Create site-wide NatGas meter"		Proj:CSE_NatGasMETER		= {	if ( IfValidAnd( Fuel_HaveNatGas > 0.5 )==0) then  UNDEFINED
 																							else  CreateComp( cseMETER, "MtrNatGas" )  endif  }
 	"Create site-wide <other> meter"		Proj:CSE_OtherFuelMETER	= {	if ( IfValidAnd( Fuel_HaveOther > 0.5 )==0) then  UNDEFINED
@@ -402,11 +707,15 @@ RULELIST "CSE_SimulationPrep_Res" 1 0 0 1
 
 	"Setup CSE HVAC & AirNet data"								ResProj:Action	= {	EvalRulelist( "CSE_SimulationPrep_HVAC" )  }				; SAC 5/16/16
 
+END
+;*************************************************************************
 
+
+;************************************************************************* SAC 01/12/22
+RULELIST "CSE_SimulationPrep_PVandBattery" 1 0 0 1
+;*************************************************************************
 	; Create and setup CSE PVARRAY objects - SAC 1/27/16
 	; SAC 10/6/16 - allow PV sim regardless of *DesignRating* settings for 2019 analysis
-	"Delete all csePVARRAY objects"		      Proj:Action = {  DeleteAllComps( csePVARRAY )  }
-   "Delete any/all PolyLp children of Proj"  Proj:Action = {  DeleteChildren( PolyLp )  }    ; past UI-defined PVArray PolyLp objects - SAC 3/4/17
    ; revised logic to include Std Design PV system for 2019+ codes - SAC 1/9/18   ; prevent generating PV inputs when setting PV results via scaling fixed results - SAC 7/16/20
    ; revised logic to ensure proper PVArray prep for Com ruleset - SAC 12/08/21
 ;"dbg" Proj:Action = { PostMessageToLog( "   about to process PVArrays for CSE:  RunAbbrev %s  IsComRuleset %g  PVSizeSum %g  Num PVArrays %g", RunAbbrev, IsComRuleset, PVSizeSum, ComponentCount( PVArray ) ) }
@@ -419,17 +728,15 @@ RULELIST "CSE_SimulationPrep_Res" 1 0 0 1
          else if ( IsComRuleset )
          then  if (IfValidAnd( PVSizeSum > 0 )==0) then  UNCHANGED
                else  EvalRulelist( "CSE_SimulationPrep_PV" )  endif
-         else if ((( ResProj:RunAbbrev == "s"  .OR. ResProj:RunAbbrev == "S" .OR. ResProj:RunAbbrev == "smf") .AND. IfValidAnd( ResProj:EnergyCodeYearNum < 2019 )) .OR.
-                    ResProj:RunAbbrev == "dr" .OR. ResProj:RunAbbrev == "DR")
+         else if ( ( (ResProj:RunAbbrev == "s"  .OR. ResProj:RunAbbrev == "zs" .OR. ResProj:RunAbbrev == "S" .OR. ResProj:RunAbbrev == "smf") .AND.
+                     IfValidAnd( ResProj:EnergyCodeYearNum < 2019 ) ) .OR.
+                   ResProj:RunAbbrev == "dr" .OR. ResProj:RunAbbrev == "DR")
          then  UNCHANGED		; prevent PVARRAY in std (<2019) and design rtg runs
-         else if ( ResProj:RunAbbrev != "s" .AND. ResProj:RunAbbrev != "S" .AND. ResProj:RunAbbrev != "smf" .AND.
+         else if ( ResProj:RunAbbrev != "s" .AND. ResProj:RunAbbrev != "zs" .AND. ResProj:RunAbbrev != "S" .AND. ResProj:RunAbbrev != "smf" .AND.
                    IfValidAnd( CommunitySolarProjID > 0 ) .AND. IfValidAnd( CommunitySolarSim == 0 )) then  UNCHANGED
          else	EvalRulelist( "CSE_SimulationPrep_PV" )  endif endif endif endif  }
 
    ; Create and setup CSE BATTERY object - SAC 12/14/16
-   "Delete all cseBATTERY objects"         Proj:Action = {  DeleteAllComps( cseBATTERY )  }
-   "Delete CSE IMPORTFILE object used to support simulation of battery control"  Proj:BattCtrlImportFile  = {
-         if (LocalCompAssigned( BattCtrlImportFile )) then  DeleteComp()  else  UNCHANGED  endif  }
    ; SAC 4/28/17 - revised logic to enable battery simulation in 2016 runs
    ; revised logic to ensure proper battery prep for Com ruleset - SAC 12/08/21
    "Create and setup cseBATTERY object"   Proj:Action = {
@@ -439,36 +746,23 @@ RULELIST "CSE_SimulationPrep_Res" 1 0 0 1
          else if ( IsComRuleset )
          then  if (IfValidAnd( BattSizeSum > 0 )==0) then  UNCHANGED
                else  EvalRulelist( "CSE_SimulationPrep_Battery" )  endif
-         else if ( ResProj:RunAbbrev == "s"  .OR. ResProj:RunAbbrev == "S" .OR. ResProj:RunAbbrev == "smf" .OR.
-                  ResProj:RunAbbrev == "dr" .OR. ResProj:RunAbbrev == "DR")
+         else if ( ResProj:RunAbbrev == "s"  .OR. ResProj:RunAbbrev == "zs" .OR. ResProj:RunAbbrev == "S" .OR. ResProj:RunAbbrev == "smf" .OR.
+                   ResProj:RunAbbrev == "dr" .OR. ResProj:RunAbbrev == "DR")
          then  UNCHANGED      ; prevent BATTERY in std and design rtg runs (??)
          else  EvalRulelist( "CSE_SimulationPrep_Battery" )  endif endif endif  }
+END
+;*************************************************************************
 
-   "Clear and setup Shade objects"     Proj:Action =
-      {  if (IsSFamResRuleset)
-         then  EvalRulelist( "CSE_SimulationPrep_Shades" )
-         else  UNCHANGED  endif  }
+
+;************************************************************************* SAC 01/12/22
+RULELIST "CSE_SimulationPrep_MetersAndReports" 1 0 0 1
+;*************************************************************************
 
   ; Create and default EXPORT definitions to output hourly energy use results
-; SAC 1/29/20 - TO RESTORE (??)
-;   "Create ResProj:CSE_EnergyUseFile"  ResProj:CSE_EnergyUseFile  = {   CreateComp( cseEXPORTFILE, "xf-hrlyenergyuse" )  }    ; SAC 1/28/20 (tic #1013)
-;   "Set ResProj:CSE_EnergyUseFile:xfFileName"   ResProj:CSE_EnergyUseFile:xfFileName  =
-;      {  ValidOr( ProjFileNameNoExt, "" ) + ValidOr( RunIDProcFile, "" ) + ".csv"  }
-   "Create site-wide Elec export"         Proj:CSE_ElecEXPORT			= {	if (LocalCompAssigned( CSE_ElecMETER ) < 0.5) then  UNDEFINED
-																									else  CreateComp( cseEXPORT, "ExportElec" )  endif  }
 	"Create site-wide NatGas export"			Proj:CSE_NatGasEXPORT		= {	if (LocalCompAssigned( CSE_NatGasMETER ) < 0.5) then  UNDEFINED
 																									else  CreateComp( cseEXPORT, "ExportNatGas" )  endif  }
 	"Create site-wide <other> export"		Proj:CSE_OtherFuelEXPORT	= {	if (LocalCompAssigned( CSE_OtherFuelMETER ) < 0.5) then  UNDEFINED
 																									else  CreateComp( cseEXPORT, "ExportOther" )  endif  }
-
-;   "Set Proj:CSE_ElecEXPORT:exExportfile"    Proj:CSE_ElecEXPORT:exExportfile    = {  CSE_EnergyUseFile:Name  }
-   "Set Proj:CSE_ElecEXPORT:exExportfile"    Proj:CSE_ElecEXPORT:exExportfile    = {  "Primary"  }
-	"Set Proj:CSE_ElecEXPORT:exType"				Proj:CSE_ElecEXPORT:exType				= {	"MTR"     }
-	"Set Proj:CSE_ElecEXPORT:exFreq"				Proj:CSE_ElecEXPORT:exFreq				= {	"HOUR"    }
-	"Set Proj:CSE_ElecEXPORT:exMeter"			Proj:CSE_ElecEXPORT:exMeter			= {	Local( Proj:CSE_ElecMETER )  }
-	"Set Proj:CSE_ElecEXPORT:exBtuSf"			Proj:CSE_ElecEXPORT:exBtuSf			= {	1000      }
-	"Set Proj:CSE_ElecEXPORT:exDayBeg_x"		Proj:CSE_ElecEXPORT:exDayBeg_x		= {	"Jan 1"   }
-	"Set Proj:CSE_ElecEXPORT:exDayEnd_x"		Proj:CSE_ElecEXPORT:exDayEnd_x		= {	"Dec 31"  }
 
 ;   "Set Proj:CSE_NatGasEXPORT:exExportfile"  Proj:CSE_NatGasEXPORT:exExportfile  = {  CSE_EnergyUseFile:Name  }
    "Set Proj:CSE_NatGasEXPORT:exExportfile"  Proj:CSE_NatGasEXPORT:exExportfile  = {  "Primary"  }
@@ -492,8 +786,8 @@ RULELIST "CSE_SimulationPrep_Res" 1 0 0 1
    "Setup DHWSolarSys SSF export for Proposed model"  ResProj:Action  =    ; SAC 1/28/20 - (tic #1013)
       {  if (ComponentCount( cseDHWSOLARSYS ) > 0 .AND.
              ( ResProj:RunAbbrev == "p" .OR. ResProj:RunAbbrev == "p-N" .OR. ResProj:RunAbbrev == "p-E" .OR. 
-              ResProj:RunAbbrev == "u" .OR. ResProj:RunAbbrev == "p-S" .OR. ResProj:RunAbbrev == "p-W" .OR.
-              ( ResProj:RunAbbrev == "s")))
+               ResProj:RunAbbrev == "u" .OR. ResProj:RunAbbrev == "p-S" .OR. ResProj:RunAbbrev == "p-W" .OR.
+               ResProj:RunAbbrev == "s" .OR. ResProj:RunAbbrev == "zs" ))
          then  EvalRulelist( "CSE_Project_SetupSolarSysSSFExport" )
          else  UNCHANGED  endif  }
 
@@ -514,8 +808,6 @@ RULELIST "CSE_SimulationPrep_Res" 1 0 0 1
          else  MaxChildComp( ResCeilingBelowAttic:AtcAirNetHoleSize )  endif  }
 
    ; SAC 11/13/16 - specification of user-selected Reports
-	"Delete all cseREPORTCOL objects"	ResProj:Action = {	DeleteAllComps( cseREPORTCOL )  }
-	"Delete all cseREPORT objects"		ResProj:Action = {	DeleteAllComps( cseREPORT )  }
    "Reset any ResHVACSys:HaveCSERpt_HVAC flags"    ResHVACSys:HaveCSERpt_HVAC = {  UNDEFINED  }
    "Setup CSE Reports"     ResProj:Action = {   if (CSERpt_HaveReports < 1) then  UNCHANGED
                                              else  EvalRulelist( "CSE_SimulationPrep_Reports" )  endif  }
@@ -645,243 +937,6 @@ RULELIST "CSE_SimulationPrep_Res" 1 0 0 1
       {  if (IfValidAnd( ResProj:CSERpt_AllRSysHrly > 0 )==0) then  UNCHANGED
          else  EvalRulelist( "ExportFile_HourlyRSYSOutput", 1 )  endif  }
 
-END
-
-
-;*************************************************************************
-RULELIST "CSE_Defaulting_Project" 1 0 0 1
-;*************************************************************************
-	"Create cseTOP component (if none exists)"	Proj:Action = {	if (ComponentCount( cseTOP ) > 0) then  UNCHANGED
-																						else  CreateComp( cseTOP, "CSE run" )  endif  }
-
-	"Default cseTOP:repHdrL"		cseTOP:repHdrL	= {	if (strlen( Global( Proj:RunTitle ) ) > 0) then  Global( Proj:RunTitle )
-																		else if (strlen( Global( ResProj:SimReportHeader ) ) > 0) then  ResProj:SimReportHeader
-																		else  "CA Res Simulation"  endif endif  }
-
-   ; SAC 4/22/19 - revised to remove any leading directory/path info, since 
-	;"Default cseTOP:wfName"			cseTOP:wfName	= {	Global( ResProj:WeatherFileName )  }
-	"Default cseTOP:wfName"			cseTOP:wfName	= {	Format( "%s.%s", SplitPath( Global( ResProj:WeatherFileName ), 3 ), SplitPath( Global( ResProj:WeatherFileName ), 4 ) )  }
-
-   "Set cseTOP:runTitle - written to report footers, export headers, and in the title lines of INP, LOG, and ERR reports"     ; SAC 10/05/20
-      cseTOP:runTitle = {  if (GlobalStatus( Proj:RunTitle ) > 0)
-                           then  Format( "%s  /  %s  /  %s", Proj:RunTitle, ResProj:RunID, Proj:ProjFileName )
-                           else  Format( "(RunTitle not specified)  /  %s  /  %s", ResProj:RunID, Proj:ProjFileName )  endif  }
-   "Set cseTOP:runTitle (2) - concatenate Path"     ; SAC 10/05/20
-      cseTOP:runTitle = {  if (GlobalStatus( ResProj:ProcessingPath ) > 0) then  runTitle + "  /  " + ResProj:ProcessingPath
-                           else if (GlobalStatus( ResProj:ModelPath ) > 0) then  runTitle + "  /  " + ResProj:ModelPath
-                           else if (GlobalStatus( ResProj:BatchPath ) > 0) then  runTitle + "  /  " + ResProj:BatchPath
-                           else  UNCHANGED  endif endif endif  }
-   "Set cseTOP:runTitle (3) - replace any backslashes w/ forward to ensure not interpretted as formatting chars"     ; SAC 10/05/20
-      cseTOP:runTitle = {  ReplaceInString( "\", "/" )  }
-;   "Set cseTOP:runTitle (2) - concatenate Path"     ; SAC 10/05/20
-;      cseTOP:runTitle = {  if (GlobalStatus( ResProj:ProcessingPath ) > 0) then  runTitle + Format( "  /  %s", ResProj:ProcessingPath )
-;                           else if (GlobalStatus( ResProj:ModelPath ) > 0) then  runTitle + Format( "  /  %s", ResProj:ModelPath )
-;                           else if (GlobalStatus( ResProj:BatchPath ) > 0) then  runTitle + Format( "  /  %s", ResProj:BatchPath )
-;                           else  UNCHANGED  endif endif endif  }
-; removed as not effecting export CSV header as expected - SAC 10/05/20
-;   "Set cseTOP:runSerial - serial # for the simulation. Increments on each run in a session; appears in report footers"       ; SAC 10/05/20
-;      cseTOP:runSerial = { if (IfValidAnd( ResProj:RunNumber >= 0 )) then  ResProj:RunNumber  else  UNDEFINED  endif  }
-
-;	"Default cseTOP:begDay=Jan 1                     //
-;	"Default cseTOP:endDay=Dec 31                    //
-	"Default cseTOP:ebTolHour"		cseTOP:ebTolHour	= {	0.001  }
-	"Default cseTOP:ebTolDay"     cseTOP:ebTolDay	= {	0.001  }
-	"Default cseTOP:ebTolMon"     cseTOP:ebTolMon	= {	0.001  }
-	"Default cseTOP:ebTolSubHr"   cseTOP:ebTolSubHr	= {	0.001  }
-
-;	"Default cseTOP:jan1DOW"		cseTOP:jan1DOW		= {	"TUE"  }
-   ; SAC 7/29/18 - removed all logic pertaining to DHWCalcMethod (related to transition from T24DHW DLLs to CSE)
-	"Default cseTOP:jan1DOW"      cseTOP:jan1DOW		= {	"THU"  }
-
-	; SAC 1/15/15 - call subordinate rulelists to setup simulation speed inputs based on ResProj:SimSpeedOption
-	"Setup simulation speed settings"	ResProj:Action	= {	switch (SimSpeedOption)
-																				case  0 :  EvalRulelist( "CSE_SimSpeedOption_Compliance" )
-																				case  1 :  EvalRulelist( "CSE_SimSpeedOption_Quick"      )
-																				case  2 :  EvalRulelist( "CSE_SimSpeedOption_Custom"     )
-																				default :  UNCHANGED
-																			endswitch  }
-
-;	"Default cseTOP:skyModel"     cseTOP:skyModel	= {	"anisotropic"  }
-;	"Default cseTOP:dflExH"			cseTOP:dflExH		= {	5.158  }					; Exterior combined surface coefficient for regular walls  (5.160 for FL vs. 5.158 for BESTEST ???)
-;	"Default cseTOP:windF"			cseTOP:windF		= {	0.25   }					; site located exactly at weather station with wind at 0.2m below top of building
-  ; SAC 1/13/13 - write out ResProj:FrontOrientation as cseTOP:bldgAzm
-	"Default cseTOP:bldgAzm"		cseTOP:bldgAzm		= {   ResProj:FrontOrientation  }
-
-   ; SAC 7/29/18 - removed all logic pertaining to DHWCalcMethod (related to transition from T24DHW DLLs to CSE)
-	"Default cseTOP:dt"           cseTOP:dt			= {	"YES"  }
-; file I/O must be altered to output these items w/OUT bounding double quotes
-;	"Default cseTOP:dtBegDay"     cseTOP:dtBegDay	= {	"Mar 08"  }		; 2009 calendar "In 2009, daylight saving time began at 2:00 a.m. (02:00) on Sunday, March 8, and it ended at 2:00 a.m. (02:00) on Sunday, November 1."
-;	"Default cseTOP:dtEndDay"     cseTOP:dtEndDay	= {	"Nov 01"  }
-
-; SAC 12/6/16 - inserted some new run ID #defines up top
-   ;   <RunDateFmt>10:27, Wed, Sep 14, 2016</RunDateFmt>
-   ;   <RunID>User</RunID>
-   ;   <AnalysisType>Proposed and Standard</AnalysisType>
-   ;   <CompCodeBase>CA2016</CompCodeBase>
-   ;   <StdDesignBase>CA2016</StdDesignBase>
-   ;   <StandardsVersion>Compliance 2017</StandardsVersion>
-   ;   <DesignRatingBase>RESNET2014</DesignRatingBase>
-	"Set Proj:CSE_DefineName[1]"		Proj:CSE_DefineName[1]		= {	"RunDateFmt"  }
-	"Set Proj:CSE_DefineType[1]"		Proj:CSE_DefineType[1]		= {	 3  }		; #define type: 0-name only, 1-float, 2-string w/ quotes, 3-string no quotes
-	"Set Proj:CSE_DefineString[1]"	Proj:CSE_DefineString[1]	= {	 Proj:RunDateFmt   }
-	"Set Proj:CSE_DefineName[2]"		Proj:CSE_DefineName[2]		= {	"RunID"  }
-	"Set Proj:CSE_DefineType[2]"		Proj:CSE_DefineType[2]		= {	 3  }
-	"Set Proj:CSE_DefineString[2]"	Proj:CSE_DefineString[2]	= {
-         switch (ResProj:RunAbbrev)
-           case "u"     :  Format( "          %5.0f   // User",             0 )
-           case "pp"    :  Format( "          %5.0f   // PrelimProp",       1 )
-           case "pp-N"  :  Format( "          %5.0f   // PrelimProp-North", 2 )
-           case "pp-E"  :  Format( "          %5.0f   // PrelimProp-East",  3 )
-           case "pp-S"  :  Format( "          %5.0f   // PrelimProp-South", 4 )
-           case "pp-W"  :  Format( "          %5.0f   // PrelimProp-West",  5 )
-           case "smf"   :  Format( "          %5.0f   // StdMixedFuel",     6 )
-           case "p"     :  Format( "          %5.0f   // Proposed",         7 )
-           case "p-N"   :  Format( "          %5.0f   // Proposed-North",   8 )
-           case "p-E"   :  Format( "          %5.0f   // Proposed-East",    9 )
-           case "p-S"   :  Format( "          %5.0f   // Proposed-South",  10 )
-           case "p-W"   :  Format( "          %5.0f   // Proposed-West",   11 )
-           case "s"     :  Format( "          %5.0f   // Standard",        12 )
-           case "dr"    :  Format( "          %5.0f   // DesignRating",    13 )
-           case "pfx"   :  Format( "          %5.0f   // PropFlex",        14 )
-           case "pfx-N" :  Format( "          %5.0f   // PropFlex-North",  15 )
-           case "pfx-E" :  Format( "          %5.0f   // PropFlex-East",   16 )
-           case "pfx-S" :  Format( "          %5.0f   // PropFlex-South",  17 )
-           case "pfx-W" :  Format( "          %5.0f   // PropFlex-West",   18 )
-           default      :  Format( "          %5.0f   // unknown",        999 )
-         endswitch  }
-	"Set Proj:CSE_DefineName[3]"		Proj:CSE_DefineName[3]		= {	"AnalysisType"  }
-	"Set Proj:CSE_DefineType[3]"		Proj:CSE_DefineType[3]		= {	 3  }
-	"Set Proj:CSE_DefineString[3]"	Proj:CSE_DefineString[3]	= {	 Format(  "   %5.0f   // %s", ResProj:ResAnalysisType, EnumString( ResProj:ResAnalysisType ) )  }
-	"Set Proj:CSE_DefineName[4]"		Proj:CSE_DefineName[4]	   = {   "CompCodeBase" }
-	"Set Proj:CSE_DefineType[4]"		Proj:CSE_DefineType[4]	   = {	 3  }
-	"Set Proj:CSE_DefineString[4]"	Proj:CSE_DefineString[4]   = {    Format(  "   %5.0f   // %s", ResProj:CompCodeBase, EnumString( ResProj:CompCodeBase ) )  }
-	"Set Proj:CSE_DefineName[5]"		Proj:CSE_DefineName[5]	   = {   "StdDesignBase"  }
-	"Set Proj:CSE_DefineType[5]"		Proj:CSE_DefineType[5]	   = {	 3  }
-	"Set Proj:CSE_DefineString[5]"	Proj:CSE_DefineString[5]   = {    Format(   "  %5.0f   // %s", ResProj:StdDesignBase, EnumString( ResProj:StdDesignBase ) )  }
-	"Set Proj:CSE_DefineName[6]"		Proj:CSE_DefineName[6]	   = {   "StandardsVersion" }
-	"Set Proj:CSE_DefineType[6]"		Proj:CSE_DefineType[6]	   = {    3  }
-	"Set Proj:CSE_DefineString[6]"	Proj:CSE_DefineString[6]   =
-      {  if (IsComRuleset)
-         then  Format(     "%4.0f   // %s", ResProj:StdsVersionYr,    EnumString(    Proj:StandardsVersion ) )
-         else  Format(     "%4.0f   // %s", ResProj:StandardsVersion, EnumString( ResProj:StandardsVersion ) )  endif  }
-	"Set Proj:CSE_DefineName[7]"		Proj:CSE_DefineName[7]	   = {   "DesignRatingBase" }
-	"Set Proj:CSE_DefineType[7]"		Proj:CSE_DefineType[7]	   = {    3  }
-	"Set Proj:CSE_DefineString[7]"	Proj:CSE_DefineString[7]   = {    if (IsComRuleset) then  "   0   // n/a"
-                                                                      else  Format(     "%4.0f   // %s", ResProj:DesignRatingBase, EnumString( ResProj:DesignRatingBase ) )  endif  }
-	"Set Proj:CSE_DefineName[8]"		Proj:CSE_DefineName[8]	   = {   "ClimateZone" }
-	"Set Proj:CSE_DefineType[8]"		Proj:CSE_DefineType[8]	   = {    3  }
-	"Set Proj:CSE_DefineString[8]"	Proj:CSE_DefineString[8]   = {    Format( "    %5.0f   // %s", ClimateZone, EnumString( ClimateZone ) ) }
-      ; reserved for future - CSE_Define*[9]
-
-   ; SAC 4/3/17 - PreCooling
-	"Set Proj:CSE_DefineName[10]"		Proj:CSE_DefineName[10]	   = {   if (ResProj:PreCl_DataValid < 1 .OR. ResProj:IsPropFlexRun < 1) then  UNDEFINED  else  "PCset"  endif }
-	"Set Proj:CSE_DefineType[10]"		Proj:CSE_DefineType[10]	   = {   if (ResProj:PreCl_DataValid < 1 .OR. ResProj:IsPropFlexRun < 1) then  UNDEFINED  else   3       endif }
-	"Set Proj:CSE_DefineString[10]"	Proj:CSE_DefineString[10]  = {   if (ResProj:PreCl_DataValid < 1 .OR. ResProj:IsPropFlexRun < 1) then  UNDEFINED  else   ResProj:PreCl_PCsetTstat  endif }
-
-; 1/3/13 - added design day #defines
-	"Set Proj:CSE_DefineName[11]"		Proj:CSE_DefineName[11]		= {	"DD1"  }
-	"Set Proj:CSE_DefineType[11]"		Proj:CSE_DefineType[11]		= {	3  }		; #define type: 0-name only, 1-float, 2-string w/ quotes, 3-string no quotes
-	"Set Proj:CSE_DefineString[11]"	Proj:CSE_DefineString[11]	= {	T24RClimateZoneDesignDay:DD1( "WeatherFileSet", ResProj:WeatherFileSet, "ClimateZone", Proj:ClimateZone )  }  ; "Jun 30"  }
-	"Set Proj:CSE_DefineName[12]"		Proj:CSE_DefineName[12]		= {	"CD1"  }
-	"Set Proj:CSE_DefineType[12]"		Proj:CSE_DefineType[12]		= {	3  }		; #define type: 0-name only, 1-float, 2-string w/ quotes, 3-string no quotes
-	"Set Proj:CSE_DefineString[12]"	Proj:CSE_DefineString[12]	= {	T24RClimateZoneDesignDay:CD1( "WeatherFileSet", ResProj:WeatherFileSet, "ClimateZone", Proj:ClimateZone )  }  ; "Jul 10"  }
-	"Set Proj:CSE_DefineName[13]"		Proj:CSE_DefineName[13]		= {	"HD1"  }
-	"Set Proj:CSE_DefineType[13]"		Proj:CSE_DefineType[13]		= {	3  }		; #define type: 0-name only, 1-float, 2-string w/ quotes, 3-string no quotes
-	"Set Proj:CSE_DefineString[13]"	Proj:CSE_DefineString[13]	= {	T24RClimateZoneDesignDay:HD1( "WeatherFileSet", ResProj:WeatherFileSet, "ClimateZone", Proj:ClimateZone )  }  ; "Dec 03"  }
-	
-	"Set Proj:CSE_DefineName[14]"		Proj:CSE_DefineName[14]	   = { "SEASONCHANGESETPT" }
-	"Set Proj:CSE_DefineType[14]"		Proj:CSE_DefineType[14]	   = {	1  }
-	"Set Proj:CSE_DefineFloat[14]"	Proj:CSE_DefineFloat[14]   =              ; SAC 2/7/20 (tic #1175)
-      {  if (IfValidAnd( ResProj:EnableResearchMode > 0.5 ) .AND. GlobalStatus( ResProj:PropSeasonChangeSetpt ) > 0 .AND.
-	          (IfValidAnd( ResProj:RunAbbrev = "p" ) .OR. IfValidAnd( ResProj:RunAbbrev = "u" )))
-	      then  ResProj:PropSeasonChangeSetpt
-	      else  ResProj:SeasonChangeSetpt  endif  }
-
-	"Set Proj:CSE_DefineName[15]"		Proj:CSE_DefineName[15]	   = { "FANVENTLOCKOUTTEMP" }
-	"Set Proj:CSE_DefineType[15]"		Proj:CSE_DefineType[15]	   = {	1  }
-	"Set Proj:CSE_DefineFloat[15]"	Proj:CSE_DefineFloat[15]   =              ; SAC 2/7/20 (tic #1175)
-      {  if (IfValidAnd( ResProj:EnableResearchMode > 0.5 ) .AND. GlobalStatus( ResProj:PropFanVentLockoutTemp ) > 0 .AND.
-	          (IfValidAnd( ResProj:RunAbbrev = "p" ) .OR. IfValidAnd( ResProj:RunAbbrev = "u" )))
-	      then  ResProj:PropFanVentLockoutTemp
-	      else  ResProj:FanVentLockoutTemp  endif  }
-
-	"Set Proj:CSE_DefineName[16]"		Proj:CSE_DefineName[16]	   = { "ISSEASONCOOLING" }
-	"Set Proj:CSE_DefineType[16]"		Proj:CSE_DefineType[16]	   = {	3 }
-	"Set Proj:CSE_DefineString[16]"	Proj:CSE_DefineString[16]  =              ; SAC 2/7/20 (tic #1175)
-      {  if (IfValidAnd( ResProj:EnableResearchMode > 0.5 ) .AND. GlobalStatus( ResProj:PropIsSeasCoolingExp ) > 0 .AND.
-	          (IfValidAnd( ResProj:RunAbbrev = "p" ) .OR. IfValidAnd( ResProj:RunAbbrev = "u" )))
-	      then  ResProj:PropIsSeasCoolingExp
-	      else  "(@weather.taDbAvg07 > SEASONCHANGESETPT)"  endif  }
-
-	"Set Proj:CSE_DefineName[17]"		Proj:CSE_DefineName[17]	   = { "FANVENTAVAIL" }
-	"Set Proj:CSE_DefineType[17]"		Proj:CSE_DefineType[17]	   = {	3 }
-	"Set Proj:CSE_DefineString[17]"	Proj:CSE_DefineString[17]  =              ; SAC 1/10/20 (tic #1175)
-	   {  if (IfValidAnd( ResProj:EnableResearchMode > 0.5 ) .AND. GlobalStatus( ResProj:ClVentFanAvailExp ) > 0 .AND.
-	          (IfValidAnd( ResProj:RunAbbrev = "p" ) .OR. IfValidAnd( ResProj:RunAbbrev = "u" )))
-	      then  ResProj:ClVentFanAvailExp
-	      else  "(@weather.taDbAvg07 > FANVENTLOCKOUTTEMP)"  endif  }       ; <<== insert new default expression HERE
-
-	"Set Proj:CSE_DefineName[18]"		Proj:CSE_DefineName[18]	   = { "WINDOWVENTAVAIL" }
-	"Set Proj:CSE_DefineType[18]"		Proj:CSE_DefineType[18]	   = {	3 }
-	; replaced 2019.2.0+ WVA of "($hour < 24 && ($hour > 12 || $radDiff+$radbeam > .01))" -with- "(!@Top.autoSizing && ($hour < 24 && ($hour > 12 || $radDiff+$radbeam > .01)))" from BAW - SAC 7/13/20
-	"Set Proj:CSE_DefineString[18]"	Proj:CSE_DefineString[18]  =              ; SAC 2/7/20 (tic #1175)      ; SAC 2/13/20 - installed mod for 2019.2.0+ (tic #1175)     ; enable 19.2.0+ mod for 2019.1.3 - SAC 7/15/20
-      {  if (IfValidAnd( ResProj:EnableResearchMode > 0.5 ) .AND. GlobalStatus( ResProj:PropWindowVentAvailExp ) > 0 .AND.
-	          (IfValidAnd( ResProj:RunAbbrev = "p" ) .OR. IfValidAnd( ResProj:RunAbbrev = "u" )))
-	      then  ResProj:PropWindowVentAvailExp
-	      else if (IfValidAnd( Proj:AnalysisVersion >= 190103 ))
-	      then  "(!@Top.autoSizing && ($hour < 24 && ($hour > 12 || $radDiff+$radbeam > .01)))"
-	      else  "($hour < 24 && ($hour > 12 || $radDiff > 1))"  endif endif  }
-
-	; SAC 7/6/15
-	"Set Proj:CSE_DefineName[19]"		Proj:CSE_DefineName[19]		= { "HWUSEF_WD" }
-	"Set Proj:CSE_DefineType[19]"		Proj:CSE_DefineType[19]		= {	3 }
-	"Set Proj:CSE_DefineString[19]"	Proj:CSE_DefineString[19]	= { "hourval( 0.014, 0.008, 0.009, 0.011, 0.020, 0.044, 0.089, 0.107, 0.089, 0.066, 0.052, 0.038, 0.036, 0.033, 0.032, 0.026, 0.042, 0.048, 0.052, 0.047, 0.042, 0.039, 0.036, 0.022 )" }
-
-	"Set Proj:CSE_DefineName[20]"		Proj:CSE_DefineName[20]		= { "HWUSEF_WE" }
-	"Set Proj:CSE_DefineType[20]"		Proj:CSE_DefineType[20]		= {	3 }
-	"Set Proj:CSE_DefineString[20]"	Proj:CSE_DefineString[20]	= { "hourval( 0.018, 0.010, 0.009, 0.008, 0.015, 0.023, 0.026, 0.047, 0.077, 0.083, 0.074, 0.061, 0.051, 0.043, 0.039, 0.039, 0.052, 0.058, 0.056, 0.052, 0.047, 0.044, 0.040, 0.028 )" }
-
-	; DHW use #define values 21-33 - left undefined if not using new DHW use profiles - SAC 3/15/16
-	"Set Proj:CSE_Define*[21-33] depending on DHW Use mechanism"		ResProj:Action	= {   EvalRulelist( "CSE_SetDHWUseInclude"   )  }
-									;					if (CSEDHWUseMethod == 1)	then	EvalRulelist( "CSE_BlastDHWUseInclude" )
-									;														else	EvalRulelist( "CSE_SetDHWUseInclude"   )  endif  }
-
-	; Internal Gains #define values 34-60 - left undefined for IntGainsMethod < 2016 - SAC 4/13/16
-	"Set Proj:CSE_Define*[34-60] depending on IntGainsMethod"		ResProj:Action	= {
-														if (IntGainsMethod == 2016)	then	EvalRulelist( "CSE_Set2016InternalGains" )
-																								else	EvalRulelist( "CSE_BlastInternalGains"   )  endif  }
-
-   ; SAC 11/4/18 - VCHP
-	"Set Proj:CSE_DefineName[61]"		Proj:CSE_DefineName[61]	   = { "FVCHPC" }
-	"Set Proj:CSE_DefineType[61]"		Proj:CSE_DefineType[61]	   = {	3  }
-	"Set Proj:CSE_DefineString[61]"	Proj:CSE_DefineString[61]  = { "0.95		// VCHP cooling input energy factor" }
-	"Set Proj:CSE_DefineName[62]"		Proj:CSE_DefineName[62]	   = { "FVCHPH" }
-	"Set Proj:CSE_DefineType[62]"		Proj:CSE_DefineType[62]	   = {	3  }
-	"Set Proj:CSE_DefineString[62]"	Proj:CSE_DefineString[62]  = { "0.88		// VCHP heating input energy factor" }
-
-	"Set Proj:CSE_DefineName[63]"		Proj:CSE_DefineName[63]	   = { "NumCntrlWHtrs( s)" }     ; SAC 12/4/19 - to facilitate central electric DHWSys heater autosizing
-	"Set Proj:CSE_DefineType[63]"		Proj:CSE_DefineType[63]	   = {   3  }
-;	"Set Proj:CSE_DefineString[63]"	Proj:CSE_DefineString[63]  = { "max( 1, @DHWSYS[ s].loadMax / (15400 * @DHWSYS[ s].loadMaxDur))" }
-	"Set Proj:CSE_DefineString[63]"	Proj:CSE_DefineString[63]  = { "tofloat( 1+fix(@DHWSYS[ s].loadMax / (15400. * @DHWSYS[ s].loadMaxDur)))" }
-
-	"Set Proj:CSE_DefineName[64]"		Proj:CSE_DefineName[64]	   = { "RunFileName" }
-	"Set Proj:CSE_DefineType[64]"		Proj:CSE_DefineType[64]	   = {   3  }
-	"Set Proj:CSE_DefineString[64]"	Proj:CSE_DefineString[64]  = { ValidOr( ProjFileNameNoExt, "" ) + ValidOr( RunIDProcFile, "" )  }
-
-	"Set Proj:CSE_DefineName[65]"		Proj:CSE_DefineName[65]	   = { UNDEFINED }      ; next #define goes here...
-	"Set Proj:CSE_DefineType[65]"		Proj:CSE_DefineType[65]	   = { UNDEFINED }
-	"Set Proj:CSE_DefineFloat[65]"	Proj:CSE_DefineFloat[65]   = { UNDEFINED }
-	"Set Proj:CSE_DefineString[65]"	Proj:CSE_DefineString[65]  = { UNDEFINED }
-
-
-   "Set cseTOP:heatDsTDbO"       cseTOP:heatDsTDbO		= {	T24RClimateZoneDesignDay:HtgDesign( "WeatherFileSet", ResProj:WeatherFileSet, "ClimateZone", Proj:ClimateZone )  }
-   "Set cseTOP:coolDsDay_x"      cseTOP:coolDsDay_x	= {	"DD1"  }   ; trailing '_x' in property name causes output string to NOT be enclosed in double quotes
-
-	; SAC 5/1/14 - added logic to prevent output of ventAvail_x when CFIClVent not selected @ the project level (mainly to turn off for Std design run - GC #298)
-   "Set cseTOP:ventAvail_x"      cseTOP:ventAvail_x	= {	if ( ResProj:CSEVentAvailZonal) then  "zonal"    ; SAC 7/12/20
-                                                            else if (SumAll( ResHVACSys:CFIClVentFlow ) > 1 .AND. ResProj:UnitClVentOption == 3)
-																				then  "FANVENTAVAIL ? RSYSOAV : WholeBuilding "		; turns off window ventilation during cooling mode, but leaves it on in case of overheating in heating mode.  Only the OAV system runs in cooling mode.
-																				else  UNDEFINED  endif endif  }   ; SAC 8/26/13 - OAV
 END
 ;*************************************************************************
 
