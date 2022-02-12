@@ -389,24 +389,31 @@ RULELIST "ProposedModelCodeAdditions" 1 0 0 1
    ;--------------------------------------------------------------------
    ; Set HVACSys:StdHeatingType  (prior to system mods that will effect std design system selection)
    ;--------------------------------------------------------------------
-; SAC 1/14/14 - moved UP HERE from below - so that addition of proposed model cooling doesn't effect StdHeatingType (GC issue #265)
-	"Set HVACSys:StdHeatingType"		HVACSys:StdHeatingType	= {
-		if (HaveHeating < 0.5)
-	  then  0	; What if no system exists yet??
-    else if (Type == 2)
-		then ; Is a HeatPump system
-			if (HtPumpSystem[1]:Type < 1)
-		  then  0	; No Heating case ???
-			else if (HtOrClDucted < 0.5)
-			then	T24RHeatingEquipment:DuctlessStdSys( "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", HtPumpSysTypeAbbrev )
-			else  T24RHeatingEquipment:DuctedStdSys(   "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", HtPumpSysTypeAbbrev )
-			endif endif
-		else if (HeatSystem[1]:Type < 1)
-	  then  0 ; No Heating case ???
-		else if (HtOrClDucted < 0.5)
-		then T24RHeatingEquipment:DuctlessStdSys( "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", HeatSysTypeAbbrev )
-		else T24RHeatingEquipment:DuctedStdSys(   "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", HeatSysTypeAbbrev )
-    endif endif endif endif  }
+   ; SAC 1/14/14 - moved UP HERE from below - so that addition of proposed model cooling doesn't effect StdHeatingType (GC issue #265)
+   ; revised logic to keep StdHeatingType = input HeatSysType for EXISTING systems that are not PropEqStd - SAC 02/02/22 (tic #1324)
+   "Set HVACSys:StdHeatingType"      HVACSys:StdHeatingType   =
+      {  if (HaveHeating < 0.5)
+         then  0   ; What if no system exists yet??
+         else if (Type == 2)
+         then  ; Is a HeatPump system
+               if (HtPumpSystem[1]:Type < 1)
+               then  0   ; No Heating case ???
+               else if ((Proj:RunScope == 2 .OR. Proj:IsAddAlone > 0) .AND. HtPumpSysType > 0 .AND. Status == 1 .AND.
+                        T24RHeatingEquipment:PropEqStd( "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", HtPumpSysTypeAbbrev ) < 1)
+               then  HtPumpSysType
+               else if (HtOrClDucted < 0.5)
+               then  T24RHeatingEquipment:DuctlessStdSys( "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", HtPumpSysTypeAbbrev )
+               else  T24RHeatingEquipment:DuctedStdSys(   "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", HtPumpSysTypeAbbrev )
+               endif endif endif
+         else if (HeatSystem[1]:Type < 1)
+         then  0 ; No Heating case ???
+         else if ((Proj:RunScope == 2 .OR. Proj:IsAddAlone > 0) .AND. HeatSysType > 0 .AND. Status == 1 .AND.
+                  T24RHeatingEquipment:PropEqStd( "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", HeatSysTypeAbbrev ) < 1)
+         then  HeatSysType
+         else if (HtOrClDucted < 0.5)
+         then  T24RHeatingEquipment:DuctlessStdSys( "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", HeatSysTypeAbbrev )
+         else  T24RHeatingEquipment:DuctedStdSys(   "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", HeatSysTypeAbbrev )
+         endif endif endif endif endif  }
 ;	"store BEMProc details"		HVACSys:Action = {  StoreBEMProc( "ProposedModelCodeAdditions - StdHeatingType just set", 0 )  }
 ;	"DBG msg" HVACSys:Action = { MessageBox( "ProposedModelCodeAdditions -- HVACSys '%s' StdHeatingType = '%s'", Name, EnumString( StdHeatingType ) ) }
 ;	"debug HVACSys:StdHeatingType"	HVACSys:Action	=	{ PostWarning( "ProposedModelCodeAdditions -- HVACSys:StdHeatingType -> Type = %g  HtOrClDucted = %g  HtPumpSysTypeAbbrev = '%s'  StdHeatingType = %g ", Type, HtOrClDucted, HtPumpSysTypeAbbrev, StdHeatingType )  }
@@ -704,15 +711,15 @@ RULELIST "SetupProposedHVAC" 1 0 0 1
 	  endif  }
 	"Set HVACSys:HeatSystem:StdType"		HVACSys:HeatSystem:StdType	= {	StdHeatingType }
 
-	"Add HtPumpSystem to any systems requiring it"
+	"Add HtPumpSystem to any systems requiring it"    ; fix bug (?) where logic was executed for NON-HP systems, rather than for HP (Type=2) systems - SAC 02/02/22
 	HVACSys:HtPumpSystem	= {	
-		if ( Type == 1 .AND. LocalCompAssigned( HtPumpSystem ) == 0 .AND. FloorAreaServed[1] > 0.1 )
+		if ( Type == 2 .AND. LocalCompAssigned( HtPumpSystem ) == 0 .AND. FloorAreaServed[1] > 0.1 )
 		then; Type = "Central Heating and Cooling System"
 			switch (StdHeatingType)
 				case  1 :	UNDEFINED  ; CreateComp( HVACHeat, Local( Name ) + "-heat", "Setup_HVACHeat_CntrlFurnace"  )	; "CntrlFurnace"
 				case  2 :	UNDEFINED  ; CreateComp( HVACHeat, Local( Name ) + "-heat", "Setup_HVACHeat_Heater"        )	; "Heater"
 				case  3 :	UNDEFINED  ; CreateComp( HVACHeat, Local( Name ) + "-heat", "Setup_HVACHeat_Boiler"        )	; "Boiler"
-			  case  4 :	CreateComp( HVACHtPump, Local( Name ) + "-htpmp", "Setup_HVACHtPump_SplitHeatPump" )		   ; "SplitHeatPump"
+			   case  4 :	CreateComp( HVACHtPump, Local( Name ) + "-htpmp", "Setup_HVACHtPump_SplitHeatPump" )		   ; "SplitHeatPump"
 				case 19 :	CreateComp( HVACHtPump, Local( Name ) + "-htpmp", "Setup_HVACHtPump_SDHVSplitHeatPump" )		; "SDHVSplitHeatPump"
 				case 10 :	CreateComp( HVACHtPump, Local( Name ) + "-htpmp", "Setup_HVACHtPump_DuctlessMiniSplitHeatPump" )	   ; "DuctlessHeatPump"
 				case  7 :	CreateComp( HVACHtPump, Local( Name ) + "-htpmp", "Setup_HVACHtPump_RoomHeatPump"  )		   ; "RoomHeatPump"
