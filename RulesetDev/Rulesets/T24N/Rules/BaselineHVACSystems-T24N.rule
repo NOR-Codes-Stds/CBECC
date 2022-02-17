@@ -221,7 +221,7 @@ RULE NEW Bldg:BaseNonResSysNum
       endif endif endif
     else 0 // Baseline design has no nonresidential HVAC systems
     endif
-  SIZING_PROPOSED
+  SIZING_PROPOSED : T24N_2019
     if( NonResAreaForBaseSysMap - HlthCareArea -
         ( ProcAreaNew + ProcAreaExisting + ProcAreaAltered ) -
         ( RetailAreaNew + RetailAreaExisting + RetailAreaAltered ) > 0 )
@@ -230,6 +230,30 @@ RULE NEW Bldg:BaseNonResSysNum
       then 
         if( AboveGrdStoryCntForBaseSysMap < 4 ) 
         then 7 // SZVAVAC.  Will be switched to SZAC if required after sizing run
+        else if( AboveGrdStoryCntForBaseSysMap < 6 ) 
+        then 5 // PVAV
+        else 6 // VAV
+        endif endif
+      else
+      if( NonResAreaForBaseSysMap < 150000 )
+      then 
+        if( AboveGrdStoryCntForBaseSysMap < 6 ) 
+        then 5 // PVAV
+        else 6 // VAV
+        endif
+      else 6 // VAV
+      endif endif
+    else 0 // Baseline design has no nonresidential HVAC systems
+    endif
+  SIZING_PROPOSED : T24N
+    if( NonResAreaForBaseSysMap - HlthCareArea -
+        ( ProcAreaNew + ProcAreaExisting + ProcAreaAltered ) -
+        ( RetailAreaNew + RetailAreaExisting + RetailAreaAltered ) > 0 )
+    then // Process and retail systems determined by separate rules
+      if( NonResAreaForBaseSysMap < 25000 )
+      then 
+        if( AboveGrdStoryCntForBaseSysMap < 4 ) 
+        then 7 // SZVAVHP.  Will be switched to SZAC if required after sizing run
         else if( AboveGrdStoryCntForBaseSysMap < 6 ) 
         then 5 // PVAV
         else 6 // VAV
@@ -851,8 +875,8 @@ RULE NEW ThrmlZn:BaseZnAirSysRef
       endif endif endif
     else UNCHANGED
     endif
-  SIZING
-  // 2019 and beyond system map
+  SIZING : T24N_2019
+  // 2019 system map
     if( CreateBaseHVAC > 0 .AND. IsCtrlZn > 0 .AND. LocalCompAssigned( BaseZnAirSysRef ) = 0 )
     then
       if( IsRes > 0 .OR. IsHlthCare > 0 )
@@ -917,6 +941,94 @@ RULE NEW ThrmlZn:BaseZnAirSysRef
       if( Parent( BaseNonResSysNum ) = 7 )
       then // SZVAVAC
         RuleLibrary( AirSys, "BaseAirSys7", 1 ) 
+      else UNDEFINED
+      endif endif endif endif endif
+      endif endif endif
+    else UNCHANGED
+    endif
+  SIZING
+  // 2022 and beyond system map
+    if( CreateBaseHVAC > 0 .AND. IsCtrlZn > 0 .AND. LocalCompAssigned( BaseZnAirSysRef ) = 0 )
+    then
+      if( IsRes > 0 .OR. IsHlthCare > 0 )
+      then UNDEFINED // See ThrmlZn:BaseZnZnSysRef rule below for IsRes > 0
+      else
+      if( HtgOnlySysArea > 0 )
+      then // Zone is heated-only warehouse
+        if( Max( HtgOnlySysAreaNew, HtgOnlySysAreaAltered ) > 0 .OR. HasUnknownHVAC > 0 ) 
+        then // HV
+          RuleLibrary( AirSys, "BaseAirSys9", 1 ) 
+        else UNDEFINED
+        endif
+      else
+      if( CompRmArea > 0 )
+      then // Zone is a Computer Room
+        if( Max( Bldg:CompRmPwrNew, Bldg:CompRmPwrAltered ) > 0 .AND.
+               ( Bldg:CompRmPwrNew + Bldg:CompRmPwrAltered ) < 800 )
+        then // Zone is a Computer Room and Bldg < 800 kW computer power, use CRAC
+          RuleLibrary( AirSys, "BaseAirSys11", 1 ) ; CRAC
+        else 
+        if( Max( CompRmAreaNew, CompRmAreaAltered ) > 0 .AND. 
+            ( Bldg:CompRmPwrNew + Bldg:CompRmPwrAltered ) >= 800 )
+        then // Zone is a Computer Room and Bldg >= 800 kW computer power, use CRAH
+          RuleLibrary( AirSys, "BaseAirSys10", 1 ) 
+        else UNDEFINED
+        endif endif
+      else
+      if( LabArea > 0 )
+      then // Zone is lab in building below total exhaust threshold
+        if( Max( LabAreaNew, LabAreaAltered ) > 0 .AND. 
+            Bldg:BaseNonResSysNum != 5 .AND.
+            Bldg:BaseNonResSysNum != 6 .AND.
+            Bldg:LabExhFlow < 15000 )
+        then // Use SZAC if NonRes system map is not PVAV/VAV and 
+             // building lab exhaust is below threshold
+          RuleLibrary( AirSys, "BaseAirSys12b", 1 )
+        else UNDEFINED
+        endif
+      else  
+      if( CommKitArea > 0 ) 
+      then 
+        if( Max( CommKitAreaNew, CommKitAreaAltered ) > 0 ) 
+        then // Commercial kitchen system KITCH (SZAC)
+          RuleLibrary( AirSys, "BaseAirSys13", 1 ) 
+        else UNDEFINED
+        endif
+      else
+      if( IfValidAnd( Bldg:IsRetailBldg > 0 ) )
+      then // Building is Retail, <= 2 stories
+        if( Max( RetailAreaNew, RetailAreaAltered ) > 0 ) 
+        then
+          if( Proj:CliZnNum >= 2 .AND. Proj:CliZnNum <= 15 ) 
+          then // CliZn 2-15, System 7h: SZVAVHP
+            RuleLibrary( AirSys, "BaseAirSys7h", 1 ) 
+          else // CliZn 1 and 16, System 7d: SZVAVDFHP
+            RuleLibrary( AirSys, "BaseAirSys7d", 1 ) 
+          endif
+        else UNDEFINED
+        endif
+      else
+      if( IfValidAnd( Bldg:IsSchoolBldg > 0 ) )
+      then // Building is School, <= 2 stories
+        if( Max( SchoolAreaNew, SchoolAreaAltered ) > 0 ) 
+        then
+          if( Proj:CliZnNum >= 2 .AND. Proj:CliZnNum <= 15 ) 
+          then // CliZn 2-15, System 7h: SZVAVHP
+            RuleLibrary( AirSys, "BaseAirSys7h", 1 ) 
+          else // CliZn 1 and 16, System 7d: SZVAVDFHP
+            RuleLibrary( AirSys, "BaseAirSys7d", 1 ) 
+          endif
+        else UNDEFINED
+        endif
+      else
+      if( Bldg:BaseNonResSysNum = 7 )
+      then
+        if( Proj:CliZnNum >= 1 .AND. Proj:CliZnNum <= 15 ) 
+        then // CliZn 1-15, System 7h: SZVAVHP
+          RuleLibrary( AirSys, "BaseAirSys7h", 1 ) 
+        else
+          RuleLibrary( AirSys, "BaseAirSys7d", 1 )
+        endif 
       else UNDEFINED
       endif endif endif endif endif
       endif endif endif
@@ -1260,7 +1372,7 @@ RULE ThrmlZn:TrmlUnitRef
             RuleLibrary( TerminalUnit, "BaseVAVBox TrmlUnit", 1, PriAirCondgSysRef[1] )    
           case 6  : // VAV
             RuleLibrary( TerminalUnit, "BaseVAVBox TrmlUnit", 1, PriAirCondgSysRef[1] )    
-          case 7  : // SZVAVAC
+          case 7  : // SZVAV
             RuleLibrary( TerminalUnit, "BaseVAVNoReheatTrmlUnit", 1, PriAirCondgSysRef[1] ) 
           case 9  : // HV
             RuleLibrary( TerminalUnit, "BaseUnctrl TrmlUnit", 1, PriAirCondgSysRef[1] ) 
@@ -1415,7 +1527,6 @@ RULE AirSys:Type
     else UNCHANGED
     endif
 ENDRULE
-
 
 // KITCH system type threshold
 RULE AirSys:Type

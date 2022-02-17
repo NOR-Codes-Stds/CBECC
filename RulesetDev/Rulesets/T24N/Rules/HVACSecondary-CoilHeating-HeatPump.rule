@@ -320,10 +320,16 @@ RULE CoilHtg:HtPumpHSPF
     else HtPumpHSPF
     endif
   ANNUAL : T24N
-    if( BaseSysNum > 0 )
-    then UNDEFINED // T24N baseline system is never a HP
-    else z:HtPumpHSPF
-    endif    
+    if( BaseSysNum > 0 .AND. Type = "HeatPump" .AND. IfValidAnd( SysClgCap > 0 ) )
+    then
+      if( ParentComp = "ZnSys" )
+      then UNDEFINED
+      else if( IfValidAnd( SysClgCap < 65000 ) )
+      then 8.0 // Baseline is assumed Packaged, 3Phase
+      else UNDEFINED
+      endif endif
+    else UNCHANGED
+    endif
   ANNUAL : S901G ECBC
     if( BaseSysNum > 0 .AND. Type = "HeatPump" )
     then
@@ -333,7 +339,7 @@ RULE CoilHtg:HtPumpHSPF
       then 7.7 // Baseline is assumed 3Phase
       else UNDEFINED
       endif endif
-    else z:HtPumpHSPF
+    else UNCHANGED
     endif
 ENDRULE
 // -----------------------------------------------------------------------------
@@ -378,13 +384,13 @@ RULE NEW CoilHtg:CodeMinCOP
   UNITS 
     W/W
   DEFAULT
-    if( Type = "HeatPump" .AND. IfValidAnd( CapTotNetRtd > 0 ) )
+    if( Type = "HeatPump" .AND. IfValidAnd( SysClgCap > 0 ) )
     then // ------------------------------------------------------------------
       if( ParentComp = "AirSys" )
       then // Part of an AirSystem
         if( SysType = "SPVHP" )
         then // SPVHP
-          if( CapTotNetRtd >= 240000)
+          if( IfValidAnd( SysClgCap >= 240000 ) )
           then UNDEFINED // No requirement above 240 kBtu/hr
           else // Look-up from table
             UnitaryACHPMinEffReq:COP47(
@@ -395,7 +401,7 @@ RULE NEW CoilHtg:CodeMinCOP
               "SizeCategory", SysClgCap )          
           endif
         else
-        if( IfValidAnd( Parent2Valid( ClgCap ) >= 65000 ) .AND.
+        if( IfValidAnd( SysClgCap >= 65000 ) .AND.
             IfValidAnd( CndsrType = "Air" ) .AND.
             AirSys:UnitaryCat = "HP" )
         then // Air-source, >65 kBtu/hr cooling
@@ -422,7 +428,7 @@ RULE NEW CoilHtg:CodeMinCOP
       then // Part of a ZoneSystem
         if( SysType = "SPVHP" )
         then // SPVHP
-          if( CapTotNetRtd >= 240000)
+          if( IfValidAnd( SysClgCap >= 240000 ) )
           then UNDEFINED // No requirement above 240 kBtu/hr
           else // Look-up from table
             UnitaryACHPMinEffReq:COP47(
@@ -435,18 +441,18 @@ RULE NEW CoilHtg:CodeMinCOP
         else
         if( ( SysType = "SZHP" .OR.
               SysType = "MiniSplitHP" ) .AND. 
-            IfValidAnd( ParentValid( ClgCap ) >= 65000 ) )
+            IfValidAnd( SysClgCap >= 65000 ) )
         then // >65 kBtu/hr cooling, including minisplits
           3.3 
         else
-        if( SysType = "PTHP" .AND. IfValidAnd( ParentValid( ClgCap ) > 0 ) )
+        if( SysType = "PTHP" .AND. SysClgCap > 0 )
         then // PTHP
           // Rules currently only cover PTAC and PTHP in new constrution or newly 
           // conditioned buildings or additions.  Rules for PTHP replacements 
           // not currently supported.
           3.2 - (0.026 * ( Min( 15000, Max( 7000, SysClgCap ) ) ) / 1000 )
         else
-        if( SysType = "WSHP" .AND. IfValidAnd( ParentValid( ClgCap ) > 0 ) )
+        if( SysType = "WSHP" .AND. IfValidAnd( SysClgCap > 0) )
         then // Water-source heat pumps
           if( SysClgCap < 135000 ) 
           then
@@ -552,12 +558,20 @@ RULE CoilHtg:HtPumpCOP
     else HtPumpCOP
     endif endif
   ANNUAL : T24N
-    if( BaseSysNum > 0 )
-    then UNDEFINED // T24N baseline system is never a HP
-    else z:HtPumpCOP
-    endif   
+    if( BaseSysNum > 0 .AND. Type = "HeatPump" .AND. IfValidAnd( SysClgCap > 0 ) )
+    then
+      if( SysClgCap < 65000 ) 
+      then // Use HSPF -> COP equation
+        ( 0.2778 * HtPumpHSPF ) + 0.9667
+      else // Look-up minimum efficiency based on baseline rated net capacity 
+        UnitaryACHPMinEffReq:COP47( "Category", AirSys:UnitaryCat,
+                                    "SubCategory", AirSys:SubType,
+                                    "SizeCategory", CapTotNetRtd )
+      endif
+    else UNCHANGED
+    endif
   ANNUAL : S901G ECBC
-    if( BaseSysNum > 0 .AND. Type = "HeatPump")
+    if( BaseSysNum > 0 .AND. Type = "HeatPump" .AND. IfValidAnd( SysClgCap > 0 ) )
     then
       if( ParentComp = "ZnSys" )
       then // Is PTHP
@@ -566,9 +580,9 @@ RULE CoilHtg:HtPumpCOP
       then // Use HSPF -> COP equation
         ( 0.2778 * HtPumpHSPF ) + 0.9667
       else // Look-up minimum efficiency based on baseline rated net capacity 
-        StdHPHtgEfficiency:COP47("SizeCategory", SysClgCap)
+        StdHPHtgEfficiency:COP47( "SizeCategory", SysClgCap )
       endif endif
-    else z:HtPumpCOP
+    else UNCHANGED
     endif
 ENDRULE
 // -----------------------------------------------------------------------------
@@ -641,7 +655,7 @@ RULE CoilHtg:HtPumpCOPAdj
         ( ( CapTotNetRtd / ( HtPumpCOPRnd * 3.412 ) ) - ( FanHtRtd / 3.412 ) - PumpPwrRtd )
       else 0
       endif
-    else z:HtPumpCOPAdj
+    else UNCHANGED
     endif
 ENDRULE
 
@@ -681,8 +695,7 @@ RULE CoilHtg:HtPumpEIR
     endif
   ANNUAL 
     if( Type = "HeatPump" .AND. IfValidAnd( HtPumpCOPAdj > 0 ) )
-    then 
-      z:HtPumpEIR
+    then 1 / HtPumpCOPAdj
     else UNDEFINED
     endif
 ENDRULE
@@ -704,7 +717,11 @@ RULE CoilHtg:HtPumpEIR_fTempCrvRef
     else UNDEFINED
     endif
   ANNUAL 
-    z:HtPumpEIR_fTempCrvRef
+    if( Type = "HeatPump" .AND. IfValidAnd( CndsrType = "Air" ) )
+    then
+      RuleLibrary(CrvCubic, "CoilHtgHPEIRRatio_fToadbSI")
+    else UNDEFINED
+    endif
 ENDRULE
 
 
@@ -724,7 +741,11 @@ RULE CoilHtg:HtPumpEIR_fPLFCrvRef
     else UNDEFINED
     endif
   ANNUAL 
-    z:HtPumpEIR_fPLFCrvRef
+    if( Type = "HeatPump" .AND. IfValidAnd( CndsrType = "Air" ) )
+    then
+      RuleLibrary(CrvQuad, "CoilHtgHPEIRRatio_fQFrac") 
+    else UNDEFINED
+    endif
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -742,7 +763,11 @@ RULE CoilHtg:HtPumpEIR_fFlowCrvRef
     else UNDEFINED
     endif
   ANNUAL 
-    z:HtPumpEIR_fFlowCrvRef
+    if( Type = "HeatPump" .AND. IfValidAnd( CndsrType = "Air" ) )
+    then
+      RuleLibrary(CrvQuad, "CoilHtgHPEIRRatio_fCFMRatio")
+    else UNDEFINED
+    endif
 ENDRULE
 
 
@@ -827,20 +852,48 @@ RULE CoilHtg:HtPumpCprsrLockoutTemp
     then 
       if( BaseSysNum > 0 )
       then
-        if( ParentComp = "ZnSys" )
+        if( SysType = "PTHP" )
         then 35
         else 17
         endif
-      else HtPumpCprsrLockoutTemp
+      else UNCHANGED
       endif
     else UNDEFINED
     endif
   ANNUAL 
-    z:HtPumpCprsrLockoutTemp
+    if( Type = "HeatPump" )
+    then 
+      if( BaseSysNum > 0 )
+      then
+        if( SysType = "PTHP" )
+        then 35
+        else 17
+        endif
+      else UNCHANGED
+      endif
+    else UNDEFINED
+    endif
 ENDRULE
 
 
 // ********** Electric Supplemental Heating Coil *******************************
+RULE NEW CoilHtg:IsHtPumpSuppCoilHtg
+  DATATYPE
+    Integer
+  LONGFORM
+    IsHeatPumpSupplementalCoilHeating
+  DESCRIPTION
+    "The a flag that indicates the CoilHeating object is supplemental heating for
+     the heat pump."
+  INPUTCLASS
+    NotInput
+  SIZING
+    if( SumRevRef( CoilHtg:HtPumpSuppCoilHtgRef, CoilHtg:SysCnt ) > 0 )
+    then 1
+    else 0
+    endif
+ENDRULE
+ 
 RULE CoilHtg:HtPumpSuppCoilHtgRef
   DESCRIPTION
     "The name of the CoilHeating object that provide supplemental heating for
@@ -885,14 +938,21 @@ RULE CoilHtg:HtPumpSuppCoilHtgRef
                  Name, HtPumpSuppCoilHtgRef:Name ) 
     else UNCHANGED
     endif endif endif
-//SIZING
-// Supplemental heating coil for baseline systems defined in library object
-  SIZING_PROPOSED
-    if( ParentComp = "ZnSys" .AND. Type = "HeatPump" )
-    then if( LocalCompAssigned( HtPumpSuppCoilHtgRef ) )
-         then UNCHANGED
-         else RuleLibrary( CoilHtg, "SuppCoilHtg", 1,  ZnSys:Name)
-         endif
+  ANNUAL : T24N
+    if( BaseSysNum = 7 .AND. Type = "Furnace" )
+    then // Supplemental coil not needed for std systems with furnace
+      UNDEFINED
+    else UNCHANGED
+    endif
+ENDRULE
+
+// T24N_2022 Delete supplemental CoilHtg object if system is changed to SZAC
+RULE CoilHtg:Action
+  ANNUAL : T24N
+    if( BaseSysNum = 7 .AND. SysType = "SZAC" .AND.
+        IfValidAnd( IsHtPumpSuppCoilHtg > 0 ) )
+    then // System is SZAC, delete HtPumpSuppCoilHtg object
+      DeleteComp()
     else UNCHANGED
     endif
 ENDRULE
@@ -961,12 +1021,15 @@ RULE CoilHtg:HtPumpSuppTemp
     then 
       if( BaseSysNum > 0 )
       then 40
-      else HtPumpSuppTemp
+      else UNCHANGED
       endif
     else UNDEFINED
     endif
   ANNUAL 
-    z:HtPumpSuppTemp
+    if( Type != "HeatPump" )
+    then UNDEFINED
+    else UNCHANGED
+    endif
 ENDRULE
 
 
@@ -993,12 +1056,19 @@ RULE CoilHtg:HtPumpDefHtSrc
     then 
       if( BaseSysNum > 0 )
       then "HotGas"
-      else HtPumpDefHtSrc
+      else UNCHANGED
       endif
     else UNDEFINED
     endif
   ANNUAL 
-    z:HtPumpDefHtSrc
+    if( Type = "HeatPump" .AND. IfValidAnd( CndsrType = "Air" ) )
+    then 
+      if( BaseSysNum > 0 )
+      then "HotGas"
+      else UNCHANGED
+      endif
+    else UNDEFINED
+    endif
 ENDRULE
 
 
@@ -1034,15 +1104,10 @@ RULE CoilHtg:HtPumpDefHtrCap
     else UNDEFINED
     endif
   ANNUAL 
-    if( BaseSysNum > 0 .AND. Type = "HeatPump" )
+    if( Type != "HeatPump" )
     then UNDEFINED
-    else
-    if( Type = "HeatPump" .AND. 
-        IfValidAnd( CndsrType = "Air" ) .AND. 
-        IfValidAnd( HtPumpDefHtSrc = "Electric" ) )
-    then z:HtPumpDefHtrCap
-    else UNDEFINED
-    endif endif
+    else UNCHANGED
+    endif
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -1059,7 +1124,10 @@ RULE CoilHtg:HtPumpDefHtrCapSim
     else UNDEFINED
     endif
   ANNUAL 
-    z:HtPumpDefHtrCapSim
+    if( Type != "HeatPump" )
+    then UNDEFINED
+    else UNCHANGED
+    endif
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -1089,12 +1157,19 @@ RULE CoilHtg:HtPumpDefCtrl
     then
       if( BaseSysNum > 0 )
       then "TimedCycle"
-      else HtPumpDefCtrl
+      else UNCHANGED
       endif
     else UNDEFINED
     endif
   ANNUAL 
-    z:HtPumpDefCtrl
+    if( Type = "HeatPump" .AND. IfValidAnd( CndsrType = "Air" ) ) 
+    then
+      if( BaseSysNum > 0 )
+      then "TimedCycle"
+      else UNCHANGED
+      endif
+    else UNDEFINED
+    endif
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -1126,7 +1201,11 @@ RULE CoilHtg:HtPumpDefCtrlTemp
     else UNDEFINED
     endif
   ANNUAL 
-    z:HtPumpDefCtrlTemp
+    if( Type = "HeatPump" .AND. IfValidAnd( CndsrType = "Air" ) .AND.
+        LocalStatus( HtPumpDefHtSrc ) > 0 ) 
+    then 40
+    else UNDEFINED
+    endif
 ENDRULE
 
 
@@ -1150,7 +1229,10 @@ RULE CoilHtg:HtPumpCrankcaseHtrCap
     else HtPumpCrankcaseHtrCap
     endif
   ANNUAL 
-    z:HtPumpCrankcaseHtrCap
+    if( Type != "HeatPump" )
+    then UNDEFINED
+    else UNCHANGED
+    endif
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -1167,7 +1249,10 @@ RULE CoilHtg:HtPumpCrankcaseHtrCapSim
     else UNDEFINED
     endif
   ANNUAL 
-    z:HtPumpCrankcaseHtrCapSim
+    if( Type != "HeatPump" )
+    then UNDEFINED
+    else UNCHANGED
+    endif
 ENDRULE
 
 
@@ -1205,7 +1290,10 @@ RULE CoilHtg:HtPumpCrankcaseCtrlTemp
     else UNDEFINED
     endif
   ANNUAL 
-    z:HtPumpCrankcaseCtrlTemp
+    if( Type != "HeatPump" )
+    then UNDEFINED
+    else UNCHANGED
+    endif
 ENDRULE
 
 

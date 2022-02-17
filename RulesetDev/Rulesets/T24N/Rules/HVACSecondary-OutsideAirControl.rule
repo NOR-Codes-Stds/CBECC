@@ -243,7 +243,8 @@ RULE OACtrl:HtRcvryRef
     then AirSys:HtRcvryRef
     else UNCHANGED
     endif
-  CHECKCODE
+  CHECKCODE : T24N_2013 T24N_2016 T24N_2019
+// heat recovery is allowed for non-100% OA system since 2022
     if( LocalCompAssigned( HtRcvryRef ) .AND. 
         IfValidAnd( AirSys:IsAllOA = 0 ) )
 //      AirSys:SysOARat < ( 1 - Proj:OATolLim ) ) ; Old criteria
@@ -861,7 +862,7 @@ RULE OACtrl:EconoCtrlMthd
       "NoEconomizer"
     else EconoCtrlMthd
     endif
-  ANNUAL : T24N
+  ANNUAL : T24N_2013 T24N_2016 T24N_2019
     if( BaseSysNum > 0 )
     then
       if( AirSys:BaseSysNum = 10 )
@@ -880,6 +881,26 @@ RULE OACtrl:EconoCtrlMthd
 ;        "None" // Commerical kitchen systems have no economizer.
       else if( AirSys:ClgCap > 54000 )
       then "DifferentialDryBulb"
+      else "NoEconomizer"
+      endif endif endif ; endif
+    else z:EconoCtrlMthd
+    endif
+  ANNUAL : T24N
+    if( BaseSysNum > 0 )
+    then
+      if( AirSys:BaseSysNum = 10 )
+      then // CRAH system
+        "FixedDryBulb" // No capacity threshold for CRAH units
+      else if( AirSys:BaseSysNum = 12 )
+      then // LAB system
+        if( IfValidAnd( AirSys:PropSysOARat < 0.99 ) ) 
+        then // Is a lab system and one of the proposed system serving the 
+             // baseline lab zones(s) is less than 99% OA
+          "FixedDryBulb"
+        else "NoEconomizer"
+        endif
+      else if( AirSys:ClgCap > 33000 )
+      then "FixedDryBulb"
       else "NoEconomizer"
       endif endif endif ; endif
     else z:EconoCtrlMthd
@@ -1112,11 +1133,21 @@ RULE OACtrl:MaxOARat
     1.0
   REPORTPRECISION
     2
-  DEFAULT : T24N
+  DEFAULT : T24N_2013 T24N_2016 T24N_2019
     if( IfValidAnd( EconoCtrlMthd != "NoEconomizer" ) )
       then
       if( IfValidAnd( AirSys:ClgCap < 54000 ) .AND. 
 ;         IfValidAnd( AirSys:FDDEnabled = 0 ) .AND.
+          IsAllOA = 0 ) 
+      then 0.9
+      else 1.0
+      endif
+    else UNDEFINED
+    endif
+  DEFAULT : T24N
+    if( IfValidAnd( EconoCtrlMthd != "NoEconomizer" ) )
+      then
+      if( IfValidAnd( AirSys:ClgCap < 33000 ) .AND. 
           IsAllOA = 0 ) 
       then 0.9
       else 1.0
@@ -1139,13 +1170,28 @@ RULE OACtrl:MaxOARat
                    to 0.9 for compliance analyis.", Name )
     else UNCHANGED
     endif   
-  SIZING : T24N
+  SIZING : T24N_2013 T24N_2016 T24N_2019
     if( BaseSysNum > 0 )
     then UNDEFINED
     else if( IfValidAnd( EconoCtrlMthd != "NoEconomizer" ) )
       then
       if( IfValidAnd( AirSys:ClgCap < 54000 ) .AND. 
 ;         IfValidAnd( AirSys:FDDEnabled = 0 ) .AND.
+          IsAllOA = 0 ) 
+      then Min( 0.9, MaxOARat)
+      else
+      if( IsAllOA > 0 )
+      then 1
+      else MaxOARat
+      endif endif
+    else UNDEFINED
+    endif endif
+  SIZING : T24N
+    if( BaseSysNum > 0 )
+    then UNDEFINED
+    else if( IfValidAnd( EconoCtrlMthd != "NoEconomizer" ) )
+      then
+      if( IfValidAnd( AirSys:ClgCap < 33000 ) .AND. 
           IsAllOA = 0 ) 
       then Min( 0.9, MaxOARat)
       else
@@ -1162,10 +1208,19 @@ RULE OACtrl:MaxOARat
       then MaxOARat
     else UNDEFINED
     endif endif
-  ANNUAL : T24N
+  ANNUAL : T24N_2013 T24N_2016 T24N_2019
     if( BaseSysNum > 0 .AND. EconoCtrlMthd != "NoEconomizer" )
     then
       if( IfValidAnd( AirSys:ClgCap < 54000 ) )
+      then 0.9
+      else 1.0
+      endif
+    else z:MaxOARat
+    endif  
+  ANNUAL : T24N
+    if( BaseSysNum > 0 .AND. EconoCtrlMthd != "NoEconomizer" )
+    then
+      if( IfValidAnd( AirSys:ClgCap < 33000 ) )
       then 0.9
       else 1.0
       endif
@@ -1273,8 +1328,39 @@ RULE OACtrl:EconoHiTempLockout
       endif
     else z:EconoHiTempLockout
     endif
-  ANNUAL
+  ANNUAL : T24N_2013 T24N_2016 T24N_2019
     z:EconoHiTempLockout
+  ANNUAL : T24N
+    if( BaseSysNum > 0 )
+    then
+      if( EconoCtrlMthd = "FixedDryBulb" )
+      then
+        if( Proj:CliZnNum =  1 .OR.
+            Proj:CliZnNum =  3 .OR.
+            Proj:CliZnNum =  5 .OR.
+            Proj:CliZnNum = 11 .OR.
+            Proj:CliZnNum = 12 .OR.
+            Proj:CliZnNum = 13 .OR.
+            Proj:CliZnNum = 14 .OR.
+            Proj:CliZnNum = 15 .OR.
+            Proj:CliZnNum = 16 )
+        then 75
+        else
+        if( Proj:CliZnNum =  2 .OR.
+            Proj:CliZnNum =  4 .OR.
+            Proj:CliZnNum = 10 )
+        then 73
+        else 
+        if( Proj:CliZnNum =  6 .OR.
+            Proj:CliZnNum =  8 .OR.
+            Proj:CliZnNum =  9 )
+        then 71
+        else 69
+        endif endif endif
+      else UNDEFINED
+      endif
+    else z:EconoHiTempLockout
+    endif
 ENDRULE
 
 
@@ -1334,9 +1420,9 @@ RULE OACtrl:EconoHiEnthLockout
     endif
   SIZING
     if( ( EconoCtrlMthd = "DifferentialEnthalpy" .OR. 
-          EconoCtrlMthd != "DifferentialDryBulbAndEnthalpy" ) .AND.
+          EconoCtrlMthd = "DifferentialDryBulbAndEnthalpy" ) .AND.
         ValidOr( u:EconoHiEnthLockout, 0 ) > 0 )
-    then // Is BaseSys and does not use  economizer is used for sizing or does not use 
+    then // Is BaseSys and does not use economizer is used for sizing or does not use 
       u:EconoHiEnthLockout + 2.0
     else UNDEFINED
     endif

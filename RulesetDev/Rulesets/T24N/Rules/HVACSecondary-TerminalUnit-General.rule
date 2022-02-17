@@ -739,7 +739,7 @@ RULE TrmlUnit:PriAirFlowMin
       endif
     else UNDEFINED
     endif
-  DEFAULT : T24N
+  DEFAULT : T24N_2019
     if( Proj:AutoHardSize = 1 .AND. SysCnt > 0 .AND.
         LocalCompAssigned( ZnServedRef ) )
     then // For PROPOSED AutoHardSizing only
@@ -768,6 +768,39 @@ RULE TrmlUnit:PriAirFlowMin
           Min( Max( ZnServedRef:MinVentFlowWithMult, PriAirFlowMaxSim * 0.2 ),
                PriAirFlowMaxSim ) / SysCnt
         endif endif ;endif
+      else UNDEFINED
+      endif
+    else UNDEFINED
+    endif
+  DEFAULT : T24N
+    if( Proj:AutoHardSize = 1 .AND. SysCnt > 0 .AND.
+        LocalCompAssigned( ZnServedRef ) )
+    then // For PROPOSED AutoHardSizing only
+      if( AirSys:IsVAVSys > 0  )
+      then 
+        // Remove unused logic from T24_2019
+        if( AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" )
+        then
+          if( AirSys:LabArea > 0 )
+          then // Is Lab SZVAV, mininimum flow is  min vent rate
+            ZnServedRef:MinVentFlowWithMult / SysCnt
+          else // Is regular SZVAV, mininimum flow is max of min vent rate or 50% design flow
+            Min( Max( ZnServedRef:MinVentFlowWithMult, PriAirFlowMaxSim * 0.5 ),
+                 PriAirFlowMaxSim ) / SysCnt  
+          endif
+        else
+        if( AirSys:Type = "DOASVAV" )
+        then // Is a DOAS, size terminal for ventilation flow
+          ZnServedRef:MinVentFlowWithMult / SysCnt 
+        else // Is PVAV or VAV
+        if ( AirSys:CtrlSysType = "DDCToZone" ) 
+        then // Has DDC, mininimum flow is min vent rate, or 20% as practical min, see ticket 3303
+          Min( Max( ZnServedRef:MinVentFlowWithMult, PriAirFlowMaxSim * 0.1 ),
+               PriAirFlowMaxSim ) / SysCnt
+        else // No DDC, mininimum flow is max of min vent rate or 30% design flow
+          Min( Max( ZnServedRef:MinVentFlowWithMult, PriAirFlowMaxSim * 0.3 ),
+               PriAirFlowMaxSim ) / SysCnt
+        endif endif endif
       else UNDEFINED
       endif
     else UNDEFINED
@@ -801,11 +834,10 @@ RULE TrmlUnit:PriAirFlowMin
       endif
     else UNDEFINED
     endif
-  CHECKCODE
+  CHECKCODE : T24N_2016 T24N_2019 S901G ECBC
     if( ( Type = "Uncontrolled" .AND. 
           ( AirSys:IsVAVSys < 1 .OR.
-            AirSys:Type = "SZVAVAC" .OR. 
-            AirSys:Type = "SZVAVHP" ) )
+            AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" ) )
         .OR.
         ( Type = "ActiveBeam" .AND. AirSys:Type = "DOASCV" ) )
     then UNCHANGED
@@ -850,11 +882,60 @@ RULE TrmlUnit:PriAirFlowMin
                  Name, PriAirFlowMin, ZnServedRef:MinExhFlow )
     else UNCHANGED
     endif endif endif endif endif
-  CHECKSIM
+  CHECKCODE
     if( ( Type = "Uncontrolled" .AND. 
           ( AirSys:IsVAVSys < 1 .OR.
             AirSys:Type = "SZVAVAC" .OR. 
             AirSys:Type = "SZVAVHP" ) )
+        .OR.
+        ( Type = "ActiveBeam" .AND. AirSys:Type = "DOASCV" ) )
+    then UNCHANGED
+    else
+    if( LocalCompAssigned( ZnServedRef ) = 0 )
+    then UNCHANGED
+    else
+    if( ZnServedRef:HasUnknownHVAC > 0 )
+    then UNCHANGED
+    else 
+    if( IfValidAnd( PriAirFlowMin >= 0 ) .AND.
+        IfValidAnd( PriAirFlowMax > 0 ) .AND. 
+        AirSys:LabArea = 0 ) 
+    then
+      if( PriAirFlowMinSim < ZnServedRef:MinVentFlowWithMult * ( 1 - Proj:VentTolMinLimNonRes ) )
+      then 
+        PostError("The min. primary flow of TrmlUnit '%s' is %.0f cfm, which is less
+                   than the minimum zone ventilation flow of %.0f cfm.", 
+                   Name, PriAirFlowMin, ZnServedRef:MinVentFlow )
+    else 
+      if( AirSys:CtrlSysType != "DDCToZone" .AND. 
+          PriAirFlowMin < ( PriAirFlowMax * 0.3 * 0.99 ) )
+      then
+        PostWarning("The min. primary flow of TrmlUnit '%s' is %.0f cfm, which is
+                     less than 30 percent of the max. primary flow, %.0f cfm.", 
+                     Name, PriAirFlowMin, PriAirFlowMax) 
+     else
+      if( PriAirFlowMin > PriAirFlowMax * 1.01 )
+      then
+        PostWarning("The min. primary flow of TrmlUnit '%s' is %.0f cfm, which is
+                     greater than the max. primary flow %.0f cfm. The minimum primary
+                     flow will be reset to equal the maximum.", 
+                     Name, PriAirFlowMin, PriAirFlowMax)
+      else UNCHANGED
+      endif endif endif
+    else
+    if( AirSys:LabArea > 0 .AND. 
+        PriAirFlowMinSim < ZnServedRef:MinExhFlowWithMult * ( 1 - Proj:VentTolMinLimNonRes ) )
+    then 
+      PostError("The min. primary flow of TrmlUnit '%s' is %.0f cfm, which is less
+                 than the minimum zone lab exhaust flow of %.0f cfm. 
+                 Revise terminal min. flow for consistency.", 
+                 Name, PriAirFlowMin, ZnServedRef:MinExhFlow )
+    else UNCHANGED
+    endif endif endif endif endif
+  CHECKSIM
+    if( ( Type = "Uncontrolled" .AND. 
+          ( AirSys:IsVAVSys < 1 .OR.
+            AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" ) )
         .OR.
         ( Type = "ActiveBeam" .AND. AirSys:Type = "DOASCV" ) )
     then UNCHANGED
@@ -922,7 +1003,7 @@ RULE TrmlUnit:PriAirFlowMin
         then // For kitchens, mininimum flow is max of 50% of design vent rate or 50% design flow
           Max( ZnServedRef:VentFlowWithMult * 0.5, 
                PriAirFlowMaxSim * 0.5 ) / SysCnt
-        else if( AirSys:Type = "SZVAVAC" )
+        else if( AirSys:Type = "SZVAVAC" .OR.  AirSys:Type = "SZVAVHP" )
         then // Is regular SZVAV, mininimum flow is max of min vent rate or 50% design flow
           Max( ZnServedRef:MinVentFlowWithMult, 
                PriAirFlowMaxSim * 0.5 ) / SysCnt
@@ -934,7 +1015,7 @@ RULE TrmlUnit:PriAirFlowMin
       endif
     else UNDEFINED
     endif
-  ANNUAL : T24N
+  ANNUAL : T24N_2019
     if( Type != "Uncontrolled" ) 
     then 
       if( BaseSysNum > 0 .AND. AirSys:IsVAVSys )
@@ -950,7 +1031,7 @@ RULE TrmlUnit:PriAirFlowMin
 ;          Max( ZnServedRef:VentFlowWithMult * 0.5, 
 ;               PriAirFlowMaxSim * 0.5 ) / SysCnt
 ;        else
-        if( AirSys:Type = "SZVAVAC" )
+        if( AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" )
         then 
           if( AirSys:LabArea > 0 )
           then // Is lab SZVAV, mininimum flow is max of min vent rate or 20% design flow
@@ -968,13 +1049,41 @@ RULE TrmlUnit:PriAirFlowMin
       endif
     else UNDEFINED
     endif
+ ANNUAL : T24N
+    if( Type != "Uncontrolled" ) 
+    then 
+      if( BaseSysNum > 0 .AND. AirSys:IsVAVSys )
+      then // --> Is a BASELINE system
+       // Remove unused logic from T24_2019
+        if( AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" )
+        then 
+          if( AirSys:LabArea > 0 )
+          then // Is Lab SZVAV, mininimum flow is  min vent rate
+            ZnServedRef:MinVentFlowWithMult / SysCnt
+          else // Is all other SZVAV, mininimum flow is max of min vent rate or 50% design flow
+            Max( ZnServedRef:MinVentFlowWithMult, 
+                 PriAirFlowMaxSim * 0.5 ) / SysCnt
+          endif
+        else // Is PVAV or VAV
+        if ( AirSys:CtrlSysType = "DDCToZone" ) 
+        then // Has DDC, mininimum flow is min vent rate, see ticket 3303
+          Max( ZnServedRef:MinVentFlowWithMult,
+               PriAirFlowMaxSim * 0.1 ) / SysCnt
+        else // No DDC, mininimum flow is max of min vent rate or 30% design flow
+          Max( ZnServedRef:MinVentFlowWithMult, 
+               PriAirFlowMaxSim * 0.3 ) / SysCnt
+        endif endif
+      else z:PriAirFlowMin
+      endif
+    else UNDEFINED
+    endif
   ANNUAL : S901G ECBC
 // Only difference between T24N and S901G is fall-through default is 30% min flow
     if( Type != "Uncontrolled" ) 
     then 
       if( BaseSysNum > 0 .AND. AirSys:IsVAVSys )
       then // --> Is a BASELINE system
-        if( AirSys:Type = "SZVAVAC" )
+        if( AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" )
         then // Is regular SZVAV, mininimum flow is max of min vent rate or 50% design flow
           Max( ZnServedRef:MinVentFlowWithMult, 
                PriAirFlowMaxSim * 0.5 ) / SysCnt

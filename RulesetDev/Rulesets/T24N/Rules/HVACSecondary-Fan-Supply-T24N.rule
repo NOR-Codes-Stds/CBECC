@@ -48,7 +48,7 @@ RULE NEW AirSys:BaseFanModelingMthd
     NotInput
   ANNUAL : T24N_2016
     UNDEFINED    
-  ANNUAL
+  ANNUAL : T24N_2019
     if( BaseSysNum > 0 )
     then
       switch( BaseSysNum )
@@ -60,6 +60,11 @@ RULE NEW AirSys:BaseFanModelingMthd
         case 101 : "PowerPerUnitFlow" // BaseVentOnlyAirSys for HRR, per fan
         default : "BrakeHorsePower" // All others
       endswitch 
+    else UNDEFINED
+    endif
+  ANNUAL : T24N
+    if( BaseSysNum > 0 )
+    then "PowerPerUnitFlow"
     else UNDEFINED
     endif
 ENDRULE
@@ -75,7 +80,7 @@ RULE NEW AirSys:BaseFanPwrIdx
     W/cfm
   ANNUAL : T24N_2016
     UNDEFINED    
-  ANNUAL
+  ANNUAL : T24N_2019
     if( BaseSysNum > 0 .AND. BaseFanModelingMthd = "PowerPerUnitFlow" )
     then
       switch( BaseSysNum )
@@ -99,6 +104,79 @@ RULE NEW AirSys:BaseFanPwrIdx
                      0.6
                    endif endif
         default : 0 // All others use BHP method
+      endswitch
+    else // Rules for HRR ventilation
+    if( SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:BaseSysNum ) > 0 .AND.
+        SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:ResVentEquipChkReq ) > 0 .AND. 
+        SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:ResVentEquipIsAccessible ) = 0 )
+    then // ResVentEquipChkReq applies, but is not checked, Std = Prop up to limit
+         // Set limit here
+      if( IfValidAnd( IsBalancedVentSys > 0 ) )
+      then 0.70 / 2 // For balanced, per fan
+      else 0.35 // For supply only
+      endif
+    else UNDEFINED
+    endif endif
+  ANNUAL : T24N
+    if( BaseSysNum > 0 .AND. 
+        BaseFanModelingMthd = "PowerPerUnitFlow" .AND.
+        IfValidAnd( SupFanCap > 0 ) )
+    then
+      switch( BaseSysNum )
+        case   1 : T24N_2022BaseFanPwrIdx:Sys1( "FlowCap", SupFanCap )
+        case   3 : T24N_2022BaseFanPwrIdx:Sys3( "FlowCap", SupFanCap )
+        case   4 : T24N_2022BaseFanPwrIdx:Sys4( "FlowCap", SupFanCap )
+        case   5 : T24N_2022BaseFanPwrIdx:Sys5( "FlowCap", SupFanCap )
+        case   6 : T24N_2022BaseFanPwrIdx:Sys6( "FlowCap", SupFanCap )
+        case   7 : if( Type = "SZVAVHP" )
+                   then // System 7h or 7d
+                     T24N_2022BaseFanPwrIdx:Sys7h( "FlowCap", SupFanCap )
+                   else // System 7a
+                     T24N_2022BaseFanPwrIdx:Sys7a( "FlowCap", SupFanCap )
+                   endif
+        case   9 : T24N_2022BaseFanPwrIdx:Sys9( "FlowCap", SupFanCap )
+        case  10 : 0.58 // CRAC
+        case  11 : 0.58 // CRAH
+        case 101 : if( Proj:HRRVentSysChange > 0 .AND. 
+                       SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:HRRVentSysRulesApply ) > 0 ) 
+                   then // 2019.2.0 ACM rule
+                     if( IfValidAnd( IsBalancedVentSys > 0 ) )
+                     then 0.70 // For balanced
+                     else 0.35 // For unbalanced (supply or exhaust)
+                     endif
+                   else // 2019.1.2/1.3 rule
+                   if( MaxRevRef( ThrmlZn:VentSysRef, ThrmlZn:PropResVentSysPwrIdx ) > 0 )
+                   then // Min of proposed fan power or 1.20 W/cfm
+                     Min( MaxRevRef( ThrmlZn:VentSysRef, ThrmlZn:PropResVentSysPwrIdx ), 1.20 )
+                   else // Default assumption for HasUnknownHVAC > 0 or proposed = W/cfm
+                     0.6
+                   endif endif
+        default : if( Type = "PVAV" )
+                  then
+                    T24N_2022BaseFanPwrIdx:Sys5( "FlowCap", SupFanCap )
+                  else
+                  if( Type = "VAV" )
+                  then
+                    T24N_2022BaseFanPwrIdx:Sys6( "FlowCap", SupFanCap )
+                  else
+                  if( Type = "SZVAVHP" )
+                  then // System 7h or 7d
+                    T24N_2022BaseFanPwrIdx:Sys7h( "FlowCap", SupFanCap )
+                  else
+                  if( Type = "SZVAVAC" )
+                  then
+                    T24N_2022BaseFanPwrIdx:Sys7a( "FlowCap", SupFanCap )
+                  else
+                  if( Type = "SZHP" )
+                  then // System 7h or 7d
+                    T24N_2022BaseFanPwrIdx:Sys4( "FlowCap", SupFanCap )
+                  else
+                  if( Type = "SZAC" )
+                  then
+                    T24N_2022BaseFanPwrIdx:Sys3( "FlowCap", SupFanCap )
+                  else 0 // All others use BHP method
+                  endif endif endif endif endif
+                  endif
       endswitch
     else // Rules for HRR ventilation
     if( SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:BaseSysNum ) > 0 .AND.
@@ -166,7 +244,7 @@ RULE NEW AirSys:BaseFanBHPAllowance
     hp
   ANNUAL : T24N_2016
     UNDEFINED
-  ANNUAL
+  ANNUAL : T24N_2019
     if( BaseSysNum > 0 )
     then
       if( BaseFanModelingMthd = "BrakeHorsePower" .AND.
@@ -190,6 +268,24 @@ RULE NEW AirSys:BaseFanBHPAllowance
         endif
       else 0 
       endif endif
+    else 0
+    endif
+  ANNUAL : T24N
+    if( BaseSysNum > 0 )
+    then
+      if( BaseFanModelingMthd = "PowerPerUnitFlow" .AND.
+          IfValidAnd( BaseFanPwrIdx > 0 ) .AND.
+          IfValidAnd( SupFanCap > 0 ) .AND.
+          IfValidAnd( BaseFanMtrEff > 0 ) )
+      then
+        if( BaseSysNum > 100 )
+        then // AirSys (DOAS) VentSys, use SysVentFlow for fan capacity
+          BaseFanPwrIdx * SysVentFlow * BaseFanMtrEff / 745.6
+        else // All other systems
+          BaseFanPwrIdx * SupFanCap * BaseFanMtrEff / 745.6 
+        endif
+      else 0 
+      endif
     else 0
     endif
 ENDRULE
@@ -241,8 +337,6 @@ RULE NEW AirSys:BaseReliefFanBHPAllowance
     UNDEFINED
   ANNUAL : T24N
     0 // Baseline has no return fans for 2019 and beyond
-  ANNUAL
-    0
 ENDRULE
 // Include PD credits and any other adjustments
 RULE NEW AirSys:BaseFanBHPWithAdj
@@ -259,7 +353,8 @@ RULE NEW AirSys:BaseFanBHPWithAdj
     hp
   ANNUAL : T24N_2016
     UNDEFINED
-  ANNUAL
+  ANNUAL : T24N_2019
+// For 2019, the *FanPwrAdj values have the units of bhp
     if( BaseSysNum > 0 )
     then
       if( BaseSysNum > 100 )
@@ -272,6 +367,23 @@ RULE NEW AirSys:BaseFanBHPWithAdj
         BaseFanBHPAllowance + TotNonExhSysFanPwrAdj
       else // All other cases, add adjust
         BaseFanBHPAllowance + TotSysFanPwrAdj
+      endif endif
+    else 0
+    endif
+  ANNUAL : T24N
+// For 2022, the *FanPwrAdj values have the units of kW, and are converted to bhp
+    if( BaseSysNum > 0 )
+    then
+      if( BaseSysNum > 100 )
+      then // AirSys (DOAS) VentSys, no FanFwrAdj
+        BaseFanBHPAllowance
+      else
+      if( LabArea > 0 .OR. CommKitArea > 0 )
+      then // Lab and CommKit systems have separate exh fan power allowance for exhaust,
+           // so only apply NonExhPwrAdj
+        BaseFanBHPAllowance + ( TotNonExhSysFanPwrAdj * 1000 * BaseFanMtrEff / 745.6 )
+      else // All other cases, add adjust
+        BaseFanBHPAllowance + ( ( TotSysFanPwrAdj + BaseERVPwrAdj ) * 1000 * BaseFanMtrEff / 745.6 )
       endif endif
     else 0
     endif
@@ -318,7 +430,7 @@ RULE NEW ZnSys:BaseFanPwrIdx
     W/cfm
   ANNUAL : T24N_2016
     UNDEFINED    
-  ANNUAL
+  ANNUAL : T24N_2019
     if( BaseSysNum > 0 .AND. BaseFanModelingMthd = "PowerPerUnitFlow" )
     then
       switch( BaseSysNum )
@@ -327,6 +439,30 @@ RULE NEW ZnSys:BaseFanPwrIdx
         case  9 : 0.59 // HV
         case 10 : 0.81 // CRAC
         case 11 : 0.81 // CRAH
+        default : 0    // All others use BHP method
+      endswitch
+    else
+    if( SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:BaseSysNum ) > 0 .AND.
+        SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:ResVentEquipChkReq ) > 0 .AND. 
+        SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:ResVentEquipIsAccessible ) = 0 )
+    then // ResVentEquipChkReq applies, but is not checked, Std = Prop up to limit
+         // Set limit here
+      if( IfValidAnd( IsBalancedVentSys > 0 ) )
+      then 0.70 // For balanced
+      else 0.35 // For unbalanced (supply or exhaust)
+      endif
+    else UNDEFINED
+    endif endif
+  ANNUAL : T24N
+    if( BaseSysNum > 0 .AND. BaseFanModelingMthd = "PowerPerUnitFlow" )
+    then
+      switch( BaseSysNum )
+        case   1 : T24N_2022BaseFanPwrIdx:Sys1( "FlowCap", SupFanCap )
+        case   3 : T24N_2022BaseFanPwrIdx:Sys3( "FlowCap", SupFanCap )
+        case   4 : T24N_2022BaseFanPwrIdx:Sys4( "FlowCap", SupFanCap )
+        case   9 : T24N_2022BaseFanPwrIdx:Sys9( "FlowCap", SupFanCap )
+        case  10 : 0.58 // CRAC
+        case  11 : 0.58 // CRAH
         default : 0    // All others use BHP method
       endswitch
     else
@@ -395,7 +531,7 @@ RULE NEW ZnSys:BaseFanBHPAllowance
     hp
   ANNUAL : T24N_2016
     UNDEFINED
-  ANNUAL
+  ANNUAL : T24N_2019
     if( BaseSysNum > 0 )
     then
       if( BaseFanModelingMthd = "BrakeHorsePower" .AND.
@@ -410,6 +546,19 @@ RULE NEW ZnSys:BaseFanBHPAllowance
         BaseFanPwrIdx * SupFanCap * BaseFanMtrEff / 745.6 
       else 0 
       endif endif
+    else 0
+    endif
+  ANNUAL : T24N
+    if( BaseSysNum > 0 )
+    then
+      if( BaseFanModelingMthd = "PowerPerUnitFlow" .AND.
+          IfValidAnd( BaseFanPwrIdx > 0 ) .AND.
+          IfValidAnd( SupFanCap > 0 ) .AND.
+          IfValidAnd( BaseFanMtrEff > 0 ) )
+      then 
+        BaseFanPwrIdx * SupFanCap * BaseFanMtrEff / 745.6 
+      else 0 
+      endif
     else 0
     endif
 ENDRULE
@@ -428,7 +577,8 @@ RULE NEW ZnSys:BaseFanBHPWithAdj
     hp
   ANNUAL : T24N_2016
     UNDEFINED
-  ANNUAL
+  ANNUAL : T24N_2019
+// For 2019, the *FanPwrAdj values have the units of bhp
     if( BaseSysNum > 0 )
     then
       if( LabArea > 0 .OR. CommKitArea > 0 )
@@ -449,6 +599,31 @@ RULE NEW ZnSys:BaseFanBHPWithAdj
         endif
       else // All other cases
         BaseFanBHPAllowance + TotSysFanPwrAdj
+      endif endif
+    else 0
+    endif
+  ANNUAL : T24N
+// For 2022, the *FanPwrAdj values have the units of kW, and are converted to bhp
+    if( BaseSysNum > 0 )
+    then
+      if( LabArea > 0 .OR. CommKitArea > 0 )
+      then // Lab and CommKit systems have separate exh fan power allowance 
+           // for exhaust, so only apply NonExhPwrAdj
+        BaseFanBHPAllowance + ( TotNonExhSysFanPwrAdj * 1000 * BaseFanMtrEff / 745.6 )
+      else
+      if( BaseSysNum = 1 .OR. BaseSysNum = 2 )
+      then 
+        // For baseline Res systems
+        if( IfValidAnd( AddClgToPropSys > 0 ) )
+        then // Is PropNoClg sys for Res, do not add PwrAdj
+          BaseFanBHPAllowance
+        else
+          //TotNonSysFanPwrAdj only includes credit for MERVGTE16PDAdj. 
+          // FullyDuctedExhPDAdj added to ExhFanBHP. See Ticket 2542
+          BaseFanBHPAllowance + ( TotNonExhSysFanPwrAdj  * 1000 * BaseFanMtrEff / 745.6 )
+        endif
+      else // All other cases
+        BaseFanBHPAllowance + ( ( TotSysFanPwrAdj + BaseERVPwrAdj ) * 1000 * BaseFanMtrEff / 745.6 )
       endif endif
     else 0
     endif
@@ -538,8 +713,10 @@ RULE Fan:ModelingMthd
 //  StaticPressure
 //  BrakeHorsePower
 //  PowerPerUnitFlow
-//DEFAULT
+//DEFAULT : T24N_2019
 //  "BrakeHorsePower"
+//DEFAULT : T24N
+//  "PowerPerUnitFlow"
 ; CHECKCODE 
 // CHECK no longer used, PowerPerUnitFlow is now supported
 ;    if( Proj:AnalysisType != "Research" .AND. ModelingMthd = "PowerPerUnitFlow" )
@@ -654,7 +831,7 @@ RULE Fan:PwrIdx
       endif endif
     else UNDEFINED
     endif
-  DEFAULT : T24N
+  DEFAULT : T24N_2019
     if( Proj:AutoEffInput = 1 .AND. ModelingMthd = "PowerPerUnitFlow" )
     then // For PROPOSED AutoEfficiency input only
       if( ParentComp = "ZnSys" )
@@ -688,14 +865,59 @@ RULE Fan:PwrIdx
         if( IfValidAnd( AirSys:SubType = "CRAC" ) .OR.
             IfValidAnd( AirSys:SubType = "CRAH" ) )
         then 0.81
-        else if( SysType = "HV" )
+        else if( Type = "HV" )
         then 0.53 // HV systems
         else 0.8 // All other AirSys
         endif endif endif
       else UNDEFINED
       endif endif
     else UNDEFINED
-    endif    
+    endif
+  DEFAULT : T24N
+    if( Proj:AutoEffInput = 1 .AND. ModelingMthd = "PowerPerUnitFlow" ) 
+    then // For PROPOSED AutoEfficiency input only
+      if( ParentComp = "ZnSys" )
+      then
+        if( ZnSys:IsExhSys > 0 )
+        then UNCHANGED // See rule below
+        else
+        if( IfValidAnd( ZnSys:SupFanCap > 0 ) )
+        then 
+         switch( ZnSys:Type )
+            case  "SZAC" : T24N_2022BaseFanPwrIdx:Sys3( "FlowCap", ZnSys:SupFanCap )
+            case  "SZHP" : T24N_2022BaseFanPwrIdx:Sys4( "FlowCap", ZnSys:SupFanCap )
+            default : 0.45
+          endswitch
+        else 0.35 // All other ZnSys
+        endif endif
+      else 
+      if( ParentComp = "AirSys" )
+      then
+        if( AirSys:IsExhSys > 0 )
+        then UNCHANGED // See rule below
+        else 
+        if( IfValidAnd( AirSys:SubType = "CRAC" ) .OR.
+            IfValidAnd( AirSys:SubType = "CRAH" ) )
+        then 0.58
+        else
+        if( IfValidAnd( AirSys:SupFanCap > 0 ) )
+        then
+          switch( AirSys:Type )
+            case  "SZAC"    : T24N_2022BaseFanPwrIdx:Sys3( "FlowCap", AirSys:SupFanCap )
+            case  "SZHP"    : T24N_2022BaseFanPwrIdx:Sys4( "FlowCap", AirSys:SupFanCap )
+            case  "PVAV"    : T24N_2022BaseFanPwrIdx:Sys5( "FlowCap", AirSys:SupFanCap )
+            case  "VAV"     : T24N_2022BaseFanPwrIdx:Sys6( "FlowCap", AirSys:SupFanCap )
+            case  "SZVAVAC" : T24N_2022BaseFanPwrIdx:Sys7a( "FlowCap", AirSys:SupFanCap )
+            case  "SZVAVHP" : T24N_2022BaseFanPwrIdx:Sys7h( "FlowCap", AirSys:SupFanCap )
+            case  "HV"      : T24N_2022BaseFanPwrIdx:Sys9( "FlowCap", AirSys:SupFanCap )
+            default : 0.8 // All others use BHP method
+          endswitch
+        else 0.8 // All other AirSys
+        endif endif endif
+      else UNDEFINED
+      endif endif
+    else UNDEFINED
+    endif  
   SIZING
     if( BaseSysNum > 0 )
     then UNDEFINED
@@ -1258,8 +1480,25 @@ RULE Fan:MtrHP
   COMMONMAXIMUM
     200 
   REPORTPRECISION
-    3   
-  DEFAULT
+    3
+  DEFAULT : T24N_2022
+    if( Proj:AutoEffInput = 1 )
+    then // For PROPOSED AutoEfficiency input only
+      // Find next largest motor size in Std motor table based on
+      // user-input,auto-calculated MtrBHP, or PwrIdx
+      if( IfValidAnd( PwrIdx > 0 ) .AND. 
+          IfValidAnd( FlowCap > 0 ) )
+      then StdElecMtrSize:MotorHPValue("InputMotorHP", PwrIdx * FlowCap / 745.6)
+      else
+      if( LocalStatus( MtrBHP ) > 0 )
+      then StdElecMtrSize:MotorHPValue("InputMotorHP", MtrBHP)
+      else if( LocalStatus( AutoEffInputMtrBHP ) > 0 )
+      then StdElecMtrSize:MotorHPValue("InputMotorHP", AutoEffInputMtrBHP)
+      else UNDEFINED
+      endif endif endif
+    else UNDEFINED
+    endif  
+  DEFAULT : T24N
     if( Proj:AutoEffInput = 1 )
     then // For PROPOSED AutoEfficiency input only
       // Find next largest motor size in Std motor table based on
@@ -1649,6 +1888,16 @@ RULE NEW Fan:MtrPerfIdx
     NACM Section 5.7.3.2
   INPUTCLASS
     NotInput
+  DEFAULT : T24N_2022
+// Reorder defaulting to better match 2022 use of PwrIdx
+    if( IfValidAnd( PwrIdx > 0 ) .AND.
+        IfValidAnd( FlowCap >= 0 ) )
+    then StdElecMtrSize:MotorHPIndex("InputMotorHP", PwrIdx * FlowCap / 745.6)
+    else
+    if( IfValidAnd( MtrHP > 0 ) )
+    then StdElecMtrSize:MotorHPIndex("InputMotorHP", MtrHP)
+    else UNDEFINED
+    endif endif
   DEFAULT
     if( IfValidAnd( MtrHP > 0 ) )
     then StdElecMtrSize:MotorHPIndex("InputMotorHP", MtrHP)

@@ -71,8 +71,6 @@ RULE CoilHtg:FluidSegInRef
     then UNDEFINED // Purge reference for when not applicable
     else UNCHANGED
     endif
-  ANNUAL
-    z:FluidSegInRef
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -112,8 +110,6 @@ RULE CoilHtg:FluidSegOutRef
     then UNDEFINED // Purge reference for when not applicable
     else UNCHANGED
     endif
-  ANNUAL
-    z:FluidSegOutRef
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -145,8 +141,6 @@ RULE NEW CoilHtg:ParentComp
     then "ZnSys"
     else ParentComponentType()
     endif endif
-  ANNUAL
-    z:ParentComp
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -246,8 +240,6 @@ RULE CoilHtg:SysCnt
       TrmlUnit:SysCnt
     else 0
     endif endif endif
-  ANNUAL
-   z:SysCnt
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -262,8 +254,6 @@ RULE CoilHtg:IsDummy
     then 0
     else UNCHANGED
     endif
-  ANNUAL
-    z:IsDummy
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -325,7 +315,14 @@ RULE NEW CoilHtg:SysClgCap
     else UNDEFINED
     endif endif
   ANNUAL
-   z:SysClgCap
+    if( ParentComp = "AirSys" )
+    then // AirSystem
+      AirSys:ClgCap
+    else if( ParentComp = "ZnSys" )
+    then // ZoneSystem
+      ZnSys:ClgCap
+    else UNDEFINED
+    endif endif
 ENDRULE
 // Define parent system object reference at coil
 RULE NEW CoilHtg:ParentAirSysRef
@@ -347,8 +344,6 @@ RULE NEW CoilHtg:ParentAirSysRef
     then AirSys:Name
     else UNDEFINED
     endif
-  ANNUAL
-   z:ParentAirSysRef
 ENDRULE
 RULE NEW CoilHtg:ParentZnSysRef
   DATATYPE
@@ -369,8 +364,6 @@ RULE NEW CoilHtg:ParentZnSysRef
     then ZnSys:Name
     else UNDEFINED
     endif
-  ANNUAL
-   z:ParentZnSysRef
 ENDRULE
 // For FluidSys:CtrlType rule
 RULE NEW CoilHtg:CondHVACZnCntWithMult
@@ -400,8 +393,6 @@ RULE NEW CoilHtg:CondHVACZnCntWithMult
       ZnSys:CondHVACZnCntWithMult
     else 0
     endif endif
-  ANNUAL
-    z:CondHVACZnCntWithMult   
 ENDRULE
 
 
@@ -439,8 +430,6 @@ RULE NEW CoilHtg:IsNew
     if( Status = "New" ) then 1 else 0 endif
   SIZING : S901G ECBC
     if( Status = "New" .AND. Parent( IsNew ) = 1 ) then 1 else 0 endif
-  ANNUAL
-    z:IsNew
 ENDRULE
 
 RULE NEW CoilHtg:IsExisting
@@ -452,8 +441,6 @@ RULE NEW CoilHtg:IsExisting
     if( IsNew ) then 0 else 1 endif
   SIZING
     if( IsNew ) then 0 else 1 endif
-  ANNUAL
-    z:IsExisting
 ENDRULE
 
 RULE NEW CoilHtg:IsHlthCare
@@ -536,8 +523,6 @@ RULE CoilHtg:Type
       UNCHANGED
     else Type
     endif
-  ANNUAL
-    z:Type
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -579,7 +564,16 @@ RULE CoilHtg:FuelSrc
     else FuelSrc
     endif endif
   ANNUAL
-    z:FuelSrc
+    if( Type = "HotWater" .OR. Type = "Steam" )
+    then UNDEFINED
+    else
+      switch ( Type )
+        case "Resistance" : "Electric" 
+        case "HeatPump"   : "Electric"
+        case "Furnace"    : "Gas"
+        default : UNCHANGED
+      endswitch
+    endif
 ENDRULE
 
 // ********** Condenser Type ***************************************************
@@ -620,15 +614,11 @@ RULE CoilHtg:CndsrType
       endif
     else UNCHANGED
     endif endif ;endif
-  SIZING
+  ANNUAL 
     if( BaseSysNum > 0 .AND. Type = "HeatPump" )
     then "Air"
-    else if( Type = "HeatPump" )
-    then CndsrType
-    else UNDEFINED
-    endif endif 
-  ANNUAL
-    z:CndsrType
+    else UNCHANGED
+    endif
 ENDRULE
 
 
@@ -1049,8 +1039,6 @@ RULE CoilHtg:NumHtgStages
       1 
     else UNDEFINED
     endif
-  ANNUAL
-    z:NumHtgStages
 ENDRULE
 
 
@@ -1176,8 +1164,23 @@ RULE CoilHtg:HtPumpCap_fTempCrvRef
     then RuleLibrary(CrvDblQuad, "CoilHtgVRFHtgQratio_fTwbTdbSI") 
     else UNDEFINED // Other E+ heating coil objects do not use capacity curves
     endif endif
-  ANNUAL
-   z:HtPumpCap_fTempCrvRef
+  ANNUAL 
+    if( BaseSysNum > 0 )
+    then
+      if( Type = "HeatPump" )
+        then
+        if( CndsrType = "WaterSource" )
+        then  UNDEFINED
+        // Currently the translator is using hard-coded coefficients in the WLHP objects
+        //RuleLibrary(QuadplLin, "CoilHtgWSHPQRatio_fTdbRatioTwtRatioCFMRatioGPMRatioSI")
+        else RuleLibrary(CrvCubic, "CoilHtgHPQRatio_fToadbSI") 
+        endif
+      else if( Type = "VRF" )
+      then RuleLibrary(CrvDblQuad, "CoilHtgVRFHtgQratio_fTwbTdbSI") 
+      else UNDEFINED // Other E+ heating coil objects do not use capacity curves
+      endif endif
+    else UNCHANGED
+    endif
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -1195,7 +1198,16 @@ RULE CoilHtg:HtPumpCap_fFlowCrvRef
     else UNDEFINED
     endif endif
   ANNUAL
-   z:HtPumpCap_fFlowCrvRef
+    if( BaseSysNum > 0 )
+    then
+      if( Type = "HeatPump" .AND. CndsrType = "Air" )
+      then RuleLibrary(CrvQuad, "CoilHtgHPQRatio_fCFMRatio") 
+      else if( Type = "VRF" )
+      then RuleLibrary(CrvCubic, "CoilHtgVRFHtgQratio_fCFMRatioSI") 
+      else UNDEFINED
+      endif endif
+    else UNCHANGED
+    endif
 ENDRULE
 
 
@@ -1272,7 +1284,7 @@ RULE CoilHtg:FluidFlowRtDsgn
       then CapTotGrossRtd /( 500.19 * FluidSegInRef:ParentFluidSysRef:DsgnSupWtrDelT)
       else 0
       endif
-    else z:FluidFlowRtDsgn
+    else UNCHANGED
     endif
 ENDRULE   
 
@@ -1370,8 +1382,6 @@ RULE CoilHtg:CoilHdDsgn
     then CoilHdDsgn
     else UNDEFINED
     endif endif
-  ANNUAL
-    z:CoilHdDsgn
 ENDRULE
 
 
@@ -1626,6 +1636,17 @@ RULE NEW CoilHtg:HtgFuelSrc
     then 1
     else 0
     endif endif endif
+  ANNUAL
+    if( Type = "HotWater" .AND. LocalCompAssigned( FluidSegInRef ) )
+    then FluidSegInRef:ParentFluidSysRef:HtgFuelSrc
+    else
+    if( Type = "HeatPump" .AND. LocalCompAssigned( FluidSegInRef ) )
+    then FluidSegInRef:ParentFluidSysRef:HtgFuelSrc
+    else
+    if( Type = "Furnace" .AND. FuelSrc != "Electric" ) 
+    then 1
+    else 0
+    endif endif endif
 ENDRULE
 // For AirSystem
 RULE NEW AirSys:HtgFuelSrc
@@ -1646,6 +1667,11 @@ RULE NEW AirSys:HtgFuelSrc
     then 1
     else 0
     endif
+  ANNUAL
+    if( SumChildrenIf( CoilHtg:CapTotNetRtd, CoilHtg:HtgFuelSrc = 1 ) > 0 )
+    then 1
+    else 0
+    endif
 ENDRULE
 // For ZoneSystem
 RULE NEW ZnSys:HtgFuelSrc
@@ -1662,6 +1688,11 @@ RULE NEW ZnSys:HtgFuelSrc
   INPUTCLASS
     NotInput
   DEFAULT
+    if( SumChildrenIf( CoilHtg:CapTotNetRtd, CoilHtg:HtgFuelSrc = 1 ) > 0 )
+    then 1
+    else 0
+    endif
+  ANNUAL
     if( SumChildrenIf( CoilHtg:CapTotNetRtd, CoilHtg:HtgFuelSrc = 1 ) > 0 )
     then 1
     else 0

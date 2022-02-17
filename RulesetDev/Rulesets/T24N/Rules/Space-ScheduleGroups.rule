@@ -588,6 +588,8 @@ RULE Spc:FuncSchGrp
     Appendix 5.4A
   INPUTCLASS
 // DR: was previously defined as Precribed. Changed to NotInput for v3d.
+// Ticket 3142: Changed to Optional to allow users to edit the FuncSchGrp for 
+// select SpcFunc identified in TABLE SpaceFunctionData:FuncSchGrpIsEditable
     Optional
 // OPTION list defined in BEMEnums.txt to facilitate Building:FuncClassMthd & CompleteBldgFunc dependencies
   DEFAULT : T24N_2016
@@ -620,6 +622,43 @@ RULE Spc:FuncSchGrp
     endif
 ENDRULE
 
+// Set the Presribed FuncSchGrp for reference
+RULE NEW Spc:PrescribedFuncSchGrp
+  DATATYPE
+    String
+  LONGFORM
+   PrescribedFunctionScheduleGroup
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( HasNoInternalLds )
+    then "- specify -"
+    else
+    if( HlthCareArea > 0 )
+    then "Health" // Revise FunchGrp to Health for schedule rules
+    else
+    if( ResCommonArea > 0 )
+    then "ResidentialCommon"
+    else SpaceFunctionData:FuncSchGrp("FuncType", SpcFunc)
+    endif endif endif
+ENDRULE
+
+// Set flag as to whether to include space in Predominant schedule determination
+RULE NEW Spc:ExcludeSpcFromPredominantCalc
+  DATATYPE
+    Integer
+  LONGFORM
+    ExcludeSpcFromPredominantCalculation
+  INPUTCLASS
+    NotInput
+  SIZING_PROPOSED
+    if( LocalStatus( SpcFunc ) > 0 .AND. SpcFunc != "- specify -" )
+    then SpaceFunctionData:ExcludeFromPredominantCalc("FuncType", SpcFunc )
+    else 0
+    endif
+ENDRULE
+
+// Set flag as to whether tthe FuncSchGrp can be edited
 ; mod to ensure SpaceFunctionData:* not looked up when SpcFunc = "- specify -" - SAC 08/23/21
 RULE NEW Spc:FuncSchGrpIsEditable
   DESCRIPTION
@@ -633,10 +672,22 @@ RULE NEW Spc:FuncSchGrpIsEditable
   DEFAULT
     if( LocalStatus( SpcFunc ) > 0 .AND. SpcFunc != "- specify -" )
     then SpaceFunctionData:FuncSchGrpIsEditable("FuncType", SpcFunc)
-    else  0  endif
+    else 0
+    endif
+  CHECKCODE
+//   Adding CHECKCODE to stop analysis if user edits FuncSchGrp when not allowed
+    if( FuncSchGrpIsEditable = 0 .AND.
+        LocalStatus( FuncSchGrp ) > 0 .AND.
+        IfValidAnd( FuncSchGrp != PrescribedFuncSchGrp ) )
+    then 
+      PostError("Space '%s' has a FunctionScheduleGroup that differs from what is
+                 prescribed for this ruleset. Please remove this user input or
+                 change to the value that is prescribed.", Name)
+    else UNCHANGED
+    endif                   
 ENDRULE
 
-// ********** Predominant Schedule Group For Sotry *******************************
+// ********** Predominant Schedule Group For Story *******************************
 // A primary FuncSchGroup is determined for each floor based on the predominant 
 // FuncSchGrp of directly conditioned (DC) or indirectly conditioned (IC) spaces.
 
@@ -649,9 +700,9 @@ RULE NEW Spc:FlrAreaForPredominantCalc
   INPUTCLASS
     NotInput
   SIZING_PROPOSED
-    if( SpaceFunctionData:ExcludeFromPredominantCalc("FuncType", SpcFunc) = 1 )
-	  then 0
-	  else CondFlrAreaWithMult
+    if( IfValidAnd( ExcludeSpcFromPredominantCalc > 0 ) )
+    then 0
+    else CondFlrAreaWithMult
     endif
 ENDRULE
 
@@ -875,7 +926,7 @@ RULE NEW Story:MaxFuncGrpArea
     z:MaxFuncGrpArea
 ENDRULE
 
-// Step 3: Determine the Story:FuncGrpAreaXXXX that corresponds to the 
+// Step 3a: Determine the Story:FuncGrpAreaXXXX that corresponds to the 
 //         Story:MaxFuncGrpArea, and use to specify the PredominantFuncGrp 
 //         for the Story
 //         mod: replaced 'Residential Common' w/ 'ResidentialCommon' - SAC 08/23/21
@@ -890,10 +941,267 @@ RULE NEW Story:PredominantFuncGrp
 // Exclude process spaces Laboratory, Data, and ParkingGarage from consideration
     if( MaxFuncGrpArea = 0)
     then if( Story:ResFlrAreaNewWithMult > 0 ) 
-         then "ResidentialCommon"  ; ----- for apartment/hotel
+         then "ResidentialCommon" // for apartment/hotel
          else if( Story:LabArea > 0 )
-         then "Laboratory" ;----- for laboratory
-         else "Office" ; ----- for data center and parking level
+         then "Laboratory" // for laboratory
+         else "Office" // for other cases where MaxFuncGrpArea = 0, such as data and parking
+         endif endif
+    else if( MaxFuncGrpArea = FuncGrpAreaAssembly )
+    then "Assembly"
+    else if( MaxFuncGrpArea = FuncGrpAreaHealth )
+    then "Health"
+    else if( MaxFuncGrpArea = FuncGrpAreaManufacturing )
+    then "Manufacturing"
+    else if( MaxFuncGrpArea = FuncGrpAreaOffice )
+    then "Office"
+    else if( MaxFuncGrpArea = FuncGrpAreaResidentialCommon )
+    then "ResidentialCommon"
+    else if( MaxFuncGrpArea = FuncGrpAreaRestaurant )
+    then "Restaurant"
+    else if( MaxFuncGrpArea = FuncGrpAreaRetail )
+    then "Retail"
+    else if( MaxFuncGrpArea = FuncGrpAreaSchool )
+    then "School"
+    else if( MaxFuncGrpArea = FuncGrpAreaWarehouse )
+    then "Warehouse"
+    else "Office" // Default predominant group to be used if not other is determined
+    endif endif endif endif endif
+    endif endif endif endif endif
+  SIZING_BASELINE
+    zp:PredominantFuncGrp
+  ANNUAL  
+    z:PredominantFuncGrp
+ENDRULE
+
+
+// Step 3b: Determine the Bldg:FuncGrpAreaXXXX based on total building FuncGrpArea
+// Ticket 3330/3304: Added to support defining 2022 systems based on Bldg type - DR 2/10/22
+RULE NEW Bldg:FuncGrpAreaAssembly
+  DATATYPE
+    Float
+  LONGFORM
+    FunctionGroupAreaAssembly
+  INPUTCLASS 
+    NotInput
+  SIZING_PROPOSED
+    SumChildren( Story:FuncGrpAreaAssembly )
+  SIZING_BASELINE
+    zp:FuncGrpAreaAssembly
+  ANNUAL
+    z:FuncGrpAreaAssembly
+ENDRULE
+RULE NEW Bldg:FuncGrpAreaData
+  DATATYPE
+    Float
+  LONGFORM
+    FunctionGroupAreaData
+  INPUTCLASS 
+    NotInput
+  SIZING_PROPOSED
+    SumChildren( Story:FuncGrpAreaData )
+  SIZING_BASELINE
+    zp:FuncGrpAreaData
+  ANNUAL
+    z:FuncGrpAreaData
+ENDRULE
+RULE NEW Bldg:FuncGrpAreaHealth
+  DATATYPE
+    Float
+  LONGFORM
+    FunctionGroupAreaHealth
+  INPUTCLASS 
+    NotInput
+  SIZING_PROPOSED
+    SumChildren( Story:FuncGrpAreaHealth )
+  SIZING_BASELINE
+    zp:FuncGrpAreaHealth
+  ANNUAL
+    z:FuncGrpAreaHealth
+ENDRULE
+RULE NEW Bldg:FuncGrpAreaLab
+  DATATYPE
+    Float
+  LONGFORM
+    FunctionGroupAreaLab
+  INPUTCLASS 
+    NotInput
+  SIZING_PROPOSED
+    SumChildren( Story:FuncGrpAreaLab )
+  SIZING_BASELINE
+    zp:FuncGrpAreaLab
+  ANNUAL
+    z:FuncGrpAreaLab
+ENDRULE
+RULE NEW Bldg:FuncGrpAreaManufacturing
+  DATATYPE
+    Float
+  LONGFORM
+    FunctionGroupAreaManufacturing
+  INPUTCLASS 
+    NotInput
+  SIZING_PROPOSED
+    SumChildren( Story:FuncGrpAreaManufacturing )
+  SIZING_BASELINE
+    zp:FuncGrpAreaManufacturing
+  ANNUAL
+    z:FuncGrpAreaManufacturing
+ENDRULE
+RULE NEW Bldg:FuncGrpAreaOffice
+  DATATYPE
+    Float
+  LONGFORM
+    FunctionGroupAreaOffice
+  INPUTCLASS 
+    NotInput
+  SIZING_PROPOSED
+    SumChildren( Story:FuncGrpAreaOffice )
+  SIZING_BASELINE
+    zp:FuncGrpAreaOffice
+  ANNUAL
+    z:FuncGrpAreaOffice
+ENDRULE
+RULE NEW Bldg:FuncGrpAreaParking
+  DATATYPE
+    Float
+  LONGFORM
+    FunctionGroupAreaParking
+  INPUTCLASS 
+    NotInput
+  SIZING_PROPOSED
+// Sum CondFlrArea
+    SumChildren( Story:FuncGrpAreaParking )
+  SIZING_BASELINE
+    zp:FuncGrpAreaParking
+  ANNUAL
+    z:FuncGrpAreaParking
+ENDRULE
+RULE NEW Bldg:FuncGrpAreaResidentialCommon
+  DATATYPE
+    Float
+  LONGFORM
+    FunctionGroupAreaResidentialCommon
+  INPUTCLASS 
+    NotInput
+  SIZING_PROPOSED
+    SumChildren( Story:FuncGrpAreaResidentialCommon )
+  SIZING_BASELINE
+    zp:FuncGrpAreaResidentialCommon
+  ANNUAL
+    z:FuncGrpAreaResidentialCommon
+ENDRULE
+RULE NEW Bldg:FuncGrpAreaResidentialLiving
+  DATATYPE
+    Float
+  LONGFORM
+    FunctionGroupAreaResidentialLiving
+  INPUTCLASS 
+    NotInput
+  SIZING_PROPOSED
+    SumChildren( Story:FuncGrpAreaResidentialLiving )
+  SIZING_BASELINE
+    zp:FuncGrpAreaResidentialLiving
+  ANNUAL
+    z:FuncGrpAreaResidentialLiving
+ENDRULE
+RULE NEW Bldg:FuncGrpAreaRestaurant
+  DATATYPE
+    Float
+  LONGFORM
+    FunctionGroupAreaRestaurant
+  INPUTCLASS 
+    NotInput
+  SIZING_PROPOSED
+    SumChildren( Story:FuncGrpAreaRestaurant )
+  SIZING_BASELINE
+    zp:FuncGrpAreaRestaurant
+  ANNUAL
+    z:FuncGrpAreaRestaurant
+ENDRULE
+RULE NEW Bldg:FuncGrpAreaRetail
+  DATATYPE
+    Float
+  LONGFORM
+    FunctionGroupAreaRetail
+  INPUTCLASS 
+    NotInput
+  SIZING_PROPOSED
+    SumChildren( Story:FuncGrpAreaRetail )
+  SIZING_BASELINE
+    zp:FuncGrpAreaRetail
+  ANNUAL
+    z:FuncGrpAreaRetail
+ENDRULE
+RULE NEW Bldg:FuncGrpAreaSchool
+  DATATYPE
+    Float
+  LONGFORM
+    FunctionGroupAreaSchool
+  INPUTCLASS 
+    NotInput
+  SIZING_PROPOSED
+    SumChildren( Story:FuncGrpAreaSchool )
+  SIZING_BASELINE
+    zp:FuncGrpAreaSchool
+  ANNUAL
+    z:FuncGrpAreaSchool
+ENDRULE
+RULE NEW Bldg:FuncGrpAreaWarehouse
+  DATATYPE
+    Float
+  LONGFORM
+    FunctionGroupAreaWarehouse
+  INPUTCLASS 
+    NotInput
+  SIZING_PROPOSED
+    SumChildren( Story:FuncGrpAreaWarehouse )
+  SIZING_BASELINE
+    zp:FuncGrpAreaWarehouse
+  ANNUAL
+    z:FuncGrpAreaWarehouse
+ENDRULE
+
+// Step 3c:  Calculate the FuncSchGrp classification with the most area for the Building
+RULE NEW Bldg:MaxFuncGrpArea
+  DATATYPE
+    Float
+  LONGFORM
+    MaxFunctionGroupArea
+  INPUTCLASS 
+    NotInput
+  SIZING_PROPOSED
+// Exclude process spaces Laboratory, Data, ResidentialCommon and ParkingGarage from consideration
+    Max(Max(Max(FuncGrpAreaAssembly,
+                FuncGrpAreaHealth),
+            Max(FuncGrpAreaManufacturing,
+                FuncGrpAreaOffice)),
+        Max(Max(FuncGrpAreaRestaurant,
+                FuncGrpAreaRetail),            
+            Max(FuncGrpAreaSchool,
+                FuncGrpAreaWarehouse)))
+  SIZING_BASELINE
+    zp:MaxFuncGrpArea
+  ANNUAL  
+    z:MaxFuncGrpArea
+ENDRULE
+
+// Step 3d: Determine the Bldg:FuncGrpAreaXXXX that corresponds to the 
+//         Bldg:MaxFuncGrpArea, and use to specify the PredominantFuncGrp 
+//         for the Building
+RULE NEW Bldg:PredominantFuncGrp
+  DATATYPE
+    String
+  LONGFORM
+    PredominantFunctionGroup
+  INPUTCLASS 
+    NotInput
+  SIZING_PROPOSED
+// Exclude process spaces Laboratory, Data, and ParkingGarage from consideration
+    if( MaxFuncGrpArea = 0)
+    then if( Bldg:ResFlrAreaNew > 0 ) 
+         then "ResidentialCommon"  // for apartment/hotel
+         else if( Bldg:LabArea > 0 )
+         then "Laboratory" // for laboratory
+         else "Office" // for other cases where MaxFuncGrpArea = 0, such as data and parking
          endif endif
     else if( MaxFuncGrpArea = FuncGrpAreaAssembly )
     then "Assembly"
@@ -928,7 +1236,8 @@ RULE Spc:FuncSchGrp
     if( CondgType = "Plenum" ) 
     then UNDEFINED // See Issue 1848.  A default is needed for other HasNoInternalLds cases
     // The following are exceptions to using the Story:PredominantFuncGrp
-    else if( IsRes )
+    else
+    if( IsRes )
     then "ResidentialLiving"
     else if( CompRmArea > 0 )
     then "Data"
@@ -940,10 +1249,14 @@ RULE Spc:FuncSchGrp
     then "Parking"
     else if( ResCommonArea > 0 )
     then "ResidentialCommon"
+    else if( Bldg:PredominantFuncGrp = "Retail" .AND. Bldg:AboveGrdStoryCnt <= 2 )
+    then "Retail"
+    else if( Bldg:PredominantFuncGrp = "School" .AND. Bldg:AboveGrdStoryCnt <= 2 )
+    then "School"
     // For all other cases, use Story:PredominantFuncGrp
     else Story:PredominantFuncGrp
-    endif endif endif endif 
-    endif endif endif
+    endif endif endif endif endif
+    endif endif endif endif
   SIZING_BASELINE
     zp:FuncSchGrp
   ANNUAL
@@ -1177,35 +1490,92 @@ ENDRULE
 
 // Retail
 // -----------------------------------------------------------------------------
+RULE NEW Bldg:IsRetailBldg
+  DATATYPE
+    Integer
+  LONGFORM
+    IsRetailBuilding
+  INPUTCLASS
+    NotInput
+  SIZING_PROPOSED
+    if( IfValidAnd( PredominantFuncGrp = "Retail" ) .AND.
+        IfValidAnd( AboveGrdStoryCnt <= 2 ) )
+    then 1 // Building is Retail, <= 2 stories
+    else 0
+    endif
+  SIZING_BASELINE
+   zp:IsRetailBldg
+ENDRULE
+
 RULE NEW Spc:RetailArea
   DATATYPE
     Float
   LONGFORM
     RetailArea
   DESCRIPTION
-    "The total (conditioned) space floor area classified as 'Retail'." 
+    "The total (conditioned) space floor area for a building that qualifies
+     for a 'Retail' building standard design system." 
+  INPUTCLASS
+    NotInput
+  UNITS 
+    ft2      
+  SIZING : T24N_2016
+    0 // 2016 does not have separate Retail system
+  SIZING_PROPOSED : T24N_2019
+    if( IfValidAnd( Story:PredominantFuncGrp = "Retail" ) .AND.
+        IfValidAnd( Bldg:AboveGrdStoryCnt <= 2 ) )
+    then CondFlrArea
+    else 0
+    endif
+  SIZING_PROPOSED
+    if( IfValidAnd( Bldg:IsRetailBldg > 0 ) )
+    then CondFlrArea
+    else 0
+    endif     
+  SIZING_BASELINE
+    zp:RetailArea
+ENDRULE
+
+// School
+// -----------------------------------------------------------------------------
+RULE NEW Bldg:IsSchoolBldg
+  DATATYPE
+    Integer
+  LONGFORM
+    IsSchoolBuilding
+  INPUTCLASS
+    NotInput
+  SIZING_PROPOSED
+    if( IfValidAnd( PredominantFuncGrp = "School" ) .AND.
+        IfValidAnd( AboveGrdStoryCnt <= 2 ) )
+    then 1 // Building is School, <= 2 stories
+    else 0
+    endif
+  SIZING_BASELINE
+   zp:IsSChoolBldg
+ENDRULE
+
+RULE NEW Spc:SchoolArea
+  DATATYPE
+    Float
+  LONGFORM
+    RetailArea
+  DESCRIPTION
+    "The total (conditioned) space floor area for a building that qualifies
+     for a 'School' building standard design system." 
   INPUTCLASS
     NotInput
   UNITS 
     ft2
-  DEFAULT : T24N_2016
-    0 // 2016 does not have separate Retail system
-  DEFAULT
-    if( IfValidAnd( FuncSchGrp = "Retail" ) .AND.
-        IfValidAnd( AboveGrdStoryCnt <= 2 ) )
-    then CondFlrArea
-    else 0
-    endif       
-  SIZING : T24N_2016
-    0 // 2016 does not have separate Retail system
+  SIZING : T24N_2016 T24N_2019
+    0 // 2016/2019 does not have separate School system
   SIZING_PROPOSED
-    if( FuncSchGrp = "Retail" .AND.
-        AboveGrdStoryCnt <= 2 )
+    if( IfValidAnd( Bldg:IsSchoolBldg > 0 ) )
     then CondFlrArea
     else 0
-    endif
+    endif     
   SIZING_BASELINE
-    zp:RetailArea
+    zp:SchoolArea
 ENDRULE
 
 // ---------- Section 2.3.3 - Space Use Classifications ------------------------

@@ -48,6 +48,260 @@ RULE NEW Proj:PDDevFlowTol
     10
 ENDRULE
 
+// Whether system is multizone or all-other for 2022 fan power adjustment rules
+// See Ticket 3323
+RULE NEW Proj:FanPwrIdxAdjNormPD
+  DATATYPE
+    Float
+  LONGFORM
+    FanPowerIndexAdjustmentNormalizedPressureDrop
+  DESCRIPTION
+    "The pressure drop to which power index adjustments are normailized to."
+  INPUTCLASS 
+    NotInput
+  UNITS
+    inH2O
+  DEFAULT
+    1.0
+ENDRULE
+
+// ********** Fan System Type *************************************************
+RULE NEW AirSys:FanSysType
+  DATATYPE
+    Enumeration
+  LONGFORM
+    FanSystemType
+  DESCRIPTION
+    "An integer flag that indicates the system qualifies as a multi-zone VAV fan system."
+  HELP
+    "FAN SYSTEM, MULTI-ZONE VARIABLE AIR VOLUME (VAV) is a fan system that serves 
+     three or more space-conditioning zones where airflow to each zone is individually
+     controlled based on heating, cooling and/or ventilation requirements, indoor fan
+     airflow varies as a function of load, and the sum of the minimum zone airflows for
+     each zone is 40% or less of the fan system design conditions."
+  INPUTCLASS 
+    NotInput
+  OPTION
+    MultiZoneVAV
+    AllOther
+  DEFAULT : T24N_2016 T24N_2019
+    UNDEFINED
+  DEFAULT : T24N
+    if( IfValidAnd( IsExhSys > 0 ) )
+    then "AllOther"
+    else
+    if( ( Type = "PVAV" .OR. Type = "VAV" .OR. Type = "DOASVAV" ) .AND. 
+        IfValidAnd( SupFanCap > 0 ) )
+    then // Is a VAV system, check that it meets other reqs
+      if( ( SumRevRef( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:HVACZnCnt ) > 3 .OR.
+            SumRevRef( ThrmlZn:PriAirCondgSysRef[2], ThrmlZn:HVACZnCnt ) > 3 .OR. 
+            SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:HVACZnCnt ) > 3 ) .AND.
+          ( ValidOr( TotTrmlPriAirFlowMinSim, 0 ) / ValidOr( Cnt, 1 ) / SupFanCap ) < 0.4 )
+      then "MultiZoneVAV"
+      else "AllOther"
+      endif
+    else "AllOther"
+    endif endif
+  ANNUAL : T24N_2016 T24N_2019
+    UNDEFINED
+  ANNUAL : T24N
+    if( BaseSysNum > 0 ) 
+    then 
+      if( ( Type = "PVAV" .OR. Type = "VAV" .OR. Type = "DOASVAV" ) .AND. 
+          IfValidAnd( SupFanCap > 0 ) )
+      then // Is a VAV system, check that it meets other reqs
+        if( ( SumRevRef( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:HVACZnCnt ) > 3 .OR.
+              SumRevRef( ThrmlZn:PriAirCondgSysRef[2], ThrmlZn:HVACZnCnt ) > 3 .OR. 
+              SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:HVACZnCnt ) > 3 ) .AND.
+            ( ValidOr( TotTrmlPriAirFlowMinSim, 0 ) / ValidOr( Cnt, 1 ) / SupFanCap ) < 0.4 )
+        then "MultiZoneVAV"
+        else "AllOther"
+        endif
+      else "AllOther"
+      endif
+    else UNCHANGED
+    endif        
+ENDRULE
+
+RULE NEW ZnSys:FanSysType
+  DATATYPE
+    Enumeration
+  LONGFORM
+    FanSystemType
+  DESCRIPTION
+    "An integer flag that indicates the system qualifies as a multi-zone VAV fan system."
+  HELP
+    "FAN SYSTEM, MULTI-ZONE VARIABLE AIR VOLUME (VAV) is a fan system that serves 
+     three or more space-conditioning zones where airflow to each zone is individually
+     controlled based on heating, cooling and/or ventilation requirements, indoor fan
+     airflow varies as a function of load, and the sum of the minimum zone airflows for
+     each zone is 40% or less of the fan system design conditions."
+  INPUTCLASS 
+    NotInput
+  OPTION
+    MultiZoneVAV
+    AllOther
+  DEFAULT : T24N_2016 T24N_2019
+    UNDEFINED
+  DEFAULT : T24N
+    "AllOther" // ZnSys is not multi-zone.
+  DEFAULT : T24N_2016 T24N_2019
+    UNDEFINED
+  ANNUAL : T24N
+    if( BaseSysNum > 0 ) 
+    then "AllOther"
+    else UNCHANGED
+    endif    
+ENDRULE
+
+// ********** Baseline Energy Recovery Fan Power Adjustment *******************
+// Set parameters to determine 2022 NonRes heat recovery requirement
+// See ticket 3317
+// =========================== AirSystem ======================================
+RULE NEW AirSys:AnnualOperHrs
+  DESCRIPTION
+    "The number of hours the system operates per year."
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  UNITS
+    Hours
+  ANNUAL : T24N
+    switch( AvailSchRef ) // Hours are depending on the prescribed HVAC schedule
+      case "AssemblyHVACAvail"           :  5840
+      case "DataHVACAvail"               :  8760
+      case "HealthHVACAvail"             :  5250
+      case "LabHVACAvail"                :  8760
+      case "ManufacturingHVACAvail"      :  6303
+      case "OfficeHVACAvail"             :  5497
+      case "ParkingHVACAvail"            :  8760
+      case "ResidentialCommonHVACAvail"  :  8760
+      case "ResidentialLivingHVACAvail"  :  8760
+      case "RestaurantHVACAvail"         :  7375
+      case "RetailHVACAvail"             :  5279
+      case "SchoolHVACAvail"             :  4328
+      case "WarehouseHVACAvail"          :  3229
+      default                            :  0
+    endswitch
+ENDRULE
+RULE NEW AirSys:HtRcvryReqThreshold
+  DESCRIPTION
+    "Heat recovery requirement threshold by full design supply airflow."
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  UNITS
+    CFM
+  ANNUAL_BASELINE : T24N_2016 T24N_2019
+    -1 // Heat recovery not required prior to 2022.
+  ANNUAL : T24N
+    if( IfValidAnd( SupFanCap > 0 ) .AND.
+        IfValidAnd( SysVentFlow > 0 ) )
+    then PrescriptiveHtRcvryReqs:SupFlowThreshold( 
+         "AnnualOperHrs", AnnualOperHrs, "OAFlowRat", SysVentFlow / SupFanCap, "ClimateZone", Proj:CliZnNum )
+    else 0
+    endif
+ENDRULE
+RULE NEW AirSys:PrescriptiveHtRcvryReq
+  DESCRIPTION
+    "A flag that indicates if heat recovery is required if using prescriptive approach"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL_BASELINE : T24N_2016 T24N_2019
+    0 // Heat recovery not required prior to 2022.
+  ANNUAL : T24N
+    if( IsResSys > 0 .OR. LabAreaNew > 0 ) 
+    then // Heat recovery is not required for Res or Laboratory
+      0
+    else
+    if( SupFanCap > HtRcvryReqThreshold )
+    then 1
+    else 0
+    endif endif
+ENDRULE
+RULE NEW AirSys:BaseERVPwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    BaselineEnergyRecoveryVentilatorPowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for Standard Design energy recovery device."
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+  ANNUAL : T24N
+    if( BaseSysNum > 0 .AND. PrescriptiveHtRcvryReq > 0 )
+    then
+      if( IfValidAnd( SysVentFlow > 0 ) .AND.
+          LocalStatus( FanSysType ) > 0 )
+      then 
+        T24N_2022FanPwrIdxAdj:ERV( "SysType", FanSysType,
+                                   "FlowCap", SysVentFlow )
+      else 0
+      endif      
+    else 0
+    endif
+ENDRULE
+RULE NEW AirSys:BaseERVPwrAdj
+  DATATYPE
+    Float
+  LONGFORM
+    BaselineEnergyRecoveryVentilatorPowerAdjustment
+  DESCRIPTION
+    "The fan power adjustment for Standard Design energy recovery device."
+  UNITS 
+    kW
+  INPUTCLASS
+    NotInput
+  ANNUAL : T24N
+    if( BaseSysNum > 0 .AND. BaseERVPwrIdxAdj > 0 )
+    then SysVentFlow * BaseERVPwrIdxAdj / 1000
+    else 0
+    endif
+ENDRULE
+// =========================== ZoneSystem =====================================
+RULE NEW ZnSys:BaseERVPwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    BaselineEnergyRecoveryVentilatorPowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for Standard Design energy recovery device."
+  UNITS
+    W/cfm
+  INPUTCLASS
+    NotInput
+  ANNUAL : T24N
+    0
+ENDRULE
+RULE NEW ZnSys:BaseERVPwrAdj
+  DATATYPE
+    Float
+  LONGFORM
+    BaselineEnergyRecoveryVentilatorPowerAdjustment
+  DESCRIPTION
+    "The fan power adjustment for Standard Design energy recovery device."
+  UNITS 
+    kW
+  INPUTCLASS
+    NotInput
+  ANNUAL : T24N
+    if( BaseSysNum > 0 .AND. BaseERVPwrIdxAdj > 0 )
+    then SysVentFlow * BaseERVPwrIdxAdj / 1000
+    else 0
+    endif
+ENDRULE
+
+
+
+
+
+
 // Flag to indicate that PD adjustments are allowed for the given system
 // For screens and CHECK rules
 // AirSys
@@ -147,6 +401,8 @@ ENDRULE
 
 // Special rules for handling specific adjustments
 // TO DO: Add ***Allowed properties for each adjustment and remove the NonExh and Exh** properties
+// to facilitate screen management
+
 // AirSys
 RULE NEW AirSys:MERVGTE16AdjAllowed
   DATATYPE
@@ -344,6 +600,29 @@ RULE AirSys:FullyDuctedExhDevFlow
   SIZING
     ValidOr( FullyDuctedExhDevFlow, 0 )
 ENDRULE
+RULE NEW AirSys:FullyDuctedExhPwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    FullyDuctedExhaustPowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for fully ducted exhaust."  
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N_2022
+    if( IfValidAnd( FullyDuctedExhFlag > 0 ) .AND.
+        IfValidAnd( FullyDuctedExhDevFlow > 0 ) .AND.
+        LocalStatus( FanSysType ) > 0 )
+    then 
+      T24N_2022FanPwrIdxAdj:FullyDuctedExh( "SysType", FanSysType,
+                                            "FlowCap", FullyDuctedExhDevFlow )
+    else 0
+    endif
+  SIZING
+    ValidOr( FullyDuctedExhPwrIdxAdj, 0 )
+ENDRULE
 
 // ---------- Exhaust Airflow Control Device---------------------------------
 RULE AirSys:ExhCtrlFlag
@@ -363,7 +642,7 @@ RULE NEW AirSys:ExhCtrlPDAdj
   DATATYPE
     Float
   LONGFORM
-    FullyDuctedExhaustPressureDropAdjustment
+    ExhaustControlPressureDropAdjustment
   DESCRIPTION
     "The fan power pressure drop adjustment for the an exhaust airflow 
      control device."      
@@ -404,6 +683,23 @@ RULE AirSys:ExhCtrlDevFlow
   SIZING
     ValidOr( ExhCtrlDevFlow, 0 )
 ENDRULE
+RULE NEW AirSys:ExhCtrlPwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    ExhaustControlPowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for exhaust control device."  
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+// TO DO: Update PwrIdxAdj formulas for credits not used for T24N
+  DEFAULT
+    0
+  SIZING
+    0
+ENDRULE
 
 // ---------- Fully Ducted Exhaust - Laboratory or Vivarium -------------------
 RULE AirSys:FullyDuctedExhLabOrVivFlag
@@ -425,7 +721,7 @@ RULE NEW AirSys:FullyDuctedExhLabOrVivPDAdj
   LONGFORM
     FullyDuctedExhaustLabOrVivariumPressureDropAdjustment
   DESCRIPTION
-    "The fan power pressure drop adjustment fully ducted exhaust for systems 
+    "The fan power pressure drop adjustment of fully ducted exhaust for systems 
      serving Laboratory or Vivarium spaces."  
   UNITS 
     inH2O 
@@ -462,6 +758,24 @@ RULE AirSys:FullyDuctedExhLabOrVivDevFlow
   SIZING
     ValidOr( FullyDuctedExhLabOrVivDevFlow, 0 )
 ENDRULE
+RULE NEW AirSys:FullyDuctedExhLabOrVivPwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    FullyDuctedExhaustLabOrVivariumPowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment of fully ducted exhaust for systems 
+     serving Laboratory or Vivarium spaces." 
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+// TO DO: Update PwrIdxAdj formulas for credits not used for T24N
+  DEFAULT
+    0
+  SIZING
+    0
+ENDRULE
 
 // ---------- Exhaust filters, scrubbers, or other exhaust treatment ----------
 RULE AirSys:ExhFiltersFlag
@@ -492,7 +806,7 @@ RULE NEW AirSys:ExhFiltersPDAdj
   LONGFORM
     ExhaustFiltersPressureDropAdjustment
   DESCRIPTION
-    "The fan power pressure drop adjustment foir exhaust filters, scrubbers, 
+    "The fan power pressure drop adjustment for exhaust filters, scrubbers, 
      or other exhaust treatment."
   UNITS 
     inH2O 
@@ -528,6 +842,31 @@ RULE AirSys:ExhFiltersDevFlow
   SIZING
     ValidOr( ExhFiltersDevFlow, 0 )
 ENDRULE
+RULE NEW AirSys:ExhFiltersPwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    ExhaustFiltersPowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for exhaust filters, scrubbers, 
+     or other exhaust treatment."
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N_2022
+    if( IfValidAnd( ExhFiltersFlag > 0 ) .AND.
+        IfValidAnd( ExhFiltersDevFlow > 0 ) .AND.
+        LocalStatus( FanSysType ) > 0 )
+    then 
+      T24N_2022FanPwrIdxAdj:ExhFilters( "SysType", FanSysType,
+                                        "FlowCap", ExhFiltersDevFlow ) *
+      ( ExhFiltersDsgnPD / Proj:FanPwrIdxAdjNormPD )
+    else 0
+    endif
+  SIZING
+    ValidOr( ExhFiltersPwrIdxAdj, 0 )
+ENDRULE
 // Value used to determine baseline fan power based on proposed inclusion of ExhFilters 
 RULE NEW AirSys:ExhFiltersPwrAdj
   DATATYPE
@@ -536,15 +875,26 @@ RULE NEW AirSys:ExhFiltersPwrAdj
     ExhaustFiltersPowerAdjustment
   INPUTCLASS
     NotInput
-  UNITS
+  UNITS : T24N_2019
+    bhp
+  UNITS : T24N
     kW
-  DEFAULT
+  DEFAULT : T24N_2019
     if( IsExhSys > 0 .AND. 
         IfValidAnd( LabArea > 0 ) .AND.
         IfValidAnd( ExhSysType = "Laboratory" ) .AND.
         ExhFiltersFlag > 0 )
     then 
       ExhFiltersPDAdj * ExhFiltersDevFlow * ( 0.1175 / 745.6 ) / 0.65
+    else 0
+    endif
+  DEFAULT : T24N
+    if( IsExhSys > 0 .AND. 
+        IfValidAnd( LabArea > 0 ) .AND.
+        IfValidAnd( ExhSysType = "Laboratory" ) .AND.
+        ExhFiltersFlag > 0 )
+    then 
+      ExhFiltersDevFlow * ExhFiltersPwrIdxAdj / 1000
     else 0
     endif
   SIZING
@@ -578,7 +928,7 @@ RULE NEW AirSys:BiosftyCabExhPDAdj
   DATATYPE
     Float
   LONGFORM
-    BiosafetyCabinetPressureDropAdjustment
+    BiosafetyCabinetExhaustPressureDropAdjustment
   DESCRIPTION
     "The fan power pressure drop adjustment for biosafety cabinets."
   UNITS 
@@ -613,7 +963,31 @@ RULE AirSys:BiosftyCabExhDevFlow
     endif
   SIZING
     ValidOr( BiosftyCabExhDevFlow, 0 )
-ENDRULE 
+ENDRULE
+RULE NEW AirSys:BiosftyCabExhPwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    BiosafetyCabinetExhaustPowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for biosafety cabinets."
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N_2022
+    if( IfValidAnd( BiosftyCabExhFlag > 0 ) .AND.
+        IfValidAnd( BiosftyCabExhDevFlow > 0 ) .AND.
+        LocalStatus( FanSysType ) > 0 )
+    then 
+      T24N_2022FanPwrIdxAdj:BiosftyCabExh( "SysType", FanSysType,
+                                           "FlowCap", BiosftyCabExhDevFlow ) *
+      ( BiosftyCabExhDsgnPD / Proj:FanPwrIdxAdjNormPD )
+    else 0
+    endif
+  SIZING
+    ValidOr( BiosftyCabExhPwrIdxAdj, 0 )
+ENDRULE
 
 // ---------- Exhaust system serving fume hood --------------------------------
 RULE AirSys:FumeHoodExhFlag
@@ -670,7 +1044,24 @@ RULE AirSys:FumeHoodExhDevFlow
     endif
   SIZING
     ValidOr( FumeHoodExhDevFlow, 0 )
-ENDRULE 
+ENDRULE
+RULE NEW AirSys:FumeHoodExhPwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    FumeHoodExhaustPowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for exhaust system serving fume hood."
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+// TO DO: Update PwrIdxAdj formulas for credits not used for T24N
+  DEFAULT
+    0
+  SIZING
+    0
+ENDRULE
 
 // ---------- Laboratory and vivarium exhaust systems in high-rise buildings ---
 // Not Used for T24N
@@ -705,8 +1096,8 @@ RULE NEW AirSys:LabOrVivExhHiRisePDAdj
   LONGFORM
     LabOrVivariumExhaustHighRisePressureDropAdjustment
   DESCRIPTION
-    "The fan power pressure drop adjustment as for laboratory and vivarium
-     exhaust systems in high-rise buildings."  
+    "The fan power pressure drop adjustment for laboratory and vivarium
+     exhaust systems in high-rise buildings."
   UNITS 
     inH2O 
   INPUTCLASS
@@ -742,7 +1133,25 @@ RULE AirSys:LabOrVivExhHiRiseDevFlow
     endif
   SIZING
     ValidOr( LabOrVivExhHiRiseDevFlow, 0 )
-ENDRULE 
+ENDRULE
+RULE NEW AirSys:LabOrVivExhHiRisePwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    LabOrVivariumExhaustHighRisePowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for laboratory and vivarium
+     exhaust systems in high-rise buildings."
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+// TO DO: Update PwrIdxAdj formulas for credits not used for T24N
+  DEFAULT
+    0
+  SIZING
+    0
+ENDRULE
       
 // ---------- Sound Attenuation Section For Exhaust----------------------------
 // Not Used for T24N
@@ -801,6 +1210,23 @@ RULE AirSys:SndAttnExhDevFlow
   SIZING
     ValidOr( SndAttnExhDevFlow, 0 )
 ENDRULE
+RULE NEW AirSys:SndAttnExhPwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    SoundAttenuationExhaustPowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for the sound attenuation section."
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+// TO DO: Update PwrIdxAdj formulas for credits not used for T24N
+  DEFAULT
+    0
+  SIZING
+    0
+ENDRULE
 
 
 // *************************** Supply/Return Systems *************************
@@ -856,6 +1282,29 @@ RULE AirSys:FullyDuctedRetDevFlow
   SIZING
     ValidOr( FullyDuctedRetDevFlow, 0 )
 ENDRULE
+RULE NEW AirSys:FullyDuctedRetPwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    FullyDuctedReturnPowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for fully ducted return."  
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N_2022
+    if( IfValidAnd( FullyDuctedRetFlag > 0 ) .AND.
+        IfValidAnd( FullyDuctedRetDevFlow > 0 ) .AND.
+        LocalStatus( FanSysType ) > 0 )
+    then 
+      T24N_2022FanPwrIdxAdj:FullyDuctedRet( "SysType", FanSysType,
+                                            "FlowCap", FullyDuctedRetDevFlow )
+    else 0
+    endif
+  SIZING
+    ValidOr( FullyDuctedRetPwrIdxAdj, 0 )
+ENDRULE
 RULE NEW AirSys:FullyDuctedRetFlowRat
   DATATYPE
     Float
@@ -890,7 +1339,7 @@ RULE NEW AirSys:RetCtrlPDAdj
   DATATYPE
     Float
   LONGFORM
-    FullyDuctedReturnPressureDropAdjustment
+    ReturnControlPressureDropAdjustment
   DESCRIPTION
     "The fan power pressure drop adjustment for the return airflow 
      control device."      
@@ -930,6 +1379,24 @@ RULE AirSys:RetCtrlDevFlow
     endif
   SIZING
     ValidOr( RetCtrlDevFlow, 0 )
+ENDRULE
+RULE NEW AirSys:RetCtrlPwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    ReturnControlPowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for the return airflow 
+     control device." 
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+// TO DO: Update PwrIdxAdj formulas for credits not used for T24N
+  DEFAULT
+    0
+  SIZING
+    0
 ENDRULE
 RULE NEW AirSys:RetCtrlDevFlowRat
   DATATYPE
@@ -1020,6 +1487,24 @@ RULE NEW AirSys:FullyDuctedRetLabOrVivFlowRat
   SIZING
     ValidOr( FullyDuctedRetLabOrVivFlowRat, 0 )
 ENDRULE
+RULE NEW AirSys:FullyDuctedRetLabOrVivPwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    FullyDuctedReturnLabOrVivariumPowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for fully ducted return for systems, 
+     serving Laboratory or Vivarium spaces'."  
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+// TO DO: Update PwrIdxAdj formulas for credits not used for T24N
+  DEFAULT
+    0
+  SIZING
+    0
+ENDRULE
 
 // ---------- Particulate Filtration Credit: MERV 9 through 12 --------------
 // Not Used for T24N
@@ -1094,6 +1579,24 @@ RULE NEW AirSys:MERV9To12FlowRat
   SIZING
     ValidOr( MERV9To12FlowRat, 0 )
 ENDRULE
+RULE NEW AirSys:MERV9To12PwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    MERV9To12PowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for particulate filtration credit: 
+     MERV 9 through 12."
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+// TO DO: Update PwrIdxAdj formulas for credits not used for T24N
+  DEFAULT
+    0
+  SIZING
+    0
+ENDRULE
 
 // ---------- Particulate Filtration Credit: MERV 13 through 15 --------------
 RULE AirSys:MERV13To15Flag
@@ -1167,8 +1670,25 @@ RULE NEW AirSys:MERV13To15FlowRat
   SIZING
     ValidOr( MERV13To15FlowRat, 0 )
 ENDRULE
-
-// ---------- Particulate Filtration Credit: MERV 9 through 12 ----------------
+RULE NEW AirSys:MERV13To15PwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    MERV13To15PowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for particulate filtration credit: 
+     MERV 13 through 15."
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+// TO DO: Update PwrIdxAdj formulas for credits not used for T24N
+  DEFAULT
+    0
+  SIZING
+    0
+ENDRULE
+// ---------- Particulate Filtration Credit: MERV 16+ ----------------
 RULE AirSys:MERVGTE16Flag
   DESCRIPTION
     "A flag to indicate that the proposed system is provided with MERV 16 or 
@@ -1237,6 +1757,31 @@ RULE AirSys:MERVGTE16DevFlow
     endif
   SIZING
     ValidOr( MERVGTE16DevFlow, 0 )
+ENDRULE
+RULE NEW AirSys:MERVGTE16PwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    MERVGreaterThanOrEqualTo16PowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for particulate filtration credit: 
+     MERV 16 or greater or electronically enhanced filters."
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N_2022
+    if( IfValidAnd( MERVGTE16Flag > 0 ) .AND.
+        IfValidAnd( MERVGTE16DevFlow > 0 ) .AND.
+        LocalStatus( FanSysType ) > 0 )
+    then 
+      T24N_2022FanPwrIdxAdj:MERVGTE16( "SysType", FanSysType,
+                                       "FlowCap", MERVGTE16DevFlow ) *
+      ( MERVGTE16DsgnPD / Proj:FanPwrIdxAdjNormPD )
+    else 0
+    endif
+  SIZING
+    ValidOr( MERVGTE16PwrIdxAdj, 0 )
 ENDRULE
 RULE NEW AirSys:MERVGTE16FlowRat
   DATATYPE
@@ -1321,6 +1866,31 @@ RULE AirSys:GasPhaseAirCleanersDevFlow
   SIZING
     ValidOr( GasPhaseAirCleanersDevFlow, 0 )
 ENDRULE
+RULE NEW AirSys:GasPhaseAirCleanersPwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    GasPhaseAirCleanersPowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for for carbon and other gas-phase 
+     air cleaners."
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N_2022
+    if( IfValidAnd( GasPhaseAirCleanersFlag > 0 ) .AND.
+        IfValidAnd( GasPhaseAirCleanersDevFlow > 0 ) .AND.
+        LocalStatus( FanSysType ) > 0 )
+    then 
+      T24N_2022FanPwrIdxAdj:GasPhaseAirCleaners( "SysType", FanSysType,
+                                            "FlowCap", GasPhaseAirCleanersDevFlow ) *
+      ( GasPhaseAirCleanersDsgnPD / Proj:FanPwrIdxAdjNormPD )
+    else 0
+    endif
+  SIZING
+    ValidOr( GasPhaseAirCleanersPwrIdxAdj, 0 )
+ENDRULE
 RULE NEW AirSys:GasPhaseAirCleanersFlowRat
   DATATYPE
     Float
@@ -1368,7 +1938,7 @@ RULE NEW AirSys:ERVPDAdj
   DATATYPE
     Float
   LONGFORM
-    EnergyRecoveryVentilatiorPressureDropAdjustment
+    EnergyRecoveryVentilatorPressureDropAdjustment
   DESCRIPTION
     "The fan power pressure drop adjustment for energy recovery devices,
      other than coil runaround loops."
@@ -1421,6 +1991,24 @@ RULE NEW AirSys:ERVFlowRat
     endswitch
   SIZING
     ValidOr( ERVFlowRat, 0 )
+ENDRULE
+RULE NEW AirSys:ERVPwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    EnergyRecoveryVentilatorPowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for energy recovery devices,
+     other than coil runaround loops."
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+// TO DO: Update PwrIdxAdj formulas for credits not used for T24N
+  DEFAULT
+    0
+  SIZING
+    0
 ENDRULE
 
 // ---------- Evaporative humidifier/cooler in series w/ another cooling coil -
@@ -1509,6 +2097,24 @@ RULE NEW AirSys:EvapHumOrClrFlowRat
   SIZING
     ValidOr( EvapHumOrClrFlowRat, 0 )
 ENDRULE
+RULE NEW AirSys:EvapHumOrClrPwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    EvaporativeHumidifierOrCoolerPowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for evaporative humidifier/cooler
+     in series w/ another cooling coil."
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+// TO DO: Update PwrIdxAdj formulas for credits not used for T24N
+  DEFAULT
+    0
+  SIZING
+    0
+ENDRULE
 
 // ---------- Sound Attenuation Section ---------------------------------------
 // Not Used for T24N
@@ -1582,7 +2188,23 @@ RULE NEW AirSys:SndAttnFlowRat
   SIZING
     ValidOr( SndAttnFlowRat, 0 )
 ENDRULE
-
+RULE NEW AirSys:SndAttnPwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    SoundAttenuationPowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for the sound attenuation section."
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+// TO DO: Update PwrIdxAdj formulas for credits not used for T24N
+  DEFAULT
+    0
+  SIZING
+    0
+ENDRULE
 
 // =========================== Zone System ====================================
 // *************************** Exhaust Systems ********************************
@@ -1630,6 +2252,29 @@ RULE ZnSys:FullyDuctedExhDevFlow
                      Name, FullyDuctedExhDevFlow, ExhFanCap)
     else UNCHANGED
     endif
+ENDRULE
+RULE NEW ZnSys:FullyDuctedExhPwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    FullyDuctedExhaustPowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for fully ducted exhaust."  
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N_2022
+    if( IfValidAnd( FullyDuctedExhFlag > 0 ) .AND.
+        IfValidAnd( FullyDuctedExhDevFlow > 0 ) .AND.
+        LocalStatus( FanSysType ) > 0 )
+    then 
+      T24N_2022FanPwrIdxAdj:FullyDuctedExh( "SysType", FanSysType,
+                                            "FlowCap", FullyDuctedExhDevFlow )
+    else 0
+    endif
+  SIZING
+    ValidOr( FullyDuctedExhPwrIdxAdj, 0 )
 ENDRULE
 
 // ---------- Exhaust Airflow Control Device---------------------------------
@@ -1685,6 +2330,23 @@ RULE ZnSys:ExhCtrlDevFlow
     else UNCHANGED
     endif
 ENDRULE
+RULE NEW ZnSys:ExhCtrlPwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    ExhaustControlPowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for exhaust control device."  
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+// TO DO: Update PwrIdxAdj formulas for credits not used for T24N
+  DEFAULT
+    0
+  SIZING
+    0
+ENDRULE
 
 // ---------- Fully Ducted Exhaust - Laboratory or Vivarium -------------------
 // Not Used for T24N
@@ -1737,6 +2399,24 @@ RULE ZnSys:FullyDuctedExhLabOrVivDevFlow
                 Name, FullyDuctedExhLabOrVivDevFlow, ExhFanCap)
     else UNCHANGED
     endif
+ENDRULE
+RULE NEW ZnSys:FullyDuctedExhLabOrVivPwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    FullyDuctedExhaustLabOrVivariumPowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment of fully ducted exhaust for systems 
+     serving Laboratory or Vivarium spaces." 
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+// TO DO: Update PwrIdxAdj formulas for credits not used for T24N
+  DEFAULT
+    0
+  SIZING
+    0
 ENDRULE
 
 // ---------- Exhaust filters, scrubbers, or other exhaust treatment ----------
@@ -1796,6 +2476,31 @@ RULE ZnSys:ExhFiltersDevFlow
     else UNCHANGED
     endif
 ENDRULE
+RULE NEW ZnSys:ExhFiltersPwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    ExhaustFiltersPowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for exhaust filters, scrubbers, 
+     or other exhaust treatment."
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N_2022
+    if( IfValidAnd( ExhFiltersFlag > 0 ) .AND.
+        IfValidAnd( ExhFiltersDevFlow > 0 ) .AND.
+        LocalStatus( FanSysType ) > 0 )
+    then 
+      T24N_2022FanPwrIdxAdj:ExhFilters( "SysType", FanSysType,
+                                        "FlowCap", ExhFiltersDevFlow ) *
+      ( ExhFiltersDsgnPD / Proj:FanPwrIdxAdjNormPD )
+    else 0
+    endif
+  SIZING
+    ValidOr( ExhFiltersPwrIdxAdj, 0 )
+ENDRULE
 // Value used to determine baseline fan power based on proposed inclusion of ExhFilters 
 RULE NEW ZnSys:ExhFiltersPwrAdj
   DATATYPE
@@ -1804,9 +2509,11 @@ RULE NEW ZnSys:ExhFiltersPwrAdj
     ExhaustFiltersPowerAdjustment
   INPUTCLASS
     NotInput
-  UNITS
+  UNITS : T24N_2019
+    bhp
+  UNITS : T24N
     kW
-  DEFAULT
+  DEFAULT : T24N_2019
     if( IsExhSys > 0 .AND. 
         IfValidAnd( LabArea > 0 ) .AND.
         IfValidAnd( ExhSysType = "Laboratory" ) .AND.
@@ -1815,6 +2522,17 @@ RULE NEW ZnSys:ExhFiltersPwrAdj
       ExhFiltersPDAdj * ExhFiltersDevFlow * ( 0.1175 / 745.6 ) / 0.65
     else 0
     endif
+  DEFAULT : T24N
+    if( IsExhSys > 0 .AND. 
+        IfValidAnd( LabArea > 0 ) .AND.
+        IfValidAnd( ExhSysType = "Laboratory" ) .AND.
+        ExhFiltersFlag > 0 )
+    then 
+      ExhFiltersDevFlow * ExhFiltersPwrIdxAdj / 1000
+    else 0
+    endif
+  SIZING
+    ValidOr( ExhFiltersPwrAdj, 0 )
 ENDRULE
 
 // ---------- Biosafety Cabinet -----------------------------------------------
@@ -1872,6 +2590,30 @@ RULE ZnSys:BiosftyCabExhDevFlow
     else UNCHANGED
     endif
 ENDRULE 
+RULE NEW ZnSys:BiosftyCabExhPwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    BiosafetyCabinetExhaustPowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for biosafety cabinets."
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N_2022
+    if( IfValidAnd( BiosftyCabExhFlag > 0 ) .AND.
+        IfValidAnd( BiosftyCabExhDevFlow > 0 ) .AND.
+        LocalStatus( FanSysType ) > 0 )
+    then 
+      T24N_2022FanPwrIdxAdj:BiosftyCabExh( "SysType", FanSysType,
+                                           "FlowCap", BiosftyCabExhDevFlow ) *
+      ( BiosftyCabExhDsgnPD / Proj:FanPwrIdxAdjNormPD )
+    else 0
+    endif
+  SIZING
+    ValidOr( BiosftyCabExhPwrIdxAdj, 0 )
+ENDRULE
 
 // ---------- Exhaust system serving fume hood --------------------------------
 RULE ZnSys:FumeHoodExhFlag
@@ -1922,7 +2664,24 @@ RULE ZnSys:FumeHoodExhDevFlow
                 Name, FumeHoodExhDevFlow, ExhFanCap)
     else UNCHANGED
     endif
-ENDRULE 
+ENDRULE
+RULE NEW ZnSys:FumeHoodExhPwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    FumeHoodExhaustPowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for exhaust system serving fume hood."
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+// TO DO: Update PwrIdxAdj formulas for credits not used for T24N
+  DEFAULT
+    0
+  SIZING
+    0
+ENDRULE
 
 // ---------- Laboratory and vivarium exhaust systems in high-rise buildings ---
 // Not Used for T24N
@@ -1986,7 +2745,25 @@ RULE ZnSys:LabOrVivExhHiRiseDevFlow
                 Name, LabOrVivExhHiRiseDevFlow, ExhFanCap)
     else UNCHANGED
     endif
-ENDRULE 
+ENDRULE
+RULE NEW ZnSys:LabOrVivExhHiRisePwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    LabOrVivariumExhaustHighRisePowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for laboratory and vivarium
+     exhaust systems in high-rise buildings."
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+// TO DO: Update PwrIdxAdj formulas for credits not used for T24N
+  DEFAULT
+    0
+  SIZING
+    0
+ENDRULE
   
 // ---------- Sound Attenuation Section For Exhaust----------------------------
 // Not Used for T24N
@@ -2038,6 +2815,23 @@ RULE ZnSys:SndAttnExhDevFlow
                 Name, SndAttnExhDevFlow, ExhFanCap)
     else UNCHANGED
     endif
+ENDRULE
+RULE NEW ZnSys:SndAttnExhPwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    SoundAttenuationExhaustPowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for the sound attenuation section."
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+// TO DO: Update PwrIdxAdj formulas for credits not used for T24N
+  DEFAULT
+    0
+  SIZING
+    0
 ENDRULE
 
 
@@ -2091,6 +2885,29 @@ RULE ZnSys:FullyDuctedRetDevFlow
                 Name, FullyDuctedRetDevFlow, SupFanCap)
     else UNCHANGED
     endif
+ENDRULE
+RULE NEW ZnSys:FullyDuctedRetPwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    FullyDuctedReturnPowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for fully ducted return."  
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N_2022
+    if( IfValidAnd( FullyDuctedRetFlag > 0 ) .AND.
+        IfValidAnd( FullyDuctedRetDevFlow > 0 ) .AND.
+        LocalStatus( FanSysType ) > 0 )
+    then 
+      T24N_2022FanPwrIdxAdj:FullyDuctedRet( "SysType", FanSysType,
+                                            "FlowCap", FullyDuctedRetDevFlow )
+    else 0
+    endif
+  SIZING
+    ValidOr( FullyDuctedRetPwrIdxAdj, 0 )
 ENDRULE
 RULE NEW ZnSys:FullyDuctedRetFlowRat
   DATATYPE
@@ -2160,6 +2977,25 @@ RULE ZnSys:RetCtrlDevFlow
     else UNCHANGED
     endif
 ENDRULE
+RULE NEW ZnSys:RetCtrlPwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    ReturnControlPowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for the return airflow 
+     control device." 
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+// TO DO: Update PwrIdxAdj formulas for credits not used for T24N
+// TO DO: Update PwrIdxAdj formulas for credits not used for T24N
+  DEFAULT
+    0
+  SIZING
+    0
+ENDRULE
 RULE NEW ZnSys:RetCtrlDevFlowRat
   DATATYPE
     Float
@@ -2228,6 +3064,24 @@ RULE ZnSys:FullyDuctedRetLabOrVivDevFlow
     else UNCHANGED
     endif
 ENDRULE
+RULE NEW ZnSys:FullyDuctedRetLabOrVivPwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    FullyDuctedReturnLabOrVivariumPowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for fully ducted return for systems, 
+     serving Laboratory or Vivarium spaces'."  
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+// TO DO: Update PwrIdxAdj formulas for credits not used for T24N
+  DEFAULT
+    0
+  SIZING
+    0
+ENDRULE
 RULE NEW ZnSys:FullyDuctedRetLabOrVivFlowRat
   DATATYPE
     Float
@@ -2293,6 +3147,24 @@ RULE ZnSys:MERV9To12DevFlow
                 Name, MERV9To12Flag, SupFanCap)
     else UNCHANGED
     endif
+ENDRULE
+RULE NEW ZnSys:MERV9To12PwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    MERV9To12PowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for particulate filtration credit: 
+     MERV 9 through 12."
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+// TO DO: Update PwrIdxAdj formulas for credits not used for T24N
+  DEFAULT
+    0
+  SIZING
+    0
 ENDRULE
 RULE NEW ZnSys:MERV9To12FlowRat
   DATATYPE
@@ -2372,6 +3244,24 @@ RULE NEW ZnSys:MERV13To15FlowRat
     default: 0
     endswitch
 ENDRULE
+RULE NEW ZnSys:MERV13To15PwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    MERV13To15PowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for particulate filtration credit: 
+     MERV 13 through 15."
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+// TO DO: Update PwrIdxAdj formulas for credits not used for T24N
+  DEFAULT
+    0
+  SIZING
+    0
+ENDRULE
 
 // ---------- Particulate Filtration Credit: MERV 9 through 12 ----------------
 RULE ZnSys:MERVGTE16Flag
@@ -2428,6 +3318,31 @@ RULE ZnSys:MERVGTE16DevFlow
                 Name, MERVGTE16DevFlow, SupFanCap)
     else UNCHANGED
     endif
+ENDRULE
+RULE NEW ZnSys:MERVGTE16PwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    MERVGreaterThanOrEqualTo16PowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for particulate filtration credit: 
+     MERV 16 or greater or electronically enhanced filters."
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N_2022
+    if( IfValidAnd( MERVGTE16Flag > 0 ) .AND.
+        IfValidAnd( MERVGTE16DevFlow > 0 ) .AND.
+        LocalStatus( FanSysType ) > 0 )
+    then 
+      T24N_2022FanPwrIdxAdj:MERVGTE16( "SysType", FanSysType,
+                                       "FlowCap", MERVGTE16DevFlow ) *
+      ( MERVGTE16DsgnPD / Proj:FanPwrIdxAdjNormPD )
+    else 0
+    endif
+  SIZING
+    ValidOr( MERVGTE16PwrIdxAdj, 0 )
 ENDRULE
 RULE NEW ZnSys:MERVGTE16FlowRat
   DATATYPE
@@ -2498,6 +3413,31 @@ RULE ZnSys:GasPhaseAirCleanersDevFlow
                  Name, GasPhaseAirCleanersDevFlow, SupFanCap)
     else UNCHANGED
     endif
+ENDRULE
+RULE NEW ZnSys:GasPhaseAirCleanersPwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    GasPhaseAirCleanersPowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for for carbon and other gas-phase 
+     air cleaners."
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N_2022
+    if( IfValidAnd( GasPhaseAirCleanersFlag > 0 ) .AND.
+        IfValidAnd( GasPhaseAirCleanersDevFlow > 0 ) .AND.
+        LocalStatus( FanSysType ) > 0 )
+    then 
+      T24N_2022FanPwrIdxAdj:GasPhaseAirCleaners( "SysType", FanSysType,
+                                                 "FlowCap", GasPhaseAirCleanersDevFlow ) *
+      ( GasPhaseAirCleanersDsgnPD / Proj:FanPwrIdxAdjNormPD )
+    else 0
+    endif
+  SIZING
+    ValidOr( GasPhaseAirCleanersPwrIdxAdj, 0 )
 ENDRULE
 RULE NEW ZnSys:GasPhaseAirCleanersFlowRat
   DATATYPE
@@ -2575,6 +3515,24 @@ RULE ZnSys:ERVDevFlow
                 Name, ERVDevFlow, SupFanCap)
     else UNCHANGED
     endif
+ENDRULE
+RULE NEW ZnSys:ERVPwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    EnergyRecoveryVentilatorPowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for energy recovery devices,
+     other than coil runaround loops."
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+// TO DO: Update PwrIdxAdj formulas for credits not used for T24N
+  DEFAULT
+    0
+  SIZING
+    0
 ENDRULE
 RULE NEW ZnSys:ERVFlowRat
   DATATYPE
@@ -2666,6 +3624,24 @@ RULE NEW ZnSys:EvapHumOrClrFlowRat
     default: 0
     endswitch
 ENDRULE
+RULE NEW ZnSys:EvapHumOrClrPwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    EvaporativeHumidifierOrCoolerPowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for evaporative humidifier/cooler
+     in series w/ another cooling coil."
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+// TO DO: Update PwrIdxAdj formulas for credits not used for T24N
+  DEFAULT
+    0
+  SIZING
+    0
+ENDRULE
 
 // ---------- Sound Attenuation Section ---------------------------------------
 // Not Used for T24N
@@ -2718,6 +3694,23 @@ RULE ZnSys:SndAttnDevFlow
     else UNCHANGED
     endif
 ENDRULE
+RULE NEW ZnSys:SndAttnPwrIdxAdj
+  DATATYPE
+    Float
+  LONGFORM
+    SoundAttenuationPowerIndexAdjustment
+  DESCRIPTION
+    "The fan power index adjustment for the sound attenuation section."
+  UNITS 
+    W/cfm
+  INPUTCLASS
+    NotInput
+// TO DO: Update PwrIdxAdj formulas for credits not used for T24N
+  DEFAULT
+    0
+  SIZING
+    0
+ENDRULE
 RULE NEW ZnSys:SndAttnFlowRat
   DATATYPE
     Float
@@ -2753,17 +3746,27 @@ RULE NEW ThrmlZn:FullyDuctedExhPwrAdj
   DATATYPE
     Float
   LONGFORM
-    FullyDuctedExhaustPwrAdjustment
+    FullyDuctedExhaustPowerAdjustment
   INPUTCLASS
     NotInput
-  UNITS
+  UNITS : T24N_2019
+    bhp
+  UNITS : T24N
     kW
-  SIZING_PROPOSED
+  SIZING_PROPOSED : T24N_2019
     if( LocalCompAssigned( ExhSysRef ) .AND. 
         FullyDuctedExhPwrAdjAllowed > 0 )
     then ( ExhSysRef:FullyDuctedExhPDAdj *
            ExhSysRef:FullyDuctedExhDevFlow *
            ExhZnToSysFlowRat ) * ( 0.1175 / 745.6 ) / 0.65 
+    else 0
+    endif
+  SIZING_PROPOSED : T24N
+    if( LocalCompAssigned( ExhSysRef ) .AND. 
+        FullyDuctedExhPwrAdjAllowed > 0 )
+    then ( ExhSysRef:FullyDuctedExhPwrIdxAdj *
+           ExhSysRef:FullyDuctedExhDevFlow *
+           ExhZnToSysFlowRat ) / 1000
     else 0
     endif
   SIZING_BASELINE
@@ -2789,9 +3792,11 @@ RULE NEW ThrmlZn:ExhCtrlPwrAdj
     ExhaustControlFanPowerAdjustment
   INPUTCLASS
     NotInput
-  UNITS
+  UNITS : T24N_2019
+    bhp
+  UNITS : T24N
     kW
-  SIZING_PROPOSED
+  SIZING_PROPOSED : T24N_2019
     if( LocalCompAssigned( ExhSysRef ) .AND. 
         ExhCtrlPwrAdjAllowed > 0 )
     then ( ExhSysRef:ExhCtrlPDAdj *
@@ -2799,6 +3804,8 @@ RULE NEW ThrmlZn:ExhCtrlPwrAdj
            ExhZnToSysFlowRat ) * ( 0.1175 / 745.6 ) / 0.65 
     else 0
     endif
+  SIZING_PROPOSED : T24N
+    0
   SIZING_BASELINE
     zp:ExhCtrlPwrAdj
 ENDRULE
@@ -2822,9 +3829,11 @@ RULE NEW ThrmlZn:FullyDuctedExhLabOrVivPwrAdj
     FullyDuctedExhaustLabOrVivariumPowerAdjustment
   INPUTCLASS
     NotInput
-  UNITS
+  UNITS : T24N_2019
+    bhp
+  UNITS : T24N
     kW
-  SIZING_PROPOSED
+  SIZING_PROPOSED : T24N_2019
     if( LocalCompAssigned( ExhSysRef ) .AND. 
         FullyDuctedExhLabOrVivPwrAdjAllowed > 0 )
     then ( ExhSysRef:FullyDuctedExhLabOrVivPDAdj *
@@ -2832,6 +3841,8 @@ RULE NEW ThrmlZn:FullyDuctedExhLabOrVivPwrAdj
            ExhZnToSysFlowRat ) * ( 0.1175 / 745.6 ) / 0.65 
     else 0
     endif
+  SIZING_PROPOSED : T24N
+    0  
   SIZING_BASELINE
     zp:FullyDuctedExhLabOrVivPwrAdj
 ENDRULE
@@ -2858,14 +3869,22 @@ RULE NEW ThrmlZn:ExhFiltersPwrAdj
     ExhaustFiltersPowerAdjustment
   INPUTCLASS
     NotInput
-  UNITS
+  UNITS : T24N_2019
+    bhp
+  UNITS : T24N
     kW
-  SIZING_PROPOSED
+  SIZING_PROPOSED : T24N_2019
     if( LocalCompAssigned( ExhSysRef ) .AND. 
         ExhFiltersPwrAdjAllowed > 0 )
     then ( ExhSysRef:ExhFiltersPDAdj *
            ExhSysRef:ExhFiltersDevFlow *
            ExhZnToSysFlowRat ) * ( 0.1175 / 745.6 ) / 0.65 
+    else 0
+    endif
+  SIZING_PROPOSED : T24N
+    if( LocalCompAssigned( ExhSysRef ) .AND. 
+        ExhFiltersPwrAdjAllowed > 0 )
+    then ExhSysRef:ExhFiltersPwrAdj
     else 0
     endif
   SIZING_BASELINE
@@ -2894,14 +3913,24 @@ RULE NEW ThrmlZn:BiosftyCabExhPwrAdj
     BiosafetyCabinetExhaustPowerAdjustment
   INPUTCLASS
     NotInput
-  UNITS
+  UNITS : T24N_2019
+    bhp
+  UNITS : T24N
     kW
-  SIZING_PROPOSED
+  SIZING_PROPOSED : T24N_2019
     if( LocalCompAssigned( ExhSysRef ) .AND. 
         BiosftyCabExhPwrAdjAllowed > 0 )
     then ( ExhSysRef:BiosftyCabExhPDAdj *
            ExhSysRef:BiosftyCabExhDevFlow *
            ExhZnToSysFlowRat ) * ( 0.1175 / 745.6 ) / 0.65 
+    else 0
+    endif
+  SIZING_PROPOSED : T24N
+    if( LocalCompAssigned( ExhSysRef ) .AND. 
+        BiosftyCabExhPwrAdjAllowed > 0 )
+    then ( ExhSysRef:BiosftyCabExhPwrIdxAdj *
+           ExhSysRef:BiosftyCabExhDevFlow *
+           ExhZnToSysFlowRat ) / 1000
     else 0
     endif
   SIZING_BASELINE
@@ -2916,7 +3945,7 @@ RULE NEW ThrmlZn:FumeHoodExhPwrAdjAllowed
   INPUTCLASS
     NotInput
   DEFAULT : T24N
-    0
+    0 // Labs have separate fan power allowance
   DEFAULT
     1
 ENDRULE
@@ -2927,9 +3956,11 @@ RULE NEW ThrmlZn:FumeHoodExhPwrAdj
     FumeHoodExhaustPowerAdjustment
   INPUTCLASS
     NotInput
-  UNITS
+  UNITS : T24N_2019
+    bhp
+  UNITS : T24N
     kW
-  SIZING_PROPOSED
+  SIZING_PROPOSED : T24N_2019
     if( LocalCompAssigned( ExhSysRef ) .AND. 
         FumeHoodExhPwrAdjAllowed > 0 )
     then ( ExhSysRef:FumeHoodExhPDAdj *
@@ -2937,6 +3968,8 @@ RULE NEW ThrmlZn:FumeHoodExhPwrAdj
            ExhZnToSysFlowRat ) * ( 0.1175 / 745.6 ) / 0.65 
     else 0
     endif
+  SIZING_PROPOSED : T24N
+    0  
   SIZING_BASELINE
     zp:FumeHoodExhPwrAdj
 ENDRULE
@@ -2960,9 +3993,11 @@ RULE NEW ThrmlZn:LabOrVivExhHiRisePwrAdj
     LabOrVivariumExhaustHighRisePowerAdjustment
   INPUTCLASS
     NotInput
-  UNITS
+  UNITS : T24N_2019
+    bhp
+  UNITS : T24N
     kW
-  SIZING_PROPOSED
+  SIZING_PROPOSED : T24N_2019
     if( LocalCompAssigned( ExhSysRef ) .AND. 
         LabOrVivExhHiRisePwrAdjAllowed > 0 )
     then ( ExhSysRef:LabOrVivExhHiRisePDAdj *
@@ -2970,6 +4005,8 @@ RULE NEW ThrmlZn:LabOrVivExhHiRisePwrAdj
            ExhZnToSysFlowRat ) * ( 0.1175 / 745.6 ) / 0.65 
     else 0
     endif
+  SIZING_PROPOSED : T24N
+    0  
   SIZING_BASELINE
     zp:LabOrVivExhHiRisePwrAdj
 ENDRULE
@@ -2993,9 +4030,11 @@ RULE NEW ThrmlZn:SndAttnExhPwrAdj
     SoundAttenuationExhaustPowerAdjustment
   INPUTCLASS
     NotInput
-  UNITS
+  UNITS : T24N_2019
+    bhp
+  UNITS : T24N
     kW
-  SIZING_PROPOSED
+  SIZING_PROPOSED : T24N_2019
     if( LocalCompAssigned( ExhSysRef ) .AND. 
         SndAttnExhPwrAdjAllowed > 0 )
     then ( ExhSysRef:SndAttnExhPDAdj *
@@ -3003,6 +4042,8 @@ RULE NEW ThrmlZn:SndAttnExhPwrAdj
            ExhZnToSysFlowRat ) * ( 0.1175 / 745.6 ) / 0.65 
     else 0
     endif
+  SIZING_PROPOSED : T24N
+    0
   SIZING_BASELINE
     zp:SndAttnExhPwrAdj
 ENDRULE
@@ -3027,9 +4068,11 @@ RULE NEW ThrmlZn:FullyDuctedRetPwrAdj
     FullyDuctedReturnPowerAdjustment
   INPUTCLASS
     NotInput
-  UNITS
+  UNITS : T24N_2019
+    bhp
+  UNITS : T24N
     kW
-  SIZING_PROPOSED
+  SIZING_PROPOSED : T24N_2019
     if( IsCond .AND. HasUnknownHVAC = 0 .AND.
         LocalCompAssigned( PriAirCondgSysRef[1] ) .AND.
         FullyDuctedRetPwrAdjAllowed > 0 )
@@ -3051,7 +4094,30 @@ RULE NEW ThrmlZn:FullyDuctedRetPwrAdj
           PriZnToSysFlowRat ) * ( 0.1175 / 745.6 ) / 0.65 
       endif endif
     else 0
-    endif       
+    endif
+  SIZING_PROPOSED : T24N
+    if( IsCond .AND. HasUnknownHVAC = 0 .AND.
+        LocalCompAssigned( PriAirCondgSysRef[1] ) .AND.
+        FullyDuctedRetPwrAdjAllowed > 0 )
+    then
+      if( PriAirCondgSysRef[1]:IsActiveBeam = 1 ) 
+      then 0
+      else
+      if( UniqueVentSysAssigned > 0 )
+      then
+        ( ( PriAirCondgSysRef[1]:FullyDuctedRetPwrIdxAdj *
+            PriAirCondgSysRef[1]:FullyDuctedRetDevFlow *
+            PriZnToSysFlowRat ) +
+          ( VentSysRef:FullyDuctedRetPwrIdxAdj *
+            VentSysRef:FullyDuctedRetDevFlow *
+            VentZnToSysFlowRat ) ) / 1000
+      else
+        ( PriAirCondgSysRef[1]:FullyDuctedRetPwrIdxAdj *
+          PriAirCondgSysRef[1]:FullyDuctedRetDevFlow *
+          PriZnToSysFlowRat ) / 1000
+      endif endif
+    else 0
+    endif
   SIZING_BASELINE
     zp:FullyDuctedRetPwrAdj
   ANNUAL_BASELINE
@@ -3077,9 +4143,11 @@ RULE NEW ThrmlZn:RetCtrlPwrAdj
     ReturnControlPowerAdjustment
   INPUTCLASS
     NotInput
-  UNITS
+  UNITS : T24N_2019
+    bhp
+  UNITS : T24N
     kW
-  SIZING_PROPOSED
+  SIZING_PROPOSED : T24N_2019
     if( IsCond .AND. HasUnknownHVAC = 0 .AND.
         LocalCompAssigned( PriAirCondgSysRef[1] ) .AND.
         RetCtrlPwrAdjAllowed > 0 )
@@ -3101,7 +4169,9 @@ RULE NEW ThrmlZn:RetCtrlPwrAdj
           PriZnToSysFlowRat ) * ( 0.1175 / 745.6 ) / 0.65 
       endif endif
     else 0
-    endif       
+    endif
+  SIZING_PROPOSED : T24N
+    0     
   SIZING_BASELINE
     zp:RetCtrlPwrAdj
   ANNUAL_BASELINE
@@ -3127,9 +4197,11 @@ RULE NEW ThrmlZn:FullyDuctedRetLabOrVivPwrAdj
     FullyDuctedExhaustLabOrVivariumPowerAdjustment
   INPUTCLASS
     NotInput
-  UNITS
+  UNITS : T24N_2019
+    bhp
+  UNITS : T24N
     kW
-  SIZING_PROPOSED
+  SIZING_PROPOSED : T24N_2019
     if( IsCond .AND. HasUnknownHVAC = 0 .AND.
         LocalCompAssigned( PriAirCondgSysRef[1] ) .AND.
         FullyDuctedRetLabOrVivPwrAdjAllowed > 0 )
@@ -3151,7 +4223,9 @@ RULE NEW ThrmlZn:FullyDuctedRetLabOrVivPwrAdj
           PriZnToSysFlowRat ) * ( 0.1175 / 745.6 ) / 0.65 
       endif endif
     else 0
-    endif      
+    endif
+  SIZING_PROPOSED : T24N
+    0        
   SIZING_BASELINE
     zp:FullyDuctedRetLabOrVivPwrAdj
   ANNUAL_BASELINE
@@ -3177,9 +4251,11 @@ RULE NEW ThrmlZn:MERV9To12PwrAdj
     MERV9To12PowerAdjustment
   INPUTCLASS
     NotInput
-  UNITS
+  UNITS : T24N_2019
+    bhp
+  UNITS : T24N
     kW
-  SIZING_PROPOSED
+  SIZING_PROPOSED : T24N_2019
     if( IsCond .AND. HasUnknownHVAC = 0 .AND.
         LocalCompAssigned( PriAirCondgSysRef[1] ) .AND.
         MERV9To12PwrAdjAllowed > 0 )
@@ -3201,7 +4277,9 @@ RULE NEW ThrmlZn:MERV9To12PwrAdj
           PriZnToSysFlowRat ) * ( 0.1175 / 745.6 ) / 0.65 
       endif endif
     else 0
-    endif       
+    endif
+  SIZING_PROPOSED : T24N
+    0 // Update in future  
   SIZING_BASELINE
     zp:MERV9To12PwrAdj
   ANNUAL_BASELINE
@@ -3227,9 +4305,11 @@ RULE NEW ThrmlZn:MERV13To15PwrAdj
     MERV13To15PowerAdjustment
   INPUTCLASS
     NotInput
-  UNITS
+  UNITS : T24N_2019
+    bhp
+  UNITS : T24N
     kW
-  SIZING_PROPOSED
+  SIZING_PROPOSED : T24N_2019
     if( IsCond .AND. HasUnknownHVAC = 0 .AND.
         LocalCompAssigned( PriAirCondgSysRef[1] ) .AND.
         MERV13To15PwrAdjAllowed > 0 )
@@ -3251,7 +4331,9 @@ RULE NEW ThrmlZn:MERV13To15PwrAdj
           PriZnToSysFlowRat ) * ( 0.1175 / 745.6 ) / 0.65 
       endif endif
     else 0
-    endif    
+    endif
+  SIZING_PROPOSED : T24N
+    0 // Update in future  
   SIZING_BASELINE
     zp:MERV13To15PwrAdj  
   ANNUAL_BASELINE
@@ -3277,9 +4359,11 @@ RULE NEW ThrmlZn:MERVGTE16PwrAdj
     MERVGreaterThanOrEqualTo16PowerAdjustment
   INPUTCLASS
     NotInput
-  UNITS
+  UNITS : T24N_2019
+    bhp
+  UNITS : T24N
     kW
-  SIZING_PROPOSED
+  SIZING_PROPOSED : T24N_2019
     if( IsCond .AND. HasUnknownHVAC = 0 .AND.
         LocalCompAssigned( PriAirCondgSysRef[1] ) .AND.
         MERVGTE16PwrAdjAllowed > 0 )
@@ -3299,6 +4383,29 @@ RULE NEW ThrmlZn:MERVGTE16PwrAdj
         ( PriAirCondgSysRef[1]:MERVGTE16PDAdj *
           PriAirCondgSysRef[1]:MERVGTE16DevFlow *
           PriZnToSysFlowRat ) * ( 0.1175 / 745.6 ) / 0.65 
+      endif endif
+    else 0
+    endif
+  SIZING_PROPOSED : T24N
+    if( IsCond .AND. HasUnknownHVAC = 0 .AND.
+        LocalCompAssigned( PriAirCondgSysRef[1] ) .AND.
+        MERVGTE16PwrAdjAllowed > 0 )
+    then
+      if( PriAirCondgSysRef[1]:IsActiveBeam = 1 ) 
+      then 0
+      else       
+      if( UniqueVentSysAssigned > 0 )
+      then  
+        ( ( PriAirCondgSysRef[1]:MERVGTE16PwrIdxAdj *
+            PriAirCondgSysRef[1]:MERVGTE16DevFlow *
+            PriZnToSysFlowRat ) +
+          ( VentSysRef:MERVGTE16PwrIdxAdj *
+            VentSysRef:MERVGTE16DevFlow *
+            VentZnToSysFlowRat ) ) / 1000
+      else
+        ( PriAirCondgSysRef[1]:MERVGTE16PwrIdxAdj *
+          PriAirCondgSysRef[1]:MERVGTE16DevFlow *
+          PriZnToSysFlowRat ) / 1000
       endif endif
     else 0
     endif   
@@ -3330,9 +4437,11 @@ RULE NEW ThrmlZn:GasPhaseAirCleanersPwrAdj
     GasPhaseAirCleanersPowerAdjustment
   INPUTCLASS
     NotInput
-  UNITS
+  UNITS : T24N_2019
+    bhp
+  UNITS : T24N
     kW
-  SIZING_PROPOSED
+  SIZING_PROPOSED : T24N_2019
     if( IsCond .AND. HasUnknownHVAC = 0 .AND.
         LocalCompAssigned( PriAirCondgSysRef[1] ) .AND.
         GasPhaseAirCleanersPwrAdjAllowed > 0 )
@@ -3354,7 +4463,30 @@ RULE NEW ThrmlZn:GasPhaseAirCleanersPwrAdj
           PriZnToSysFlowRat ) * ( 0.1175 / 745.6 ) / 0.65 
       endif endif
     else 0
-    endif     
+    endif
+  SIZING_PROPOSED : T24N
+    if( IsCond .AND. HasUnknownHVAC = 0 .AND.
+        LocalCompAssigned( PriAirCondgSysRef[1] ) .AND.
+        GasPhaseAirCleanersPwrAdjAllowed > 0 )
+    then
+      if( PriAirCondgSysRef[1]:IsActiveBeam = 1 ) 
+      then 0
+      else    
+      if( UniqueVentSysAssigned > 0 )
+      then
+        ( ( PriAirCondgSysRef[1]:GasPhaseAirCleanersPwrIdxAdj *
+            PriAirCondgSysRef[1]:GasPhaseAirCleanersDevFlow *
+            PriZnToSysFlowRat ) +
+          ( VentSysRef:GasPhaseAirCleanersPDAdj *
+            VentSysRef:GasPhaseAirCleanersDevFlow *
+            VentZnToSysFlowRat ) ) / 1000
+      else
+        ( PriAirCondgSysRef[1]:GasPhaseAirCleanersPwrIdxAdj *
+          PriAirCondgSysRef[1]:GasPhaseAirCleanersDevFlow *
+          PriZnToSysFlowRat ) / 1000
+      endif endif
+    else 0
+    endif
   SIZING_BASELINE
     zp:GasPhaseAirCleanersPwrAdj
   ANNUAL_BASELINE
@@ -3380,9 +4512,11 @@ RULE NEW ThrmlZn:ERVPwrAdj
     EnergyRecoveryVentilatorFanPowerAdjustment
   INPUTCLASS
     NotInput
-  UNITS
+  UNITS : T24N_2019
+    bhp
+  UNITS : T24N
     kW
-  SIZING_PROPOSED
+  SIZING_PROPOSED : T24N_2019
     if( IsCond .AND. HasUnknownHVAC = 0 .AND.
         LocalCompAssigned( PriAirCondgSysRef[1] ) .AND.
         ERVPwrAdjAllowed > 0 )
@@ -3404,7 +4538,9 @@ RULE NEW ThrmlZn:ERVPwrAdj
           PriZnToSysFlowRat ) * ( 0.1175 / 745.6 ) / 0.65 
       endif endif
     else 0
-    endif      
+    endif
+  SIZING_PROPOSED : T24N
+    0 // Update in future  
   SIZING_BASELINE
     zp:ERVPwrAdj
   ANNUAL_BASELINE
@@ -3430,9 +4566,11 @@ RULE NEW ThrmlZn:EvapHumOrClrPwrAdj
     EvaporativeHumidifierOrCoolerPowerAdjustment
   INPUTCLASS
     NotInput
-  UNITS
+  UNITS : T24N_2019
+    bhp
+  UNITS : T24N
     kW
-  SIZING_PROPOSED
+  SIZING_PROPOSED : T24N_2019
     if( IsCond .AND. HasUnknownHVAC = 0 .AND.
         LocalCompAssigned( PriAirCondgSysRef[1] ) .AND.
         EvapHumOrClrPwrAdjAllowed > 0 )
@@ -3454,7 +4592,9 @@ RULE NEW ThrmlZn:EvapHumOrClrPwrAdj
           PriZnToSysFlowRat ) * ( 0.1175 / 745.6 ) / 0.65 
       endif endif
     else 0
-    endif    
+    endif
+  SIZING_PROPOSED : T24N
+    0 // Update in future  
   SIZING_BASELINE
     zp:EvapHumOrClrPwrAdj
   ANNUAL_BASELINE
@@ -3480,9 +4620,11 @@ RULE NEW ThrmlZn:SndAttnPwrAdj
     SoundAttenuationPowerAdjustment
   INPUTCLASS
     NotInput
-  UNITS
+  UNITS : T24N_2019
+    bhp
+  UNITS : T24N
     kW
-  SIZING_PROPOSED
+  SIZING_PROPOSED : T24N_2019
     if( IsCond .AND. HasUnknownHVAC = 0 .AND.
         LocalCompAssigned( PriAirCondgSysRef[1] ) .AND.
         SndAttnPwrAdjAllowed > 0 )
@@ -3504,7 +4646,9 @@ RULE NEW ThrmlZn:SndAttnPwrAdj
           PriZnToSysFlowRat ) * ( 0.1175 / 745.6 ) / 0.65 
       endif endif
     else 0
-    endif     
+    endif
+  SIZING_PROPOSED : T24N
+    0
   SIZING_BASELINE
     zp:SndAttnPwrAdj 
   ANNUAL_BASELINE
@@ -3519,7 +4663,9 @@ RULE NEW ThrmlZn:TotExhFanPwrAdj
     TotalExhaustFanPowerAdjustment
   INPUTCLASS
     NotInput
-  UNITS
+  UNITS : T24N_2019
+    bhp
+  UNITS : T24N
     kW
   ANNUAL
     FullyDuctedExhPwrAdj +
@@ -3539,7 +4685,9 @@ RULE NEW ThrmlZn:TotNonExhFanPwrAdj
     TotalNonExhaustFanPowerAdjustment
   INPUTCLASS
     NotInput
-  UNITS
+  UNITS : T24N_2019
+    bhp
+  UNITS : T24N
     kW
   ANNUAL
     FullyDuctedRetPwrAdj +
@@ -3561,7 +4709,9 @@ RULE NEW ThrmlZn:TotFanPwrAdj
     TotalFanPowerAdjustment
   INPUTCLASS
     NotInput
-  UNITS
+  UNITS : T24N_2019
+    bhp
+  UNITS : T24N
     kW
   ANNUAL
      TotNonExhFanPwrAdj + TotExhFanPwrAdj
@@ -3580,9 +4730,11 @@ RULE NEW AirSys:TotExhSysFanPwrAdj
     "The total exhaust system pressure drop adjustment."
   INPUTCLASS
     NotInput
-  UNITS
+  UNITS : T24N_2019
+    bhp
+  UNITS : T24N
     kW
-  DEFAULT
+  DEFAULT : T24N_2019
     if( IfValidand( IsPropSys > 0 ) )
     then
     // Sum up user PD inputs and convert to bhp, for reference 
@@ -3596,7 +4748,16 @@ RULE NEW AirSys:TotExhSysFanPwrAdj
         SndAttnExhPDAdj * SndAttnExhDevFlow ) * ( 0.1175 / 745.6 ) / 0.65 
     else 0
     endif
-  ANNUAL_PROPOSED
+  DEFAULT : T24N
+    if( IfValidand( IsPropSys > 0 ) )
+    then
+    // Sum up user PD inputs and convert to bhp, for reference 
+      ( FullyDuctedExhPwrIdxAdj * FullyDuctedExhDevFlow +
+        ExhFiltersPwrIdxAdj * ExhFiltersDevFlow +
+        BiosftyCabExhPwrIdxAdj * BiosftyCabExhDevFlow ) / 1000
+    else 0
+    endif
+  ANNUAL_PROPOSED : T24N_2019
     if( IsPropSys > 0 )
     then
     // Sum up user PD inputs and convert to bhp, for reference 
@@ -3608,6 +4769,15 @@ RULE NEW AirSys:TotExhSysFanPwrAdj
         FumeHoodExhPDAdj * FumeHoodExhDevFlow +
         LabOrVivExhHiRisePDAdj * LabOrVivExhHiRiseDevFlow +
         SndAttnExhPDAdj * SndAttnExhDevFlow ) * ( 0.1175 / 745.6 ) / 0.65 
+    else 0
+    endif
+  ANNUAL_PROPOSED : T24N
+    if( IsPropSys > 0 )
+    then
+    // Sum up user PD inputs and convert to bhp, for reference 
+      ( FullyDuctedExhPwrIdxAdj * FullyDuctedExhDevFlow +
+        ExhFiltersPwrIdxAdj * ExhFiltersDevFlow +
+        BiosftyCabExhPwrIdxAdj * BiosftyCabExhDevFlow ) / 1000
     else 0
     endif
   ANNUAL_BASELINE
@@ -3624,9 +4794,11 @@ RULE NEW AirSys:TotNonExhSysFanPwrAdj
     "The total non-exhaust system pressure drop adjustment."
   INPUTCLASS
     NotInput
-  UNITS
+  UNITS : T24N_2019
+    bhp
+  UNITS : T24N
     kW
-  DEFAULT
+  DEFAULT : T24N_2019
     if( IfValidAnd( IsPropSys > 0 ) )
     then
     // Sum up user PD inputs and convert to bhp, for reference
@@ -3642,7 +4814,16 @@ RULE NEW AirSys:TotNonExhSysFanPwrAdj
         SndAttnPDAdj * SndAttnDevFlow ) * ( 0.1175 / 745.6 ) / 0.65 
     else 0
     endif
-  ANNUAL_PROPOSED
+  DEFAULT : T24N
+    if( IfValidAnd( IsPropSys > 0 ) )
+    then
+    // Sum up user PD inputs and convert to bhp, for reference
+      ( FullyDuctedRetPwrIdxAdj * FullyDuctedRetDevFlow +
+        MERVGTE16PwrIdxAdj * MERVGTE16DevFlow +
+        GasPhaseAirCleanersPwrIdxAdj * GasPhaseAirCleanersDevFlow ) / 1000
+    else 0
+    endif
+  ANNUAL_PROPOSED : T24N_2019
     if( IsPropSys > 0 )
     then
     // Sum up user PD inputs and convert to bhp, for reference
@@ -3658,8 +4839,17 @@ RULE NEW AirSys:TotNonExhSysFanPwrAdj
         SndAttnPDAdj * SndAttnDevFlow ) * ( 0.1175 / 745.6 ) / 0.65 
     else 0
     endif
-  // Add up power adjustment from zones      
+  ANNUAL_PROPOSED : T24N
+    if( IfValidAnd( IsPropSys > 0 ) )
+    then
+    // Sum up user PD inputs and convert to bhp, for reference
+      ( FullyDuctedRetPwrIdxAdj * FullyDuctedRetDevFlow +
+        MERVGTE16PwrIdxAdj * MERVGTE16DevFlow +
+        GasPhaseAirCleanersPwrIdxAdj * GasPhaseAirCleanersDevFlow ) / 1000
+    else 0
+    endif
   ANNUAL_BASELINE
+  // Add up power adjustment from zones  
     SumRevRef( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:TotNonExhFanPwrAdj )
 ENDRULE
 
@@ -3672,7 +4862,9 @@ RULE NEW AirSys:TotSysFanPwrAdj
     "The total non-exhaust system pressure drop adjustment."
   INPUTCLASS
     NotInput
-  UNITS
+  UNITS : T24N_2019
+    bhp
+  UNITS : T24N
     kW
   DEFAULT
     ValidOr( TotNonExhSysFanPwrAdj, 0 ) + ValidOr( TotExhSysFanPwrAdj, 0 )
@@ -3691,9 +4883,11 @@ RULE NEW ZnSys:TotExhSysFanPwrAdj
     "The total exhaust system pressure drop adjustment."
   INPUTCLASS
     NotInput
-  UNITS
+  UNITS : T24N_2019
+    bhp
+  UNITS : T24N
     kW
-  DEFAULT
+  DEFAULT : T24N_2019
     if( IfValidAnd( IsPropSys > 0 ) .AND. IfValidAnd( IsActiveBeam = 0 ) )
     then
     // Sum up user PD inputs and convert to bhp, for reference
@@ -3706,8 +4900,17 @@ RULE NEW ZnSys:TotExhSysFanPwrAdj
         LabOrVivExhHiRisePDAdj * LabOrVivExhHiRiseDevFlow +
         SndAttnExhPDAdj * SndAttnExhDevFlow ) * ( 0.1175 / 745.6 ) / 0.65
     else 0
-    endif 
-  ANNUAL_PROPOSED
+    endif
+  DEFAULT : T24N
+    if( IfValidAnd( IsPropSys > 0 ) .AND. IfValidAnd( IsActiveBeam = 0 ) )
+    then
+    // Sum up user PD inputs and convert to bhp, for reference 
+      ( FullyDuctedExhPwrIdxAdj * FullyDuctedExhDevFlow +
+        ExhFiltersPwrIdxAdj * ExhFiltersDevFlow +
+        BiosftyCabExhPwrIdxAdj * BiosftyCabExhDevFlow ) / 1000
+    else 0
+    endif
+  ANNUAL_PROPOSED : T24N_2019
     if( IsPropSys > 0 .AND. IfValidAnd( IsActiveBeam = 0 ) )
     then
     // Sum up user PD inputs and convert to bhp, for reference
@@ -3721,6 +4924,15 @@ RULE NEW ZnSys:TotExhSysFanPwrAdj
         SndAttnExhPDAdj * SndAttnExhDevFlow ) * ( 0.1175 / 745.6 ) / 0.65
     else 0
     endif 
+  ANNUAL_PROPOSED : T24N
+    if( IsPropSys > 0 .AND. IfValidAnd( IsActiveBeam = 0 ) )
+    then
+    // Sum up user PD inputs and convert to bhp, for reference 
+      ( FullyDuctedExhPwrIdxAdj * FullyDuctedExhDevFlow +
+        ExhFiltersPwrIdxAdj * ExhFiltersDevFlow +
+        BiosftyCabExhPwrIdxAdj * BiosftyCabExhDevFlow ) / 1000
+    else 0
+    endif
   ANNUAL_BASELINE
   // Add up power adjustment from zones  
     SumRevRef( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:TotExhFanPwrAdj )
@@ -3735,9 +4947,11 @@ RULE NEW ZnSys:TotNonExhSysFanPwrAdj
     "The total non-exhaust system pressure drop adjustment."
   INPUTCLASS
     NotInput
-  UNITS
+  UNITS : T24N_2019
+    bhp
+  UNITS : T24N
     kW
-  DEFAULT
+  DEFAULT : T24N_2019
     if( IfValidAnd( IsPropSys > 0 ) .AND. IfValidAnd( IsActiveBeam = 0 ) )
     then
     // Sum up user PD inputs and convert to bhp, for reference
@@ -3753,7 +4967,16 @@ RULE NEW ZnSys:TotNonExhSysFanPwrAdj
         SndAttnPDAdj * SndAttnDevFlow ) * ( 0.1175 / 745.6 ) / 0.65 
     else 0
     endif
-  ANNUAL_PROPOSED
+  DEFAULT : T24N
+    if( IfValidAnd( IsPropSys > 0 ) .AND. IfValidAnd( IsActiveBeam = 0 ) )
+    then
+    // Sum up user PD inputs and convert to bhp, for reference
+      ( FullyDuctedRetPwrIdxAdj * FullyDuctedRetDevFlow +
+        MERVGTE16PwrIdxAdj * MERVGTE16DevFlow +
+        GasPhaseAirCleanersPwrIdxAdj * GasPhaseAirCleanersDevFlow ) / 1000
+    else 0
+    endif
+  ANNUAL_PROPOSED : T24N_2019
     if( IsPropSys > 0 .AND. IfValidAnd( IsActiveBeam = 0 ) )
     then
     // Sum up user PD inputs and convert to bhp, for reference
@@ -3767,6 +4990,15 @@ RULE NEW ZnSys:TotNonExhSysFanPwrAdj
         ERVPDAdj * ERVDevFlow +
         EvapHumOrClrPDAdj * EvapHumOrClrDevFlow +
         SndAttnPDAdj * SndAttnDevFlow ) * ( 0.1175 / 745.6 ) / 0.65 
+    else 0
+    endif
+  ANNUAL_PROPOSED : T24N
+    if( IsPropSys > 0 .AND. IfValidAnd( IsActiveBeam = 0 ) )
+    then
+    // Sum up user PD inputs and convert to bhp, for reference
+      ( FullyDuctedRetPwrIdxAdj * FullyDuctedRetDevFlow +
+        MERVGTE16PwrIdxAdj * MERVGTE16DevFlow +
+        GasPhaseAirCleanersPwrIdxAdj * GasPhaseAirCleanersDevFlow ) / 1000
     else 0
     endif
   ANNUAL_BASELINE
@@ -3783,7 +5015,9 @@ RULE NEW ZnSys:TotSysFanPwrAdj
     "The total system pressure drop adjustment."
   INPUTCLASS
     NotInput
-  UNITS
+  UNITS : T24N_2019
+    bhp
+  UNITS : T24N
     kW
   DEFAULT
     ValidOr( TotNonExhSysFanPwrAdj, 0 ) + ValidOr( TotExhSysFanPwrAdj, 0 )
