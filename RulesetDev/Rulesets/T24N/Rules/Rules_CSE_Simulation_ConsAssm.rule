@@ -88,6 +88,8 @@ RULELIST "CSE_SimulationPrep_Mat_Composite" 1 0 0 1
 ;"dbg - store BEMProc details" Proj:Action = {  StoreBEMProc( Format( "Before run %s CSE Mat SimPrep", RunAbbrev ), 0 )  }
 
 ;for Composite Mats
+;    1=Frm, 2=CavOther, 3=CavCeiling, 4=QIIdegradedCavOther, 5=QIIdegradedCavCeiling
+
 ;Mat:cseMATERIALRef[1] = "%s-frm"
 
    "Assign/create cseMATERIAL to simulate this Mat in CSE - 1"    Mat:cseMATERIALRef[1] =
@@ -102,18 +104,45 @@ RULELIST "CSE_SimulationPrep_Mat_Composite" 1 0 0 1
 ;Mat:cseMATERIALRef[2] = "%s-cav"
 
    "Assign/create cseMATERIAL to simulate this Mat in CSE - 2"    Mat:cseMATERIALRef[2] =
-      {  AssignOrCreateComp( cseMATERIAL, Format( "%s-cavoth", Name ),
+      {  if (IfValidAnd( ResSurfacesQIINotDegraded > 0 ))
+         then AssignOrCreateComp( cseMATERIAL, Format( "%s-cavoth", Name ),
 										  "matDens", ResCavDens, 
                                           "matSpHt", ResCavSpecHt, 
                                           "matCond", ResCavThrmlCndct, 
-                                          "matCondCT", ResCavOtherThrmlCndctCT )  }
+                                          "matCondCT", ResCavOtherThrmlCndctCT )
+         else UNCHANGED
+         endif  }
 
    "Assign/create cseMATERIAL to simulate this Mat in CSE - 3"    Mat:cseMATERIALRef[3] =
-      {  AssignOrCreateComp( cseMATERIAL, Format( "%s-cavclg", Name ),
+      {  if (IfValidAnd( ResSurfacesQIINotDegraded > 0 ))
+         then AssignOrCreateComp( cseMATERIAL, Format( "%s-cavclg", Name ),
 										  "matDens", ResCavDens, 
                                           "matSpHt", ResCavSpecHt, 
                                           "matCond", ResCavThrmlCndct, 
-                                          "matCondCT", ResCavCeilingThrmlCndctCT )  }
+                                          "matCondCT", ResCavCeilingThrmlCndctCT )
+         else UNCHANGED
+         endif  }
+
+   "Assign/create cseMATERIAL to simulate this Mat in CSE - 4"    Mat:cseMATERIALRef[4] =
+      {  if (IfValidAnd( ResSurfacesQIIDegraded > 0 ))
+         then AssignOrCreateComp( cseMATERIAL, Format( "%s-cavoth", Name ),
+										  "matDens", ResCavDens, 
+                                          "matSpHt", ResCavSpecHt, 
+                                          "matCond", ResCavThrmlCndct / ResProj:ICQEnclCavInsMult, 
+                                          "matCondCT", ResCavOtherThrmlCndctCT )
+         else UNCHANGED
+         endif  }
+
+   "Assign/create cseMATERIAL to simulate this Mat in CSE - 5"    Mat:cseMATERIALRef[5] =
+      {  if (IfValidAnd( ResSurfacesQIIDegraded > 0 ))
+         then AssignOrCreateComp( cseMATERIAL, Format( "%s-cavclg", Name ),
+										  "matDens", ResCavDens, 
+                                          "matSpHt", ResCavSpecHt, 
+                                          "matCond", ResCavThrmlCndct / ResProj:ICQEnclCavInsMult, 
+                                          "matCondCT", ResCavCeilingThrmlCndctCT )
+         else UNCHANGED
+         endif  }
+
 
 END
 
@@ -132,7 +161,13 @@ RULELIST "CSE_SimulationPrep_ConsAssm"  1 0 0 1
       ConsAssm:Action = {   if (IfValidAnd( AreaResZnSurf > 0 )==0 .OR.
                                 LocalCompAssigned( cseCavCONS ) > 0) 
                             then  UNCHANGED
-                            else  EvalRulelist( "CSE_SimulationPrep_ConsAssm_Cav", 1 ) 
+                            else  if (IfValidAnd(ResSurfacesQIINotDegraded > 0)) 
+                                  then EvalRulelist( "CSE_SimulationPrep_ConsAssm_Cav", 1 )
+                                  else if (IfValidAnd(ResSurfacesQIIDegraded > 0))
+                                       then EvalRulelist( "CSE_SimulationPrep_ConsAssm_Cav_QIIDegraded", 1 )
+                                       else UNCHANGED
+                                       endif
+                                  endif
                             endif  }
 
    "call subordinate ruleset to assign/create Frame cseCONSTRUCTION and cseLAYER for those ConsAssm objects needing them"
@@ -196,6 +231,38 @@ RULELIST "CSE_SimulationPrep_ConsAssm_Cav"  1 0 0 1
        endif endif }
 
    "Set ConsAssm:cseCavLAYERs[#Layer]:lrThk"   for:#Layer=(1to10) ConsAssm:cseCavLAYERs[#Layer]:lrThk  = {  
+       if (IfValidAnd(MatRef[#Layer]:ResFrmThkns > 0))
+       then MatRef[#Layer]:ResFrmThkns
+       else MatRef[#Layer]:Thkns / 12 
+       endif }
+
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "CSE_SimulationPrep_ConsAssm_Cav_QIIDegraded"  1 0 0 1
+;*************************************************************************
+
+   "Create cseCONSTRUCTION object for this ConsAssm"     ConsAssm:cseQIIDegradedCavCONS =
+      {  CreateComp( cseCONSTRUCTION, Format( "ccqiidgrd-%s", Name ) )  }
+   "Set ConsAssm:cseQIIDegradedCavCONS:SourceCons"   ConsAssm:cseQIIDegradedCavCONS:SourceCons = {  Name  }
+
+   "Create cseLAYER object #1 for this ConsAssm"  for:#Layer=(1to10)   ConsAssm:cseQIIDegradedCavLAYERs[#Layer] =
+      {  if (NumMats >= #Layer .AND. LocalCompAssigned(MatRef[#Layer]) > 0)
+         then CreateComp( cseLAYER, Format( "cclqiidgrd%g-%s", #Layer, Name ) )
+         else UNDEFINED
+         endif }
+   "Set ConsAssm:cseQIIDegradedCavLAYERs[#Layer]:Parent"  for:#Layer=(1to10) ConsAssm:cseQIIDegradedCavLAYERs[#Layer]:Parent = {  cseQIIDegradedCavCONS  }
+   "Set ConsAssm:cseQIIDegradedCavLAYERs[#Layer]:SourceCons"  for:#Layer=(1to10) ConsAssm:cseQIIDegradedCavLAYERs[#Layer]:SourceCons = {  Name  }
+   "Set ConsAssm:cseQIIDegradedCavLAYERs[#Layer]:lrMat"   for:#Layer=(1to10) ConsAssm:cseQIIDegradedCavLAYERs[#Layer]:lrMat  = {  
+       if (LocalCompAssigned( MatRef[#Layer]:cseMATERIALRef[5] ) > 0 .AND. (CompatibleSurfType == "Ceiling" .OR. CompatibleSurfType == "Roof")) ; 7 or 2
+       then  MatRef[#Layer]:cseMATERIALRef[5]
+       else if (LocalCompAssigned( MatRef[#Layer]:cseMATERIALRef[4] ) > 0)
+       then  MatRef[#Layer]:cseMATERIALRef[4]
+       else  MatRef[#Layer]:cseMATERIALRef[1]
+       endif endif }
+
+   "Set ConsAssm:cseQIIDegradedCavLAYERs[#Layer]:lrThk"   for:#Layer=(1to10) ConsAssm:cseQIIDegradedCavLAYERs[#Layer]:lrThk  = {  
        if (IfValidAnd(MatRef[#Layer]:ResFrmThkns > 0))
        then MatRef[#Layer]:ResFrmThkns
        else MatRef[#Layer]:Thkns / 12 
