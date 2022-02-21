@@ -614,7 +614,7 @@ RULE Blr:CombEff
     1.0
   CHECKCODE
     if( FuelSrc = "Gas" .OR. FuelSrc = "Oil" ) then
-      if( u:DraftType <> "Condensing" .AND. u:CombEff > 0.85 ) then
+      if( u:DraftType <> "Condensing" .AND. IfValidAnd(u:CombEff > 0.85) ) then
         PostError( "Boiler '%s' has a combustion efficiency that is too 
                     high for a noncondensing boiler.  Adjust the efficiency or 
                     draft type to be consistent.", Name )
@@ -684,29 +684,46 @@ RULE Blr:ThrmlEff
     2
   DEFAULT : S901G ECBC
     if( IfValidAnd(CapRtd < 300000) ) then
-      0.875 * 0.80 + 0.105    // AFUE = 0.80 -> ThrmlEff = 0.805
+      if( IfValidAnd(AFUE > 0) ) then
+        0.875 * AFUE + 0.105
+      else
+        0.875 * 0.80 + 0.105   // AFUE = 0.80 -> ThrmlEff = 0.805
+      endif
     else if( IfValidAnd(CapRtd > 2500000) ) then
-      0.82 - 0.020            // CombEff = 0.82 -> ThrmlEff = 0.80
+      if( IfValidAnd(CombEff > 0) ) then
+        CombEff - 0.020
+      else
+        0.82 - 0.020           // CombEff = 0.82 -> ThrmlEff = 0.80
+      endif
     else 0.80
     endif endif
   DEFAULT
     if( IfValidAnd(CapRtd < 300000) ) then
-      0.875 * 0.82 + 0.105    // AFUE = 0.82 -> ThrmlEff = 0.8225
+      if( IfValidAnd(AFUE > 0) ) then
+        0.875 * AFUE + 0.105
+      else
+        0.875 * 0.82 + 0.105   // AFUE = 0.82 -> ThrmlEff = 0.8225
+      endif
     else if( IfValidAnd(CapRtd > 2500000) ) then
-      0.82 - 0.015            // CombEff = 0.82 -> ThrmlEff = 0.805
+      if( IfValidAnd(CombEff > 0) ) then
+        CombEff - 0.015
+      else
+        0.82 - 0.015           // CombEff = 0.82 -> ThrmlEff = 0.805
+      endif
     else 0.80
     endif endif
   CHECKCODE
     if( FuelSrc = "Gas" .OR. FuelSrc = "Oil" ) then
-      if( IfValidAnd(u:AFUE <= 0) .AND.
-          IfValidAnd(u:CombEff <= 0) .AND.
-          IfValidAnd(u:ThrmlEff <= 0) ) then
-        PostError( "A non-zero efficiency input is required for boiler '%s'", Name )
-      else if( u:DraftType <> "Condensing" .AND. u:ThrmlEff > 0.85 ) then
+      if( u:DraftType <> "Condensing" .AND. IfValidAnd(u:ThrmlEff > 0.85) ) then
         PostError( "Boiler '%s' has a thermal efficiency that is too 
                     high for a noncondensing boiler.  Adjust the efficiency or 
                     draft type to be consistent.", Name )
-      else UNCHANGED
+      else if( IfValidAnd(u:AFUE > 0) .OR.
+               IfValidAnd(u:CombEff > 0) .OR.
+               IfValidAnd(u:ThrmlEff > 0) ) then
+        UNCHANGED
+      else
+        PostError( "A non-zero efficiency input is required for boiler '%s'", Name )
       endif endif
     else UNCHANGED
     endif
@@ -782,6 +799,42 @@ RULE Blr:ThrmlEff
         0.875 * u:AFUE + 0.105
       endif endif endif
     endif endif endif endif
+  SIZING : T24N
+    if( IsBaseSys ) then
+      0.90 // Blr sizing is not dependent on ThrmlEff, default 0.90 used
+    else if( FuelSrc = "Electric" ) then
+      0.98
+    else if( IfValidAnd(CapRtd < 300000) ) then
+      if( IfValidAnd(u:AFUE < 0.80) ) then
+        0.1 * u:AFUE + 0.725
+      else if( IfValidAnd(u:AFUE >= 0.80) ) then
+        0.875 * u:AFUE + 0.105
+      else if( IfValidAnd(u:ThrmlEff > 0) ) then
+        u:ThrmlEff
+      else
+        u:CombEff - 0.015
+      endif endif endif
+    else if( IfValidAnd(CapRtd > 2500000) ) then
+      if( IfValidAnd(u:CombEff > 0) ) then
+        u:CombEff - 0.015
+      else if( IfValidAnd(u:ThrmlEff > 0) ) then
+        u:ThrmlEff
+      else if( IfValidAnd(u:AFUE < 0.80) ) then
+        0.1 * u:AFUE + 0.725
+      else
+        0.875 * u:AFUE + 0.105
+      endif endif endif
+    else
+      if( IfValidAnd(u:ThrmlEff > 0) ) then
+        u:ThrmlEff
+      else if( IfValidAnd(u:CombEff > 0) ) then
+        u:CombEff - 0.015
+      else if( IfValidAnd(u:AFUE < 0.80) ) then
+        0.1 * u:AFUE + 0.725
+      else
+        0.875 * u:AFUE + 0.105
+      endif endif endif
+    endif endif endif endif
   ANNUAL : S901G ECBC
     if( IsBaseSys ) then
       if( IfValidAnd(CapRtdSim < 300000) ) then
@@ -805,7 +858,7 @@ RULE Blr:ThrmlEff
   ANNUAL : T24N
     if( IsBaseSys ) then
       if( IfValidAnd(CapRtdSim < 300000) ) then
-         0.875 * 0.82 + 0.105 // AFUE = 0.82, ThrmlEff = 0.8225
+        0.8225             // AFUE = 0.82, ThrmlEff = 0.8225
       else 0.90
       endif
     else z:ThrmlEff
