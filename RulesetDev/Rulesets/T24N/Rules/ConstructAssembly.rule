@@ -743,10 +743,11 @@ RULE NEW ConsAssm:FramingFactor
   DATATYPE
     Float
   DESCRIPTION
-    ""
+    "Only valid for Wood framed walls"
   INPUTCLASS
     NotInput
   DEFAULT
+  if (FrmMat = "Metal") then 0 else
     switch (NumMats)
       case  1 :     if (IfValidAnd( MatRef[1]:FrmFacMembers > 0 )) then  MatRef[1]:FrmFacMembers
                else 0  endif
@@ -814,7 +815,7 @@ RULE NEW ConsAssm:FramingFactor
                else if (IfValidAnd( MatRef[10]:FrmFacMembers > 0 )) then  MatRef[10]:FrmFacMembers
                else 0  endif endif endif endif endif endif endif endif endif endif
       default :  0
-    endswitch
+    endswitch endif
 ENDRULE
 
 
@@ -3482,6 +3483,35 @@ RULE NEW Mat:ResThrmlCndctCT
     endif endif endif endif
 ENDRULE
 
+RULE NEW Mat:ResMetalRVal
+  DATATYPE 
+    Float
+  LONGFORM
+    ResidentialMetalRValue
+  DESCRIPTION
+     ""
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (CodeCat = "Composite" .AND. FrmMat = "Metal")
+    then if( LocalStatus(FrmConfig) > 0 .AND. LocalStatus(CavityInsVal) > 0 ) 
+         then if( FrmConfig = "WallMetalSingleLayerBatt" .OR.
+                  FrmConfig = "WallMetalDoubleLayerBatt" .OR.
+                  FrmConfig = "RoofMetalScrewDown" .OR.
+                  FrmConfig = "RoofMetalStandingSeam" .OR.
+                  FrmConfig = "RoofMetalStandingSeamFilledCavity" ) 
+              then MetalInsFrameLayers:Rvalue("FrmConfig",FrmConfig,"CavityIns",CavityInsVal)
+              else if( LocalStatus(FrmDepth) > 0 ) 
+                   then MetalInsFrameLayers:Rvalue("FrmConfig",FrmConfig,"FrmDepth",FrmDepth,"CavityIns",CavityInsVal )
+                   else UNDEFINED
+                   endif 
+              endif
+         else UNDEFINED
+         endif
+    else UNDEFINED 
+    endif
+ENDRULE
+
 RULE NEW Mat:ResThrmlCndct
   DATATYPE 
     Float
@@ -3498,8 +3528,10 @@ RULE NEW Mat:ResThrmlCndct
                then  MaterialData:CSE_Cond("MatList","Softwood - 1/2 in.")
                else  ThrmlCndct
                endif
+          else if (FrmMat = "Metal" .AND. LocalStatus( ResMetalRVal ) > 0)
+          then  1 / max( ResMetalRVal, 0.0001 )
           else UNDEFINED
-          endif
+          endif endif
     else if (CodeCat = "Specify Properties")
     then  UserThrmlCndct
     else if( LocalStatus(CodeItem) < 2 ) then
@@ -3587,7 +3619,10 @@ RULE NEW Mat:ResCavDens
     NotInput
   DEFAULT
     if (CodeCat = "Composite")
-    then if (CavityIns == 0) then ResProj:LibMat_VertWallCavity:Density else ResProj:LibMat_OtherIns:Density endif
+    then if (FrmMat = "Metal")
+         then 0
+         else if (CavityIns == 0) then ResProj:LibMat_VertWallCavity:Density else ResProj:LibMat_OtherIns:Density endif
+         endif
     else UNDEFINED
     endif
 ENDRULE
@@ -3603,7 +3638,10 @@ RULE NEW Mat:ResCavSpecHt
     NotInput
   DEFAULT
     if (CodeCat = "Composite")
-    then if (CavityIns == 0) then ResProj:LibMat_VertWallCavity:SpecHeat else ResProj:LibMat_OtherIns:SpecHeat endif
+    then if (FrmMat = "Metal")
+         then 0
+         else if (CavityIns == 0) then ResProj:LibMat_VertWallCavity:SpecHeat else ResProj:LibMat_OtherIns:SpecHeat endif
+         endif
     else UNDEFINED
     endif
 ENDRULE
@@ -3619,7 +3657,10 @@ RULE NEW Mat:ResCavOtherThrmlCndctCT
     NotInput
   DEFAULT
     if (CodeCat = "Composite")
-    then if (CavityIns == 0) then ResProj:LibMat_VertWallCavity:ConductivityCT else ResProj:LibMat_OtherIns:ConductivityCT endif
+    then if (FrmMat = "Metal")
+         then UNDEFINED
+         else if (CavityIns == 0) then ResProj:LibMat_VertWallCavity:ConductivityCT else ResProj:LibMat_OtherIns:ConductivityCT endif
+         endif
     else UNDEFINED
     endif
 ENDRULE
@@ -3635,7 +3676,10 @@ RULE NEW Mat:ResCavCeilingThrmlCndctCT
     NotInput
   DEFAULT
     if (CodeCat = "Composite")
-    then ResProj:LibMat_CeilingIns:ConductivityCT
+    then if (FrmMat = "Metal")
+         then UNDEFINED
+         else ResProj:LibMat_CeilingIns:ConductivityCT
+         endif
     else UNDEFINED
     endif
 ENDRULE
@@ -3651,7 +3695,10 @@ RULE NEW Mat:ResFrmThkns
     NotInput
   DEFAULT
     if (CodeCat = "Composite")
-    then FrmDepthVal / 12.0
+    then  if (FrmMat = "Metal")
+          then  0.1
+          else  FrmDepthVal / 12.0
+          endif
 ;    then switch (FrmDepth) 
 ;                 case "0_5In": (0.5 / 12.0)
 ;                 case "0_75In": (0.75 / 12.0)
@@ -3685,11 +3732,14 @@ RULE NEW Mat:ResCavThrmlCndct
     NotInput
   DEFAULT
     if (CodeCat = "Composite")
-    then if (CavityIns == 0) 
-         then ResProj:LibMat_VertWallCavity:Conductivity
-         else if ( IfValidAnd( ResFrmThkns > 0 ) )
-              then ResFrmThkns / CavityIns
-              else UNDEFINED
+    then if (FrmMat = "Metal")
+         then ResThrmlCndct
+         else if (CavityIns == 0) 
+              then ResProj:LibMat_VertWallCavity:Conductivity
+              else if ( IfValidAnd( ResFrmThkns > 0 ) )
+                   then ResFrmThkns / CavityIns
+                   else UNDEFINED
+                   endif
               endif
          endif
     else UNDEFINED
@@ -8654,4 +8704,3 @@ RULE Proj:OtherFlrUFac[8]
     endif
     endif
 ENDRULE
-
