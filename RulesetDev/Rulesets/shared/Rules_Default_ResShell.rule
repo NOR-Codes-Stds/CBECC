@@ -234,11 +234,13 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
                then  Description + Format( " / DF %s", HVACHtPumpRef[1]:TypeAbbrevStr )
                else  Description + Format( " / %s",    HVACHtPumpRef[1]:TypeAbbrevStr )
                endif
-         else if (HVACSysType != 2 .AND. LocalStatus( HVACHeatRef[1]:TypeAbbrevStr ) > 0 .AND. LocalStatus( HVACCoolRef[1]:TypeAbbrevStr ) > 0)
+         else if (HVACSysType = 1 .AND. LocalStatus( HVACHeatRef[1]:TypeAbbrevStr ) > 0 .AND. LocalStatus( HVACCoolRef[1]:TypeAbbrevStr ) > 0)
          then  Description + Format( " / %s-%s", HVACHeatRef[1]:TypeAbbrevStr, HVACCoolRef[1]:TypeAbbrevStr )
-         else if (HVACSysType != 2 .AND. LocalStatus( HVACHeatRef[1]:TypeAbbrevStr ) > 0)
+         else if (HVACSysType = 1 .AND. LocalStatus( HVACHeatRef[1]:TypeAbbrevStr ) > 0)
          then  Description + Format( " / %s-NoCool", HVACHeatRef[1]:TypeAbbrevStr )
-         else  UNCHANGED  endif endif endif  }
+         else if (HVACSysType = 4 .AND. LocalStatus( HVACCentralRef:TypeAbbrevStr ) > 0)
+         then  Description + Format( " / %s", HVACCentralRef:TypeAbbrevStr )
+         else  UNCHANGED  endif endif endif endif }
    "Set DwellUnitType:Description-3 DHW"     DwellUnitType:Description		=              ; SAC 6/27/20
       {  if (LocalStatus( DHWSysRef[1]:TypeAbbrevStr ) > 0)
          then  Description + Format( " / %s", DHWSysRef[1]:TypeAbbrevStr )
@@ -267,19 +269,6 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
    "Set DwellUnitType:IAQCFM[2]"					DwellUnitType:IAQCFM[2]			= {	if (IAQDisabled > 0 .OR. IAQOption != 2 .OR. LocalCompAssigned( IAQFanRef[2] ) < 0.5) then  0  else  IAQFanRef[2]:IAQCFM * IAQFanCnt[2]   endif  }
    "Set DwellUnitType:IAQCFM[3]"					DwellUnitType:IAQCFM[3]			= {	if (IAQDisabled > 0 .OR. IAQOption != 2 .OR. LocalCompAssigned( IAQFanRef[3] ) < 0.5) then  0  else  IAQFanRef[3]:IAQCFM * IAQFanCnt[3]   endif  }
    "Set DwellUnitType:IAQCFM[4]"					DwellUnitType:IAQCFM[4]			= {	if (IAQDisabled > 0 .OR. IAQOption != 2 .OR. LocalCompAssigned( IAQFanRef[4] ) < 0.5) then  0  else  IAQFanRef[4]:IAQCFM * IAQFanCnt[4]   endif  }
-
-	"Set DwellUnitType:TotalIAQCFM"				DwellUnitType:TotalIAQCFM		= {	if (IAQOption != 2 .AND. IAQDisabled < 1) then  MinIAQCFM  else  IAQCFM[1] + IAQCFM[2] + IAQCFM[3] + IAQCFM[4]  endif  }
-
-   ; SAC 12/16/19 - IAQOption revisions to labels, CFMs & Powers updated to reflect new settings (default balanced, min exhaust)
-   "Set DwellUnitType:MinIAQCFMLbl"				DwellUnitType:MinIAQCFMLbl		= {	if (IAQDisabled > 0) then  Format( "IAQ Ventilation disabled (%s required but not met)", FltToStr( MinIAQCFM, 1 ) )
-																											else if (MinIAQCFM < 0.05) then  " "  else if (IAQOption == 3) then  "CFI (Central Fan Integrated) IAQ  - NOT YET IMPLEMENTED -"
-																											else if (TotalIAQCFM < (MinIAQCFM - 0.05)) then	Format( "Min IAQ Vent -NOT MET-:  %s required, %s entered (CFM/unit)", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
-																											else  switch (IAQOption)
-																											         case  2:  Format( "Minimum IAQ Ventilation:  %s CFM/unit  (%s entered)", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
-																											         case  4:  Format( "Minimum IAQ Ventilation:  %s CFM/unit  (balanced)",   FltToStr( MinIAQCFM, 1 ) )
-																											         case  5:  Format( "Minimum IAQ Ventilation:  %s CFM/unit  (exhaust)",    FltToStr( MinIAQCFM, 1 ) )
-																											         default:  " "
-																											      endswitch  endif endif endif endif  }
 
 ; re-ordered DwellUnitType:IAQ rules - first all CFMs, then reset ResProj:DefaultIAQFanPwr and then calc Powers (which can depend on CFMs) - SAC 08/27/20
    ; SAC 11/11/17 - added IAQCFM_Exhaust to ensure mixture of IAQ fans simulated (tic #915)
@@ -369,6 +358,31 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
                then  IAQBalCFM + IAQCFM[4]  else  UNCHANGED  endif
          else	UNCHANGED  endif  }
 
+  ; JP 2/4/22 - move TotalIAQCFM down and revise how it is calculated
+	"Set DwellUnitType:TotalIAQCFM"				DwellUnitType:TotalIAQCFM		= {	if( IAQOption >= 4 .AND. IAQOption <= 5 .AND. IAQDisabled < 1 ) 
+	                                                                      then  MinIAQCFM  
+	                                                                      else if( IAQOption >= 11 .AND. IAQOption <= 15 .AND. IAQDisabled < 1 ) 
+	                                                                      then Max( CentralSupplyCFM, CentralExhaustCFM )
+	                                                                      else Max( IAQBalCFM + IAQCFM_Supply , IAQBalCFM + IAQCFM_Exhaust )
+	                                                                      endif endif }
+
+   ; SAC 12/16/19 - IAQOption revisions to labels, CFMs & Powers updated to reflect new settings (default balanced, min exhaust)
+   "Set DwellUnitType:MinIAQCFMLbl"				DwellUnitType:MinIAQCFMLbl		= {	if (IAQDisabled > 0) then  Format( "IAQ Ventilation disabled (%s required but not met)", FltToStr( MinIAQCFM, 1 ) )
+																											else if (MinIAQCFM < 0.05) then  " " 
+																											else if (TotalIAQCFM < (MinIAQCFM - 0.05)) then	Format( "Min IAQ Vent -NOT MET-:  %s CFM required, %s entered", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
+																											else  switch (IAQOption)
+																											         case  2:  Format( "Minimum IAQ Ventilation:  %s CFM  (%s entered)", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
+																											         case  3:  Format( "Minimum IAQ Ventilation:  %s CFM", FltToStr( MinIAQCFM, 1 ) )
+																											         case  4:  Format( "Minimum IAQ Ventilation:  %s CFM  (balanced)",   FltToStr( MinIAQCFM, 1 ) )
+																											         case  5:  Format( "Minimum IAQ Ventilation:  %s CFM  (exhaust)",    FltToStr( MinIAQCFM, 1 ) )
+																											         case 11:  Format( "Minimum IAQ Ventilation:  %s CFM  (%s entered)", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
+																											         case 12:  Format( "Minimum IAQ Ventilation:  %s CFM  (%s entered)", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
+																											         case 13:  Format( "Minimum IAQ Ventilation:  %s CFM  (%s entered)", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
+																											         case 14:  Format( "Minimum IAQ Ventilation:  %s CFM  (%s supply entered)", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
+																											         case 15:  Format( "Minimum IAQ Ventilation:  %s CFM  (%s exhaust entered)", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
+																											         default:  " "
+																											      endswitch  endif endif endif  }
+
    ; SAC 12/16/19 - add flag and label indicating whether DwellUnitType IAQ is balanced
    ; SAC 5/13/20 - updated logic (copied from DwellUnit) to take into account IAQHRVCFM
    ; revised logic to ensure that Balanced fans (where IAQCFM_Supply & IAQCFM_Exhaust = 0 but IAQHRVCFM > 0) are labeled as such - SAC 7/20/20 (tic #1174)
@@ -386,16 +400,26 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
                           (IAQCFM_Supply  + IAQHRVCFM) <= (1.2 * (IAQCFM_Exhaust + IAQHRVCFM)) )
                      then  1  else  0  endif
                endif
-         else  0  endif endif endif endif  }
+         else if (IAQOption >= 11 .AND. IAQOption <= 13 .AND. CentralSupplyCFM > 0 .AND. CentralExhaustCFM > 0 )
+         then if ( CentralSupplyCFM > CentralExhaustCFM )
+              then if ( CentralSupplyCFM <= 1.2 * CentralExhaustCFM .AND. 0.8 * CentralSupplyCFM < CentralExhaustCFM )
+                   then 1 else 0 endif
+              else if ( CentralExhaustCFM <= 1.2 * CentralSupplyCFM .AND. 0.8 * CentralExhaustCFM < CentralSupplyCFM )
+                   then 1 else 0 endif
+              endif
+         else 0 endif endif endif endif endif  }
    "Set DwellUnitType:MostIAQ_Exhaust - flag indicating whether whether most IAQ CFM is exhaust"   DwellUnitType:MostIAQ_Exhaust =     ; to report inconsistent IAQ type in MFam models - SAC 7/26/20 (tic #1174)
       {  if (IAQDisabled > 0 .OR. IAQCFMIsBalanced > 0) then  UNDEFINED
-         else if (IAQOption == 5) then  1
+         else if (IAQOption == 5 .OR. IAQOption == 15) then  1
          else if (IAQOption == 2 .AND. IAQCFM_Exhaust > IAQCFM_Supply) then  1
-         else  UNDEFINED  endif endif endif  }
+         else if (IAQOption >= 11 .AND. IAQOption <= 13 .AND. CentralExhaustCFM > CentralSupplyCFM) then 1
+         else  0  endif endif endif endif }
    "Set DwellUnitType:MostIAQ_Supply - flag indicating whether whether most IAQ CFM is supply"     DwellUnitType:MostIAQ_Supply  =  
       {  if (IAQDisabled > 0 .OR. IAQCFMIsBalanced > 0) then  UNDEFINED
+         else if (IAQOption == 14) then 1
          else if (IAQOption == 2 .AND. IAQCFM_Exhaust < IAQCFM_Supply) then  1
-         else  UNDEFINED  endif endif  }
+         else if (IAQOption >= 11 .AND. IAQOption <= 13 .AND. CentralSupplyCFM > CentralExhaustCFM) then 1
+         else  0  endif endif endif endif }
 
 ; now re-default ResProj:DefaultIAQFanPwr (based on CFMs) - SAC 08/27/20
    ; SAC 2/25/20 - revised default IAQ fan power from 0.25 to 0.3 for SFam and 0.6 for MFam in 2019.2.0+ (tic #1174)
@@ -563,6 +587,16 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
                then  IAQHRVCFMxASRE + (IAQCFM[4] * ValidOr( IAQFanRef[4]:AdjSensRecovEff, 0 ) * ValidOr( IAQFanRef[4]:FanHeatRecovMult, 0 ))  else  UNCHANGED  endif
          else	UNCHANGED  endif  }
 
+   "Set DwellUnitType:IAQSysType" DwellUnitType:IAQSysType = ; JP 2/4/22
+      {  if (IAQDisabled < 1 .AND. MinIAQCFM > 0.05 .AND. TotalIAQCFM > 0)
+         then if( IfValidAnd(IAQCFMIsBalanced > 0) )
+              then "Balanced"
+              else if( IfValidAnd( MostIAQ_Exhaust > 0) )
+              then "Exhaust"
+              else "Supply"
+              endif endif 
+         else  UNDEFINED  endif  } 
+
    "Set DwellUnitType:UnbalancedIAQLbl"      DwellUnitType:UnbalancedIAQLbl =    ; SAC 12/16/19
       {  if (IAQDisabled < 1 .AND. MinIAQCFM > 0.05 .AND. IAQCFMIsBalanced == 0)
          then  "Requires enclosure leakage testing for each dwelling unit"
@@ -667,9 +701,9 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
 	"Set DwellUnit:MinIAQCFMLbl"				DwellUnit:MinIAQCFMLbl		= {	if (LocalCompAssigned( DwellUnitTypeRef ) == 0) then  " "
 																									else if (IfValidAnd( DwellUnitTypeRef:IAQDisabled > 0.5 )) then  Format( "IAQ Ventilation disabled (%s required but not met)", FltToStr( MinIAQCFM, 1 ) )
 																									else if (MinIAQCFM < 0.05) then  " "  else if (DwellUnitTypeRef:IAQOption == 3) then  "CFI (Central Fan Integrated) IAQ  - NOT YET IMPLEMENTED -"
-																									else if (TotalIAQCFM < (MinIAQCFM - 0.05)) then	Format( "Min IAQ Vent -NOT MET-:  %s required, %s entered (CFM/unit)", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
-																									else if (DwellUnitTypeRef:IAQOption == 2) then  Format( "Minimum IAQ Ventilation:  %s CFM/unit  (%s entered)", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
-																									else  Format( "Minimum IAQ Ventilation:  %s CFM/unit", FltToStr( MinIAQCFM, 1 ) )  endif endif endif endif endif endif  }
+																									else if (TotalIAQCFM < (MinIAQCFM - 0.05)) then	Format( "Min IAQ Vent -NOT MET-:  %s CFM required, %s entered", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
+																									else if (DwellUnitTypeRef:IAQOption == 2) then  Format( "Minimum IAQ Ventilation:  %s CFM (%s entered)", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
+																									else  Format( "Minimum IAQ Ventilation:  %s CFM", FltToStr( MinIAQCFM, 1 ) )  endif endif endif endif endif endif  }
 
    ; added logic to set DwellUnit Std design IAQ CFM, Power & HRV properties based on Proj level inputs when BypassRuleLimits activated - SAC 08/27/20 
    "Set DwellUnit:IAQCFM_Exhaust - 1"      DwellUnit:IAQCFM_Exhaust   =       ; ApplyStdDesignIAQFromTable - SAC 04/03/21
@@ -715,26 +749,28 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
 
    ; re-ordered rules to set all CFMs (above) followed by IsBalanced and MostDUIAQ_* properties, followed by a re-default of IAQ Pwr - SAC 08/27/20
    "Set DwellUnit:IAQCFMIsBalanced - flag indicating exhaust & supply IAQ CFMs are within 20% of each other"    ; SAC 7/25/19 - tic #1104
-      DwellUnit:IAQCFMIsBalanced  = {
-         if (TotalCondFlrArea < 1 .OR. LocalCompAssigned( DwellUnitTypeRef ) == 0) then  0
-         else  if ((IAQCFM_Exhaust + IAQHRVCFM) > (IAQCFM_Supply + IAQHRVCFM))
-               then  if ( (IAQCFM_Exhaust + IAQHRVCFM) >= (0.8 * (IAQCFM_Supply  + IAQHRVCFM)) .AND.
-                          (IAQCFM_Exhaust + IAQHRVCFM) <= (1.2 * (IAQCFM_Supply  + IAQHRVCFM)) )
-                     then  1  else  0  endif
-               else  if ( (IAQCFM_Supply  + IAQHRVCFM) >= (0.8 * (IAQCFM_Exhaust + IAQHRVCFM)) .AND.
-                          (IAQCFM_Supply  + IAQHRVCFM) <= (1.2 * (IAQCFM_Exhaust + IAQHRVCFM)) )
-                     then  1  else  0  endif  endif  endif  }
+      DwellUnit:IAQCFMIsBalanced  = 
+//         if (TotalCondFlrArea < 1 .OR. LocalCompAssigned( DwellUnitTypeRef ) == 0) then  0
+//         else  if ((IAQCFM_Exhaust + IAQHRVCFM) > (IAQCFM_Supply + IAQHRVCFM))
+//               then  if ( (IAQCFM_Exhaust + IAQHRVCFM) >= (0.8 * (IAQCFM_Supply  + IAQHRVCFM)) .AND.
+//                          (IAQCFM_Exhaust + IAQHRVCFM) <= (1.2 * (IAQCFM_Supply  + IAQHRVCFM)) )
+//                     then  1  else  0  endif
+//               else  if ( (IAQCFM_Supply  + IAQHRVCFM) >= (0.8 * (IAQCFM_Exhaust + IAQHRVCFM)) .AND.
+//                          (IAQCFM_Supply  + IAQHRVCFM) <= (1.2 * (IAQCFM_Exhaust + IAQHRVCFM)) )
+//                     then  1  else  0  endif  endif  endif  }
+      {  if (TotalCondFlrArea < 1 .OR. LocalCompAssigned( DwellUnitTypeRef ) == 0) then  0
+         else DwellUnitTypeRef:IAQCFMIsBalanced endif  }
    "Set DwellUnit:IAQCFM_Balanced"     DwellUnit:IAQCFM_Balanced  =                 ; SAC 2/25/20
-      {  if (IAQCFMIsBalanced) then  IAQHRVCFM + IAQCFM_Exhaust + IAQCFM_Supply
+      {  if (IAQCFMIsBalanced) then  IAQHRVCFM + IAQCFM_Exhaust + IAQCFM_Supply + ValidOr( CentralSupplyCFMWithMult, 0 ) + ValidOr( CentralExhaustCFMWithMult, 0 )
          else  0  endif  }
    "Set ResProj:MostDUIAQ_Balanced"    ResProj:MostDUIAQ_Balanced  =    ; SAC 2/24/20   ; leave UNCHANGED for SFam models - SAC 03/18/21 (tic #1243)
       {  if (ResProj:IsMultiFamily < 0.5) then  UNCHANGED
-         else if (SumAll( DwellUnit:IAQCFM_Balanced ) > SumAll( DwellUnit:IAQCFM_Exhaust ) .AND. 
-                  SumAll( DwellUnit:IAQCFM_Balanced ) > SumAll( DwellUnit:IAQCFM_Supply  )) then  1  else  0  endif endif  } 
+         else if (SumAll( DwellUnit:IAQCFM_Balanced ) > (SumAll( DwellUnit:IAQCFM_Exhaust ) + SumAll( DwellUnit:CentralExhaustCFMWithMult)) .AND. 
+                  SumAll( DwellUnit:IAQCFM_Balanced ) > (SumAll( DwellUnit:IAQCFM_Supply  ) + SumAll( DwellUnit:CentralSupplyCFMWithMult))) then  1  else  0  endif endif  } 
    "Set ResProj:MostDUIAQ_Exhaust"     ResProj:MostDUIAQ_Exhaust   =
       {  if (ResProj:IsMultiFamily < 0.5) then  UNCHANGED
          else if (MostDUIAQ_Balanced > 0) then  0
-         else if (SumAll( DwellUnit:IAQCFM_Exhaust ) > SumAll( DwellUnit:IAQCFM_Supply  )) then  1  else  0  endif endif endif  } 
+         else if ((SumAll( DwellUnit:IAQCFM_Exhaust ) + SumAll( DwellUnit:CentralExhaustCFMWithMult)) > (SumAll( DwellUnit:IAQCFM_Supply  ) + SumAll( DwellUnit:CentralSupplyCFMWithMult))) then  1  else  0  endif endif endif  } 
    "Set ResProj:MostDUIAQ_Supply"      ResProj:MostDUIAQ_Supply    =
       {  if (ResProj:IsMultiFamily < 0.5) then  UNCHANGED
          else if (MostDUIAQ_Balanced > 0 .OR. MostDUIAQ_Exhaust > 0) then  0  else  1  endif endif  } 
@@ -776,7 +812,7 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
    "Set DwellUnit:IAQPwr_Supply - 1"      DwellUnit:IAQPwr_Supply      =
       {  if (LocalCompAssigned( DwellUnitTypeRef ) == 0 .OR. IfValidAnd( TotalCondFlrArea > 0.1 )==0 .OR. IfValidAnd( DwellUnitTypeRef:IAQDisabled > 0.5 )) then  0
          else if (DwellUnitTypeRef:IAQOption >= 3 .AND. ((IfValidAnd( ResProj:BypassRuleLimits > 0 ) .AND. IfValidAnd( Proj:AnalysisVersion >= 190200 )) .OR. ResProj:ApplyStdDesignIAQFromTable) .AND.
-                  IfValidAnd( ResProj:StdDesignIAQType[1] > 0 ) .AND. (ResProj:RunAbbrev == "s" .OR. ResProj:RunAbbrev == "zb" .OR. ResProj:RunAbbrev == "smf"))
+                  IfValidAnd( ResProj:StdDesignIAQType[1] > 0 ) .AND. (ResProj:RunAbbrev == "s" .OR. ResProj:RunAbbrev == "zs" .OR. ResProj:RunAbbrev == "smf"))
          then  if (IfValidAnd( ResProj:StdDesignIAQType[1] = 2 ))
                then  IAQCFM_Supply * ValidOr( ForceStdIAQFanPwr, min( ResProj:DefaultIAQFanPwr, ValidOr( ResProj:StdDesignIAQWperCFM, 9999 ) ) )
                else  0  endif
@@ -886,8 +922,8 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
 																											else if (IfValidAnd( DHWSysRef[5]:NumDHWHeaters > 0.5 ) .AND. IfValidAnd( DHWSysRef[5]:CentralDHW < 0.5 )) then  NumAssigningDUs
 																											else  0  endif endif endif endif endif endif  }
 
-   "Set DwellUnitType:NumAssigningHtClDUs[1]"   DwellUnitType:NumAssigningHtClDUs[1]  =      ; SAC 6/27/20
-      {  if (HVACSysType != 2) then  NumAssigningDUs  else  0  endif  }
+   "Set DwellUnitType:NumAssigningHtClDUs[1]"   DwellUnitType:NumAssigningHtClDUs[1]  =      ; SAC 6/27/20   ; more explicit check for non-HP/Central type - SAC 02/25/22
+      {  if (HVACSysType == 1 .OR. HVACSysType == 3) then  NumAssigningDUs  else  0  endif  }
    "Set DwellUnitType:NumAssigningHtClDUs[2]"   DwellUnitType:NumAssigningHtClDUs[2]  = {  NumAssigningHtClDUs[1]  }
    "Set DwellUnitType:NumAssigningHtClDUs[3]"   DwellUnitType:NumAssigningHtClDUs[3]  = {  NumAssigningHtClDUs[1]  }
    "Set DwellUnitType:NumAssigningHtClDUs[4]"   DwellUnitType:NumAssigningHtClDUs[4]  = {  NumAssigningHtClDUs[1]  }
@@ -895,10 +931,17 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
 
    "Set DwellUnitType:NumAssigningHPDUs[1]"     DwellUnitType:NumAssigningHPDUs[1]    =      ; SAC 6/27/20
       {  if (HVACSysType == 2) then  NumAssigningDUs  else  0  endif  }
-   "Set DwellUnitType:NumAssigningHPDUs[2]"     DwellUnitType:NumAssigningHPDUs[2]    = {  NumAssigningHtClDUs[1]  }
-   "Set DwellUnitType:NumAssigningHPDUs[3]"     DwellUnitType:NumAssigningHPDUs[3]    = {  NumAssigningHtClDUs[1]  }
-   "Set DwellUnitType:NumAssigningHPDUs[4]"     DwellUnitType:NumAssigningHPDUs[4]    = {  NumAssigningHtClDUs[1]  }
-   "Set DwellUnitType:NumAssigningHPDUs[5]"     DwellUnitType:NumAssigningHPDUs[5]    = {  NumAssigningHtClDUs[1]  }
+   "Set DwellUnitType:NumAssigningHPDUs[2]"     DwellUnitType:NumAssigningHPDUs[2]    = {  NumAssigningHPDUs[1]  }
+   "Set DwellUnitType:NumAssigningHPDUs[3]"     DwellUnitType:NumAssigningHPDUs[3]    = {  NumAssigningHPDUs[1]  }
+   "Set DwellUnitType:NumAssigningHPDUs[4]"     DwellUnitType:NumAssigningHPDUs[4]    = {  NumAssigningHPDUs[1]  }
+   "Set DwellUnitType:NumAssigningHPDUs[5]"     DwellUnitType:NumAssigningHPDUs[5]    = {  NumAssigningHPDUs[1]  }
+
+   "Set DwellUnitType:NumAssigningCntrlDUs[1]"   DwellUnitType:NumAssigningCntrlDUs[1]  =    ; SAC 02/25/22
+      {  if (HVACSysType == 4) then  NumAssigningDUs  else  0  endif  }
+   "Set DwellUnitType:NumAssigningCntrlDUs[2]"   DwellUnitType:NumAssigningCntrlDUs[2]  = {  NumAssigningCntrlDUs[1]  }
+   "Set DwellUnitType:NumAssigningCntrlDUs[3]"   DwellUnitType:NumAssigningCntrlDUs[3]  = {  NumAssigningCntrlDUs[1]  }
+   "Set DwellUnitType:NumAssigningCntrlDUs[4]"   DwellUnitType:NumAssigningCntrlDUs[4]  = {  NumAssigningCntrlDUs[1]  }
+   "Set DwellUnitType:NumAssigningCntrlDUs[5]"   DwellUnitType:NumAssigningCntrlDUs[5]  = {  NumAssigningCntrlDUs[1]  }
 
 
    ;--------------------------------------------------------------------
