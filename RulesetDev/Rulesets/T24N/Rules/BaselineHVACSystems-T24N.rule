@@ -82,110 +82,12 @@ ENDRULE
 // ---------- Section 5.1.2 - Baseline HVAC Systems ----------------------------
 
 // ---------- Determine baseline system for building ---------------------------
-// First calculate floor area used to determine baseline system type by subtracing:
-//   - Heating-only spaces that do not include cooling in the proposed design
+// First calculate floor area used to determine baseline system type:
 
-RULE NEW Bldg:NonResAreaForBaseSysMap
-  DATATYPE
-    Integer
-  LONGFORM
-    NonresidentialAreaForBaselineSystemMap
-  INPUTCLASS
-    NotInput
-  DESCRIPTION
-    "The building area used to determine the nonresidential baseline system type." 
-  REFERENCE 
-    NACM Section 5.1.2 
-  SIZING_PROPOSED
-    if( Proj:IsAddOrAlt = 1 )
-    then // Project is Addition/Alteration analysis
-      if( TotClgCap > 0 .AND. DeltaClgCapBldgRat > 0 )
-      then // Not all systems are HtgOnly, use DeltaClgCap ratios
-        if( DeltaClgCapBldgRat > DeltaCapBldgRatThreshold .OR.
-            DeltaClgCapAltAddRat > DeltaCapAltAddRatThreshold )
-        then 
-          NonResFlrArea - 
-          ( HtgOnlySysAreaNew + HtgOnlySysAreaExisting + HtgOnlySysAreaAltered )
-        else // Baseline is system map based on altered or added area only
-          ( NonResFlrArea - NonResFlrAreaExisting ) - 
-          ( HtgOnlySysAreaNew + HtgOnlySysAreaExisting + HtgOnlySysAreaAltered )
-        endif
-      else 
-      if( TotClgCap = 0 .AND.
-          TotHtgCap > 0 .AND. DeltaHtgCapBldgRat > 0 ) 
-      then // All systems are HtgOnly, use DeltaHtgCap ratios
-        if( DeltaHtgCapBldgRat > DeltaCapBldgRatThreshold .OR.
-            DeltaHtgCapAltAddRat > DeltaCapAltAddRatThreshold )
-        then // Baseline HVAC systems are based on the entire building attributes
-          NonResFlrArea -           
-          ( HtgOnlySysAreaNew + HtgOnlySysAreaExisting + HtgOnlySysAreaAltered )
-        else // Baseline is system map based on altered or added area only 
-          ( NonResFlrArea - NonResFlrAreaExisting ) - 
-          ( HtgOnlySysAreaNew + HtgOnlySysAreaExisting + HtgOnlySysAreaAltered )
-        endif
-      else
-      if( Proj:IsNoAddMech > 0 )
-      then // Baseline system applies to new area with no HVAC and existing area
-        ( NonResFlrAreaNew + NonResFlrAreaExisting ) -
-        ( HtgOnlySysAreaNew + HtgOnlySysAreaExisting )
-      else // Baseline HVAC systems are based on the entire building attributes
-           // Default if no other criteria is met, such as if all zones are HasUnknownHVAC
-           // See issue 2275
-        NonResFlrArea - 
-        ( HtgOnlySysAreaNew + HtgOnlySysAreaExisting + HtgOnlySysAreaAltered )
-      endif endif endif
-    else // Project is not Add/Alt
-      NonResFlrArea - 
-      ( HtgOnlySysAreaNew + HtgOnlySysAreaAltered )
-    endif
-  SIZING_BASELINE
-    zp:NonResAreaForBaseSysMap
-ENDRULE
-RULE NEW Bldg:AboveGrdStoryCntForBaseSysMap
-  DATATYPE
-    Integer
-  LONGFORM
-    AboveGradeStoryCountForBaselineSystemMap
-  INPUTCLASS
-    NotInput
-  DESCRIPTION
-    "The number of stories used to determine the nonresidential baseline system type." 
-  REFERENCE 
-    NACM Section 5.1.2 
-  SIZING_PROPOSED
-    if( Proj:IsAddOrAlt = 1 )
-    then // Project is Addition/Alteration analysis
-      if( TotClgCap > 0 )
-      then // Not all systems are HtgOnly, use DeltaClgCap ratios
-        if( DeltaClgCapBldgRat > DeltaCapBldgRatThreshold .OR.
-            DeltaClgCapAltAddRat > DeltaCapAltAddRatThreshold )
-        then // Baseline HVAC systems are based on total building stories
-          AboveGrdStoryCnt
-        else // Baseline is system map based on altered or added stories only
-          Max( 1, AboveGrdStoryCnt - AboveGrdStoryCntExisting )
-        endif
-      else 
-      if( TotClgCap = 0 .AND.
-          TotHtgCap > 0 ) 
-      then // All systems are HtgOnly, use DeltaHtgCap ratios
-        if( DeltaHtgCapBldgRat > DeltaCapBldgRatThreshold .OR.
-            DeltaHtgCapAltAddRat > DeltaCapAltAddRatThreshold )
-        then // Baseline HVAC systems are based on total building stories
-          AboveGrdStoryCnt
-        else // Baseline is system map based on altered or added stories only
-          Max( 1, AboveGrdStoryCnt - AboveGrdStoryCntExisting )
-        endif
-      else // There is no added or altered heating/cooling capacity that meets
-           // criteria for Add/Alt system map.
-           // Baseline is system map based on altered or added stories
-        Max( 1, AboveGrdStoryCnt - AboveGrdStoryCntExisting )
-      endif endif
-    else // Project is not Add/Alt
-      AboveGrdStoryCnt
-    endif 
-  SIZING_BASELINE
-    zp:AboveGrdStoryCntForBaseSysMap
-ENDRULE
+//Rules for 
+//Bldg:NonResAreaForBaseSysMap
+//Bldg:AboveGrdStoryCntForBaseSysMap
+// moved to ThermalZone-ScheduleGroups.rule file for rule ordering purposes.
 
 // Nonresidential HVAC System Map (not including covered processes)
 RULE NEW Bldg:BaseNonResSysNum
@@ -245,10 +147,33 @@ RULE NEW Bldg:BaseNonResSysNum
       endif endif
     else 0 // Baseline design has no nonresidential HVAC systems
     endif
-  SIZING_PROPOSED : T24N
+  SIZING_PROPOSED : T24N_2019
     if( NonResAreaForBaseSysMap - HlthCareArea -
         ( ProcAreaNew + ProcAreaExisting + ProcAreaAltered ) -
         ( RetailAreaNew + RetailAreaExisting + RetailAreaAltered ) > 0 )
+    then // Process and retail systems determined by separate rules
+      if( NonResAreaForBaseSysMap < 25000 )
+      then 
+        if( AboveGrdStoryCntForBaseSysMap < 4 ) 
+        then 7 // SZVAVAC.  Will be switched to SZAC if required after sizing run
+        else if( AboveGrdStoryCntForBaseSysMap < 6 ) 
+        then 5 // PVAV
+        else 6 // VAV
+        endif endif
+      else
+      if( NonResAreaForBaseSysMap < 150000 )
+      then 
+        if( AboveGrdStoryCntForBaseSysMap < 6 ) 
+        then 5 // PVAV
+        else 6 // VAV
+        endif
+      else 6 // VAV
+      endif endif
+    else 0 // Baseline design has no nonresidential HVAC systems
+    endif
+  SIZING_PROPOSED : T24N
+    if( NonResAreaForBaseSysMap - HlthCareArea -
+        ( ProcAreaNew + ProcAreaExisting + ProcAreaAltered ) > 0 )
     then // Process and retail systems determined by separate rules
       if( NonResAreaForBaseSysMap < 25000 )
       then 
@@ -596,6 +521,9 @@ ENDRULE
 // -----------------------------------------------------------------------------
 //            Create baseline flr-by-flr multizone HVAC systems
 // -----------------------------------------------------------------------------
+
+
+
 RULE NEW Story:BaseHVACAreaForFlrSys
   DATATYPE
     Float
