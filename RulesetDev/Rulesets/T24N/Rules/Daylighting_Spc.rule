@@ -1061,14 +1061,35 @@ RULE Spc:DayltgCtrlType
 ;    Continuous
 ;    ContinuousPlusOff
 ;    SteppedSwitching
-  DEFAULT
+  DEFAULT : T24N_2013 T24N_2016 T24N_2019
     if( HasDayltgCtrl = 1 )
     then "Continuous"
     else  UNCHANGED
     endif
+  DEFAULT
+    if( HasDayltgCtrl = 1 )
+    then if( IfValidAnd( PrkgGarArea > 0 ) )
+         then "ContinuousPlusOff"
+         else "Continuous"
+         endif
+    else  UNCHANGED
+    endif
+  CHECKCODE : T24N_2022
+  // See ticket 3325
+    if( HasDayltgCtrl = 1 )
+    then if( DayltgCtrlType = "None" )
+         then PostError( "Space: '%s' has lights controlled by daylight sensor
+                          but no daylighting control type has been specified.", Name )
+         else if( PrkgGarArea > 0 .AND. DayltgCtrlType = "Continuous" )
+         then PostError( "Parking space: '%s' is required the have daylight control 
+                          capable switch off lights completely.", Name )
+         else UNCHANGED
+         endif endif
+    else UNCHANGED
+    endif
   SIZING
     "None"
-  ANNUAL
+  ANNUAL : T24N_2013 T24N_2016 T24N_2019
     switch( ApplyStdDayltg )
     case 1:  // standard design daylighting rules
       if( HasDayltgCtrl = 1 )
@@ -1081,11 +1102,45 @@ RULE Spc:DayltgCtrlType
       else UNDEFINED
       endif
     endswitch
+  ANNUAL
+    switch( ApplyStdDayltg )
+    case 1:  // standard design daylighting rules
+      if( HasDayltgCtrl = 1 )
+      then if( PrkgGarArea > 0 )
+           then "ContinuousPlusOff"
+           else "Continuous"
+           endif
+      else  UNCHANGED
+      endif
+    default:  // proposed design daylighting rules
+      if( LocalStatus( u:DayltgCtrlType ) > 0 ) 
+      then u:DayltgCtrlType
+      else UNDEFINED
+      endif
+    endswitch
+ENDRULE
+RULE NEW Spc:MinDimPwrFracSim
+  DESCRIPTION
+    "Calculated - Average minimum dimming power Fraction 
+    for all interior lighting systems in a Space."    
+  HELP
+    "This property is displayed in the User Interface when lighting power is 
+     specified via Interior Lighting System."
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IntLtgSysChildren > 0 .AND. IfValidAnd( RegLtgPwr > 0 ) )
+    then SumChildrenIf( IntLtgSys:MinDimPwrFracXPwr,
+                        IntLtgSys:DaylitAreaType <> "- none -" )/ RegLtgPwr
+    else UNDEFINED
+    endif
 ENDRULE
 RULE Spc:MinDimPwrFrac
   INPUTCLASS
     Default
-  DEFAULT
+  DEFAULT : T24N_2013 T24N_2016 T24N_2019
     if( LocalStatus (DayltgCtrlType) > 0 )
     then if( DayltgCtrlType = "None" .OR.
              DayltgCtrlType = "SteppedSwitching" .OR. 
@@ -1101,9 +1156,43 @@ RULE Spc:MinDimPwrFrac
       endif endif
     else UNDEFINED
     endif
+  DEFAULT
+  // See ticket 3325
+    if( LocalStatus (DayltgCtrlType) > 0 )
+    then if( DayltgCtrlType = "None" .OR.
+             DayltgCtrlType = "SteppedSwitching" .OR. 
+             RegLtgPwr = 0 )
+         then UNDEFINED
+         else if( IntLtgSysChildren > 0 .AND. IfValidAnd( RegLtgPwr > 0 ) )
+         then MinDimPwrFracSim
+         else if( Proj:AutoEffInput = 1 )
+         then // simplified lighting case defaults to standard design values for LED
+              0.1
+         else UNDEFINED
+         endif endif endif
+    else UNDEFINED
+    endif
+  CHECKSIM : T24N_2022
+    if( ( DayltgCtrlType = "Continuous" .OR. DayltgCtrlType = "ContinuousPlusOff" ) 
+        .AND. LocalStatus( MinDimPwrFrac ) = 0 .AND. LocalStatus( MinDimPwrFracSim ) = 0 )
+    then PostError( "Minimum daylight dimming power fraction in Space: '%s' 
+                     shall be provided", Name )
+    else UNCHANGED
+    endif
+  CHECKCODE : T24N_2022
+    // only check for "Continous" since other control types can switch off completely 
+    if( DayltgCtrlType = "Continuous" )
+    then if( ( LocalStatus( MinDimPwrFracSim ) = 0 .AND. IfValidAnd( MinDimPwrFrac > 0.1 ) )
+             .OR. IfValidAnd( MinDimPwrFracSim > 0.1 ) )
+         then PostError( "Standard requires the controlled lighting power in the 
+                          daylight zone of Space: '%s' be able to reduced to 10% or lower.",Name )
+         else UNCHANGED
+         endif
+    else UNCHANGED
+    endif
   SIZING
     UNDEFINED
-  ANNUAL
+  ANNUAL : T24N_2013 T24N_2016 T24N_2019
     if( LocalStatus (DayltgCtrlType) > 0 )
     then if( DayltgCtrlType = "None" .OR.
              DayltgCtrlType = "SteppedSwitching" .OR. 
@@ -1119,11 +1208,48 @@ RULE Spc:MinDimPwrFrac
     else 
       UNDEFINED
     endif
+  ANNUAL
+    if( LocalStatus (DayltgCtrlType) > 0 )
+    then if( DayltgCtrlType = "None" .OR.
+             DayltgCtrlType = "SteppedSwitching" .OR. 
+             RegLtgPwr = 0 )
+      then UNDEFINED
+      else switch( ApplyStdDayltg )
+        case 1:  // standard design daylighting rules
+          0.1
+        default:  // proposed design daylighting rules
+          if( IntLtgSysChildren > 0 .AND. IfValidAnd( RegLtgPwr > 0 ) )
+          then MinDimPwrFracSim
+          else u:MinDimPwrFrac
+          endif
+        endswitch
+      endif
+    else 
+      UNDEFINED
+    endif
+ENDRULE
+RULE NEW Spc:MinDimLtgFracSim
+  DESCRIPTION
+    "Calculated - Average minimum dimming light Fraction 
+    for all interior lighting systems in a Space."    
+  HELP
+    "This property is displayed in the User Interface when lighting power is 
+     specified via Interior Lighting System."
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IntLtgSysChildren > 0 .AND. IfValidAnd( RegLtgPwr > 0 ) )
+    then SumChildrenIf( IntLtgSys:MinDimLtgFracXPwr,
+                        IntLtgSys:DaylitAreaType <> "- none -" )/ RegLtgPwr
+    else UNDEFINED
+    endif
 ENDRULE
 RULE Spc:MinDimLtgFrac
   INPUTCLASS
     Default
-  DEFAULT
+  DEFAULT : T24N_2013 T24N_2016 T24N_2019
     if( LocalStatus (DayltgCtrlType) > 0 )
     then if( DayltgCtrlType = "None" .OR.
              DayltgCtrlType = "SteppedSwitching" .OR. 
@@ -1139,9 +1265,32 @@ RULE Spc:MinDimLtgFrac
       endif endif
     else UNDEFINED
     endif
+  DEFAULT
+  // See ticket 3325
+    if( LocalStatus (DayltgCtrlType) > 0 )
+    then if( DayltgCtrlType = "None" .OR.
+             DayltgCtrlType = "SteppedSwitching" .OR. 
+             RegLtgPwr = 0 )
+         then UNDEFINED
+         else if( IntLtgSysChildren > 0 .AND. IfValidAnd( RegLtgPwr > 0 ) )
+         then MinDimLtgFracSim
+         else if( Proj:AutoEffInput = 1 )
+         then  // simplified lighting case defaults to standard design values for LED
+              0.1
+         else UNDEFINED
+         endif endif endif
+    else UNDEFINED
+    endif
+  CHECKSIM : T24N_2022
+    if( ( DayltgCtrlType = "Continuous" .OR. DayltgCtrlType = "ContinuousPlusOff" )
+         .AND. LocalStatus( MinDimLtgFrac ) = 0 .AND. LocalStatus( MinDimLtgFracSim ) = 0 )
+    then PostError( "Minimum daylight dimming power fraction in Space: '%s' 
+                     shall be provided", Name )
+    else UNCHANGED
+    endif
   SIZING
     0
-  ANNUAL
+  ANNUAL : T24N_2013 T24N_2016 T24N_2019
     if( LocalStatus (DayltgCtrlType) > 0 )
     then if( DayltgCtrlType = "None" .OR.
              DayltgCtrlType = "SteppedSwitching" .OR. 
@@ -1152,6 +1301,25 @@ RULE Spc:MinDimLtgFrac
           0.2 
         default:  // proposed design daylighting rules
           u:MinDimLtgFrac
+        endswitch
+      endif
+    else 
+      UNDEFINED
+    endif
+  ANNUAL
+    if( LocalStatus (DayltgCtrlType) > 0 )
+    then if( DayltgCtrlType = "None" .OR.
+             DayltgCtrlType = "SteppedSwitching" .OR. 
+             RegLtgPwr = 0 )
+      then UNDEFINED
+      else switch( ApplyStdDayltg )
+        case 1:  // standard design daylighting rules
+          0.1
+        default:  // proposed design daylighting rules
+          if( IntLtgSysChildren > 0 .AND. IfValidAnd( RegLtgPwr > 0 ) )
+          then MinDimLtgFracSim
+          else u:MinDimLtgFrac
+          endif
         endswitch
       endif
     else 
