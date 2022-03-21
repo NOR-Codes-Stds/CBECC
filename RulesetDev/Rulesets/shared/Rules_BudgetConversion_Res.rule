@@ -170,101 +170,16 @@ RULELIST  "BudgetConversion" 1 0 1 0
 
 
    ;--------------------------------------------------------------------
-   ; BudgetConversion: Convert CathedralCeiling objects to CeilingBelowAttic - and evaluate ProposedInput rules to generate Attic object if necessary   - SAC 10/3/13
-   ; mjb-10/15/13  mods for E+A+A
-   ;                 - don't create Attics for EXISTING Cathedral Ceilings
-   ;                 - apply Status of Cathedral Ceilings (IsNew, IsAltered, IsVerified) to newly created Ceiling Below Attics
-   ;                 - apply Existing Construction of Cathedral Ceilings to newly created Ceiling Below Attics
+   ; BudgetConversion: for SFam or <2022 analysis: Convert CathedralCeiling objects to CeilingBelowAttic
+   ;                   for MFam 2022+: retain CathedralCeiling and update Construction
    ;--------------------------------------------------------------------
 	"Set ResProj:NumPropClgBlwAtticObjs"		ResProj:NumPropClgBlwAtticObjs	= {	ComponentCount( CeilingBelowAttic )  }
-; unnecessary - duct location reset to Attic w/out this addition
-;	; SAC 10/8/13 - added to ensure proper adjustment of duct locations before/after conversion of proposed CathedralCeilings to CeilingBelowAttic
-;	"Set Zone:NumPropCathClgObjs"				Zone:NumPropCathClgObjs			= {	ChildCount( CathedralCeiling )  }
-
-	"Create CathedralCeiling:StdDesignCeiling (if necessary)"	CathedralCeiling:StdDesignCeiling	= {	if (ParentComponentType() != "ResZn") then  UNDEFINED
-                                                                      else if (IsNew .OR. IsAltered) then 
-                                                                              CreateComp( CeilingBelowAttic, Local( Name ) + "-ClgBlwAtc" )
-                                                                            else UNCHANGED endif
-                                                                      endif }
-
-	"Assign (or create) Attic above ceiling"	CathedralCeiling:StdDesignCeiling:AtticZone	= {	if (MaxAll( Attic:StdCathClgAtticArea ) > 1) then  MaxAllComp( Attic:StdCathClgAtticArea )
-																																else  CreateComp( Attic, "Std Design CathClg Attic", "Setup_StdCathClgAttic" )  endif  }
-	; SAC 4/14/15 - revised following rule to evalute different Attic defaulting rules that will setup Construction and Rise/Pitch/misc properties PRIOR to evaluation of other Attic:Cons BudgetConversion rules
-	"Refresh all Attic defaults"			Attic:Action	= {	EvalRulelist( "Default_Attic", 1 )  }
-
-	"Set CathedralCeiling:StdDesignCeiling:Parent"			CathedralCeiling:StdDesignCeiling:Parent			= {	Parent( Name )  }
-  "Set CathedralCeiling:StdDesignCeiling:Status"      CathedralCeiling:StdDesignCeiling:Status     = { Status  }  ; need to assign this now, since Proposed Input rules called below for new CeilingBelowAttics will otherwise incorrectly set the IsNew... flags
-  "Set CathedralCeiling:StdDesignCeiling:IsNew"         CathedralCeiling:StdDesignCeiling:IsNew   = { IsNew  }   ; redundant with what will be set from Status in PI rules - but may need to be set for subsequent rules below
-  "Set CathedralCeiling:StdDesignCeiling:IsAltered"  CathedralCeiling:StdDesignCeiling:IsAltered  = { IsAltered  }  ; redundant with what will be set from Status in PI rules - but may need to be set for subsequent rules below
-  "Set CathedralCeiling:StdDesignCeiling:IsVerified"  CathedralCeiling:StdDesignCeiling:IsVerified = { IsVerified  }
-  "Set CathedralCeiling:StdDesignCeiling:exConstruction"  CathedralCeiling:StdDesignCeiling:exConstruction = { exConstruction  } ; this is not going to work - changing from cathedral ceiling to ceiling below attic Cons...
-  ; assign minimal (R0) construction first, which may get switched to something minimally compliant later in this rulelist
-	"Set CathedralCeiling:StdDesignCeiling:Construction"	CathedralCeiling:StdDesignCeiling:Construction	= {	RuleLibrary( Cons, "R0 ClgBlwAttic Cons" )  }
-	"Set CathedralCeiling:StdDesignCeiling:CathCeilUValue"	CathedralCeiling:StdDesignCeiling:CathCeilUValue	= {	Construction:WinterDesUValue  }
-  ; set area of CeilingBelowAttic to the horizontal projection of the pitched CathedralCeiling area
-	"Set CathedralCeiling:StdDesignCeiling:Area"				CathedralCeiling:StdDesignCeiling:Area				= {	Area * cos( (RoofTilt * 3.14159265 / 180) )  }
-  "Set CathedralCeiling:StdDesignCeiling:WasCathCeil"  CathedralCeiling:StdDesignCeiling:WasCathCeil = { 1  }		;	mjb	2/20/14	needed later for CBA budget conversion rules
-
-;	"debug CeilingBelowAttic"					CathedralCeiling:Action = { if (IsAltered) then PostWarning( "CathedralCeiling: '%s' Cons: '%s' WinterDesUValue: %g ", Name, Construction:Name, Construction:WinterDesUValue	 ) else UNCHANGED endif }
-
-; mjb	E+A+A	12/1/13	2/20/14	moved rules here
-	"Assign Altered CathedralCeiling RoofSolReflect"					CathedralCeiling:AltSolReflect = {	RoofSolReflect }
-; mjb 1/13/14	removed cool roof requirements for Alterations
-;	mjb	8/21/14 - added them back in, consistent with 2013 RACM - don't remember why we removed them???
-;	mjb 1/12/15 - use new T24RClimateZoneCodeBase lookup table
-; SAC 9/18/15 - added logic to DISABLE requirement for 2013 & 2016 additions <= 300 SF
-; SAC 9/21/15 - fixed bug where EAA <= 300 SF addition logic being applied to both New & EAA projects (revised to apply only to EAA projects)
-; SAC 10/2/15 - revised if statement to include New Cons Addition Alone in check for additionCFA <= 300SF
-; JP 10/3/19 - added a case for re-roofing (tic #867)
-"Set CathedralCeiling:RoofSolReflect"	CathedralCeiling:RoofSolReflect	= {	if ( IsNew .OR. IsAltered .OR. IsAlteredSurface)
-                                                                          then	if (Construction:RoofingLayer == 100205)		; "25 PSF (Very Heavy Ballast or Pavers)"
-									                                                              then	UNCHANGED
-								                                                                else if ((ResProj:EnergyCodeYearNum = 2019 .AND. IfValidAnd( Proj:AnalysisVersion <= 190101 ) .AND. 
-									                                                                       (ResProj:RunScope == 2 .OR. (ResProj:RunScope == 1 .AND. IfValidAnd( ResProj:IsAddAlone > 0.5 ))) .AND.IfValidAnd( ResProj:AdditionCFA <= 300 ))
-                                                                          							 .OR. (ResProj:RunScope == 2 .AND. IfValidAnd( ResProj:AdditionCFA <= 300 ) .AND. IsNew))
-                                                                      							 then	UNCHANGED
-                                                                  								   else if ( SteepSlope > 0.5 )
-                                                                       									  then	T24RClimateZoneCodeBase:SteepRoofReflect( "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )
-                                                                       									  else	T24RClimateZoneCodeBase:FlatRoofReflect(  "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )
-                                                                          endif endif endif else UNCHANGED endif }
-;	mjb 1/12/15 - removed these lines from above rule:												else if (SteepSlope > 0.5 .AND.  Proj:CliZnNum >= 10 .AND. Proj:CliZnNum <= 15 ) then  0.2
-;																													else if (SteepSlope < 0.5 .AND. (Proj:CliZnNum == 13 .OR.  Proj:CliZnNum == 15)) then  0.63
-;																													else  0.1  endif endif endif
-
-;	"Change to Exist RoofSolReflect if better than Code"	
-;										CathedralCeiling:RoofSolReflect = { if ( IsAltered ) then
-;																							if ( IsVerified ) then
-;																								if ( AltSolReflect >= RoofSolReflect ) then exSolReflect else UNCHANGED endif
-;																								else UNCHANGED endif 											   
-;																						else UNCHANGED endif }
-
-; TC 1/29/15 - changed existing and verified solar reflectance to existing value
-	"Change to Exist RoofSolReflect"	
-										CathedralCeiling:RoofSolReflect = { if (IsVerified) then exSolReflect	else UNCHANGED endif}
-
-; TC 1/29/15 - need to change existing and verified solar emittance to existing value
-; JP 10/3/19 - added a case for re-roofing (tic #867)    ; SAC 11/12/19 - switched 0.75 RoofEmiss to prior (& default) 0.85 due to this used for some time as most representative of real roofing products
-	"Set SolEmiss"	
-										CathedralCeiling:RoofEmiss = {if(ResProj:EnergyCodeYearNum = 2019 .AND. IfValidAnd( Proj:AnalysisVersion <= 190101 ))
-					                                        Then UNCHANGED
-					                                        Else if (IsNew .OR. IsAltered .OR. ISAlteredSurface)
-                                                        then if (ResProj:RunScope == 2 .AND. IfValidAnd( ResProj:AdditionCFA <= 300 ) .AND. IsNew) then UNCHANGED
-                                                             else if (IsVerified) then exSolEmiss
-                                                             else if (RoofSolReflect != 0.1) then 0.85
-                                                             else UNCHANGED endif endif endif
-                                                  else UNCHANGED endif endif}
-
-
-;	mjb	2/20/14	make assignments to CeilingBelowAttic's Attic from CathedralCeiling
-  "Set CathedralCeiling:StdDesignCeiling - Attic roof reflectance"
-  			CathedralCeiling:StdDesignCeiling:AtticZone:RoofSolReflect	 = { RoofSolReflect  }
-
-  "Set CathedralCeiling:StdDesignCeiling - Attic roof SolEmiss"
-  			CathedralCeiling:StdDesignCeiling:AtticZone:RoofEmiss	 = { if(ResProj:EnergyCodeYearNum = 2019 .AND. IfValidAnd( Proj:AnalysisVersion <= 190101 )) then UNCHANGED else RoofEmiss endif }
-
-
-	"Delete CathedralCeiling objects that are being replaced by a CeilingBelowAttic"
-			CathedralCeiling:Action	= {	if (LocalCompAssigned( StdDesignCeiling )) then  DeleteComp()  else  UNCHANGED  endif  }
+   "Budget conversion of CathedralCeiling"   Proj:Action =
+      {  if (ComponentCount( CathedralCeiling ) < 1) then  UNCHANGED
+         else if (Proj:IsSFamResRuleset .OR. AnalysisVersion <= 220000)
+         then  EvalRulelist( "BudgetConversion_Res_CathClgToAttic" )
+         else  EvalRulelist( "BudgetConversion_Res_MFamCathClg" )
+         endif endif  }
 
 	"Eval ProposedInput rules to setup other Attic & Roof-related objects if new CeilingBelowAttic objects were just created"     ResProj:Action	=
 		{  if (ComponentCount( CeilingBelowAttic ) < (NumPropClgBlwAtticObjs + 0.5)) then  UNCHANGED
@@ -1725,6 +1640,118 @@ RULELIST  "BudgetConversion" 1 0 1 0
 
 ;"dbg BEMProc details"  ResProj:Action = {  StoreBEMProc( "at end of BudgetConversion", 0 )  }
 ;"dbg" ResProj:Action = {  MessageBox( "End of 'BudgetConversion' for run %s", RunAbbrev )  }
+
+END
+;*************************************************************************
+
+
+;************************************************************************* SAC 03/21/22
+RULELIST  "BudgetConversion_Res_MFamCathClg" 1 0 1 0
+;*************************************************************************
+   "Set CathedralCeiling:Construction"    CathedralCeiling:Construction	=
+      {  if (IsNew .OR. IsAltered) 
+         then  RuleLibrary(Cons, T24RClimateZoneCodeBase:StdWdFrameCathClgCons( "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:CompCodeBase, "BldgType", Proj:BldgTypeTblStr ) )
+         else UNCHANGED endif	}	
+END
+;*************************************************************************
+RULELIST  "BudgetConversion_Res_CathClgToAttic" 1 0 1 0
+;*************************************************************************
+; moved these rules into this subordinate ruelist from BudgetConversion - SAC 03/21/22
+
+   ;--------------------------------------------------------------------
+   ; BudgetConversion: Convert CathedralCeiling objects to CeilingBelowAttic - and evaluate ProposedInput rules to generate Attic object if necessary   - SAC 10/3/13
+   ; mjb-10/15/13  mods for E+A+A
+   ;                 - don't create Attics for EXISTING Cathedral Ceilings
+   ;                 - apply Status of Cathedral Ceilings (IsNew, IsAltered, IsVerified) to newly created Ceiling Below Attics
+   ;                 - apply Existing Construction of Cathedral Ceilings to newly created Ceiling Below Attics
+   ;--------------------------------------------------------------------
+; unnecessary - duct location reset to Attic w/out this addition
+;	; SAC 10/8/13 - added to ensure proper adjustment of duct locations before/after conversion of proposed CathedralCeilings to CeilingBelowAttic
+;	"Set Zone:NumPropCathClgObjs"				Zone:NumPropCathClgObjs			= {	ChildCount( CathedralCeiling )  }
+
+	"Create CathedralCeiling:StdDesignCeiling (if necessary)"	CathedralCeiling:StdDesignCeiling	= {	if (ParentComponentType() != "ResZn") then  UNDEFINED
+                                                                      else if (IsNew .OR. IsAltered) then 
+                                                                              CreateComp( CeilingBelowAttic, Local( Name ) + "-ClgBlwAtc" )
+                                                                            else UNCHANGED endif
+                                                                      endif }
+
+	"Assign (or create) Attic above ceiling"	CathedralCeiling:StdDesignCeiling:AtticZone	= {	if (MaxAll( Attic:StdCathClgAtticArea ) > 1) then  MaxAllComp( Attic:StdCathClgAtticArea )
+																																else  CreateComp( Attic, "Std Design CathClg Attic", "Setup_StdCathClgAttic" )  endif  }
+	; SAC 4/14/15 - revised following rule to evalute different Attic defaulting rules that will setup Construction and Rise/Pitch/misc properties PRIOR to evaluation of other Attic:Cons BudgetConversion rules
+	"Refresh all Attic defaults"			Attic:Action	= {	EvalRulelist( "Default_Attic", 1 )  }
+
+	"Set CathedralCeiling:StdDesignCeiling:Parent"			CathedralCeiling:StdDesignCeiling:Parent			= {	Parent( Name )  }
+  "Set CathedralCeiling:StdDesignCeiling:Status"      CathedralCeiling:StdDesignCeiling:Status     = { Status  }  ; need to assign this now, since Proposed Input rules called below for new CeilingBelowAttics will otherwise incorrectly set the IsNew... flags
+  "Set CathedralCeiling:StdDesignCeiling:IsNew"         CathedralCeiling:StdDesignCeiling:IsNew   = { IsNew  }   ; redundant with what will be set from Status in PI rules - but may need to be set for subsequent rules below
+  "Set CathedralCeiling:StdDesignCeiling:IsAltered"  CathedralCeiling:StdDesignCeiling:IsAltered  = { IsAltered  }  ; redundant with what will be set from Status in PI rules - but may need to be set for subsequent rules below
+  "Set CathedralCeiling:StdDesignCeiling:IsVerified"  CathedralCeiling:StdDesignCeiling:IsVerified = { IsVerified  }
+  "Set CathedralCeiling:StdDesignCeiling:exConstruction"  CathedralCeiling:StdDesignCeiling:exConstruction = { exConstruction  } ; this is not going to work - changing from cathedral ceiling to ceiling below attic Cons...
+  ; assign minimal (R0) construction first, which may get switched to something minimally compliant later in this rulelist
+	"Set CathedralCeiling:StdDesignCeiling:Construction"	CathedralCeiling:StdDesignCeiling:Construction	= {	RuleLibrary( Cons, "R0 ClgBlwAttic Cons" )  }
+	"Set CathedralCeiling:StdDesignCeiling:CathCeilUValue"	CathedralCeiling:StdDesignCeiling:CathCeilUValue	= {	Construction:WinterDesUValue  }
+  ; set area of CeilingBelowAttic to the horizontal projection of the pitched CathedralCeiling area
+	"Set CathedralCeiling:StdDesignCeiling:Area"				CathedralCeiling:StdDesignCeiling:Area				= {	Area * cos( (RoofTilt * 3.14159265 / 180) )  }
+  "Set CathedralCeiling:StdDesignCeiling:WasCathCeil"  CathedralCeiling:StdDesignCeiling:WasCathCeil = { 1  }		;	mjb	2/20/14	needed later for CBA budget conversion rules
+
+;	"debug CeilingBelowAttic"					CathedralCeiling:Action = { if (IsAltered) then PostWarning( "CathedralCeiling: '%s' Cons: '%s' WinterDesUValue: %g ", Name, Construction:Name, Construction:WinterDesUValue	 ) else UNCHANGED endif }
+
+; mjb	E+A+A	12/1/13	2/20/14	moved rules here
+	"Assign Altered CathedralCeiling RoofSolReflect"					CathedralCeiling:AltSolReflect = {	RoofSolReflect }
+; mjb 1/13/14	removed cool roof requirements for Alterations
+;	mjb	8/21/14 - added them back in, consistent with 2013 RACM - don't remember why we removed them???
+;	mjb 1/12/15 - use new T24RClimateZoneCodeBase lookup table
+; SAC 9/18/15 - added logic to DISABLE requirement for 2013 & 2016 additions <= 300 SF
+; SAC 9/21/15 - fixed bug where EAA <= 300 SF addition logic being applied to both New & EAA projects (revised to apply only to EAA projects)
+; SAC 10/2/15 - revised if statement to include New Cons Addition Alone in check for additionCFA <= 300SF
+; JP 10/3/19 - added a case for re-roofing (tic #867)
+"Set CathedralCeiling:RoofSolReflect"	CathedralCeiling:RoofSolReflect	= {	if ( IsNew .OR. IsAltered .OR. IsAlteredSurface)
+                                                                          then	if (Construction:RoofingLayer == 100205)		; "25 PSF (Very Heavy Ballast or Pavers)"
+									                                                              then	UNCHANGED
+								                                                                else if ((ResProj:EnergyCodeYearNum = 2019 .AND. IfValidAnd( Proj:AnalysisVersion <= 190101 ) .AND. 
+									                                                                       (ResProj:RunScope == 2 .OR. (ResProj:RunScope == 1 .AND. IfValidAnd( ResProj:IsAddAlone > 0.5 ))) .AND.IfValidAnd( ResProj:AdditionCFA <= 300 ))
+                                                                          							 .OR. (ResProj:RunScope == 2 .AND. IfValidAnd( ResProj:AdditionCFA <= 300 ) .AND. IsNew))
+                                                                      							 then	UNCHANGED
+                                                                  								   else if ( SteepSlope > 0.5 )
+                                                                       									  then	T24RClimateZoneCodeBase:SteepRoofReflect( "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )
+                                                                       									  else	T24RClimateZoneCodeBase:FlatRoofReflect(  "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )
+                                                                          endif endif endif else UNCHANGED endif }
+;	mjb 1/12/15 - removed these lines from above rule:												else if (SteepSlope > 0.5 .AND.  Proj:CliZnNum >= 10 .AND. Proj:CliZnNum <= 15 ) then  0.2
+;																													else if (SteepSlope < 0.5 .AND. (Proj:CliZnNum == 13 .OR.  Proj:CliZnNum == 15)) then  0.63
+;																													else  0.1  endif endif endif
+
+;	"Change to Exist RoofSolReflect if better than Code"	
+;										CathedralCeiling:RoofSolReflect = { if ( IsAltered ) then
+;																							if ( IsVerified ) then
+;																								if ( AltSolReflect >= RoofSolReflect ) then exSolReflect else UNCHANGED endif
+;																								else UNCHANGED endif 											   
+;																						else UNCHANGED endif }
+
+; TC 1/29/15 - changed existing and verified solar reflectance to existing value
+	"Change to Exist RoofSolReflect"	
+										CathedralCeiling:RoofSolReflect = { if (IsVerified) then exSolReflect	else UNCHANGED endif}
+
+; TC 1/29/15 - need to change existing and verified solar emittance to existing value
+; JP 10/3/19 - added a case for re-roofing (tic #867)    ; SAC 11/12/19 - switched 0.75 RoofEmiss to prior (& default) 0.85 due to this used for some time as most representative of real roofing products
+	"Set SolEmiss"	
+										CathedralCeiling:RoofEmiss = {if(ResProj:EnergyCodeYearNum = 2019 .AND. IfValidAnd( Proj:AnalysisVersion <= 190101 ))
+					                                        Then UNCHANGED
+					                                        Else if (IsNew .OR. IsAltered .OR. ISAlteredSurface)
+                                                        then if (ResProj:RunScope == 2 .AND. IfValidAnd( ResProj:AdditionCFA <= 300 ) .AND. IsNew) then UNCHANGED
+                                                             else if (IsVerified) then exSolEmiss
+                                                             else if (RoofSolReflect != 0.1) then 0.85
+                                                             else UNCHANGED endif endif endif
+                                                  else UNCHANGED endif endif}
+
+
+;	mjb	2/20/14	make assignments to CeilingBelowAttic's Attic from CathedralCeiling
+  "Set CathedralCeiling:StdDesignCeiling - Attic roof reflectance"
+  			CathedralCeiling:StdDesignCeiling:AtticZone:RoofSolReflect	 = { RoofSolReflect  }
+
+  "Set CathedralCeiling:StdDesignCeiling - Attic roof SolEmiss"
+  			CathedralCeiling:StdDesignCeiling:AtticZone:RoofEmiss	 = { if(ResProj:EnergyCodeYearNum = 2019 .AND. IfValidAnd( Proj:AnalysisVersion <= 190101 )) then UNCHANGED else RoofEmiss endif }
+
+	"Delete CathedralCeiling objects that are being replaced by a CeilingBelowAttic"
+			CathedralCeiling:Action	= {	if (LocalCompAssigned( StdDesignCeiling )) then  DeleteComp()  else  UNCHANGED  endif  }
 
 END
 ;*************************************************************************
