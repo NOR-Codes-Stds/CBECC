@@ -488,6 +488,11 @@ RULELIST "CSE_SimulationPrep" 1 0 0 1
          then  EvalRulelist( "CSE_Project_SetupHVACCapacityExport" )
          else  UNCHANGED  endif  }
 
+   "Setup Zone UMLHs export if needed"    Proj:Action  =    ; SAC 03/24/22
+      {  if (SumAll( Zone:TrackUMLHs ) > 0)
+         then  EvalRulelist( "CSE_Project_SetupZoneUMLHsExport" )
+         else  UNCHANGED  endif  }
+
    ; SAC 11/17/16 - rules to prep Zone for ZEB single day reporting
    "Set CeilingBelowAttic:AtcAirNetHoleSize"   CeilingBelowAttic:AtcAirNetHoleSize = {
          if (IfValidAnd( CeilAirNetIZXFER:izALo > 0)==0) then  -1
@@ -1950,6 +1955,55 @@ RULELIST "CSE_HVACSys_SetupHVACCapacityExport" 1 0 0 1
 ;   "Set HVACSys:CSE_HVACCapsExpCol[7]:colhead"     HVACSys:CSE_HVACCapsExpCol[7]:colhead   = {  "HrlyHtgCap (kBtu)"  }
 ;   "Set HVACSys:CSE_HVACCapsExpCol[7]:colVal_x"    HVACSys:CSE_HVACCapsExpCol[7]:colVal_x  =
 ;      {  Format( "@RSYS[%c%s%c].capH_As/1000", 34, cseRSYS:Name, 34 )  }
+END
+;*************************************************************************
+
+
+;************************************************************************* SAC 03/24/22
+RULELIST "CSE_Project_SetupZoneUMLHsExport" 1 0 0 1
+;*************************************************************************
+   "Create Proj:CSE_UMLHsExportFile"            Proj:CSE_UMLHsExportFile  = {   CreateComp( cseEXPORTFILE, "xf-znUMLHs" )  }
+   "Set Proj:CSE_UMLHsExportFile:xfFileName"    Proj:CSE_UMLHsExportFile:xfFileName  =
+      {  ValidOr( ProjFileNameNoExt, "" ) + ValidOr( RunIDProcFile, "" ) + "-znUMLHs.csv"  }
+;"dbg" Proj:Action = { PostMessageToLog( "CSE_UMLHsExportFile '%s' created -> %s", CSE_UMLHsExportFile:Name, CSE_UMLHsExportFile:xfFileName ) }
+
+   "Create Proj:CSE_UMLHsExport"             Proj:CSE_UMLHsExport  = {   CreateComp( cseEXPORT, "x-znUMLHs" )  }
+   "Set Proj:CSE_UMLHsExport:exExportfile"   Proj:CSE_UMLHsExport:exExportfile  = {  CSE_UMLHsExportFile:Name  }
+   "Set Proj:CSE_UMLHsExport:exType"         Proj:CSE_UMLHsExport:exType    = {  "UDT"   }
+   "Set Proj:CSE_UMLHsExport:exFreq"         Proj:CSE_UMLHsExport:exFreq    = {  "YEAR"  }
+   "Set Proj:CSE_UMLHsExport:exHeader"       Proj:CSE_UMLHsExport:exHeader  = {  "COLUMNSONLY"    }
+;   "Set Proj:CSE_UMLHsExport:exHeader"       Proj:CSE_UMLHsExport:exHeader  = {  "YESIFNEW"    }
+;   "Set Proj:CSE_UMLHsExport:exFooter"       Proj:CSE_UMLHsExport:exFooter  = {  "NO"     }
+
+   "Create Proj:CSE_UMLHsExportCol"          Proj:CSE_UMLHsExportCol  = {   CreateComp( cseEXPORTCOL, "xc-znUMLHs" )  }      ; SAC 03/14/21
+   "Set Proj:CSE_UMLHsExportCol - Parent"    Proj:CSE_UMLHsExportCol:Parent    = {  CSE_UMLHsExport:Name  }
+   "Set Proj:CSE_UMLHsExportCol:colVal_x"    Proj:CSE_UMLHsExportCol:colVal_x  = {  "@top.runDateTime"  }
+   "Set Proj:CSE_UMLHsExportCol:colHead"     Proj:CSE_UMLHsExportCol:colHead   = {  "runDateTime"  }
+
+   "Create Zone UMLHs ExportCols via subordinate rulelist"    Zone:Action =
+      {  if (IfValidAnd( TrackUMLHs > 0 ) .AND. LocalCompAssigned( CSE_ZONE ))
+         then  EvalRulelist( "CSE_Zone_SetupUMLHsExport", 1 )
+         else  UNDEFINED  endif  }
+END
+;*************************************************************************
+RULELIST "CSE_Zone_SetupUMLHsExport" 1 0 0 1
+;*************************************************************************
+   "Create Zone:CSE_UMLHsExpCol[1] - Name"   Zone:CSE_UMLHsExpCol[1]  = {  CreateComp( cseEXPORTCOL, "xcz-" + substr( Name, 0, 39 ) + "-Name" )  }
+   "Set Zone:CSE_UMLHsExpCol[1]:Parent"      Zone:CSE_UMLHsExpCol[1]:Parent    = {  Proj:CSE_UMLHsExport:Name  }
+   "Set Zone:CSE_UMLHsExpCol[1]:colhead"     Zone:CSE_UMLHsExpCol[1]:colhead   = {  "ZnName"  }
+   "Set Zone:CSE_UMLHsExpCol[1]:colVal_x"    Zone:CSE_UMLHsExpCol[1]:colVal_x  = {  Format( "%c%s%c", 34, Name, 34 )  }
+
+   "Create Zone:CSE_UMLHsExpCol[2] - Clg"    Zone:CSE_UMLHsExpCol[2]  = {  CreateComp( cseEXPORTCOL, "xcz-" + substr( Name, 0, 39 ) + "-Clg" )  }
+   "Set Zone:CSE_UMLHsExpCol[2]:Parent"      Zone:CSE_UMLHsExpCol[2]:Parent    = {  Proj:CSE_UMLHsExport:Name  }
+   "Set Zone:CSE_UMLHsExpCol[2]:colhead"     Zone:CSE_UMLHsExpCol[2]:colhead   = {  "Clg"  }
+   "Set Zone:CSE_UMLHsExpCol[2]:colVal_x"    Zone:CSE_UMLHsExpCol[2]:colVal_x  =
+      {  Format( "@Znres[%c%s%c].Y.unMetHrsTol[1]", 34, CSE_ZONE:Name, 34 )  }
+
+   "Create Zone:CSE_UMLHsExpCol[3] - Htg"    Zone:CSE_UMLHsExpCol[3]  = {  CreateComp( cseEXPORTCOL, "xcz-" + substr( Name, 0, 39 ) + "-Htg" )  }
+   "Set Zone:CSE_UMLHsExpCol[3]:Parent"      Zone:CSE_UMLHsExpCol[3]:Parent    = {  Proj:CSE_UMLHsExport:Name  }
+   "Set Zone:CSE_UMLHsExpCol[3]:colhead"     Zone:CSE_UMLHsExpCol[3]:colhead   = {  "Htg"  }
+   "Set Zone:CSE_UMLHsExpCol[3]:colVal_x"    Zone:CSE_UMLHsExpCol[3]:colVal_x  =
+      {  Format( "@Znres[%c%s%c].Y.unMetHrsTol[0]", 34, CSE_ZONE:Name, 34 )  }
 END
 ;*************************************************************************
 
