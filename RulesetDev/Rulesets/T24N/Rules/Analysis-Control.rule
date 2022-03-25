@@ -80,6 +80,7 @@ RULE Proj:SimFlag
 ENDRULE
 
 ; added to prevent E+ simulation for Res-only building models - SAC 10/29/21
+; revised logic to ensure E+ simulation when load passing from CSE to central plants modeled in E+ - SAC 03/20/22
 RULE NEW Proj:SimComFlag
   DESCRIPTION
     "flag indicating Com building components (ThrmlZn) are present and to be simulated"
@@ -88,7 +89,16 @@ RULE NEW Proj:SimComFlag
   INPUTCLASS
     NotInput
   DEFAULT
-    if (SumAll( ThrmlZn:CondFlrArea ) > 0)
+    if (SumAll( ThrmlZn:CondFlrArea ) > 0 .OR.
+        SumAll( FluidSys:CSELoadPassing ) > 0)
+    then  1  else  0  endif
+  SIZING
+    if (SumAll( ThrmlZn:CondFlrArea ) > 0 .OR.
+        SumAll( FluidSys:CSELoadPassing ) > 0)
+    then  1  else  0  endif
+  ANNUAL
+    if (SumAll( ThrmlZn:CondFlrArea ) > 0 .OR.
+        SumAll( FluidSys:CSELoadPassing ) > 0)
     then  1  else  0  endif
 ENDRULE
 
@@ -966,3 +976,32 @@ RULE ThrmlZn:BypassHtgUMLHLimit
     else BypassHtgUMLHLimit
     endif endif
 ENDRULE
+
+
+// ---------------------------------------------------------------- SAC 03/19/22
+// to facilitate Res CSE load passing to E+
+RULE NEW FluidSys:CSELoadMeterIdx
+   ANNUAL
+     if (IfValidAnd( CSELoadPassing > 0 ))
+     then  if (SumAll( FluidSys:CSELoadMeterIdx ) < 1)
+           then  1
+           else  MaxAll( FluidSys:CSELoadMeterIdx ) + 1
+           endif
+     else  UNDEFINED
+     endif
+ENDRULE
+
+RULE NEW Proj:CSE_LoadPassingExportFileName
+  ANNUAL
+    if (SumAll( FluidSys:CSELoadMeterIdx ) > 0)
+    then  ValidOr( ModelFile, "LoadPass" ) + " - " + ValidOr( RunAbbrev, "" ) + "-CSE-PlantLds.csv"
+    else  UNDEFINED  endif
+ENDRULE
+
+RULE FluidSys:Action
+  ANNUAL
+    if (IfValidAnd( CSELoadPassing > 0 ))
+    then  EvalRulelist( "CSE_SimulationPrep_LoadMeters_FluidSys_ProcLoads", 1 )
+    else  UNCHANGED  endif
+ENDRULE
+

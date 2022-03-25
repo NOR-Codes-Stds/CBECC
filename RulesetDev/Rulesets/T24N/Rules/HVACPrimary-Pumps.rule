@@ -1315,10 +1315,16 @@ RULE Pump:FlowMin
     then
       if( FluidSys:IsBaseSys > 0 ) 
       then 0 // No minimum flow for sizing
-      else if( ParentComponentType() = "ThrmlEngyStor" )
+      else
+      if( ParentComponentType() = "ThrmlEngyStor" )
       then 0
-      else u:FlowMin
-      endif endif
+      else 
+      if( FluidSys:IsWSHPSys > 0 )
+      then // Set min flow to 30% to avoid simulation failure. See Ticket 3257
+        ValidOr( FlowCap, 0 ) * 0.3
+      else // All others, set to 10% min per NACM that indicates 10% min speed
+        Max( ValidOr( FlowMin, 0 ), ValidOr( FlowCap, 0 ) * 0.1 )
+      endif endif endif
     else UNDEFINED
     endif
   ANNUAL
@@ -1326,8 +1332,37 @@ RULE Pump:FlowMin
     if( SpdCtrl = "VariableSpeed" )
     then
       if( FluidSys:IsBaseSys > 0 ) 
-      then FlowCap * 0.3
-      else z:FlowMin
+      then 0 // No minimum flow for sizing
+      else
+      if( ParentComponentType() = "ThrmlEngyStor" )
+      then 0
+      else
+      if( FluidSys:IsWSHPSys > 0 )
+      then // Set min flow to 30% to avoid simulation failure. See Ticket 3257
+        ValidOr( FlowCap, 0 ) * 0.3
+      else // All others, set to 10% min per NACM that indicates 10% min speed
+        Max( ValidOr( FlowMin, 0 ), ValidOr( FlowCap, 0 ) * 0.1 )
+      endif endif endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+// ********** Pump Flow Minimum Ratio *******************************************
+RULE Pump:FlowMinRat
+  DESCRIPTION
+    "For variable speed pumps, the minimum pump flow ratio"
+  HELP
+    "This is the minimum flow ratio of the pump if the pump capacity is Autosize."
+  INPUTCLASS
+    Prescribed
+  REPORTPRECISION
+    2
+  DEFAULT
+    if( Proj:HVACAutoSizing > 0 .AND. SpdCtrl = "VariableSpeed" )
+    then
+      if( FluidSys:IsWSHPSys > 0 )
+      then 0.3
+      else 0.1
       endif
     else UNDEFINED
     endif
@@ -1571,6 +1606,93 @@ RULE Blr:HasBypass
     "Selecting this option adds an adiabatic pipe segment branch in parallel to
      the other supply side branches of plant loop. Only 1 bypass branch is added
      if any of the primary equipment has this option specified."
+ENDRULE
+
+
+RULE NEW Pump:FluidSysRef
+  DATATYPE
+    FluidSys
+  DESCRIPTION
+    "The parent FluidSys for the pump."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    FluidSys:Name
+ENDRULE
+
+RULE NEW Pump:IsDemandSidePump
+  DATATYPE
+    Integer
+  DESCRIPTION
+    "Flag that indicates pump is for E+ demand side."
+  HELP
+    "For MFamLoadPassing"
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( FluidSys:Type = "ServiceHotWater" )
+    then 0
+    else 
+    if( ParentComponentType() = "FluidSeg" )
+    then 
+      if( IfValidAnd( FluidSys:IsPriSec > 0 ) .AND. FluidSeg:Type = "SecondarySupply" )
+      then 1 // is Secondary Pump
+      else
+      if( FluidSeg:Type = "PrimarySupply" .OR. FluidSeg:Type = "PrimaryReturn" )
+      then 1
+      else 0
+      endif endif
+   else 0
+   endif endif
+ENDRULE
+
+RULE NEW FluidSys:DemandSidePumpRef
+  DATATYPE
+    Pump
+  DESCRIPTION
+    "The demand side pump for the FluidSys."
+  HELP
+    "For MFamLoadPassing"
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    MaxRevRefComp( Pump:FluidSysRef,  Pump:IsDemandSidePump )
+ENDRULE
+
+RULE NEW FluidSys:DemandSidePumpSpdCtrl
+  DATATYPE
+    String
+  LONGFORM
+    DemandSidePumpSpeedControl
+  DESCRIPTION
+    "Echo demand side pump speed control."
+  HELP
+    "For MFamLoadPassing"
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( LocalCompAssigned( DemandSidePumpRef ) )
+    then DemandSidePumpRef:SpdCtrl
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW FluidSys:DemandSidePumpFlowCap
+  DATATYPE
+    Float
+  LONGFORM
+    DemandSidePumpFlowCap
+  DESCRIPTION
+    "Echo demand side pump speed control."
+  HELP
+    "For MFamLoadPassing"
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( LocalCompAssigned( DemandSidePumpRef ) )
+    then DemandSidePumpRef:FlowCap
+    else UNDEFINED
+    endif
 ENDRULE
 
 

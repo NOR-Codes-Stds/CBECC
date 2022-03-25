@@ -1056,18 +1056,19 @@ RULE NEW FluidSys:ProcLdRef
     ProcLd
   INPUTCLASS
     NotInput
-  ANNUAL_PROPOSED
-    if( Proj:SimResZnInEnergyPlus = 0 .AND. 
-        ( SumRevRef( ResZn:HWFluidSysRef, ResZn:FloorArea) > 0 .OR.
-          SumRevRef( ResOtherZn:HWFluidSysRef, ResOtherZn:Area) > 0 .OR.
-          SumRevRef( ResZn:ChWFluidSysRef, ResZn:FloorArea) > 0 .OR.
-          SumRevRef( ResOtherZn:ChWFluidSysRef, ResOtherZn:Area) > 0 .OR.
-          SumRevRef( ResZn:CWFluidSysRef, ResZn:FloorArea) > 0 .OR.
-          SumRevRef( ResOtherZn:CWFluidSysRef, ResOtherZn:Area) > 0 ) )
-    then RuleLibrary( ProcLd, "ResLoad" , 1, Name)
-    else UNCHANGED
-    endif
 ENDRULE
+; removed test/reference Res loads - now supplied by CSE load passing - SAC 03/19/22
+;  ANNUAL_PROPOSED
+;    if( Proj:SimResZnInEnergyPlus = 0 .AND. 
+;        ( SumRevRef( ResZn:HWFluidSysRef, ResZn:FloorArea) > 0 .OR.
+;          SumRevRef( ResOtherZn:HWFluidSysRef, ResOtherZn:Area) > 0 .OR.
+;          SumRevRef( ResZn:ChWFluidSysRef, ResZn:FloorArea) > 0 .OR.
+;          SumRevRef( ResOtherZn:ChWFluidSysRef, ResOtherZn:Area) > 0 .OR.
+;          SumRevRef( ResZn:CWFluidSysRef, ResZn:FloorArea) > 0 .OR.
+;          SumRevRef( ResOtherZn:CWFluidSysRef, ResOtherZn:Area) > 0 ) )
+;    then RuleLibrary( ProcLd, "ResLoad" , 1, Name)
+;    else UNCHANGED
+;    endif
 
 
 // -------------------- Labels -------------------------
@@ -1088,9 +1089,11 @@ ENDRULE
 
 // -------------------- Summary Stats & Tree Label ------------------------- SAC 02/25/22
 
+; sum DwellUnitType area to FloorAreaServed - SAC 03/15/22
 RULE ResCentralHtgClgSys:FloorAreaServed
   DEFAULT
-	 SumRevRef( ResHVACSys:HVACCentralRef, ResHVACSys:FloorAreaServed )
+	 SumRevRef( ResHVACSys:HVACCentralRef, ResHVACSys:FloorAreaServed ) +
+	 SumRevRef( DwellUnitType:HVACCentralRef, DwellUnitType:DUCntrlHtClFlrAreaServed )
 ENDRULE
 
 RULE ResCentralHtgClgSys:NumAssigningDUs
@@ -1447,7 +1450,7 @@ RULE ResOtherZn:SupplyIAQCFM
     if( IAQOption = "Central Exhaust / Individual Supply" .AND.
         LocalCompAssigned( SupplyIAQFanRef ) )
     then SupplyIAQFanRef:IAQCFM * SupplyIAQFanCnt
-    else UNDEFINED
+    else 0
     endif
 ENDRULE
 
@@ -1456,7 +1459,7 @@ RULE DwellUnitType:SupplyIAQCFM
     if( IAQOption = "Central Exhaust / Individual Supply" .AND.
         LocalCompAssigned( SupplyIAQFanRef ) )
     then SupplyIAQFanRef:IAQCFM * SupplyIAQFanCnt
-    else UNDEFINED
+    else 0
     endif
 ENDRULE
 
@@ -1465,7 +1468,7 @@ RULE ResOtherZn:ExhaustIAQCFM
     if( IAQOption = "Central Supply / Individual Exhaust" .AND.
         LocalCompAssigned( ExhaustIAQFanRef ) )
     then ExhaustIAQFanRef:IAQCFM * ExhaustIAQFanCnt
-    else UNDEFINED
+    else 0
     endif
 ENDRULE
 
@@ -1474,7 +1477,7 @@ RULE DwellUnitType:ExhaustIAQCFM
     if( IAQOption = "Central Supply / Individual Exhaust" .AND.
         LocalCompAssigned( ExhaustIAQFanRef ) )
     then ExhaustIAQFanRef:IAQCFM * ExhaustIAQFanCnt
-    else UNDEFINED
+    else 0
     endif
 ENDRULE
 
@@ -1749,9 +1752,41 @@ ENDRULE
 
 RULE ResCentralVentSys:Type
   RESETS
+    HXType
     TempCtrl
+    EconoCtrlMthd
     SupFanPwrIdx
     ExhFanPwrIdx
+  CHECKSIM
+    if( HXType = "Wheel" )
+    then PostError("ResCentralVentSys '%s' has thermal 'Wheel' heat exchanger.
+                     This option not currently supported.", Name)
+    else if( HtRcvryCertification = "HVI")
+    then PostError("ResCentralVentSys '%s' is using 'HVI' certified heat exchanger.
+                     This option not currently supported.", Name)
+    else if( HasHXBypass = "Yes")
+    then PostError("ResCentralVentSys '%s' has heat recovery with 'Bypass'.
+                     This option not currently supported.", Name)
+    else if( EconoLockout = "Yes")
+    then PostError("ResCentralVentSys '%s' has heat recovery with 'Economizer Lockout'.
+                     This option not currently supported.", Name)
+    else if( DefrostCtrl != "None")
+    then PostError("ResCentralVentSys '%s' has heat recovery with 'Defrost Control'.
+                     This option not currently supported.", Name)
+    else if( TempCtrl = "Scheduled" .OR. TempCtrl = "OutsideAirReset" .OR. TempCtrl = "ScheduledDualSetpoint" )
+    then PostError("ResCentralVentSys '%s' is using supply temperature control '%s'.
+                     This option not currently supported.", Name, TempCtrl)
+    else if( CoilClgType = "ChilledWater" )
+    then PostError("ResCentralVentSys '%s' is using 'ChilledWater' coil.
+                     This option not currently supported.", Name)
+    else if( CoilHtgType = "HotWater" )
+    then PostError("ResCentralVentSys '%s' is using 'HotWater' coil.
+                     This option not currently supported.", Name)
+    else if( EconoCtrlMthd != "NoEconomizer" )
+    then PostError("ResCentralVentSys '%s' has economizer.
+                     This option not currently supported.", Name)
+    else UNCHANGED
+    endif endif endif endif endif endif endif endif endif
 ENDRULE
 
 RULE ResCentralVentSys:TempCtrl
