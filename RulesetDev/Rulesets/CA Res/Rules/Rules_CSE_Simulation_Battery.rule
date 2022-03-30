@@ -71,18 +71,25 @@ RULELIST "CSE_SimulationPrep_Battery" 1 0 0 1
                         UNDEFINED
          case   10 :  ; "Time of Use"
                         if (IfValidAnd( Proj:BattMaxDschgPwr > 0 )==0 .OR. IfValidAnd( Proj:TDVSummerPkFirstHr > 0 )==0) then  UNDEFINED
-                        else if (IfValidAnd( Proj:AnalysisVersion >= 220000 ))
+                        else if (IfValidAnd( Proj:AnalysisVersion >= 220000 ) .AND. IfValidAnd( Proj:SimStandaloneBatt < 0.5 ))
                         then  Format( "select( $dsDay>0, 0, $month>5 && $month<10 && $hour<%g,-min(@BATTERY[ 1].loadSeen, 0),$month>5 && $month<10 && $hour>(%g-1),-1000, default -@BATTERY[ 1].loadSeen)",
                                        Proj:TDVSummerPkFirstHr, Proj:TDVSummerPkFirstHr )
+                        else if (IfValidAnd( Proj:AnalysisVersion >= 220000 ) .AND. IfValidAnd( Proj:SimStandaloneBatt > 0.5 ))
+                        then  Format( "select( $dsDay>0, 0, $hour>(%g-1) && $hour<%g, 1000, $hour<%g || $hour>(%g-1), -1000, default 0)",
+                                       Proj:StandaloneChgStartHr, Proj:TDVSummerPkFirstHr, Proj:StandaloneChgStartHr, Proj:TDVSummerPkFirstHr )
                         else  Format( "select( $dsDay>0, 0, $month>6 && $month<10 && $hour<%g,-min(@BATTERY[ 1].loadSeen, 0),$month>6 && $month<10 && $hour>(%g-1),-1000, default -@BATTERY[ 1].loadSeen)",
                                        Proj:TDVSummerPkFirstHr, Proj:TDVSummerPkFirstHr )
-                        endif endif
-         case   11 :  ; "Advanced DR Control"
+                        endif endif endif
+         case   11 :  ; "Ranked Day DR Control"
                         if (IfValidAnd( Proj:AnalysisVersion > 190101 ))
                         then  UNDEFINED
                         else  ; 2019.1.0 and earlier logic
                               Format( "select( $dsDay>0, 0, @Weather.tdvElecPk>10 && $hour != @weather.tdvElecHrRank[1] && $hour != @weather.tdvElecHrRank[2] && $hour != @weather.tdvElecHrRank[3] ,-@METER[%cMtrElec%c].H.PV / 3412.142,\n\n   @Weather.tdvElecPk>10 && ($hour == @weather.tdvElecHrRank[1] || $hour == @weather.tdvElecHrRank[2]) ,-1000,\n\n   @Weather.tdvElecPk>10 && $hour == @weather.tdvElecHrRank[3] ,-1.305 * %g, Default -@BATTERY[ 1].loadSeen)", 34, 34, Proj:BattCapRatio )
                         endif
+         case   101 :  ; "Advanced DR Control"
+                        if (IfValidAnd( Proj:AnalysisVersion >= 220000 ) .AND. IfValidAnd( Proj:SimStandaloneBatt > 0.5 ))
+                        then Format( "select( $dsDay>0, 0, $hour > (%g-1) && $hour < (%g+5) , 1000, @Weather.tdvElecPkRank>%g && $hour>(%g-1), -1000, default 0)", Proj:StandaloneChgStartHr, Proj:StandaloneChgStartHr, Proj:BattDRNumRankedDays, Proj:TDVSummerPkFirstHr)
+                        else  UNDEFINED endif
          case  100 :  ; "Advanced Control"
                         Format( "import(BTCtrlData,%cBatteryCharge%c)", 34, 34 )    ; ADVANCED CONTROL BATTERY CONTROL EXPRESSION - OLD version
          default   :    UNDEFINED
@@ -90,11 +97,13 @@ RULELIST "CSE_SimulationPrep_Battery" 1 0 0 1
    ; SAC 7/28/19 - added btControlAlg_x to enable Advanced DR for new CSE simulation feature    - SAC 10/28/19 - further revisions to ensure 2019.1.1 results consistent w/ 2019.1.0
    ; SAC 3/4/20 - added initial test expression for new 'Ranked Day DR Control' control option  - SAC 3/5/20 - extended to include in 2019.2.0
 	"Set cseBATTERY:btControlAlg_x"  cseBATTERY:btControlAlg_x	   = {
-         if (IfValidAnd( Proj:AnalysisVersion > 190101 ))
+         if (IfValidAnd( Proj:AnalysisVersion >= 220000 ) .AND. IfValidAnd( Proj:SimStandaloneBatt > 0.5 ) .AND. IfValidAnd( Proj:BatteryControl == 101 ))
+            then  Format( "@Weather.tdvElecPkRank<=%g && ($hour < %g || $hour > (%g+5)) ? %cTDVPeakSave%c : %cDefault%c", ValidOr( Proj:BattDRNumRankedDays, 20 ), Proj:StandaloneChgStartHr, Proj:StandaloneChgStartHr, 34, 34, 34, 34 )
+         else if (IfValidAnd( Proj:AnalysisVersion > 190101 ) .AND. IfValidAnd( Proj:SimStandaloneBatt < 0.5 ))
          then  switch (Proj:BatteryControl)
-                  case   11 :  ; "Advanced DR Control"
+                  case   11 :  ; "Ranked Day DR Control"
                                  Format( "@Weather.tdvElecPk>%g ? %cTDVPeakSave%c : %cDefault%c", Proj:AdvBattTDVPkDayVal, 34, 34, 34, 34 )
-                  case  101 :  ; "Ranked Day DR Control"
+                  case  101 :  ; "Advanced DR Control"
                                  if (IfValidAnd( Proj:AnalysisVersion >= 190200 ))
                                  then  Format( "@Weather.tdvElecPkRank<=%g ? %cTDVPeakSave%c : %cDefault%c", ValidOr( Proj:BattDRNumRankedDays, 20 ), 34, 34, 34, 34 )
                                  else  Format( "@Weather.tdvElecPk>%g ? %cTDVPeakSave%c : %cDefault%c", Proj:AdvBattTDVPkDayVal, 34, 34, 34, 34 )
@@ -103,7 +112,7 @@ RULELIST "CSE_SimulationPrep_Battery" 1 0 0 1
                endswitch
          else  ; 2019.1.0 and earlier logic
                UNDEFINED
-         endif  }
+         endif endif }
 
 
 ; SAC 7/28/19 - REMOVE output of following property for New CSE battery sim    - SAC 10/28/19 - further revisions to ensure 2019.1.1 results consistent w/ 2019.1.0
@@ -116,7 +125,7 @@ RULELIST "CSE_SimulationPrep_Battery" 1 0 0 1
                else  "Yes"  endif endif
          endif  }
 
-;   "btUseUsrChg_x",     BEMP_Str,  1,  0,  1, "",                 0,  0,                          3208, "If YES/1, then the user specified btChgReq will be used to set the battery’s charge request; if NO/0, the default strategy will be used (expression)"
+;   "btUseUsrChg_x",     BEMP_Str,  1,  0,  1, "",                 0,  0,                          3208, "If YES/1, then the user specified btChgReq will be used to set the batteryâ€™s charge request; if NO/0, the default strategy will be used (expression)"
 
 ;   "btInitSOE",         BEMP_Flt,  1,  0,  1, "",                 0,  0,                          3208, "The initial state of energy of the BATTERY system as a fraction of the total capacity"
 ;   "btInitCycles",      BEMP_Flt,  1,  0,  1, "# cycles",         0,  0,                          3208, "The number of cycles on the battery at the beginning of the run"
