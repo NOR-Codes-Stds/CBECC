@@ -70,11 +70,18 @@ RULELIST "CSE_SimulationPrep_Battery" 1 0 0 1
                         UNDEFINED
          case  "Time of Use" :
                         if (IfValidAnd( MaxDschrgPwr > 0 )==0 .OR. IfValidAnd( TDVSummerPkFirstHr > 0 )==0) then  UNDEFINED
-                        else  Format( "select( $dsDay>0, 0, $month>(%g-1) && $month<(%g+1) && $hour<%g,-min(@BATTERY[ 1].loadSeen, 0),$month>(%g-1) && $month<(%g+1) && $hour>(%g-1),-1000, default -@BATTERY[ 1].loadSeen)",
-                                       TOUFirstMonth, TOULastMonth, TDVSummerPkFirstHr, TOUFirstMonth, TOULastMonth, TDVSummerPkFirstHr )
-                        endif
+                        else  if (IfValidAnd( SimStandaloneBatt > 0 ) .AND. IfValidAnd( SumAll( PVArray:DCSysSize ) == 0 )) ; APB 04/07/22 - If no PV and user turned on sim standalone batt, then use standalone charge start hour in charge request expression (tic #3352)
+                        then Format( "select( $dsDay>0, 0, $month>(%g-1) && $month<(%g+1) && $hour>(%g-1) && $hour<%g, 1000, $month>(%g-1) && $month<(%g+1) && ($hour<%g || $hour>(%g-1)), -1000, default 0)", ; APB 04/07/22 - During TOU months, set hours of day to charge & discharge (tic #3352)
+                                       TOUFirstMonth, TOULastMonth, StandaloneChgStartHr, TDVSummerPkFirstHr, TOUFirstMonth, TOULastMonth, StandaloneChgStartHr, TDVSummerPkFirstHr ) ; APB 04/07/22 - During TOU months, set hours of day to charge & discharge (tic #3352)
+                        else Format( "select( $dsDay>0, 0, $month>(%g-1) && $month<(%g+1) && $hour<%g,-min(@BATTERY[ 1].loadSeen, 0),$month>(%g-1) && $month<(%g+1) && $hour>(%g-1),-1000, default -@BATTERY[ 1].loadSeen)", ; APB 04/07/22 - Otherwise, during TOU months for PV-tied battery, charge battery when it can from PV and discharge at peak afternoon hour (tic #3352)
+                                       TOUFirstMonth, TOULastMonth, TDVSummerPkFirstHr, TOUFirstMonth, TOULastMonth, TDVSummerPkFirstHr ) ; APB 04/07/22 - Otherwise, during TOU months for PV-tied battery, charge battery when it can from PV and discharge at peak afternoon hour (tic #3352)
+                        endif endif
          case  "Advanced DR Control" :
                         UNDEFINED
+         case  "Ranked Day DR Control" : ; APB 04/07/22 - Add charge/discharge logic for standalone battery with Ranked Day DR control Enable user to set month to start & end TOU control (analyze seasonal vs. annual) (tic #3352)
+                        if (IfValidAnd( SimStandaloneBatt > 0 ))
+                        then Format( "select( $dsDay>0, 0, $hour > (%g-1) && $hour < (%g+5) , 1000, @Weather.tdvElecPkRank>%g && $hour>(%g-1), -1000, default 0)", StandaloneChgStartHr, StandaloneChgStartHr, NumRankedDays, TDVSummerPkFirstHr)
+                        else  UNDEFINED endif
          default   :    UNDEFINED
       endswitch  }
 ; likely not in future (was in res for testing/development)
