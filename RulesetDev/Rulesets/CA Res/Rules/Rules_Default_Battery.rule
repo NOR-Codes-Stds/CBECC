@@ -84,11 +84,12 @@ RULELIST "ProposedInput_Battery" 0 0 0 0
 
 ; APB 03/30/22 - Add logic to enable standalone battery without PV (tic #1319)
    "Set Proj:SimulateBattery"    Proj:SimulateBattery =           ; SAC 1/29/20 - toggle OFF simulation of Battery is PVEception specified as 0kW (tic #1193)
-   {  if (AllowBattInputs > 0 .AND. BattMaxCap > 0 .AND.
-          IfValidAnd( UseReducedPVReqVal == 0)==0) then 1  
-     else if (AllowBattInputs > 0 .AND. BattMaxCap > 0 .AND.
-          (IfValidAnd( ReducedPVReqValue == 0) .OR. IfValidAnd( PVWDCSysTotal == 0)) .AND. IfValidAnd( SimStandaloneBatt == 1)) then 1 
-     else  0  endif endif }
+   {  if (AllowBattInputs > 0 .AND. BattMaxCap > 0)
+      then 
+         if (IfValidAnd( SimStandaloneBatt > 0)) then 1
+         else if (IfValidAnd( UseReducedPVReqVal == 0)==0 .AND. IfValidAnd( PVWDCSysTotal > 0)) then 1  
+         else  0  endif endif
+     else  0  endif }
 
    "Set Proj:SecondBattSimReqd"  Proj:SecondBattSimReqd = {
       if (SimulateBattery < 1) then  0
@@ -100,7 +101,13 @@ RULELIST "ProposedInput_Battery" 0 0 0 0
 
 ; APB 03/30/22 - Enable standalone battery without PV (tic #1319)
    "Default Proj:SimStandaloneBatt"     Proj:SimStandaloneBatt = {  
-      0  }   ; Turn off by default
+      0 }   ; Turn off by default
+
+; APB 04/13/22 - Reset Proj:SimStandaloneBatt if PV size reset > 0 kW
+	"Blast user-defined SimStandaloneBatt if PV capacity increased > 0 kW"  Proj:Action  = {
+         if ( IfValidAnd( SimStandaloneBatt > 0.5) .AND. IfValidAnd( AllowStandaloneBattInputs = 1 )==0 )
+         then  EvalRulelist( "ForceDefault_SimStandaloneBatt" )
+         else	UNCHANGED  endif  }
 
 ;   "Prevent Battery performance user inputs if not ResearchMode"  Proj:Action = {   ; SAC 12/31/17
 ;         if (IfValidAnd( EnableResearchMode > 0 )) then  UNCHANGED
@@ -111,6 +118,21 @@ RULELIST "ProposedInput_Battery" 0 0 0 0
          else if (LocalStatus( BattMaxChgPwr ) > 4 .OR. LocalStatus( BattMaxDschgPwr ) > 4)
          then  EvalRulelist( "ForceDefault_BatteryRates" )
          else  UNCHANGED  endif endif  }
+
+; APB 03/30/22 - Enable user to set month to start TOU control (analyze seasonal vs. annual) (tic #1319)
+   "Default Proj:TOUStartMonth"  Proj:TOUStartMonth  = { 
+      if (IfValidAnd( Proj:SimStandaloneBatt < 0.5 )) then 6 ; Default to June for PV-tied battery (previous >= v220000 summer month start)
+      else 1 endif } ; Default to January for standalone battery (use all year)
+      
+; APB 03/30/22 - Enable user to set month to end TOU control (analyze seasonal vs. annual) (tic #1319)
+   "Default Proj:TOUEndMonth"  Proj:TOUEndMonth  = { 
+      if (IfValidAnd( Proj:SimStandaloneBatt < 0.5 )) then 9 ; Default to September for PV-tied battery (previous >= v220000 summer month start)
+      else 12 endif } ; Default to December for standalone battery (use all year)
+
+; APB 3/30/22 - add standalone battery charge start hour for TOU or Advanced DR control (tic #1319)
+   "Default Proj:AllowStandaloneChgStartHr"     Proj:AllowStandaloneChgStartHr = {  
+      if (SimStandaloneBatt > 0.5 .AND. (BatteryControl == 10 .OR. BatteryControl == 101)) then 1 ; expose if standalone battery and Time of Use or Advanced DR control
+      else  0  endif  }   ; Default to not allow/show in screens
 
 ; APB 03/30/22 - Enable roundtrip efficiency as alternative to charge & discharge efficiency (tic #1319)
    "Default Proj:AllowBattRoundTripEff"      Proj:AllowBattRoundTripEff = {
@@ -262,6 +284,17 @@ END
 ;************************************************************************* SAC 03/08/22
 RULELIST "ForceOff_BattGridHarmCredit" 1 0 0 0
    "Blast Proj:BattGridHarmCredit"  Proj:BattGridHarmCredit  = {  0  }
+END
+;*************************************************************************
+
+; APB 04/13/22 - blast user-defined SimStandaloneBatt if PV capacity increased > 0 kW
+;*************************************************************************
+RULELIST "ForceDefault_SimStandaloneBatt" 1 0 0 0
+;*************************************************************************
+   "Post warning to log for reset of Proj:SimStandaloneBatt"  Proj:Action  = {
+         PostWarning( "Proj:SimStandaloneBatt reset to default OFF (since PV capacity increased > 0 kW).")   }
+   "Force reset of Proj:SimStandaloneBatt"     Proj:SimStandaloneBatt  = {
+         0  }
 END
 ;*************************************************************************
 
