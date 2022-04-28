@@ -1491,16 +1491,35 @@ RULELIST  "BudgetConversion" 1 0 1 0
 ; mjb 7/29/14 - revised logic to ensure that ClVent NOT added to Additions < 1000sf (GC #337 related)
 ; mjb 8/1/14  - revised logic to ensure that ClVent added to Additions > 1000sf (GC #337 related)
 ; mjb 1/12/15 - modified to use new look up table for code levels
-	"Set Zone:NeedStdClVent"		Zone:NeedStdClVent		= {	if (( Proj:RunScope == 2 .AND. Status == 3 .AND. AdditionCFA > 1000) .OR. (Proj:RunScope == 1 .AND. Proj:IsAddAlone > 0.5 .AND. CondFloorArea > 1000) .OR. (Proj:RunScope ==1 .AND. Proj:IsAddAlone < 0.5) ) then
+; modified for 2022+ code to require WHFan for NewCons SFam w/ CondFloorArea > 500SF and also expand AdditionCFA checks to span entire model (not just single zone) - SAC 04/28/22 (tic #1291)
+	"Set Zone:NeedStdClVent"		Zone:NeedStdClVent		=
+      {  if (IfValidAnd( Proj:AnalysisVersion <= 199999 ))
+         then  if (( Proj:RunScope == 2 .AND. Status == 3 .AND. AdditionCFA > 1000) .OR.
+                   ( Proj:RunScope == 1 .AND. Proj:IsAddAlone > 0.5 .AND. CondFloorArea > 1000) .OR.
+                   ( Proj:RunScope == 1 .AND. Proj:IsAddAlone < 0.5) )
+               then  if (T24RClimateZoneCodeBase:WHFan( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr ) > 0.5)
+                     then 1
+                     else 0 endif  
+               else 0 endif  
+         else  ; 2022+ code vintage
+               if (( Proj:RunScope == 2 .AND. AdditionCFA > 1 .AND. SumAcrossIf( Zone:AdditionCFA, Zone:Status = 3 ) > 1000) .OR.
+                   ( Proj:RunScope == 1 .AND. Proj:IsAddAlone > 0.5 .AND. CondFloorArea > 1 .AND. SumAll( Zone:CondFloorArea ) > 1000) .OR.
+                   ( Proj:RunScope == 1 .AND. Proj:IsAddAlone < 0.5 .AND. CondFloorArea > 1 .AND. SumAll( Zone:CondFloorArea ) >  500) )
+               then  if (T24RClimateZoneCodeBase:WHFan( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr ) > 0.5)
+                     then 1
+                     else 0 endif  
+               else 0 endif  
+         endif   }
 ;																							if (T24RClimateZoneDesignDay:WHFan( "WeatherFileSet", Proj:WeatherFileSet, "ClimateZone", ClimateZone ) > 0.5) then 1 else 0 endif  
-																							if (T24RClimateZoneCodeBase:WHFan( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr ) > 0.5) then 1 else 0 endif  
-																						else  0  endif   }
 
 	"Check NeedStdClVent"			Proj:EnableClVent		= {	if (MaxChild(Zone:NeedStdClVent) > 0.5) then 1 else UNCHANGED endif	}
 
+   ; revise logic to PREVENT WHF in models where max Zone:NeedStdClVent < 1 - SAC 04/28/22 (tic #1291)
 	"Set main Cool Vent option based on CZ"
 ;			Proj:UnitClVentOption	= {	if (EnableClVent < 0.5 .OR. IsMultiFamily > 0.5 .OR. T24RClimateZoneDesignDay:WHFan( "WeatherFileSet", Proj:WeatherFileSet, "ClimateZone", ClimateZone ) < 0.5)
-			Proj:UnitClVentOption	= {	if (EnableClVent < 0.5 .OR. IsMultiFamily > 0.5 .OR. T24RClimateZoneCodeBase:WHFan( "ClimateZone", ClimateZone, "CodeBase", StdDesignBase, "BldgType", Proj:BldgTypeTblStr ) < 0.5)
+			Proj:UnitClVentOption	= {	if (EnableClVent < 0.5 .OR. IsMultiFamily > 0.5 .OR.
+                                           (IfValidAnd( Proj:AnalysisVersion >= 220000 ) .AND. MaxChild(Zone:NeedStdClVent) < 0.5) .OR.
+                                           T24RClimateZoneCodeBase:WHFan( "ClimateZone", ClimateZone, "CodeBase", StdDesignBase, "BldgType", Proj:BldgTypeTblStr ) < 0.5)
 														then	0					; none
 														else	1  endif 	}		; "Default Prescriptive Whole House Fan"
 
