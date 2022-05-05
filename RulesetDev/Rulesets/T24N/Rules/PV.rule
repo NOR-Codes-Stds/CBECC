@@ -177,9 +177,9 @@ RULE NEW ResOtherZn:PVBattSizeArea
     else  0  endif
 ENDRULE
 
-RULE NEW ResZn:PVBattSizeHiRiseResArea
+RULE NEW ResZn:PVBattSizeResArea
   LONGFORM
-    PhotovoltaicBatterySizeHighRiseResidentialArea
+    PhotovoltaicBatterySizeResidentialArea
   DATATYPE
     Float
   REFERENCE
@@ -193,9 +193,7 @@ RULE NEW ResZn:PVBattSizeHiRiseResArea
   DEFAULT : T24N_2019
     UNDEFINED
   DEFAULT
-    if (IfValidAnd( Bldg:TotStoryCnt >= 4 ))
-    then  ValidOr( CondFlrAreaWithMult, 0 )
-    else  0  endif
+    ValidOr( CondFlrAreaWithMult, 0 )
 ENDRULE
 
 RULE NEW Proj:NResPVBattAreaSum
@@ -217,27 +215,24 @@ RULE NEW Proj:NResPVBattAreaSum
     SumAll( Spc:PVBattSizeArea ) + SumAll( ResOtherZn:PVBattSizeArea )
 ENDRULE
 
-RULE NEW Proj:HiRiseResPVBattAreaSum
+RULE NEW Proj:HiRiseResNResPVBattAreaSum
   LONGFORM
-    HighRiseResidentialPVBatteryAreaSum
+    HighRiseResidentialNonResidentialPVBatteryAreaSum
   DATATYPE
     Float
   REFERENCE
     2022+ Standards Tables 140.10-A,B
   HELP
-    "HighRise Residential building area (excl. hotel/motel guest rooms) used to determine prescribed PV & battery sizes"
+    "HighRise Residential + Nonresidential building area used to determine prescribed PV & battery sizes"
   DESCRIPTION
-    "HighRise Residential building area (excl. hotel/motel guest rooms) used to determine prescribed PV & battery sizes"
+    "HighRise Residential + Nonresidential building area used to determine prescribed PV & battery sizes"
   INPUTCLASS
     NotInput
   DEFAULT : T24N_2019
     UNDEFINED
   DEFAULT
     if (IfValidAnd( Bldg:TotStoryCnt >= 4 ))
-    then  SumAll( ResZn:PVBattSizeHiRiseResArea ) +
-          SumAcrossIf( ResOtherZn:PVBattSizeArea, ResOtherZn:PVBattSizeBldgType = "Highrise Multifamily" ) +
-          SumAcrossIf(        Spc:PVBattSizeArea,        Spc:PVBattSizeBldgType = "Highrise Multifamily" ) -
-          SumAcrossIf(        Spc:PVBattSizeArea,        Spc:SpcFunc = "Hotel/Motel Guest Room" )
+    then  SumAll( ResZn:PVBattSizeResArea ) + NResPVBattAreaSum
     else  0  endif
 ENDRULE
 
@@ -257,14 +252,14 @@ RULE NEW Proj:NResPVBattAreaPct
   DEFAULT : T24N_2019
     UNDEFINED
   DEFAULT
-    if (SumAll( Bldg:TotFlrArea ) < 1) then  0
-    else  NResPVBattAreaSum * 100 / SumAll( Bldg:TotFlrArea )
+    if (SumAll( Bldg:TotCondFlrArea ) < 1) then  0
+    else  NResPVBattAreaSum * 100 / SumAll( Bldg:TotCondFlrArea )
     endif
 ENDRULE
 
-RULE NEW Proj:HiRiseResPVBattAreaPct
+RULE NEW Proj:HiRiseResNResPVBattAreaPct
   LONGFORM
-    HighRiseResidentialPVBatteryAreaPercent
+    HighRiseResidentialNonResidentialPVBatteryAreaPercent
   DATATYPE
     Float
   REFERENCE
@@ -278,12 +273,12 @@ RULE NEW Proj:HiRiseResPVBattAreaPct
   DEFAULT : T24N_2019
     UNDEFINED
   DEFAULT
-    if (SumAll( Bldg:TotFlrArea ) < 1) then  0
-    else  HiRiseResPVBattAreaSum * 100 / SumAll( Bldg:TotFlrArea )
+    if (SumAll( Bldg:TotCondFlrArea ) < 1) then  0
+    else  HiRiseResNResPVBattAreaSum * 100 / SumAll( Bldg:TotCondFlrArea )
     endif
 ENDRULE
 
-RULE Proj:PrscrpPVBattClass
+RULE NEW Proj:PrscrpPVBattClass
   REFERENCE
     2022+ Standards Tables 140.10-A,B & 170.2(f,g)
   HELP
@@ -291,9 +286,12 @@ RULE Proj:PrscrpPVBattClass
   DESCRIPTION
     "Classification used to determine prescribed PV & battery sizes"
   OPTION
+    HiRiseRes/MixedUse
+    HiRiseRes_NoPVBatt
+    LowRiseRes/MixedUse
     LowRiseRes
-    HiRiseRes
     NonRes/MixedUse
+    NonRes_NoPVBatt
     n/a   
   INPUTCLASS
     NotInput
@@ -301,19 +299,34 @@ RULE Proj:PrscrpPVBattClass
     UNDEFINED
   DEFAULT
     if (IfValidAnd( ResDwellUnits > 0 ) .AND.
-        IfValidAnd( ResProj:NumDwellingUnits > 0 ) .AND.
-        HiRiseResPVBattAreaPct > 20) then  "HiRiseRes"
-    else if (NResPVBattAreaPct >= 80) then  "NonRes/MixedUse"
-    else if (IfValidAnd( ResDwellUnits > 0 ) .AND.
-             IfValidAnd( ResProj:NumDwellingUnits > 0 ) .AND.
-             SumAll( ResZn:CondFlrAreaWithMult ) > 0)
-    then  if (IfValidAnd( Bldg:TotStoryCnt >= 4 ))
-          then  "HiRiseRes"
-          else  "LowRiseRes"
+        IfValidAnd( ResProj:NumDwellingUnits > 0 ))
+    then  if (IfValidAnd( Bldg:TotStoryCnt > 3 ))
+          then  if (HiRiseResNResPVBattAreaPct >= 80)
+                then  "HiRiseRes/MixedUse"
+                else  "HiRiseRes_NoPVBatt"  endif
+          else  if (NResPVBattAreaPct >= 80)
+                then  "LowRiseRes/MixedUse"
+                else  "LowRiseRes"  endif
           endif
-    else  "n/a"
-    endif endif endif
+    else  if (NResPVBattAreaPct >= 80)
+          then  "NonRes/MixedUse"
+          else  "NonRes_NoPVBatt"  endif
+    endif
 ENDRULE
+; prior version -
+;    if (IfValidAnd( ResDwellUnits > 0 ) .AND.
+;        IfValidAnd( ResProj:NumDwellingUnits > 0 ) .AND.
+;        HiRiseResPVBattAreaPct > 20) then  "HiRiseRes"
+;    else if (NResPVBattAreaPct >= 80) then  "NonRes/MixedUse"
+;    else if (IfValidAnd( ResDwellUnits > 0 ) .AND.
+;             IfValidAnd( ResProj:NumDwellingUnits > 0 ) .AND.
+;             SumAll( ResZn:CondFlrAreaWithMult ) > 0)
+;    then  if (IfValidAnd( Bldg:TotStoryCnt >= 4 ))
+;          then  "HiRiseRes"
+;          else  "LowRiseRes"
+;          endif
+;    else  "n/a"
+;    endif endif endif
 
 RULE NEW Proj:NResPVBattAreaMsg
   LONGFORM
@@ -332,15 +345,22 @@ RULE NEW Proj:NResPVBattAreaMsg
     UNDEFINED
   DEFAULT
     switch (PrscrpPVBattClass)
-       case "HiRiseRes"  :  if (IfValidAnd( ResDwellUnits > 0 ) .AND. HiRiseResPVBattAreaPct > 20)
-                            then  Format( "Prescribed PV/Battery based on '%s' classification w/ %g stories, %.0f dwellings and %.1f% highrise residential area", PrscrpPVBattClass, Bldg:TotStoryCnt, ResProj:NumDwellingUnits, HiRiseResPVBattAreaPct )
-                            else  Format( "Prescribed PV/Battery based on '%s' classification w/ %g stories, %.0f dwellings and %.1f% non-residential area", PrscrpPVBattClass, Bldg:TotStoryCnt, ResProj:NumDwellingUnits, NResPVBattAreaPct )
-                            endif
-       case "LowRiseRes" :  Format( "Prescribed PV/Battery based on '%s' classification w/ %g stories, %.0f dwellings and %.1f% non-residential PV/Battery requirement area", PrscrpPVBattClass, Bldg:TotStoryCnt, ResProj:NumDwellingUnits, NResPVBattAreaPct )
-       case "NonRes/MixedUse" :  Format( "Prescribed PV/Battery based on '%s' classification w/ %.1f% PV/Battery requirement area", PrscrpPVBattClass, NResPVBattAreaPct )
+       case "HiRiseRes/MixedUse"  :  Format( "Prescribed PV/Battery based on '%s' classification w/ %g stories, %.0f dwellings and %.1f% highrise res and mixed use area", PrscrpPVBattClass, Bldg:TotStoryCnt, ResProj:NumDwellingUnits, HiRiseResNResPVBattAreaPct )
+       case "LowRiseRes/MixedUse" :  Format( "Prescribed PV/Battery based on '%s' classification w/ %g stories, %.0f dwellings and %.1f% nonres and mixed use area", PrscrpPVBattClass, Bldg:TotStoryCnt, ResProj:NumDwellingUnits, NResPVBattAreaPct )
+       case "NonRes/MixedUse"     :  Format( "Prescribed PV/Battery based on '%s' classification w/ %.1f% PV/Battery requirement area", PrscrpPVBattClass, NResPVBattAreaPct )
+       case "LowRiseRes"          :  Format( "Prescribed PV/Battery based on '%s' classification w/ %g stories and %.0f dwellings", PrscrpPVBattClass, Bldg:TotStoryCnt, ResProj:NumDwellingUnits )
+       case "HiRiseRes_NoPVBatt"  :  Format( "No Prescribed PV/Battery requirement ('%s' classification) due to %.1f% highrise res and mixed use area (below 80%)", PrscrpPVBattClass, HiRiseResNResPVBattAreaPct )
+       case "NonRes_NoPVBatt"     :  Format( "No Prescribed PV/Battery requirement ('%s' classification) due to %.1f% nonres and mixed use area (below 80%)", PrscrpPVBattClass, NResPVBattAreaPct )
        default  :  Format( "No prescriptive PV/Battery requirement w/ %.1f% PV requirement area", NResPVBattAreaPct )
     endswitch
 ENDRULE
+;       case "HiRiseRes"  :  if (IfValidAnd( ResDwellUnits > 0 ) .AND. HiRiseResPVBattAreaPct > 20)
+;                            then  Format( "Prescribed PV/Battery based on '%s' classification w/ %g stories, %.0f dwellings and %.1f% highrise residential area", PrscrpPVBattClass, Bldg:TotStoryCnt, ResProj:NumDwellingUnits, HiRiseResPVBattAreaPct )
+;                            else  Format( "Prescribed PV/Battery based on '%s' classification w/ %g stories, %.0f dwellings and %.1f% non-residential area", PrscrpPVBattClass, Bldg:TotStoryCnt, ResProj:NumDwellingUnits, NResPVBattAreaPct )
+;                            endif
+;       case "LowRiseRes" :  Format( "Prescribed PV/Battery based on '%s' classification w/ %g stories, %.0f dwellings and %.1f% non-residential PV/Battery requirement area", PrscrpPVBattClass, Bldg:TotStoryCnt, ResProj:NumDwellingUnits, NResPVBattAreaPct )
+;       case "NonRes/MixedUse" :  Format( "Prescribed PV/Battery based on '%s' classification w/ %.1f% PV/Battery requirement area", PrscrpPVBattClass, NResPVBattAreaPct )
+;       default  :  Format( "No prescriptive PV/Battery requirement w/ %.1f% PV requirement area", NResPVBattAreaPct )
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -354,6 +374,20 @@ RULE Proj:ReducedPVReq
     Optional
   DEFAULT 
     0
+ENDRULE
+
+RULE Proj:ReducedPVReqExcptLowRiseRes
+  DESCRIPTION
+    "whether or not the reduced PV requirement exception list pertains
+    to low-rise residential (sec. 170.2(f))"
+  INPUTCLASS
+    NotInput
+  DEFAULT 
+    switch (PrscrpPVBattClass)
+       case "LowRiseRes/MixedUse" :  1
+       case "LowRiseRes"          :  1
+       default                    :  0
+    endswitch
 ENDRULE
 
 RULE Proj:ReducedPVReqExcpt
@@ -477,9 +511,13 @@ RULE NEW Spc:T24PVSize
   DEFAULT : T24N_2019
     UNDEFINED
   DEFAULT
-    ( PVBattSizeArea *
-      T24NR_PVCapacity:FactorA( "ClimateZone", ValidOr( Proj:CliZnNum, 12 ),
-                                "BldgType", PVBattSizeBldgType ) ) / 1000
+    if ( Proj:PrscrpPVBattClass == "HiRiseRes/MixedUse"  .OR.
+         Proj:PrscrpPVBattClass == "LowRiseRes/MixedUse" .OR.
+         Proj:PrscrpPVBattClass == "NonRes/MixedUse" )
+    then  ( PVBattSizeArea *
+            T24NR_PVCapacity:FactorA( "ClimateZone", ValidOr( Proj:CliZnNum, 12 ),
+                                      "BldgType", PVBattSizeBldgType ) ) / 1000
+    else  0  endif
 ENDRULE
 
 // ResOtherZn Prescribed PV Requirements
@@ -501,9 +539,13 @@ RULE NEW ResOtherZn:T24PVSize
   DEFAULT : T24N_2019
     UNDEFINED
   DEFAULT
-    ( PVBattSizeArea *
-      T24NR_PVCapacity:FactorA( "ClimateZone", ValidOr( Proj:CliZnNum, 12 ),
-                                "BldgType", PVBattSizeBldgType ) ) / 1000
+    if ( Proj:PrscrpPVBattClass == "HiRiseRes/MixedUse"  .OR.
+         Proj:PrscrpPVBattClass == "LowRiseRes/MixedUse" .OR.
+         Proj:PrscrpPVBattClass == "NonRes/MixedUse" )
+    then  ( PVBattSizeArea *
+            T24NR_PVCapacity:FactorA( "ClimateZone", ValidOr( Proj:CliZnNum, 12 ),
+                                      "BldgType", PVBattSizeBldgType ) ) / 1000
+    else  0  endif
 ENDRULE
 
 // ResZn Prescribed PV Requirements
@@ -525,19 +567,44 @@ RULE NEW ResZn:T24PVSize
   DEFAULT : T24N_2019
     UNDEFINED
   DEFAULT
-    if (IfValidAnd( Proj:BldgTypeTblStr = "HiRiseRes" ))
+    if ( Proj:PrscrpPVBattClass == "HiRiseRes/MixedUse" )
     then  ( ValidOr( CondFlrAreaWithMult, 0 ) *
             T24NR_PVCapacity:FactorA( "ClimateZone", ValidOr( Proj:CliZnNum, 12 ),
                                       "BldgType", "Highrise Multifamily" ) ) / 1000
-    else  (( ValidOr( CondFlrAreaWithMult, 0 ) *
+    else if ( Proj:PrscrpPVBattClass == "LowRiseRes/MixedUse" .OR.
+              Proj:PrscrpPVBattClass == "LowRiseRes" )
+    then  (( ValidOr( CondFlrAreaWithMult, 0 ) *
              T24MF_PVCapacity:A_CFA( "ClimateZone", ValidOr( Proj:CliZnNum, 12 ) ) ) / 1000) +
           (  ValidOr( NumDwellingUnitsWithMult, 0 ) *
              T24MF_PVCapacity:B_Dwellings( "ClimateZone", ValidOr( Proj:CliZnNum, 12 ) ) )
+    else  0
+    endif endif
+ENDRULE
+
+RULE NEW Proj:PrscrpPVSize
+  LONGFORM
+    PrescriptivePhotovoltaicSize
+  DATATYPE
+    Float
+  UNITS
+    kWdc
+  HELP
+    "Prescriptive PV direct current size"
+  DESCRIPTION
+    "Prescriptive PV direct current size"
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if ( PrscrpPVBattClass == "HiRiseRes/MixedUse"  .OR.
+         PrscrpPVBattClass == "LowRiseRes/MixedUse" .OR.
+         PrscrpPVBattClass == "LowRiseRes"          .OR.
+         PrscrpPVBattClass == "NonRes/MixedUse" )
+    then  SumAll( Spc:T24PVSize ) + SumAll( ResZn:T24PVSize ) + SumAll( ResOtherZn:T24PVSize )
+    else  0
     endif
 ENDRULE
 
-
-// Proj-wide Prescribed PV Requirements
+// Proj-wide PV Requirements
    ; adjust Proj:T24PVSize for lower SARA-based PV for NonRes/MixedUse & HiRiseRes prescrip PV models - SAC 04/21/22
 RULE NEW Proj:T24PVSize
   LONGFORM
@@ -553,13 +620,43 @@ RULE NEW Proj:T24PVSize
   INPUTCLASS
     NotInput
   DEFAULT
-    if ((PrscrpPVBattClass == "NonRes/MixedUse" .OR. PrscrpPVBattClass == "HiRiseRes") .AND.
-        SolAccessRfAreaPVPwr > 0 .AND.
-        SolAccessRfAreaPVPwr < (SumAll( Spc:T24PVSize ) + SumAll( ResZn:T24PVSize ) + SumAll( ResOtherZn:T24PVSize )))
-    then  SolAccessRfAreaPVPwr
-    else  SumAll( Spc:T24PVSize ) + SumAll( ResZn:T24PVSize ) + SumAll( ResOtherZn:T24PVSize )
+    if ( PrscrpPVBattClass == "HiRiseRes/MixedUse"  .OR.
+         PrscrpPVBattClass == "LowRiseRes/MixedUse" .OR.
+         PrscrpPVBattClass == "LowRiseRes"          .OR.
+         PrscrpPVBattClass == "NonRes/MixedUse" )
+    then  if ( SolAccessRfAreaPVPwr > 0 .AND.
+               SolAccessRfAreaPVPwr < PrscrpPVSize )
+          then  SolAccessRfAreaPVPwr
+          else  PrscrpPVSize
+          endif
+    else  0
     endif
 ENDRULE
+
+
+// Round 2 of T24PVSize mod adjusting for ReducedPVReq
+
+
+// keep track of FRACTION of final Std design PV size / Prescriptive table size
+RULE NEW Proj:PrscrpStdPVSizeRat
+  LONGFORM
+    PrescriptiveStandardPhotovoltaicSizeRatio
+  DATATYPE
+    Float
+  UNITS
+    frac
+  HELP
+    "Ratio of final standard design PV size / size based on prescriptive tables"
+  DESCRIPTION
+    "Ratio of final standard design PV size / size based on prescriptive tables"
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (IfValidAnd( PrscrpPVSize > 0 ))
+    then  T24PVSize / PrscrpPVSize
+    else  0  endif
+ENDRULE
+
 
 RULE NEW Proj:T24PVArrayRef
   LONGFORM
