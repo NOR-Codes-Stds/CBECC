@@ -898,13 +898,13 @@ RULE PVArray:CalFlexibleInstallOpt
     CFI1
     CFI2
   DEFAULT 
-    if (Proj:HavePVShadeObj)
+    if (Proj:HavePVShadeObj .OR. IfValidAnd(ArrayType != "Fixed (open rack)"))  // APB 05/11/22 - Default to "n/a" for any axis tracking array type (tic #3352)
     then  "n/a"
     else  "CFI1"
     endif
   ANNUAL
     if (LocalStatus( CalFlexibleInstallOpt ) > 3) then  UNCHANGED
-    else if (Proj:HavePVShadeObj)
+    else if (Proj:HavePVShadeObj .OR. IfValidAnd(ArrayType != "Fixed (open rack)"))  // APB 05/11/22 - Default to "n/a" for any axis tracking array type (tic #3352)
     then  "n/a"
     else  "CFI1"
     endif endif
@@ -1098,7 +1098,11 @@ RULE PVArray:Az
           then  PVArrayGeomRef:ChildPolyLpRef:Azimuth
           else  UNDEFINED
           endif endif endif
-    else  170
+    else  
+          if ( IfValidAnd(ArrayType = "Tracking (one axis)"))  // APB 05/11/22 - Different default for one-axis tracking array type (tic #3352)
+          then 180
+          else 170
+          endif
     endif
   ANNUAL
     if (LocalStatus( Az ) > 3) then  UNCHANGED
@@ -1112,7 +1116,11 @@ RULE PVArray:Az
                 then  PVArrayGeomRef:ChildPolyLpRef:Azimuth
                 else  UNDEFINED
                 endif endif endif
-          else  170
+          else
+                if ( IfValidAnd(ArrayType = "Tracking (one axis)"))  // APB 05/11/22 - Different default for one-axis tracking array type (tic #3352)
+                then 180
+                else 170
+                endif
           endif
     endif
 ENDRULE
@@ -1194,7 +1202,11 @@ RULE PVArray:TiltPitch
     then  if (TiltAngle = 0) then  0
           else  12 * tan( (TiltAngle/180)*3.14159 )
           endif
-    else   5
+    else
+          if ( IfValidAnd(ArrayType = "Tracking (one axis)"))  // APB 05/11/22 - Different default for one-axis tracking array type (tic #3352)
+          then 0
+          else 5
+          endif
     endif endif
   ANNUAL
     if (LocalStatus( TiltPitch ) > 3) then  UNCHANGED
@@ -1206,7 +1218,11 @@ RULE PVArray:TiltPitch
           then  if (TiltAngle = 0) then  0
                 else  12 * tan( (TiltAngle/180)*3.14159 )
                 endif
-          else   5
+          else
+            if ( IfValidAnd(ArrayType = "Tracking (one axis)"))  // APB 05/11/22 - Different default for one-axis tracking array type (tic #3352)
+            then 0
+            else 5
+            endif
           endif endif
     endif
 ENDRULE
@@ -1217,7 +1233,11 @@ RULE PVArray:TiltAngle
     if (GeomSpecMthd = "reference PVArrayGeom object") then  UNCHANGED
     else if (TiltInp = "pitch" .AND. LocalStatus( TiltPitch ) > 4)
     then  (atan( TiltPitch / 12 ) / 3.14159) * 180
-    else   (atan( 5 / 12 ) / 3.14159) * 180
+    else  
+          if ( IfValidAnd(ArrayType = "Tracking (one axis)"))  // APB 05/11/22 - Different default for one-axis tracking array type (tic #3352)
+          then 0
+          else (atan( 5 / 12 ) / 3.14159) * 180
+          endif
     endif endif
   ANNUAL
     if (LocalStatus( TiltAngle ) > 3) then  UNCHANGED
@@ -1225,7 +1245,11 @@ RULE PVArray:TiltAngle
           if (GeomSpecMthd = "reference PVArrayGeom object") then  UNCHANGED
           else if (TiltInp = "pitch" .AND. LocalStatus( TiltPitch ) > 4)
           then  (atan( TiltPitch / 12 ) / 3.14159) * 180
-          else   (atan( 5 / 12 ) / 3.14159) * 180
+          else
+            if ( IfValidAnd(ArrayType = "Tracking (one axis)"))  // APB 05/11/22 - Different default for one-axis tracking array type (tic #3352)
+            then 0
+            else (atan( 5 / 12 ) / 3.14159) * 180
+            endif
           endif endif
     endif
 ENDRULE
@@ -1361,17 +1385,24 @@ RULE PVArray:GeomSummaryMessage
     if (IfValidAnd( DCSysSize > 0 )==0) then  UNDEFINED
     else if (FindInString( LctnMessage, "ERROR" ) >= 0)
     then  LctnMessage
+    else if ( IfValidAnd(ArrayType = "Tracking (two axis)"))  // APB 05/11/22 - Update summary message for tracking axis array types (tic #3352)
+    then "2-axis tracking"
+    else if ( IfValidAnd(ArrayType = "Tracking (one axis)"))
+    then if (GeomSpecMthd == "deg")
+          then  Format( "Tracking axis %.0f%c azimuth, %.1f%c tilt (%.1f-in-12)", Az, 176, TiltAngle, 176, TiltPitch )
+          else  Format( "Tracking axis %.0f%c azimuth, %.1f-in-12 tilt (%.1f%c)", Az, 176, TiltPitch, TiltAngle, 176 )
+          endif
     else if (GeomSpecMthd == "azimuth and tilt")
-    then  if (LctnSpecMthd == "- not specified -")
-          then  if (TiltInp == "deg")
-                then  Format( "%.0f%c azimuth, %.1f%c tilt (%.1f-in-12) (no location specified)", Az, 176, TiltAngle, 176, TiltPitch )
-                else  Format( "%.0f%c azimuth, %.1f-in-12 tilt (%.1f%c) (no location specified)", Az, 176, TiltPitch, TiltAngle, 176 )
-                endif
-          else if (LctnSpecified == 0)
-          then  "ERROR:  PV Array Location fields above missing or invalid."
-          else  Format( "PV Array:  %.1f ft2 (%.1f W/ft2) with %.0f%c azimuth and %.1f%c tilt.", (Hgt * Wd),
-                         (DCSysSize * 1000 / (Hgt * Wd)), Az, 176, TiltAngle, 176 )
-          endif endif
+          then  if (LctnSpecMthd == "- not specified -")
+                then  if (TiltInp == "deg")
+                      then  Format( "%.0f%c azimuth, %.1f%c tilt (%.1f-in-12) (no location specified)", Az, 176, TiltAngle, 176, TiltPitch )
+                      else  Format( "%.0f%c azimuth, %.1f-in-12 tilt (%.1f%c) (no location specified)", Az, 176, TiltPitch, TiltAngle, 176 )
+                      endif
+                else if (LctnSpecified == 0)
+                then  "ERROR:  PV Array Location fields above missing or invalid."
+                else  Format( "PV Array:  %.1f ft2 (%.1f W/ft2) with %.0f%c azimuth and %.1f%c tilt.", (Hgt * Wd),
+                              (DCSysSize * 1000 / (Hgt * Wd)), Az, 176, TiltAngle, 176 )
+                endif endif
     else if (GeomSpecMthd == "reference PVArrayGeom object")
     then  if (LocalCompAssigned( PVArrayGeomRef )==0)
           then  "ERROR:  Geometry to be defined via PVArrayGeom object assignment, but none is assigned."
@@ -1384,7 +1415,7 @@ RULE PVArray:GeomSummaryMessage
                          (DCSysSize * 1000 / PVArrayGeomRef:ChildPolyLpRef:Area), Az, 176, TiltAngle, 176 )
           endif endif endif
     else  "(geometry summary msg)"
-    endif endif endif endif
+    endif endif endif endif endif endif
 ENDRULE
 
 
@@ -1395,9 +1426,11 @@ RULE PVArray:ArrayType
     Default 
   OPTION
     Fixed (open rack)
-    Fixed (roof mount)
+//    Fixed (roof mount)  ; APB 05/11/2022 - Option removed from CBECC-Res (tic# 3352)
+    Tracking (one axis)
+    Tracking (two axis)
   RESETS
-    ResetThisWhenTheFollowingIsModified
+    ResetTheFollowingWhenThisIsModified
       PVArray:CalFlexibleInstallOpt
   DEFAULT 
     "Fixed (open rack)"
@@ -1496,10 +1529,22 @@ RULE NEW PVArray:TreeDescrip
     if (IfValidAnd( DCSysSize > 0.01 ))
     then  if (IfValidAnd( CalFlexibleInstallOpt != "n/a" ))
           then  Format( "%s kWdc, %s module, %s", FltToStr( DCSysSize ), ModuleType, CalFlexibleInstallOpt )
-          else if (TiltInp == "deg")
-          then  Format( "%s kWdc, %s module, %.0f%c azimuth, %.1f%c tilt (%.1f-in-12)", FltToStr( DCSysSize ), ModuleType, Az, 176, TiltAngle, 176, TiltPitch )
-          else  Format( "%s kWdc, %s module, %.0f%c azimuth, %.1f-in-12 tilt (%.1f%c)", FltToStr( DCSysSize ), ModuleType, Az, 176, TiltPitch, TiltAngle, 176 )
-          endif endif
+          else if (IfValidAnd(ArrayType = "Tracking (two axis)"))                                  // APB 05/11/22 - Update tree description for tracking axis array types (tic #3352)
+          then Format( "%s kWdc, %s module, 2-axis tracking", FltToStr( DCSysSize ), ModuleType )
+          else if (IfValidAnd(ArrayType = "Tracking (one axis)"))
+          then  if (GeomSpecMthd == "deg")
+                then  Format( "%s kWdc, %s module, Tracking axis %.0f%c azimuth, %.1f%c tilt (%.1f-in-12)", FltToStr( DCSysSize ), ModuleType, Az, 176, TiltAngle, 176, TiltPitch )
+                else  Format( "%s kWdc, %s module, Tracking axis %.0f%c azimuth, %.1f-in-12 tilt (%.1f%c)", FltToStr( DCSysSize ), ModuleType, Az, 176, TiltPitch, TiltAngle, 176 )
+                endif
+          else if (GeomSpecMthd == "azimuth and tilt")
+                then if (TiltInp == "deg")
+                      then  Format( "%s kWdc, %s module, %.0f%c azimuth, %.1f%c tilt (%.1f-in-12)", FltToStr( DCSysSize ), ModuleType, Az, 176, TiltAngle, 176, TiltPitch )
+                      else  Format( "%s kWdc, %s module, %.0f%c azimuth, %.1f-in-12 tilt (%.1f%c)", FltToStr( DCSysSize ), ModuleType, Az, 176, TiltPitch, TiltAngle, 176 )
+                      endif
+		            else Format( "%s kWdc, %s module, %.1f ft2 (%.1f W/ft2) with %.0f%c azimuth and %.1f%c tilt.", FltToStr( DCSysSize ), ModuleType, PVArrayGeomRef:ChildPolyLpRef:Area,
+                         (DCSysSize * 1000 / PVArrayGeomRef:ChildPolyLpRef:Area), Az, 176, TiltAngle, 176 )
+		            endif
+	        endif endif endif
     else  "not specified"  endif
 ENDRULE
 
