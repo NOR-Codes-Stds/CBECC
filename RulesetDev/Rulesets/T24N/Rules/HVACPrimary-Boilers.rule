@@ -423,9 +423,18 @@ RULE Blr:DraftType
       else UNDEFINED
       endif
     endif
-  SIZING : T24N
+  SIZING : T24N_2019
     if( IsBaseSys ) then
       "MechanicalNoncondensing"
+    else
+      if( u:FuelSrc = "Gas" .OR. u:FuelSrc = "Oil" ) then
+        u:DraftType
+      else UNDEFINED
+      endif
+    endif
+  SIZING : T24N
+    if( IsBaseSys ) then
+      "Condensing"
     else
       if( u:FuelSrc = "Gas" .OR. u:FuelSrc = "Oil" ) then
         u:DraftType
@@ -451,8 +460,13 @@ RULE Blr:DraftType
       endif
     endif
   ANNUAL : T24N
-    if( IsBaseSys ) then
-      "Condensing"
+    if( IsBaseSys ) then 
+      if( Parent(HWLoopLd) * Proj:HtgSizingRat >=   300000 .AND. 
+          Parent(HWLoopLd) * Proj:HtgSizingRat <= 10000000 ) then
+        "Condensing"
+      else
+        "MechanicalNoncondensing"
+      endif
     else
       if( u:FuelSrc = "Gas" .OR. u:FuelSrc = "Oil" ) then
         u:DraftType
@@ -565,6 +579,24 @@ RULE Blr:AFUE
     0.98
   MAXIMUM
     1.0
+  CHECKCODE
+    if( FuelSrc = "Gas" .OR. FuelSrc = "Oil" ) then
+      if( IfValidAnd(u:CapRtd < 300000) ) then
+        if( IfValidAnd(u:AFUE >= 0.82) ) then
+          UNCHANGED
+        else if( IfValidAnd(u:AFUE > 0)) then
+          PostError( "Boiler '%s' has a capacity of less than 300,000 Btu/h 
+                      but the AFUE is '%.2f' which is less than the mandatory 
+                      minimum of 0.82.", Name, u:AFUE )
+        else if( IfValidAnd(u:AFUE <= 0)) then
+          PostError( "Boiler '%s' has a capacity of less than 300,000 Btu/h 
+                      but does not have a valid AFUE input.", Name )
+        else UNCHANGED
+        endif endif endif
+      else UNCHANGED
+      endif
+    else UNCHANGED
+    endif
   SIZING
     // use 30 Btuh/sq ft as a proxy for sizing to determine efficiency
     // 10000 sq ft -> 300000 Btuh
@@ -620,9 +652,35 @@ RULE Blr:CombEff
         PostError( "Boiler '%s' has a combustion efficiency that is too 
                     high for a noncondensing boiler.  Adjust the efficiency or 
                     draft type to be consistent.", Name )
-      else
-        UNCHANGED
-      endif
+      else if( IfValidAnd(u:CapRtd >   2500000) .AND. 
+               IfValidAnd(u:CapRtd <= 10000000) ) then
+        if( IfValidAnd(u:CombEff >= 0.85)) then
+          UNCHANGED
+        else if( IfValidAnd(u:CombEff > 0)) then
+          PostError( "Boiler '%s' has a capacity between 2,500,000 and  
+                      10,000,000 Btu/h but the combustion efficiency is 
+                      '%.2f' which is less than the mandatory minimum of 
+                      0.85.", Name, u:CombEff )
+        else if( IfValidAnd(u:CombEff <= 0)) then
+          PostError( "Boiler '%s' has a capacity between 2,500,000 and 
+                      10,000,000 Btu/h but does not have a valid combustion 
+                      efficiency input.", Name )
+        else UNCHANGED
+        endif endif endif
+      else if( IfValidAnd(u:CapRtd > 10000000) ) then
+        if( IfValidAnd(u:CombEff >= 0.82)) then
+          UNCHANGED
+        else if( IfValidAnd(u:CombEff > 0)) then
+          PostError( "Boiler '%s' has a capacity of more than 10,000,000 Btu/h 
+                      but the combustion efficiency is '%.2f' which is less than
+                      the mandatory minimum of 0.82.", Name, u:CombEff )
+        else if( IfValidAnd(u:CombEff <= 0)) then
+          PostError( "Boiler '%s' has a capacity of 10,000,000 Btu/h or more but 
+                      does not have a valid combustion efficiency input.", Name )
+        else UNCHANGED
+        endif endif endif
+      else UNCHANGED
+      endif endif endif
     else
       UNCHANGED
     endif
@@ -643,12 +701,14 @@ RULE Blr:CombEff
       endif
     else z:CombEff
     endif
-  ANNUAL
+  ANNUAL 
     if( IsBaseSys ) then
-      if( CapRtdSim >= 2500000 ) then
-        0.915     // CombEff = ThrmlEff + 0.015 = 0.90 + 0.015 
+      if( CapRtdSim > 2500000 .AND. CapRtdSim <= 10000000 ) then
+        0.85 
+      else if( CapRtdSim > 10000000 ) then
+        0.82 
       else UNDEFINED
-      endif
+      endif endif
     else z:CombEff
     endif
 ENDRULE
@@ -720,13 +780,28 @@ RULE Blr:ThrmlEff
         PostError( "Boiler '%s' has a thermal efficiency that is too 
                     high for a noncondensing boiler.  Adjust the efficiency or 
                     draft type to be consistent.", Name )
+      else if( IfValidAnd(u:CapRtd >= 300000) .AND. 
+               IfValidAnd(u:CapRtd <= 2500000) ) then
+        if( IfValidAnd(u:ThrmlEff >= 0.84)) then
+          UNCHANGED
+        else if( IfValidAnd(u:ThrmlEff > 0)) then
+          PostError( "Boiler '%s' has a capacity between 300,000 and  
+                      2,500,000 Btu/h but the thermal efficiency is 
+                      '%.2f' which is less than the mandatory minimum of 
+                      0.84.", Name, u:ThrmlEff )
+        else if( IfValidAnd(u:ThrmlEff <= 0)) then
+          PostError( "Boiler '%s' has a capacity between 300,000 and  
+                      2,500,000 Btu/h but does not have a valid thermal 
+                      efficiency input.", Name )
+        else UNCHANGED
+        endif endif endif
       else if( IfValidAnd(u:AFUE > 0) .OR.
                IfValidAnd(u:CombEff > 0) .OR.
                IfValidAnd(u:ThrmlEff > 0) ) then
         UNCHANGED
       else
         PostError( "A non-zero efficiency input is required for boiler '%s'", Name )
-      endif endif
+      endif endif endif
     else UNCHANGED
     endif
   SIZING : S901G ECBC
@@ -860,9 +935,13 @@ RULE Blr:ThrmlEff
   ANNUAL : T24N
     if( IsBaseSys ) then
       if( IfValidAnd(CapRtdSim < 300000) ) then
-        0.8225             // AFUE = 0.82, ThrmlEff = 0.8225
-      else 0.90
-      endif
+        0.8225             // AFUE = 0.82, ThrmlEff = 0.8225 = 0.875 * AFUE + 0.105
+      else if( IfValidAnd(CapRtdSim >= 300000) .AND. IfValidAnd(CapRtdSim <= 2500000) ) then
+        0.84
+      else if( IfValidAnd(CapRtdSim > 2500000) ) then
+        CombEff - 0.015
+      else 0.805
+      endif endif endif
     else z:ThrmlEff
     endif
 ENDRULE
@@ -1040,7 +1119,11 @@ RULE Blr:HIR_fPLRCrvRef
     endif endif endif
   ANNUAL : T24N_2022
     if( IsBaseSys ) then
-      RuleLibrary(CrvQuad,"BlrHWCondBlrFIRRatio_fQRatioTewtSI")
+      if( DraftType = "Condensing" ) then
+        RuleLibrary(CrvDblQuad,"BlrHWCondBlrFIRRatio_fQRatioTewtSI")
+      else 
+        RuleLibrary(CrvQuad,"BlrHWBlrFIRRatio_fQRatioSI")
+      endif
     else z:HIR_fPLRCrvRef
     endif
   ANNUAL
