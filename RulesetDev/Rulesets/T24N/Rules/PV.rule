@@ -39,7 +39,7 @@
 
 RULE Proj:SolAccessRfArea
   DESCRIPTION
-    "SARA include the area of the building�s roof space capable of structurally 
+    "SARA includes the area of the building's roof space capable of structurally 
     supporting a PV system, and the area of all roof space on covered parking 
     areas, carports, and all other newly constructed structures on the site that 
     are compatible with supporting a PV system per Title 24, Part 2, Section 1511.2.
@@ -372,8 +372,16 @@ RULE Proj:ReducedPVReq
     this project (exception must be entered)"
   INPUTCLASS
     Optional
+  RESETS
+    ResetThisWhenTheFollowingIsModified
+      Proj:SolAccessRfArea
+    ResetTheFollowingWhenThisIsModified
+      Proj:ReducedPVReqExcpt
   DEFAULT 
-    0
+    if ( SumAll( PVArray:DCSysSize ) > SolAccessRfAreaPVPwr ) 
+      then 1
+    else 0
+    endif
 ENDRULE
 
 RULE Proj:ReducedPVReqExcptLowRiseRes
@@ -395,8 +403,16 @@ RULE Proj:ReducedPVReqExcpt
     "Exception describing why standard PV requirements don't apply to this project"
   INPUTCLASS
     CondRequired
+  RESETS
+    ResetThisWhenTheFollowingIsModified
+      Proj:SolAccessRfArea
+    ResetTheFollowingWhenThisIsModified
+      Proj:ReducedPVReqVal
   DEFAULT 
-    UNCHANGED
+    if ( SumAll( PVArray:DCSysSize ) > SolAccessRfAreaPVPwr )
+      then "Limited by SARA provided"
+    else UNCHANGED
+    endif
 ENDRULE
 
 RULE Proj:ReducedPVReqExcptDesc
@@ -464,9 +480,16 @@ RULE Proj:ReducedPVReqVal
     "Reduced PV requirement capacity"
   INPUTCLASS
     Optional
+  MINIMUM
+    0
   DEFAULT 
-    if (ReducedPVReq > 0 .AND. (EnumValue( ReducedPVReqExcpt = 1 ) .OR. EnumValue( ReducedPVReqExcpt >= 6 )))
-    then  0
+    if (ReducedPVReq > 0 )
+    then if (EnumValue( ReducedPVReqExcpt = 1 )) ; .OR. EnumValue( ReducedPVReqExcpt >= 6 ))) ; APB 05/18/22 - Res enums were 1-8, new enums are 100+
+        then  0
+        else if (EnumValue( ReducedPVReqExcpt = 100 ) .AND. SumAll( PVArray:DCSysSize ) > SolAccessRfAreaPVPwr) ; "Limited by SARA provided"
+        then SolAccessRfAreaPVPwr
+        else UNDEFINED
+        endif endif
     else if (ReducedPVReqMinVal > 0.01)
     then  ReducedPVReqMinVal
     else  UNDEFINED
@@ -487,6 +510,62 @@ RULE Proj:UseReducedPVReqVal
     endif
 ENDRULE
 
+// APB 05/18/22 - New SARA limit on proposed PV kW (tic #3352)
+RULE Proj:DCSizeMultiplier
+  DESCRIPTION
+    "Multiplier on PV system size, used to adjust user-entered proposed PV kW down to required exception kW (when exception is applied)"
+  INPUTCLASS
+    NotInput
+  DEFAULT 
+    if (IfValidAnd( UseReducedPVReqVal >= 0 ) .AND. IfValidAnd( SumAll(  PVArray:DCSysSize ) > 0 ))
+    then  if (ValidOr( UseReducedPVReqVal, 999 ) == (SumAll(  PVArray:DCSysSize )))
+          then  1   ; don't re-scale already scaled value
+          else if (ValidOr( UseReducedPVReqVal, 999 ) <= (SumAll(  PVArray:DCSysSize )))
+          then ReducedPVReqVal / SumAll(  PVArray:DCSysSize )
+          else  1
+          endif endif
+    else  1  endif
+  ANNUAL_PROPOSED 
+    if (LocalStatus( DCSizeMultiplier ) > 0) then  UNCHANGED
+    else 1 endif
+  ANNUAL_BASELINE 
+    1
+ENDRULE
+
+// APB 05/18/22 - Add messages about new SARA limit on proposed PV kW
+RULE Proj:ReducedPVReqMsg1
+  DEFAULT 
+    if (IfValidAnd( SumAll(  PVArray:DCSysSize ) > SolAccessRfAreaPVPwr ))
+    then  Format( "Proposed PV capacity of %.0f kW > capacity based on SARA (%.0f kW).",
+               SumAll(  PVArray:DCSysSize ), SolAccessRfAreaPVPwr )
+    else  ""
+    endif
+ENDRULE
+
+RULE Proj:ReducedPVReqMsg2
+  DEFAULT 
+    if (IfValidAnd( SumAll(  PVArray:DCSysSize ) > SolAccessRfAreaPVPwr ))
+    then  if (ReducedPVReq = 1)
+        then if (EnumValue(ReducedPVReqExcpt) = 100)  ; "Limited by SARA provided"
+            then "Proposed kW will be adjusted to match the capacity based on SARA."
+            else ""
+            endif 
+        else ""
+        endif
+    else  ""
+    endif
+ENDRULE
+
+RULE Proj:ReducedPVReqMsg3
+  DEFAULT 
+    if (IfValidAnd( SumAll(  PVArray:DCSysSize ) > SolAccessRfAreaPVPwr ))
+    then  if (ReducedPVReq = 0)
+        then "With no reduced PV requirement, standard PV & Battery matches prescriptive tables."
+        else ""
+        endif
+    else  ""
+    endif
+ENDRULE
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -625,8 +704,11 @@ RULE NEW Proj:T24PVSize
          PrscrpPVBattClass == "LowRiseRes"          .OR.
          PrscrpPVBattClass == "NonRes/MixedUse" )
     then  if ( SolAccessRfAreaPVPwr > 0 .AND.
-               SolAccessRfAreaPVPwr < PrscrpPVSize )
-          then  SolAccessRfAreaPVPwr
+               SolAccessRfAreaPVPwr < PrscrpPVSize)
+          then  if ( SolAccessRfAreaPVPwr < SumAll(  PVArray:DCSysSize ) .AND. ReducedPVReq = 0 )  ; APB 05/18/22 - User de-selected reduced PV requirement, even though proposed kW > SARA kW (tic #3352)
+                then  PrscrpPVSize
+                else  SolAccessRfAreaPVPwr
+                endif
           else  PrscrpPVSize
           endif
     else  0
