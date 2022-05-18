@@ -44,6 +44,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 ;*************************************************************************
 ;"log status"   ResProj:Action = {  if (DevMode==0 .OR. LocalStatus(RunAbbrev) < 1 .OR. EnergyCodeYearNum < 2019) then  UNCHANGED  else
 ;   PostMessageToLog( "    evaluating 'ProposedModelCodeCheck' rules on '%s' model...", RunAbbrev )  endif  }
+;"dbg" ResProj:Action = { PostMessageToLog( "    evaluating 'ProposedModelCodeCheck' rules on '%s' model...", RunAbbrev ) }
 
 	"Check for valid ClimateZone specified"
 		ResProj:Action		= {	if (ClimateZone > 0.5 .AND. ClimateZone < 16.5) then  UNCHANGED
@@ -55,19 +56,23 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 ;									then  PostError( "2019 Title-24 compliance analyis currently available only for New Construction projects." )
 ;									else  UNCHANGED  endif  }
 
+; revised several rules to be ignored for Com models where ResDwellUnits toggled OFF - SAC 05/18/22
+
   ; SAC 2/9/15 - check flag documenting requirement of alterations including at least 2 categories of upgraded component(s)
 	"Call subordinate rulelist to generate max estimated alteration cateogries"
-		ResProj:Action		= {	if (RunScope == 2 .AND. SumAcrossIf( ResZn:IsNew, ResZn:FloorArea > 1 ) < 0.5) then  EvalRulelist( "Count_NumAlterations" )
-									else  UNCHANGED  endif  }
+		ResProj:Action		= {	if (IfValidAnd( IsComRuleset > 0 ) .AND. IfValidAnd( Proj:ResDwellUnits > 0 )==0) then  UNCHANGED
+                              else if (RunScope == 2 .AND. SumAcrossIf( ResZn:IsNew, ResZn:FloorArea > 1 ) < 0.5) then  EvalRulelist( "Count_NumAlterations" )
+									else  UNCHANGED  endif endif  }
 	; SAC 3/8/19 - added logic to perform check on AlterIncl2Categs (& NumAlterations) only for analysis PRIOR to 2019 (tic #1085)
 	"Report AlterIncl2Categs problem"
-		ResProj:Action		= {	if (RunScope == 2 .AND. SumAcrossIf( ResZn:IsNew, ResZn:FloorArea > 1 ) < 0.5 .AND. ResProj:EnergyCodeYearNum < 2019)
+		ResProj:Action		= {	if (IfValidAnd( IsComRuleset > 0 ) .AND. IfValidAnd( Proj:ResDwellUnits > 0 )==0) then  UNCHANGED
+                              else if (RunScope == 2 .AND. SumAcrossIf( ResZn:IsNew, ResZn:FloorArea > 1 ) < 0.5 .AND. ResProj:EnergyCodeYearNum < 2019)
 									then	if (IfValidAnd( AlterIncl2Categs > 0.5 )==0)
 											then	PostError( "Proj:AlterIncl2Categs (CBECC-Res: checkbox in Project dialog > Analysis tab) must be selected to confirm that alterations span multiple categories (as per standard section 150.2(b)2)." )
 											else if (IfValidAnd( NumAlterations < 2 ))
 											then	PostWarning( "Number of alterations (from standard table 150.2-B) is %.0f, despite user confirming multiple alterations specified ( ResProj:AlterIncl2Categs).", NumAlterations )
 											else  UNCHANGED  endif endif
-									else  UNCHANGED  endif  }
+									else  UNCHANGED  endif endif  }
 
 ; SAC 6/25/14 - checks no longer @ Proj level, as of introduction of DwellUnit object
 ;	"Check for consistency in conditioned areas between dwelling unit & physical model inputs"
@@ -82,7 +87,8 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 
 	; SAC 6/6/13 - added check for conditioned/living/sleeping zones present in model
 	"Check for at least one conditioned zone plus one zone of each (conditioned) type (living & sleeping) when control credits selected"
-		ResProj:Action		= {	if ( ResProj:ZonalControl < 0.5 .AND. SumAll( ResZn:CondFloorArea ) < 0.1)
+		ResProj:Action		= {	if (IfValidAnd( IsComRuleset > 0 ) .AND. IfValidAnd( Proj:ResDwellUnits > 0 )==0) then  UNCHANGED
+                              else if ( ResProj:ZonalControl < 0.5 .AND. SumAll( ResZn:CondFloorArea ) < 0.1)
 									then  PostError( "At least one conditioned zone must be specified in the model prior to performing analysis" )
 									else if ( ResProj:ZonalControl > 0.5 .AND. SumAll( ResZn:LvgCondFloorArea ) < 0.1 .AND. SumAll( ResZn:SlpCondFloorArea ) < 0.1)
 									then	PostError( "At least one Living and one Sleeping zone must exist in the model when Zonal Control Credit is selected" )
@@ -90,7 +96,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 									then	PostError( "No zones classified as 'Living' are present in the model.  At least one Living and one Sleeping zone must exist in the model when Zonal Control Credit is selected" )
 									else if ( ResProj:ZonalControl > 0.5 .AND. SumAll( ResZn:SlpCondFloorArea ) < 0.1)
 									then	PostError( "No zones classified as 'Sleeping' are present in the model.  At least one Living and one Sleeping zone must exist in the model when Zonal Control Credit is selected" )
-									else	UNCHANGED  endif endif endif endif  }
+									else	UNCHANGED  endif endif endif endif endif  }
 
 	; SAC 10/26/15 - check to confirm DwellUnit:CondFlrArea is equal to DwellUnitType:CondFlrArea
 	"Check for valid DwellUnit:DwellUnitTypeRef assignment and consistency between DwellUnit: and DwellUnitType:CondFlrArea"
@@ -114,7 +120,8 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
          else  UNCHANGED  endif endif  }
 
 	"Check for invalid ADU # bedrooms and area vs. main dwelling"     ResProj:Action  =    ; SAC 2/18/20 (tic #1182)
-	   {  if (EnergyCodeYearNum < 2019 .OR. IsMultiFamily > 0 .OR. SFamADUType < 1) then  UNCHANGED
+	   {  if (IfValidAnd( IsComRuleset > 0 )) then  UNCHANGED
+         else if (EnergyCodeYearNum < 2019 .OR. IsMultiFamily > 0 .OR. SFamADUType < 1) then  UNCHANGED
          else if (LocalStatus( SFamADUNumBedrooms ) < 4)
          then  PostError( "Number of ADU bedrooms is not specified but is a required input (when ADU is present)" )
          else if (IfValidAnd( SFamADUNumBedrooms > SimNumBedrooms ))
@@ -129,7 +136,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
          then  PostError( "Overall project bedroom count must exceed the number of ADU bedrooms (%s) or switch the project to Addition Alone", FltToStr( SFamADUNumBedrooms ) )
          else if (RunScope == 1 .AND. IsAddAlone < 0.5 .AND. IfValidAnd( SFamADUArea = CondFloorArea ))
          then  PostError( "ADU conditioned area must be less than the overall project area of %s ft2", FltToStr( CondFloorArea ) )
-         else  UNCHANGED  endif endif endif endif endif endif endif  }
+         else  UNCHANGED  endif endif endif endif endif endif endif endif  }
 
 ; checks for valid & minimum IAQ ventilation (for both SFam & MFam models) - SAC 9/10/13 added
 ; mjb 12/17/13 - do not check for IAQ fan if E+A+A
@@ -160,37 +167,39 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 ; SAC 11/12/14 - added DwellUnit IAQ CFM checks, replacing old MFam ones that were removed 6/25/14 (GC issue 410)
    ; SAC 11/01/19 - relaxed insufficient IAQ error to warning when BypassRuleLimits activated
    ; added small 0.05 CFM margin of error to min CFM error message - SAC 7/26/20 (tic #1174)
-	"Check for single family IAQ ventilation valid and sufficient"
-		DwellUnit:Action	= {	if (Proj:IsSFamResRuleset .OR. LocalCompAssigned( DwellUnitTypeRef ) == 0 .OR. IfValidAnd( MinIAQCFM > 0.05 )==0 .OR. IfValidAnd( DwellUnitTypeRef:IAQDisabled > 0 )) then  UNCHANGED
-										else if (DwellUnitTypeRef:IAQOption == 3) 
-										then	PostError( "Model IAQ option 'CFI (Central Fan Integrated) IAQ' is not yet implemented.  Another IAQ selection needs to be made for DwellUnit '%s' (DwellUnitType '%s').", Name, DwellUnitTypeRef:Name )
-										else if (TotalIAQCFM < (MinIAQCFM - 0.05) .AND. ResProj:RunScope == 1)
-										then	if ( ResProj:BypassRuleLimits > 0.5)
-									         then  PostWarning( "Minimum IAQ Ventilation NOT MET:  %s required, %s entered (CFM).  Review inputs for DwellUnit '%s' (DwellUnitType '%s').", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ), Name, DwellUnitTypeRef:Name )
-									         else  PostError(   "Minimum IAQ Ventilation NOT MET:  %s required, %s entered (CFM).  Review inputs for DwellUnit '%s' (DwellUnitType '%s').", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ), Name, DwellUnitTypeRef:Name )  endif
-										else	UNCHANGED  endif endif endif  }
-
-   "Check for inconsistencies in IAQ fan types in MFam models"    DwellUnitType:Action =        ; SAC 7/26/20 (tic #1174)
-      {  if ( Proj:IsSFamResRuleset .OR. IfValidAnd( NumAssigningDUs > 0 )==0) then  UNCHANGED
-         else if ( ( ResProj:MostDUIAQ_Balanced > 0 .AND. IAQCFMIsBalanced > 0) .OR.
-                   ( ResProj:MostDUIAQ_Exhaust  > 0 .AND. IfValidAnd( MostIAQ_Exhaust > 0 )) .OR.
-                   ( ResProj:MostDUIAQ_Supply   > 0 .AND. IfValidAnd( MostIAQ_Supply  > 0 )) ) then  UNCHANGED
-         else if (GlobalStatus( ResProj:MostDUIAQ_Type ) > 0)
-         then  if (                 IAQCFMIsBalanced > 0 ) then  PostError( "DwellUnitType '%s' IAQ type Balanced must be consistent w/ predominant project IAQ type of %s", Name, ResProj:MostDUIAQ_Type )
-               else if (IfValidAnd( MostIAQ_Exhaust > 0 )) then  PostError( "DwellUnitType '%s' IAQ type Exhaust must be consistent w/ predominant project IAQ type of %s" , Name, ResProj:MostDUIAQ_Type )
-               else if (IfValidAnd( MostIAQ_Supply  > 0 )) then  PostError( "DwellUnitType '%s' IAQ type Supply must be consistent w/ predominant project IAQ type of %s"  , Name, ResProj:MostDUIAQ_Type )
-               else  UNCHANGED  endif endif endif
-         else  UNCHANGED  endif endif endif  }
+; to be replaced w/ new MFam checks - SAC 05/18/22
+;	"Check for single family IAQ ventilation valid and sufficient"
+;		DwellUnit:Action	= {	if (Proj:IsSFamResRuleset .OR. LocalCompAssigned( DwellUnitTypeRef ) == 0 .OR. IfValidAnd( MinIAQCFM > 0.05 )==0 .OR. IfValidAnd( DwellUnitTypeRef:IAQDisabled > 0 )) then  UNCHANGED
+;										else if (DwellUnitTypeRef:IAQOption == 3) 
+;										then	PostError( "Model IAQ option 'CFI (Central Fan Integrated) IAQ' is not yet implemented.  Another IAQ selection needs to be made for DwellUnit '%s' (DwellUnitType '%s').", Name, DwellUnitTypeRef:Name )
+;										else if (TotalIAQCFM < (MinIAQCFM - 0.05) .AND. ResProj:RunScope == 1)
+;										then	if ( ResProj:BypassRuleLimits > 0.5)
+;									         then  PostWarning( "Minimum IAQ Ventilation NOT MET:  %s required, %s entered (CFM).  Review inputs for DwellUnit '%s' (DwellUnitType '%s').", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ), Name, DwellUnitTypeRef:Name )
+;									         else  PostError(   "Minimum IAQ Ventilation NOT MET:  %s required, %s entered (CFM).  Review inputs for DwellUnit '%s' (DwellUnitType '%s').", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ), Name, DwellUnitTypeRef:Name )  endif
+;										else	UNCHANGED  endif endif endif  }
+;
+;   "Check for inconsistencies in IAQ fan types in MFam models"    DwellUnitType:Action =        ; SAC 7/26/20 (tic #1174)
+;      {  if ( Proj:IsSFamResRuleset .OR. IfValidAnd( NumAssigningDUs > 0 )==0) then  UNCHANGED
+;         else if ( ( ResProj:MostDUIAQ_Balanced > 0 .AND. IAQCFMIsBalanced > 0) .OR.
+;                   ( ResProj:MostDUIAQ_Exhaust  > 0 .AND. IfValidAnd( MostIAQ_Exhaust > 0 )) .OR.
+;                   ( ResProj:MostDUIAQ_Supply   > 0 .AND. IfValidAnd( MostIAQ_Supply  > 0 )) ) then  UNCHANGED
+;         else if (GlobalStatus( ResProj:MostDUIAQ_Type ) > 0)
+;         then  if (                 IAQCFMIsBalanced > 0 ) then  PostError( "DwellUnitType '%s' IAQ type Balanced must be consistent w/ predominant project IAQ type of %s", Name, ResProj:MostDUIAQ_Type )
+;               else if (IfValidAnd( MostIAQ_Exhaust > 0 )) then  PostError( "DwellUnitType '%s' IAQ type Exhaust must be consistent w/ predominant project IAQ type of %s" , Name, ResProj:MostDUIAQ_Type )
+;               else if (IfValidAnd( MostIAQ_Supply  > 0 )) then  PostError( "DwellUnitType '%s' IAQ type Supply must be consistent w/ predominant project IAQ type of %s"  , Name, ResProj:MostDUIAQ_Type )
+;               else  UNCHANGED  endif endif endif
+;         else  UNCHANGED  endif endif endif  }
 
   ; SAC 3/4/16 - Check to confirm validity between PV compliance credit & detailed (EDR) PV system size (tic #609)
   ; SAC 3/25/16 - Revised rule to throw similar error when PVCompCredit and DesignRatingCalcs are selected but No EDR PV
 	"Check for valid EDR PV system size when activated along w/ PV compliance credit"
-		ResProj:Action		= {	if (IfValidAnd(StandardsVersion >= 2017)==0 .OR. EnablePVCredit < 1 .OR. PVCompCredit < 1 .OR. IfValidAnd( AllowDesignRating > 0.5 )==0 .OR. IfValidAnd( DesignRatingCalcs > 0.5 )==0) then  UNCHANGED
+		ResProj:Action		= {	if (IfValidAnd( IsComRuleset > 0 )) then  UNCHANGED
+                              else if (IfValidAnd(StandardsVersion >= 2017)==0 .OR. EnablePVCredit < 1 .OR. PVCompCredit < 1 .OR. IfValidAnd( AllowDesignRating > 0.5 )==0 .OR. IfValidAnd( DesignRatingCalcs > 0.5 )==0) then  UNCHANGED
 									else if (IfValidAnd( PVWDCSysTotal > 0 )==0)
 									then	PostError( "When both the PV compliance credit and Energy Design Rating (EDR) PV system credit features are activated, an EDR PV system size must be specified that is >= the minimum PV compliance credit system size of %g kWdc.", PVMinRatedPower[1] )
 									else if (IfValidAnd( PVWDCSysTotal < PVMinRatedPower[1] ))
 									then	PostError( "When both the PV compliance credit and Energy Design Rating (EDR) PV system credit features are activated, the EDR PV system size (%g kWdc) must be >= the minimum PV compliance credit system size of %g kWdc.", PVWDCSysTotal, PVMinRatedPower[1] )
-									else	UNCHANGED  endif endif endif  }
+									else	UNCHANGED  endif endif endif endif  }
 
 	"Prevent Unconditioned Zones in compliance analysis (for the time being)"		; SAC 11/18/14 - 
 		ResZn:Action		= {	if (IfValidAnd( Type = 10 ))
@@ -551,8 +560,10 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
                else  UNCHANGED  endif
          else  UNCHANGED  endif endif  }
 
+; TO DO - ResZn HVACSys check for new 2022 models - SAC 05/18/22
 	"Check for all conditioned zones having valid assignments of HVAC Systems w/ valid Heating systems"  ; SAC 6/7/13 - per GC issue #103
-		ResZn:Action			= {	if (Type < 0.5 .OR. Type > 9.5) then  UNCHANGED
+		ResZn:Action			= {	if (IfValidAnd( Proj:IsComRuleset > 0 )) then  UNCHANGED
+                              else if (Type < 0.5 .OR. Type > 9.5) then  UNCHANGED
 										else if (LocalCompAssigned( ActiveHVACSystem ) == 0)
 										then	PostError( "Zone '%s' is a conditioned zone that must have a valid HVAC system assigned in order to be simulated.", Name )
 										else if (LocalStatus( ActiveHVACSystem:Type ) == 0)
@@ -570,7 +581,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 												then	PostError( "Heating component '%s' of HVAC system '%s' assigned to zone '%s' must be of a valid type in order to be simulated.", ActiveHVACSystem:HeatSystem:Name, ActiveHVACSystem:Name, Name )
 												else  UNCHANGED  endif endif
 										else	PostError( "HVAC system '%s' assigned to zone '%s' cannot be simulated due to a unrecognized system type (%.0f).", ActiveHVACSystem:Name, Name, ActiveHVACSystem:Type )
-										endif endif endif endif endif  }
+										endif endif endif endif endif endif  }
 
 ; "Dbg-1"		ResHVACSys:Action	= {	MessageBox( "ResProj:RunScope = %g  Fan:Status = %g", ResProj:RunScope, Fan:Status )  }
 
@@ -800,7 +811,8 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
    ; SAC 3/25/19 - update for Proj-wide Compact Distrib
    ; removed check associated w/ SFamUserSpecCmpctDist and undefined SFamUserCompactFactor - SAC 09/29/21 (tic #1277)
    "Ensure all required data specified for selected Compact Distrib is specified"    ResProj:Action  = {
-         if ( ResProj:EnergyCodeYearNum < 2019 .OR. SFamCompactDistrib < 1 .OR. IsMultiFamily > 0.5) then  UNCHANGED
+         if (IfValidAnd( IsComRuleset > 0 )) then  UNCHANGED
+         else if ( ResProj:EnergyCodeYearNum < 2019 .OR. SFamCompactDistrib < 1 .OR. IsMultiFamily > 0.5) then  UNCHANGED
          else  if (IfValidAnd( SFamCDWeightedDist = 10001 ))
                then  PostError( "Compactness selection is '%s' but the straight-line heater to furthest room fixture distance is unspecified for all compatible recirculation DHW systems.", EnumString( SFamCompactDistrib ) )
                else if (IfValidAnd( SFamCDWeightedDist = 10002 ))
@@ -808,7 +820,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
                else if (IfValidAnd( SFamCompactFactor < 1 )==0)
                then  PostError( "Compactness selection is '%s' but heater to fixture distances do not qualify this project for the compliance credit.", EnumString( SFamCompactDistrib ) )
                else  UNCHANGED  endif endif endif
-         endif  }
+         endif endif  }
 ;   "Ensure all required data specified for selected Compact Distrib is specified and that those systems pass qualification test"    ResDHWSys:Action  = {
 ;         if (FloorAreaServed < 1 .OR. IfValidAnd( ResProj:EnergyCodeYearNum < 2019 ) .OR. CompactDistrib < 1) then  UNCHANGED
 ;         else if ( Proj:IsSFamResRuleset)
@@ -1014,9 +1026,11 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 
 ; SAC 12/30/15 - throw error if HVACDist assigned to both heat/cool and heating-only systems - tic 544 - fix logic 1/4/16
 	"Throw err** if HVACDist assigned to both heat/cool and heating-only systems"	ResDistSys:Action  = {  
-				if (FloorAreaServed < 0.1 .OR. IfValidAnd( ResProj:CondFloorArea > 1 ) == 0) then  UNCHANGED
+				if (IfValidAnd( Proj:IsComRuleset > 0 )) then  UNCHANGED
+            else if (FloorAreaServed < 0.1 .OR. IfValidAnd( ResProj:CondFloorArea > 1 ) == 0) then  UNCHANGED
 				else if (ServesCooling < 1 .OR. ServesCooling == ServesHeating) then  UNCHANGED
-				else	PostError( "Distribution system '%s' is assigned to both heat+cool and heating-only systems, which is not allowed in compliance analysis.", Name )  endif endif  }
+				else	PostError( "Distribution system '%s' is assigned to both heat+cool and heating-only systems, which is not allowed in compliance analysis.", Name )
+            endif endif endif  }
 
 ; SAC 5/11/15 - check to confirm valid Attic assigned for supply and return ducts if needed (issue 536)
 	"Check confirm that Attic selected for active distribution systems are valid"
@@ -1370,13 +1384,16 @@ RULELIST "ProposedModelSimulationCheck" 1 0 0 0
 ;"log status"   ResProj:Action = {  if (DevMode==0 .OR. LocalStatus(RunAbbrev) < 1 .OR. EnergyCodeYearNum < 2019) then  UNCHANGED  else
 ;   PostMessageToLog( "    evaluating 'ProposedModelSimulationCheck' rules on '%s' model...", RunAbbrev )  endif  }
 
+; revised several rules to be ignored for Com models where ResDwellUnits toggled OFF - SAC 05/18/22
+
 	"Check for existence of at least one zone object - and prevent OtherZones in SFam models"    ; SAC 9/10/19 - added OtherZone check (MFamProto)
-		ResProj:Action	= {	if (AnalysisType > 0 .AND. ComponentCount( Zone ) < 1)		; SAC 2/4/16 - disable check for 'Research' mode
+		ResProj:Action	= {	if (IfValidAnd( IsComRuleset > 0 ) .AND. IfValidAnd( Proj:ResDwellUnits > 0 )==0) then  UNCHANGED
+                        else if (AnalysisType > 0 .AND. ComponentCount( Zone ) < 1)		; SAC 2/4/16 - disable check for 'Research' mode
 								then  PostError( "At least one Zone object must be present in the model prior to simulation" )
 								else if (AnalysisType > 0 .AND. IsMultiFamily == 0 .AND. SumAll( ResOtherZn:Area ) > 0.1 .AND.
                                  IfValidAnd( Proj:EnableResearchMode > 0 )==0 .AND. IfValidAnd( BypassRuleLimits > 0 )==0)
 								then  PostError( "OtherZone objects cannot be present in single family projects" )
-								else  UNCHANGED  endif endif  }
+								else  UNCHANGED  endif endif endif  }
 
 
   ; SAC 6/24/14 - prevent selection of ZonalControl for Multifamily models (incompatible w/ new DwellUnitType & DwellUnit objects)
@@ -1385,19 +1402,21 @@ RULELIST "ProposedModelSimulationCheck" 1 0 0 0
 								then  PostError( "Zonal Control Credit is not an available analysis option for multifamily buildings." )  else  UNCHANGED  endif  }
 
    "global check for sufficient Window area - ResProj:CondWinAreaCFARat > 0.05"     ResProj:Action =     ; SAC 09/30/21
-      {  if (RunScope = 1 .AND. IfValidAnd( IsAddAlone > 0 )) then  UNCHANGED
+      {  if (IfValidAnd( IsComRuleset > 0 ) .AND. IfValidAnd( Proj:ResDwellUnits > 0 )==0) then  UNCHANGED
+         else if (RunScope = 1 .AND. IfValidAnd( IsAddAlone > 0 )) then  UNCHANGED
          else if (IfValidAnd( CondWinAreaCFARat >= 0 )==0)
          then  PostError( "Error calculating building-wide ratio of conditioned zone window area & floor area ( ResProj:CondWinAreaCFARat)" )
          else if (IfValidAnd( CondWinAreaCFARat < 0.05 ))
          then  PostError( "Ratio of conditioned zone window area / floor area (%0.3f) deemed too small, must be >= 0.05", CondWinAreaCFARat )
-         else  UNCHANGED  endif endif endif  }
+         else  UNCHANGED  endif endif endif endif  }
 
    "global check for conditioned area and sufficient ratio of conditioned volume / floor area"     ResProj:Action =     ; SAC 09/30/21
-      {  if (IfValidAnd( CondFloorArea > 0 )==0)
+      {  if (IfValidAnd( IsComRuleset > 0 ) .AND. IfValidAnd( Proj:ResDwellUnits > 0 )==0) then  UNCHANGED
+         else if (IfValidAnd( CondFloorArea > 0 )==0)
          then  PostError( "No conditioned zone floor area found in model, must be > 0" )
          else if (ValidOr( CondVolume, 0 ) / CondFloorArea < 7)
          then  PostError( "Ratio of conditioned zone volume / floor area (%0.1f) deemed too small, must be >= 7", ValidOr( CondVolume, 0 ) / CondFloorArea )
-         else  UNCHANGED  endif endif  }
+         else  UNCHANGED  endif endif endif  }
 
 ; SAC 8/1/14 - removed check to prevent compliance analysis on Conditioned attics
 ;  ; SAC 4/25/14 - revised ResAttic:Type check to ALLOW conditioned attics when ResProj:BypassRuleLimits is set
