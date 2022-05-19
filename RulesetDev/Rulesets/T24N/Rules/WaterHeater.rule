@@ -906,6 +906,10 @@ RULE WtrHtr:Type
     if( FluidSysSHW = 1 )  
     then
       Conventional
+//      if (Bldg:IsSchoolBldgForWtrHtr = 1 .AND. StdsVersionYr > 2019 .AND. FuelSrc = "Electricity")
+//      then HeatPumpSplit
+//      else Conventional
+//      endif
     else if( Parent(Type) = "HotWater" )
     then
       HeatPumpSplit
@@ -978,7 +982,12 @@ RULE WtrHtr:Type
         u:Type
       else if( Proj:SHWUserAndBaseline .OR. Proj:SHWBothBaseline )
       then
+        if ( Bldg:IsSchoolBldgForWtrHtr = 1 .AND. StdsVersionYr > 2019 )
+        then
+          "HeatPumpSplit"
+        else
         "Conventional"               
+        endif             
       else if( Proj:SHWNone )
       then 
         UNDEFINED
@@ -1279,7 +1288,10 @@ RULE WtrHtr:IsUEFRtd
         u:IsUEFRtd
       else if( Proj:SHWUserAndBaseline .OR. Proj:SHWBothBaseline )
       then
-        UNDEFINED               
+			  if ( Bldg:IsSchoolBldgForWtrHtr = 1 .AND. StdsVersionYr > 2019 )
+			  then 1
+			  else UNDEFINED
+			  endif            
       else if( Proj:SHWNone )
       then 
         UNDEFINED
@@ -1429,7 +1441,7 @@ RULE NEW WtrHtr:BaseEngyInput
         BaseHtOutput
       else if( FuelSrc = "Electricity" .AND. Type <> "Conventional" )
       then
-        ( BaseHtOutput - ValidOr(TankLoss,0) ) / ValidOr( HtPumpEF, 3 )
+        ( BaseHtOutput - ValidOr(TankLoss, 0) ) / ValidOr( HtPumpEF, 3 )
       else UNDEFINED
       endif endif endif endif
     else if( FluidSysHtg = 1 )
@@ -1456,7 +1468,7 @@ RULE NEW WtrHtr:BaseEngyInput
           BaseHtOutput
         else if( FuelSrc = "Electricity" .AND. Type <> "Conventional" )
         then
-          ( BaseHtOutput - ValidOr(TankLoss,0) ) / ValidOr( HtPumpEF, 3 )
+          ( BaseHtOutput - 1556.21)  / 1.94778   // 1.94778 - Calculated HtPumpEF based on a UEF 2.15, High Draw Pattern. 1556.21 - TankLoss
         else UNDEFINED
         endif endif endif
       else if( Proj:SHWNone )
@@ -1486,7 +1498,7 @@ RULE NEW WtrHtr:BaseEngyInput
           BaseHtOutput
         else if( FuelSrc = "Electricity" .AND. Type <> "Conventional" )
         then
-          ( BaseHtOutput - ValidOr(TankLoss,0) ) / ValidOr( HtPumpEF, 3 )
+         ( BaseHtOutput - 1556.21)  / 1.94778   // 1.94778 - Calculated HtPumpEF based on a UEF 2.15, High Draw Pattern. 1556.21 - TankLoss
         else UNDEFINED
         endif endif endif
       else if( Proj:SHWPropOnly )
@@ -1682,6 +1694,13 @@ RULE NEW WtrHtr:IsCommHtPumpWtrHtr
                  Please select a different water heater.", Name)
     else UNCHANGED
     endif
+   SIZING_BASELINE
+     if ( Bldg:IsSchoolBldgForWtrHtr = 1 .AND. StdsVersionYr > 2019 )
+     then 0
+     else UNCHANGED
+     endif
+   ANNUAL_BASELINE
+    zb:IsCommHtPumpWtrHtr
 ENDRULE
 
 
@@ -1843,7 +1862,15 @@ RULE WtrHtr:CapRtd
         endif endif endif
       else if( Proj:SHWUserAndBaseline .OR. Proj:SHWBothBaseline )
       then 
+        if( Type = "Conventional" )
+        then
         BaseEngyInput 
+        else if( FuelSrc = "Electricity" .AND. Type <> "Conventional" )
+        then
+          BaseHtOutput
+	      else
+	        BaseEngyInput 
+	      endif endif
       else if( Proj:SHWPropOnly )
       then 
         if( Type = "Conventional" .AND. FuelSrc = "Gas" )
@@ -1903,19 +1930,67 @@ RULE WtrHtr:WtrFlowCap
     else UNDEFINED
     endif
   SIZING
-    if( IsBaseSys ) then
+    if( IsBaseSys .AND. FluidSysHtg = 1 ) then
       UNDEFINED   // AutoSize
     else
-      u:WtrFlowCap
+      WtrFlowCap
     endif
   ANNUAL
-    if( IsBaseSys ) then
+    if( IsBaseSys .AND. FluidSysHtg = 1 ) then
       CapRtdSim/500.19/Parent(DsgnSupWtrDelT)
     else
       z:WtrFlowCap
     endif
 ENDRULE
 
+// -----------------------------------------------------------------------------
+RULE WtrHtr:IsMultipass
+  DESCRIPTION
+    "Shows whether a heat pump water heater is a multipass unit, commonly used 
+     for space heating applications."
+  DEFAULT
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      if( FluidSysHtg = 1 )
+      then 1
+      else 0
+      endif
+    else UNDEFINED
+    endif
+  CHECKCODE
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      if( IsMultipass = 1 .AND. IsCommHtPumpWtrHtr = 0)
+      then
+        PostError("Multipass is only allowed for commerical heat pump water heaters.
+                   Water Heater '%s' is not a commercial heat pump water heater.", Name )
+      else if( IsMultipass = 1 .AND. FluidSysSHW = 1)
+      then
+        PostError("Multipass is only allowed for space heating application.
+                   Water Heater '%s' is part of a service hot water application.", Name )
+      else UNCHANGED
+	    endif endif
+	 else UNCHANGED
+	 endif  
+  SIZING
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      if( FluidSysHtg = 1 )
+      then 1
+      else 0
+      endif
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      if( FluidSysHtg = 1 )
+      then 1
+      else 0
+      endif
+    else UNDEFINED
+    endif  
+ENDRULE
 
 // -----------------------------------------------------------------------------
 RULE NEW WtrHtr:StdEvapInletAirDBTemp
@@ -1942,6 +2017,19 @@ RULE NEW WtrHtr:StdEvapInletAirDBTemp
       endif
     else UNDEFINED
     endif
+  SIZING
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      if( IsMultipass = 1 )
+      then
+        40
+      else
+        67.5
+      endif
+    else UNDEFINED
+    endif
+  ANNUAL
+   z:StdEvapInletAirDBTemp
 ENDRULE
 
 
@@ -1965,6 +2053,14 @@ RULE NEW WtrHtr:StdEvapInletAirWBTemp
       56.3
     else UNDEFINED
     endif
+  SIZING
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      56.3
+    else UNDEFINED
+    endif
+  ANNUAL
+   z:StdEvapInletAirWBTemp
 ENDRULE
 
 
@@ -1993,6 +2089,19 @@ RULE NEW WtrHtr:StdCondInletWtrTemp
       endif
     else UNDEFINED
     endif
+  SIZING
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      if( IsMultipass = 1 )
+      then
+        120
+      else
+        135.5
+      endif
+    else UNDEFINED
+    endif
+  ANNUAL
+   z:StdCondInletWtrTemp
 ENDRULE
 
 
@@ -2024,6 +2133,13 @@ RULE WtrHtr:RtdEvapInletAirDBTempF
 	    endif
     else UNCHANGED
     endif endif
+  SIZING_BASELINE
+    if( Bldg:IsSchoolBldgForWtrHtr = 1 .AND. StdsVersionYr > 2019 .AND. Type <> "Conventional" )
+      then StdEvapInletAirDBTemp
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+   zb:RtdEvapInletAirDBTempF
 ENDRULE
 
 
@@ -2041,6 +2157,13 @@ RULE WtrHtr:RtdEvapInletAirWBTempF
     else UNDEFINED
     endif
 //    endif
+  SIZING_BASELINE
+    if( Bldg:IsSchoolBldgForWtrHtr = 1 .AND. StdsVersionYr > 2019 .AND. Type <> "Conventional" )
+      then StdEvapInletAirWBTemp
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+   zb:RtdEvapInletAirWBTempF
 ENDRULE
 
 
@@ -2075,6 +2198,13 @@ RULE WtrHtr:RtdCondInletWtrTempF
 	    endif
     else UNCHANGED
     endif endif
+  SIZING_BASELINE
+    if( Bldg:IsSchoolBldgForWtrHtr = 1 .AND. StdsVersionYr > 2019 .AND. Type <> "Conventional" )
+      then StdCondInletWtrTemp
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+   zb:RtdCondInletWtrTempF
 ENDRULE
 
 
@@ -2091,6 +2221,13 @@ RULE NEW WtrHtr:RtdEvapInletAirDBTempC
     then ( RtdEvapInletAirDBTempF - 32 ) * 5 / 9 
     else UNCHANGED
     endif
+  SIZING
+    if( LocalStatus( RtdEvapInletAirDBTempF ) > 0 )
+    then ( RtdEvapInletAirDBTempF - 32 ) * 5 / 9 
+    else UNCHANGED
+    endif
+  ANNUAL
+   z:RtdEvapInletAirDBTempC
 ENDRULE
 
 
@@ -2107,6 +2244,13 @@ RULE NEW WtrHtr:RtdEvapInletAirWBTempC
     then ( RtdEvapInletAirWBTempF - 32 ) * 5 / 9 
     else UNCHANGED
     endif
+  SIZING
+    if( LocalStatus( RtdEvapInletAirWBTempF ) > 0 )
+    then ( RtdEvapInletAirWBTempF - 32 ) * 5 / 9 
+    else UNCHANGED
+    endif
+  ANNUAL
+   z:RtdEvapInletAirWBTempC
 ENDRULE
 
 
@@ -2123,6 +2267,13 @@ RULE NEW WtrHtr:RtdCondInletWtrTempC
     then ( RtdCondInletWtrTempF - 32 ) * 5 / 9 
     else UNCHANGED
     endif
+  SIZING
+    if( LocalStatus( RtdCondInletWtrTempF ) > 0 )
+    then ( RtdCondInletWtrTempF - 32 ) * 5 / 9 
+    else UNCHANGED
+    endif
+  ANNUAL
+   z:RtdCondInletWtrTempC
 ENDRULE
 
 
@@ -2144,6 +2295,14 @@ RULE NEW WtrHtr:CapfTempCrvType
       // Figure out a way to read this from the curve library
     else UNDEFINED
     endif
+  SIZING_BASELINE
+    if( Type <> "Conventional" )              //Heat Pump
+    then
+      "CrvDblQuad"
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+    zb:CapfTempCrvType
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -2164,6 +2323,15 @@ RULE NEW WtrHtr:COPfTempCrvType
       // Figure out a way to read this from the curve library
     else UNDEFINED
     endif
+  SIZING_BASELINE
+    if( Type <> "Conventional" )              //Heat Pump
+    then
+      "CrvDblQuad"
+      // Figure out a way to read this from the curve library
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+    zb:COPfTempCrvType
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -2189,6 +2357,18 @@ RULE NEW WtrHtr:CapfTempCrvCoef1
       // Figure out a way to read this from the curve library
     else UNDEFINED
     endif
+  SIZING_BASELINE
+    if( Type <> "Conventional" )              //Heat Pump
+    then
+      if( IsMultipass = 0 ) then
+        0.563000
+      else
+        0.866676
+      endif
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+    zb:CapfTempCrvCoef1
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -2213,6 +2393,18 @@ RULE NEW WtrHtr:CapfTempCrvCoef2
       endif
     else UNDEFINED
     endif
+  SIZING_BASELINE
+    if( Type <> "Conventional" )              //Heat Pump
+    then
+      if( IsMultipass = 0 ) then
+        0.043700
+      else
+        0.030503
+      endif
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+    zb:CapfTempCrvCoef2
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -2237,6 +2429,19 @@ RULE NEW WtrHtr:CapfTempCrvCoef3
       endif
     else UNDEFINED
     endif
+  SIZING_BASELINE
+    if( Type <> "Conventional" )              //Heat Pump
+    then
+      // Figure out a way to read this from the curve library
+      if( IsMultipass = 0 ) then
+        0.000039
+      else
+        0.000066
+      endif
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+    zb:CapfTempCrvCoef3  
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -2261,6 +2466,20 @@ RULE NEW WtrHtr:CapfTempCrvCoef4
       endif
     else UNDEFINED
     endif
+  SIZING_BASELINE
+    if( Type <> "Conventional" )              //Heat Pump
+    then
+      // Figure out a way to read this from the curve library
+      if( IsMultipass = 0 ) then
+        0.005500
+      else
+        0.002806
+      endif
+    else UNDEFINED
+    endif
+
+  ANNUAL_BASELINE
+    zb:CapfTempCrvCoef4
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -2285,6 +2504,19 @@ RULE NEW WtrHtr:CapfTempCrvCoef5
       endif
     else UNDEFINED
     endif
+  SIZING_BASELINE
+    if( Type <> "Conventional" )              //Heat Pump
+    then
+      // Figure out a way to read this from the curve library
+      if( IsMultipass = 0 ) then
+        -0.000148
+      else
+        -0.000051
+      endif
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+    zb:CapfTempCrvCoef5
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -2309,6 +2541,19 @@ RULE NEW WtrHtr:CapfTempCrvCoef6
       endif
     else UNDEFINED
     endif
+  SIZING_BASELINE
+    if( Type <> "Conventional" )              //Heat Pump
+    then
+      // Figure out a way to read this from the curve library
+      if( IsMultipass = 0 ) then
+        -0.000145
+      else
+        -0.000134
+      endif
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+    zb:CapfTempCrvCoef6
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -2333,6 +2578,19 @@ RULE NEW WtrHtr:COPfTempCrvCoef1
       endif
     else UNDEFINED
     endif
+  SIZING_BASELINE
+    if( Type <> "Conventional" )              //Heat Pump
+    then
+      // Figure out a way to read this from the curve library
+      if( IsMultipass = 0 ) then
+        1.133200
+      else
+        1.921974
+      endif
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+    zb:COPfTempCrvCoef1
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -2357,6 +2615,19 @@ RULE NEW WtrHtr:COPfTempCrvCoef2
       endif
     else UNDEFINED
     endif
+  SIZING_BASELINE
+    if( Type <> "Conventional" )              //Heat Pump
+    then
+      // Figure out a way to read this from the curve library
+      if( IsMultipass = 0 ) then
+        0.063000
+      else
+        0.043998
+      endif
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+    zb:COPfTempCrvCoef2
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -2381,6 +2652,19 @@ RULE NEW WtrHtr:COPfTempCrvCoef3
       endif
     else UNDEFINED
     endif
+  SIZING_BASELINE
+    if( Type <> "Conventional" )              //Heat Pump
+    then
+      // Figure out a way to read this from the curve library
+      if( IsMultipass = 0 ) then
+        -0.000098
+      else
+        0.000019
+      endif
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+    zb:COPfTempCrvCoef3
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -2405,6 +2689,19 @@ RULE NEW WtrHtr:COPfTempCrvCoef4
       endif
     else UNDEFINED
     endif
+  SIZING_BASELINE
+    if( Type <> "Conventional" )              //Heat Pump
+    then
+      // Figure out a way to read this from the curve library
+      if( IsMultipass = 0 ) then
+        -0.009720
+      else
+        -0.031994
+      endif
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+    zb:COPfTempCrvCoef4
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -2429,6 +2726,19 @@ RULE NEW WtrHtr:COPfTempCrvCoef5
       endif
     else UNDEFINED
     endif
+  SIZING_BASELINE
+    if( Type <> "Conventional" )              //Heat Pump
+    then
+      // Figure out a way to read this from the curve library
+      if( IsMultipass = 0 ) then
+        -0.000021
+      else
+        0.000206
+      endif
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+    zb:COPfTempCrvCoef5
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -2453,6 +2763,19 @@ RULE NEW WtrHtr:COPfTempCrvCoef6
       endif
     else UNDEFINED
     endif
+  SIZING_BASELINE
+    if( Type <> "Conventional" )              //Heat Pump
+    then
+      // Figure out a way to read this from the curve library
+      if( IsMultipass = 0 ) then
+        -0.000686
+      else
+        -0.000459
+      endif
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+    zb:COPfTempCrvCoef6
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -2786,6 +3109,13 @@ RULE WtrHtr:COPSim
     then zp:COPSim
     else COP
     endif
+  ANNUAL_PROPOSED
+    COPSim
+  ANNUAL_BASELINE
+    if( IsExisting )
+    then zp:COPSim
+    else COP
+    endif
 ENDRULE
 
 // ---------- Water Heater Outlet Fluid Segment Reference Check --------------
@@ -3047,7 +3377,12 @@ RULE WtrHtr:StorCap
         StorCap
       else if( Proj:SHWUserAndBaseline .OR. Proj:SHWBothBaseline )
       then
+        if ( Bldg:IsSchoolBldgForWtrHtr = 1 .AND. StdsVersionYr > 2019)
+        then
+         int( (BaseHtOutput / 0.60 * 0.40 / ( ( DsgnSupWtrTemp - 55 ) * 1 * 8.2877 )) / 80 + 0.5 ) * 80
+        else
         BaseHtOutput / 0.60 * 0.40 / ( ( DsgnSupWtrTemp - 55 ) * 1 * 8.2877 ) 
+        endif
       else if( Proj:SHWNone )
       then 
         UNDEFINED
@@ -3063,6 +3398,17 @@ RULE WtrHtr:StorCap
     z:StorCap
 ENDRULE
 
+
+RULE NEW WtrHtr:BaseHtPumpCnt
+  LONGFORM
+    BaselineHeatPumpCount
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  SIZING
+    int ( (ValidOr(StorCap,80) / 80) + 0.5 )
+ENDRULE
 
 // -------------- Water Heater --------------
 RULE WtrHtr:StorCapSim
@@ -3374,7 +3720,10 @@ RULE NEW WtrHtr:UEFRtdVal
         u:UEFRtdVal
       else if( Proj:SHWUserAndBaseline .OR. Proj:SHWBothBaseline )
       then
-        UNDEFINED               
+				if ( Bldg:IsSchoolBldgForWtrHtr = 1 .AND. StdsVersionYr > 2019 )
+				then 50
+				else UNDEFINED
+				endif             
       else if( Proj:SHWNone )
       then 
         UNDEFINED
@@ -3512,7 +3861,10 @@ RULE WtrHtr:SubType
   SIZING_BASELINE
     if( IfValidAnd( Type <> "Conventional" ) )
     then
-      UNDEFINED
+      if ( Bldg:IsSchoolBldgForWtrHtr = 1 )
+      then "Storage"
+      else UNDEFINED
+      endif
     else if( FluidSysSHW = 1 )  
     then
       if( IsResAndCombo )
@@ -4012,7 +4364,10 @@ RULE WtrHtr:UEF
         endif
       else if( Proj:SHWUserAndBaseline .OR. Proj:SHWBothBaseline )
       then
-        UNDEFINED                    
+          if ( Bldg:IsSchoolBldgForWtrHtr = 1 .AND. StdsVersionYr > 2019 )
+          then 2.15
+          else UNDEFINED
+          endif               
       else if( Proj:SHWNone )
       then 
         UNDEFINED
@@ -4289,7 +4644,10 @@ RULE WtrHtr:FirstHrRating
     else UNDEFINED
     endif endif
   SIZING_BASELINE
-    UNDEFINED
+    if ( Bldg:IsSchoolBldgForWtrHtr = 1 .AND. StdsVersionYr > 2019 )
+    then 75
+    else UNDEFINED
+    endif
   ANNUAL_PROPOSED
     zp:FirstHrRating
   ANNUAL_BASELINE
@@ -4347,6 +4705,16 @@ RULE WtrHtr:UEFMdlDrawPattern
       endif endif
     else 
       UNDEFINED
+    endif
+  SIZING_BASELINE
+    if ( Bldg:IsSchoolBldgForWtrHtr = 1 .AND. StdsVersionYr > 2019 )
+    then UEFMdlDrawPatternFHRTbl:UEFMdlDrawPattern("FHRRng", FirstHrRating)
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+    if ( Bldg:IsSchoolBldgForWtrHtr = 1 .AND. StdsVersionYr > 2019 )
+    then UEFMdlDrawPatternFHRTbl:UEFMdlDrawPattern("FHRRng", FirstHrRating)
+    else UNDEFINED
     endif
 ENDRULE
 
@@ -4446,6 +4814,16 @@ RULE WtrHtr:UEFMdlCoefDV
       else
         UNDEFINED
       endif    
+    else UNDEFINED
+    endif
+	SIZING_BASELINE
+    if ( Bldg:IsSchoolBldgForWtrHtr = 1 .AND. StdsVersionYr > 2019 )
+    then UEFMdlCoefTbl:UEFMdlCoefDV("UEFMdlDrawPatternRng", UEFMdlDrawPattern)
+    else UNDEFINED
+    endif
+	ANNUAL_BASELINE
+    if ( Bldg:IsSchoolBldgForWtrHtr = 1 .AND. StdsVersionYr > 2019 )
+    then UEFMdlCoefTbl:UEFMdlCoefDV("UEFMdlDrawPatternRng", UEFMdlDrawPattern)
     else UNDEFINED
     endif
 ENDRULE
@@ -4560,6 +4938,13 @@ RULE WtrHtr:UEFMdl
       endswitch  
     else UNDEFINED
     endif
+  SIZING_BASELINE
+	  if ( Bldg:IsSchoolBldgForWtrHtr = 1 .AND. StdsVersionYr > 2019 )
+	  then UEF
+	  else UNCHANGED
+	  endif
+  ANNUAL_BASELINE
+    zb:UEFMdl
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -5034,7 +5419,10 @@ RULE WtrHtr:UEFMdlCalcEF
         u:UEFMdlCalcEF
       else if( Proj:SHWUserAndBaseline .OR. Proj:SHWBothBaseline )
       then
-        UNDEFINED               
+			  if ( Bldg:IsSchoolBldgForWtrHtr = 1 .AND. StdsVersionYr > 2019 )
+			  then  ( UEFMdl - 0.1513 -( 0.0043 * UEFMdlCoefDV ) ) / 0.8407
+			  else UNCHANGED
+			  endif
       else if( Proj:SHWNone )
       then 
         UNDEFINED
@@ -5479,6 +5867,98 @@ RULE NEW WtrHtr:HtPumpEF
       endif endif
     else UNDEFINED
     endif
+  SIZING_PROPOSED
+    if( FluidSysSHW = 1 )
+    then  
+      if( Proj:SHWUserAndBaseline .OR. Proj:SHWPropOnly )
+      then
+        if( Type <> "Conventional" )
+        then
+		      if( IfValidAnd( UEFRtdVal < 10 ) )     // not UEF rated
+		      then
+		        EF
+		      else if( IfValidAnd( UEFRtdVal = 50 ) )
+		      then
+		        UEFMdlCalcEF
+		      else UNDEFINED
+		      endif endif
+		    else 
+		      UNDEFINED
+		    endif
+      else if( Proj:SHWBothBaseline )
+      then
+        if( Type <> "Conventional" )
+        then
+          UEFMdlCalcEF
+        else
+          UNDEFINED
+        endif
+      else if( Proj:SHWNone )
+      then
+        UNDEFINED
+      else
+        UNDEFINED
+      endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
+    else UNDEFINED
+    endif endif
+  SIZING_BASELINE
+    if( FluidSysSHW = 1 )  
+    then
+     if( Proj:SHWPropOnly )
+     then
+       if( Type <> "Conventional" )
+       then
+	       if( IfValidAnd( UEFRtdVal < 10 ) )     // not UEF rated
+	       then
+	         EF
+	       else if( IfValidAnd( UEFRtdVal = 50 ) )
+	       then
+	         UEFMdlCalcEF
+	       else UNDEFINED
+	       endif endif
+	     else
+	       UNDEFINED
+	     endif
+     else if( Proj:SHWUserAndBaseline .OR. Proj:SHWBothBaseline )
+     then
+        if( Type <> "Conventional" )
+        then
+          UEFMdlCalcEF
+        else
+          UNDEFINED
+        endif
+      else if( Proj:SHWNone )
+      then
+        UNDEFINED
+      else UNDEFINED
+      endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
+    else UNDEFINED
+    endif endif
+//  SIZING_BASELINE
+//    if( Type <> "Conventional" )
+//    then
+//      if( IfValidAnd( UEFRtdVal < 10 ) )     // not UEF rated
+//      then
+//        EF
+//      else if( IfValidAnd( UEFRtdVal = 50 ) )
+//      then
+//        UEFMdlCalcEF
+//      else UNDEFINED
+//      endif endif
+//    else UNDEFINED
+//    endif
+//  ANNUAL_BASELINE
+//    zb:HtPumpEF
+  ANNUAL_PROPOSED
+    zp:HtPumpEF
+  ANNUAL_BASELINE
+    zb:HtPumpEF
 ENDRULE
 
 
@@ -5798,7 +6278,11 @@ RULE WtrHtr:ThrmlEff
           else 0.80
           endif
         else if( FuelSrc = "Electricity" )
-        then 1.00
+        then
+          if ( Bldg:IsSchoolBldgForWtrHtr = 1 .AND. StdsVersionYr > 2019 )
+          then UNDEFINED
+          else 1.00
+          endif
         else UNDEFINED
         endif endif                                            
       else if( Proj:SHWNone )
@@ -5884,8 +6368,10 @@ RULE WtrHtr:MaxTempLimit
   SIZING_BASELINE
     if( IsExisting )
     then zp:MaxTempLimit
-    else 180
-    endif
+    else if( Type = "Conventional" ) 
+	  then 180
+	  else 150
+	  endif endif
   ANNUAL
     z:MaxTempLimit
 ENDRULE
@@ -6408,7 +6894,7 @@ RULE WtrHtr:StdbyLossFrac
           if( FuelSrc = "Gas" )
           then
             (CapRtd/800 + 110*SQRT( StorCap )) / (8.25 * 70 * StorCap)
-          else if( FuelSrc = "Electricity")
+          else if( FuelSrc = "Electricity" )
           then
             (0.3 + 27 / StorCap) / 100
           else 
@@ -6428,7 +6914,7 @@ RULE WtrHtr:StdbyLossFrac
         if( FuelSrc = "Gas" )
         then
           (CapRtd/800 + 110*SQRT( StorCap )) / (8.25 * 70 * StorCap)
-        else if( FuelSrc = "Electricity")
+        else if( FuelSrc = "Electricity" .AND. Type = "Conventional" )
         then
           (0.3 + 27 / StorCap) / 100
         else 
@@ -6600,7 +7086,7 @@ RULE WtrHtr:StdbyLoss
         if( FuelSrc = "Gas" ) 
         then
           CapRtd/800 + 110*SQRT( StorCap )
-        else if( FuelSrc = "Electricity" )
+        else if( FuelSrc = "Electricity" .AND. Type = "Conventional" )
         then
           (0.3 + 27 / StorCap) / 100 * 8.25 * 70 * StorCap 
         else
@@ -6644,9 +7130,9 @@ RULE WtrHtr:TankHgt
 //    else UNCHANGED
 //    endif
   SIZING
-    TankHgt
+    5
   ANNUAL
-    TankHgt
+    5
 ENDRULE
 
 // The following tables are referenced for determing the Max and Min UA
@@ -6683,17 +7169,14 @@ RULE NEW WtrHtr:MinHPEF
   SIZING
     if( Type <> "Conventional" )
     then
-      u:MinHPEF
-    else
-      UNDEFINED
+      if( LocalStatus( StorCap ) > 0 )
+        then PrpHPWtrHtrUAEF:MinHPEF("StorCapRng", StorCap)
+      else UNDEFINED
+      endif    
+    else UNDEFINED
     endif
   ANNUAL
-    if( Type <> "Conventional" )
-    then
       z:MinHPEF
-    else
-      UNDEFINED
-    endif
 ENDRULE
 
 // --------------  ---------
@@ -6720,17 +7203,16 @@ RULE NEW WtrHtr:MaxHPEF
   SIZING
     if( Type <> "Conventional" )
     then
-      u:MaxHPEF
+      if( LocalStatus( StorCap ) > 0 )
+      then 
+        PrpHPWtrHtrUAEF:MaxHPEF("StorCapRng", StorCap)
     else
       UNDEFINED
     endif
+    else UNDEFINED
+    endif  
   ANNUAL
-    if( Type <> "Conventional" )
-    then
       z:MaxHPEF
-    else
-      UNDEFINED
-    endif
 ENDRULE
 
 // --------------  ----------
@@ -6756,17 +7238,15 @@ RULE NEW WtrHtr:MinHPUA
   SIZING
     if( Type <> "Conventional" )
     then
-      u:MinHPUA
+      if( LocalStatus( StorCap ) > 0 )
+        then PrpHPWtrHtrUAEF:MinHPUA("StorCapRng", StorCap)
     else
       UNDEFINED
+    endif
+    else UNDEFINED
     endif
   ANNUAL
-    if( Type <> "Conventional" )
-    then
       z:MinHPUA
-    else
-      UNDEFINED
-    endif
 ENDRULE
 
 // --------------  ----------
@@ -6792,17 +7272,15 @@ RULE NEW WtrHtr:MaxHPUA
   SIZING
     if( Type <> "Conventional" )
     then
-      u:MaxHPUA
+      if( LocalStatus( StorCap ) > 0 )
+        then PrpHPWtrHtrUAEF:MaxHPUA("StorCapRng", StorCap)
     else
       UNDEFINED
+    endif
+    else UNDEFINED
     endif
   ANNUAL
-    if( Type <> "Conventional" )
-    then
       z:MaxHPUA
-    else
-      UNDEFINED
-    endif
 ENDRULE
 
 // -------------- ----------
@@ -6834,22 +7312,120 @@ RULE NEW WtrHtr:TankLoss
     else 
       UNDEFINED
     endif endif
-  SIZING
-    if( Type <> "Conventional" )
+  SIZING_PROPOSED
+    if( FluidSysSHW = 1 ) 
     then
-     u:TankLoss
-    else
-     UNDEFINED
-    endif
-  ANNUAL
-    if( Type <> "Conventional" )
+      if( IsResAndCombo )
+      then
+        UNDEFINED
+      else if( Proj:SHWUserAndBaseline .OR. Proj:SHWPropOnly )
+      then 
+		    if( Type <> "Conventional" .AND. IsCommHtPumpWtrHtr = 0)
+		    then
+		      if( IfValidAnd( UEFRtdVal < 10 ) .AND. IfValidAnd( EF > 0) .AND. IfValidAnd( StorCap >0 ) )
+		      then
+		        ( MaxHPUA - ( EF - MinHPEF) * ( (MaxHPUA - MinHPUA) / (MaxHPEF - MinHPEF) ) ) * 80   // Using look-up table derived from Appliance Database for Small Water Heaters
+		      else if( IfValidAnd( UEFRtdVal = 50 ) .AND. IfValidAnd(UEFMdlCalcEF >0) ) 
+		      then
+		        ( MaxHPUA - ( UEFMdlCalcEF - MinHPEF) * ( (MaxHPUA - MinHPUA) / (MaxHPEF - MinHPEF) ) ) * 80   // Using look-up table derived from Appliance Database for Small Water Heaters
+		      else UNDEFINED
+		      endif endif
+		    else if( Type <> "Conventional" .AND. IsCommHtPumpWtrHtr = 1 )
+		    then
+		     StdbyLoss   //u:TankLoss
+		    else
+		     UNDEFINED
+		    endif endif
+      else if( Proj:SHWBothBaseline )
+      then 
+		    if( Type <> "Conventional" .AND. IsCommHtPumpWtrHtr = 0)
+		    then
+		      if( IfValidAnd( UEFRtdVal = 50 ) .AND. IfValidAnd(UEFMdlCalcEF >0) ) 
+		      then
+		        ( MaxHPUA - ( UEFMdlCalcEF - MinHPEF) * ( (MaxHPUA - MinHPUA) / (MaxHPEF - MinHPEF) ) ) * 80   // Using look-up table derived from Appliance Database for Small Water Heaters
+		      else UNDEFINED
+		      endif
+		    else
+		     UNDEFINED
+		    endif
+      else if( Proj:SHWNone )
+      then 
+        UNDEFINED
+      else
+        UNDEFINED
+      endif endif endif endif
+    else if( FluidSysHtg = 1 )
     then
-     z:TankLoss
-    else
-     UNDEFINED
-    endif
+      UNDEFINED
+    else UNDEFINED
+    endif endif
+  SIZING_BASELINE
+    if( FluidSysSHW = 1 ) 
+    then
+      if( IsResAndCombo )
+      then
+        UNDEFINED
+      else if( Proj:SHWUserAndBaseline .OR. Proj:SHWBothBaseline )
+      then 
+		    if( Type <> "Conventional" .AND. IsCommHtPumpWtrHtr = 0)
+		    then
+		      if( IfValidAnd( UEFRtdVal = 50 ) .AND. IfValidAnd(UEFMdlCalcEF >0) ) 
+		      then
+		        ( MaxHPUA - ( UEFMdlCalcEF - MinHPEF) * ( (MaxHPUA - MinHPUA) / (MaxHPEF - MinHPEF) ) ) * 80   // Using look-up table derived from Appliance Database for Small Water Heaters
+		      else UNDEFINED
+		      endif
+		    else
+		     UNDEFINED
+		    endif
+      else if( Proj:SHWPropOnly )
+      then 
+		    if( Type <> "Conventional" .AND. IsCommHtPumpWtrHtr = 0)
+		    then
+		      if( IfValidAnd( UEFRtdVal < 10 ) .AND. IfValidAnd( EF > 0) .AND. IfValidAnd( StorCap >0 ) )
+		      then
+		        ( MaxHPUA - ( EF - MinHPEF) * ( (MaxHPUA - MinHPUA) / (MaxHPEF - MinHPEF) ) ) * 80   // Using look-up table derived from Appliance Database for Small Water Heaters
+		      else if( IfValidAnd( UEFRtdVal = 50 ) .AND. IfValidAnd(UEFMdlCalcEF >0) ) 
+		      then
+		        ( MaxHPUA - ( UEFMdlCalcEF - MinHPEF) * ( (MaxHPUA - MinHPUA) / (MaxHPEF - MinHPEF) ) ) * 80   // Using look-up table derived from Appliance Database for Small Water Heaters
+		      else UNDEFINED
+		      endif endif
+		    else if( Type <> "Conventional" .AND. IsCommHtPumpWtrHtr = 1 )
+		    then
+		     StdbyLoss   //u:TankLoss
+		    else
+		     UNDEFINED
+		    endif endif
+      else if( Proj:SHWNone )
+      then 
+        UNDEFINED
+      else
+        UNDEFINED
+      endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
+    else UNDEFINED
+    endif endif    
+//  SIZING
+//    if( Type <> "Conventional" .AND. IsCommHtPumpWtrHtr = 0)
+//    then
+//      if( IfValidAnd( UEFRtdVal < 10 ) .AND. IfValidAnd( EF > 0) .AND. IfValidAnd( StorCap >0 ) )
+//    then
+//        ( MaxHPUA - ( EF - MinHPEF) * ( (MaxHPUA - MinHPUA) / (MaxHPEF - MinHPEF) ) ) * 80   // Using look-up table derived from Appliance Database for Small Water Heaters
+//      else if( IfValidAnd( UEFRtdVal = 50 ) .AND. IfValidAnd(UEFMdlCalcEF >0) ) 
+//      then
+//        ( MaxHPUA - ( UEFMdlCalcEF - MinHPEF) * ( (MaxHPUA - MinHPUA) / (MaxHPEF - MinHPEF) ) ) * 80   // Using look-up table derived from Appliance Database for Small Water Heaters
+//      else UNDEFINED
+//      endif endif
+//    else if( Type <> "Conventional" .AND. IsCommHtPumpWtrHtr = 1 )
+//    then
+//     StdbyLoss   //u:TankLoss
+//    else
+//     UNDEFINED
+//    endif endif
+//  ANNUAL
+//     z:TankLoss
 ENDRULE
-
 
 // -------------- Water Heater --------------
 RULE WtrHtr:TankHgtSim
@@ -6857,10 +7433,14 @@ RULE WtrHtr:TankHgtSim
     "The simulates system type for SDD -> OS reverse translator."
   HELP
     ""
-  ANNUAL_PROPOSED
+  SIZING_PROPOSED
     zp:TankHgt
-  ANNUAL_BASELINE
+  SIZING_BASELINE
     zb:TankHgt
+  ANNUAL_PROPOSED
+    zp:TankHgtSim
+  ANNUAL_BASELINE
+    zb:TankHgtSim
 ENDRULE
 
 // -------------- Heat Pump Water Heater Compressor Power
@@ -6891,10 +7471,10 @@ RULE NEW WtrHtr:CprsrPwr
   SIZING
     if( Type <> "Conventional" )
     then 
-      if( u:Type = "HeatPumpSplit" .AND. IfValidAnd( InpPwr > 0 ) )
+      if( Type = "HeatPumpSplit" .AND. IfValidAnd( InpPwr > 0 ) )
       then
         InpPwr * 0.85 * 1000
-      else if( u:Type = "HeatPumpPackaged" .AND. IfValidAnd( InpPwr > 0 ) )
+      else if( Type = "HeatPumpPackaged" .AND. IfValidAnd( InpPwr > 0 ) )
       then
         InpPwr * 0.91 * 1000
       else UNDEFINED
@@ -7065,7 +7645,10 @@ RULE WtrHtr:COP
         endif endif
       else if( Proj:SHWUserAndBaseline .OR. Proj:SHWBothBaseline )
       then
-        UNDEFINED
+			  if ( Bldg:IsSchoolBldgForWtrHtr = 1 )
+			  then CapRtd / 3.412 / CprsrPwr
+			  else UNDEFINED
+			  endif
       else if( Proj:SHWNone )
       then
         UNDEFINED
@@ -7122,6 +7705,17 @@ RULE NEW WtrHtr:HtOutput
       CapRtd * IfValidAnd( ThrmlEff > 0 ) * CmbdMult
     else UNDEFINED
     endif endif
+  SIZING
+    if( Type <> "Conventional" .AND. IfValidAnd( InpPwr > 0 ) .AND. IfValidAnd( COP > 0 ) )
+    then
+      InpPwr * COP * 3412 * CmbdMult                // Heat Pump
+    else if( Type = "Conventional" .AND. IfValidAnd( CapRtd > 0 ) )
+    then
+      CapRtd * IfValidAnd( ThrmlEff > 0 ) * CmbdMult
+    else UNDEFINED
+    endif endif
+  ANNUAL
+    z:HtOutput
 ENDRULE
 
 // -------------- Split Heat Pump Water Heater Condenser Pump Power
@@ -7135,7 +7729,7 @@ RULE WtrHtr:CndsrPumpPwr
   SIZING
     if( Type <> "Conventional" )
     then 
-      if( u:Type = "HeatPumpSplit" )
+      if( Type = "HeatPumpSplit" )
       then
         InpPwr * 0.06 * 1000
       else 0
@@ -7145,7 +7739,7 @@ RULE WtrHtr:CndsrPumpPwr
   ANNUAL
     if( Type <> "Conventional" )
     then
-     CndsrPumpPwr
+     z:CndsrPumpPwr
     else
      UNDEFINED
     endif
@@ -7422,7 +8016,10 @@ RULE NEW WtrHtr:UEFMdlTankOffCycleLossCoef
         u:UEFMdlTankOffCycleLossCoef
       else if( Proj:SHWUserAndBaseline .OR. Proj:SHWBothBaseline )
       then
-        UNDEFINED               
+        if ( Bldg:IsSchoolBldgForWtrHtr = 1 .AND. StdsVersionYr > 2019 )
+        then  ValidOr ( TankLoss, 0 ) / 80
+        else UNDEFINED        
+        endif       
       else if( Proj:SHWNone )
       then 
         UNDEFINED
@@ -7573,12 +8170,16 @@ RULE WtrHtr:TankOffCycleLossCoef
         endif
       else if( Proj:SHWUserAndBaseline .OR. Proj:SHWBothBaseline )
       then
+        if ( Bldg:IsSchoolBldgForWtrHtr = 1 .AND. StdsVersionYr > 2019 )
+        then 0.5
+        else
         if( Size = "Small" )
         then
           ((1/EF) - (1/RE)) / ( 67.5 * ( (24/41094) - (1/(RE * CapRtd)) ) )
         else
           ValidOr( StdbyLoss, 0 ) / 70          // 70 is the delta T between indoor space temp and setpoint temp - from Fed Regs
         endif   
+	      endif
       else if( Proj:SHWNone )
       then
         UNDEFINED
@@ -7590,8 +8191,10 @@ RULE WtrHtr:TankOffCycleLossCoef
       UNDEFINED
     else UNDEFINED
     endif endif
-  ANNUAL
-    z:TankOffCycleLossCoef
+  ANNUAL_PROPOSED
+    zp:TankOffCycleLossCoef
+  ANNUAL_BASELINE
+    zb:TankOffCycleLossCoef
 ENDRULE
 
 // -------------- Water Heater --------------
@@ -7695,7 +8298,7 @@ RULE WtrHtr:TankOffCycleLossCoefSim
             endif endif endif
           else if( IfValidAnd( UEFRtdVal >= 10 ) )
           then
-            MAX( zp:UEFMdlTankOffCycleLossCoef * u:CmbdMult, 0.001 )
+            MAX( zb:UEFMdlTankOffCycleLossCoef * u:CmbdMult, 0.001 )
           else UNDEFINED
           endif endif
         else if( Proj:ResComboDHWUserAndBaseline )
@@ -7725,17 +8328,20 @@ RULE WtrHtr:TankOffCycleLossCoefSim
           endif endif endif
         else if( IfValidAnd( UEFRtdVal >= 10 ) )
         then
-          MAX( zp:UEFMdlTankOffCycleLossCoef * u:CmbdMult, 0.001 )
+          MAX( zb:UEFMdlTankOffCycleLossCoef * CmbdMult, 0.001 )
         else UNDEFINED
         endif endif
       else if( Proj:SHWUserAndBaseline .OR. Proj:SHWBothBaseline )
       then
-        if( Size = "Small" )
+        if( Bldg:IsSchoolBldgForWtrHtr = 1 .AND. StdsVersionYr > 2019 )
+        then
+          MAX( zb:UEFMdlTankOffCycleLossCoef * CmbdMult, 0.001 )
+        else if( Size = "Small" )
         then
           MAX( zb:TankOffCycleLossCoef * CmbdMult, 0.001 )  
         else
           MAX ( zb:TankOffCycleLossCoef, 0.001 )               // 70 is the delta T between indoor space temp and setpoint temp - from Fed Regs
-        endif   
+        endif  endif
       else if( Proj:SHWNone )
       then
         UNDEFINED
@@ -7747,8 +8353,10 @@ RULE WtrHtr:TankOffCycleLossCoefSim
       UNDEFINED
     else UNDEFINED
     endif endif
-  ANNUAL
-    z:TankOffCycleLossCoefSim
+  ANNUAL_BASELINE
+    zb:TankOffCycleLossCoefSim
+  ANNUAL_PROPOSED
+    zp:TankOffCycleLossCoefSim
 ENDRULE
 
 // -------------- Water Heater Tank On Cycle Loss Coefficient (UA) ----------------
@@ -7885,8 +8493,10 @@ RULE WtrHtr:CprsrLoc
     then
       if( Type = "HeatPumpPackaged" .AND. IfValidAnd( StorLoc > 0 ) )
       then 1
+      else if( Bldg:IsSchoolBldgForWtrHtr = 1 )
+      then 1
       else CprsrLoc
-      endif
+      endif endif
     else
      UNDEFINED
     endif
@@ -8045,23 +8655,19 @@ RULE WtrHtr:MinInletAirTempCprsrOper
   UNITS
     F
   DEFAULT
-    if( Type <> "Conventional" )
+    if( IfValidAnd( Type <> "Conventional" ) )
     then
       40
     else UNDEFINED
     endif
-  SIZING
-    if( Type <> "Conventional" )
-    then 
-      MinInletAirTempCprsrOper
-    else UNDEFINED
-    endif  
-  ANNUAL
-    if( Type <> "Conventional" )
+  SIZING_BASELINE
+    if( IfValidAnd( Type <> "Conventional" ) )
     then
-      MinInletAirTempCprsrOper
+      40
     else UNDEFINED
     endif
+  ANNUAL_BASELINE
+   zb:MinInletAirTempCprsrOper
 ENDRULE
 
 
@@ -8451,7 +9057,14 @@ RULE WtrHtr:ProdType
     else UNDEFINED
     endif endif  
   ANNUAL_BASELINE
-    UNDEFINED
+    if( FluidSysSHW = 1 )  
+    then
+      if( Type <> "Conventional")
+      then "Consumer"
+      else UNDEFINED
+      endif
+    else UNDEFINED
+    endif
 ENDRULE
 
 
@@ -8589,6 +9202,14 @@ RULE WtrHtr:MaxInletAirTempCprsrOper
       201
     else UNDEFINED
     endif
+  SIZING_BASELINE
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      201
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+    zb:MaxInletAirTempCprsrOper
 ENDRULE
 
 
@@ -8605,6 +9226,14 @@ RULE WtrHtr:FanPlcmt
       DrawThrough
     else UNDEFINED
     endif
+  SIZING_BASELINE
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      DrawThrough
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+    zb:FanPlcmt
 ENDRULE
 
 
@@ -8621,6 +9250,14 @@ RULE WtrHtr:EvapFanPwrInCOP
       "Yes"
     else UNDEFINED
     endif
+  SIZING_BASELINE
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      "Yes"
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+    zb:EvapFanPwrInCOP
 ENDRULE
 
 
@@ -8637,6 +9274,14 @@ RULE WtrHtr:CndsrPumpPwrInCOP
       "Yes"
     else UNDEFINED
     endif
+  SIZING_BASELINE
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      "Yes"
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+    zb:CndsrPumpPwrInCOP
 ENDRULE
 
 
@@ -8653,6 +9298,14 @@ RULE WtrHtr:CndsrPumpHtInCapAndCOP
       "Yes"
     else UNDEFINED
     endif
+  SIZING_BASELINE
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      "Yes"
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+    zb:CndsrPumpHtInCapAndCOP
 ENDRULE
 
 
@@ -8666,6 +9319,14 @@ RULE WtrHtr:CndsrPumpHtFracToWtr
       0.2
     else UNDEFINED
     endif
+  SIZING_BASELINE
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      0.2
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+    zb:CndsrPumpHtFracToWtr
 ENDRULE
 
 
@@ -8679,39 +9340,65 @@ RULE WtrHtr:CrankcaseHtrMaxT
       50
     else UNDEFINED
     endif
-ENDRULE
-
-
-// -----------------------------------------------------------------------------
-RULE WtrHtr:IsMultipass
-  DESCRIPTION
-    "Shows whether a heat pump water heater is a multipass unit, commonly used 
-     for space heating applications."
-  DEFAULT
+  SIZING_BASELINE
     if( IfValidAnd( Type <> "Conventional" ) )
     then
-      if( FluidSysHtg = 1 )
-      then 1
-      else 0
-      endif
+      50
     else UNDEFINED
     endif
-  CHECKCODE
-    if( IfValidAnd( Type <> "Conventional" ) )
-    then
-      if( IsMultipass = 1 .AND. IsCommHtPumpWtrHtr = 0)
-      then
-        PostError("Multipass is only allowed for commerical heat pump water heaters.
-                   Water Heater '%s' is not a commercial heat pump water heater.", Name )
-      else if( IsMultipass = 1 .AND. FluidSysSHW = 1)
-      then
-        PostError("Multipass is only allowed for space heating application.
-                   Water Heater '%s' is part of a service hot water application.", Name )
-      else UNCHANGED
-	    endif endif
-	 else UNCHANGED
-	 endif  
+  ANNUAL_BASELINE
+    zb:CrankcaseHtrMaxT
 ENDRULE
+
+
+//// -----------------------------------------------------------------------------
+//RULE WtrHtr:IsMultipass
+//  DESCRIPTION
+//    "Shows whether a heat pump water heater is a multipass unit, commonly used 
+//     for space heating applications."
+//  DEFAULT
+//    if( IfValidAnd( Type <> "Conventional" ) )
+//    then
+//      if( FluidSysHtg = 1 )
+//      then 1
+//      else 0
+//      endif
+//    else UNDEFINED
+//    endif
+//  CHECKCODE
+//    if( IfValidAnd( Type <> "Conventional" ) )
+//    then
+//      if( IsMultipass = 1 .AND. IsCommHtPumpWtrHtr = 0)
+//      then
+//        PostError("Multipass is only allowed for commerical heat pump water heaters.
+//                   Water Heater '%s' is not a commercial heat pump water heater.", Name )
+//      else if( IsMultipass = 1 .AND. FluidSysSHW = 1)
+//      then
+//        PostError("Multipass is only allowed for space heating application.
+//                   Water Heater '%s' is part of a service hot water application.", Name )
+//      else UNCHANGED
+//	    endif endif
+//	 else UNCHANGED
+//	 endif  
+//  SIZING
+//    if( IfValidAnd( Type <> "Conventional" ) )
+//    then
+//      if( FluidSysHtg = 1 )
+//      then 1
+//      else 0
+//      endif
+//    else UNDEFINED
+//    endif
+//  ANNUAL
+//    if( IfValidAnd( Type <> "Conventional" ) )
+//    then
+//      if( FluidSysHtg = 1 )
+//      then 1
+//      else 0
+//      endif
+//    else UNDEFINED
+//    endif  
+//ENDRULE
 
 
 // -----------------------------------------------------------------------------
@@ -8724,6 +9411,14 @@ RULE WtrHtr:Cap_fAirFlowFracCrvRef
       RuleLibrary(CrvQuad, "Constant1Quad")
     else UNDEFINED
     endif
+  SIZING_BASELINE
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      RuleLibrary(CrvQuad, "Constant1Quad")
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+    zb:Cap_fAirFlowFracCrvRef
 ENDRULE
 
 
@@ -8737,6 +9432,14 @@ RULE WtrHtr:Cap_fWtrFlowFracCrvRef
       RuleLibrary(CrvQuad, "Constant1Quad")
     else UNDEFINED
     endif
+  SIZING_BASELINE
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      RuleLibrary(CrvQuad, "Constant1Quad")
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+    zb:Cap_fWtrFlowFracCrvRef
 ENDRULE
 
 
@@ -8750,6 +9453,14 @@ RULE WtrHtr:COP_fAirFlowFracCrvRef
       RuleLibrary(CrvQuad, "Constant1Quad")
     else UNDEFINED
     endif
+  SIZING_BASELINE
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      RuleLibrary(CrvQuad, "Constant1Quad")
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+    zb:COP_fAirFlowFracCrvRef
 ENDRULE
 
 
@@ -8763,6 +9474,14 @@ RULE WtrHtr:COP_fWtrFlowFracCrvRef
       RuleLibrary(CrvQuad, "Constant1Quad")
     else UNDEFINED
     endif
+  SIZING_BASELINE
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      RuleLibrary(CrvQuad, "Constant1Quad")
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+    zb:COP_fWtrFlowFracCrvRef
 ENDRULE
 
 
@@ -8776,6 +9495,14 @@ RULE WtrHtr:WtrHtrSetPtTemp
       135
     else UNDEFINED
     endif
+  SIZING_BASELINE
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      135
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+   zb:WtrHtrSetPtTemp    
 ENDRULE
 
 
@@ -8789,6 +9516,14 @@ RULE WtrHtr:CapRtdSupp
       CapRtd
     else UNDEFINED
     endif
+  SIZING_BASELINE
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      CapRtd
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+   zb:CapRtdSupp
 ENDRULE
 
 
@@ -8820,6 +9555,14 @@ RULE WtrHtr:FanPwr_fPLRCvRef
       RuleLibrary(CrvCubic, "Constant1Cubic")
     else UNDEFINED
     endif
+  SIZING_BASELINE
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      RuleLibrary(CrvCubic, "Constant1Cubic")
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+    zb:FanPwr_fPLRCvRef
 ENDRULE
 
 
@@ -8833,6 +9576,14 @@ RULE WtrHtr:FanEff_fPLRCvRef
       RuleLibrary(CrvQuad, "Constant1Quad")
     else UNDEFINED
     endif
+  SIZING_BASELINE
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      RuleLibrary(CrvQuad, "Constant1Quad")
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+    zb:FanEff_fPLRCvRef
 ENDRULE
 
 
@@ -8846,6 +9597,14 @@ RULE WtrHtr:TankDeadBandTempHtPump
      5
     else UNDEFINED
     endif
+  SIZING_BASELINE
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      5
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+    zb:TankDeadBandTempHtPump
 ENDRULE
 
 
@@ -8859,5 +9618,13 @@ RULE WtrHtr:TankDeadBandTempInternal
       2
     else UNDEFINED
     endif
+  SIZING_BASELINE
+    if( IfValidAnd( Type <> "Conventional" ) )
+    then
+      2
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+    zb:TankDeadBandTempInternal
 ENDRULE
 
