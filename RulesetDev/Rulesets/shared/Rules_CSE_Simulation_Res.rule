@@ -231,6 +231,8 @@ RULELIST "CSE_SimulationPrep_PVBattOnly" 1 0 0 1
 	"Delete all DwellUnitDHW components"			Proj:Action = {	DeleteAllComps( DwellUnitDHW     )  }	; SAC 5/11/16
 
 	"Delete all cseRSYS components"				   Proj:Action = {	DeleteAllComps( cseRSYS        )  }
+	"Blast all cseAIRHANDLER components"	      Proj:Action	= {	DeleteAllComps( cseAIRHANDLER )  }     ; SAC 04/26/22
+	"Blast all cseTERMINAL components"		      Proj:Action	= {	DeleteAllComps( cseTERMINAL )  }
 
    ; clear out existing CSE PV/Battery objects
 	"Delete all csePVARRAY objects"		      Proj:Action = {  DeleteAllComps( csePVARRAY )  }
@@ -298,12 +300,19 @@ RULELIST "CSE_Defaulting_Project" 1 0 0 1
 ;   "Set cseTOP:runSerial - serial # for the simulation. Increments on each run in a session; appears in report footers"       ; SAC 10/05/20
 ;      cseTOP:runSerial = { if (IfValidAnd( ResProj:RunNumber >= 0 )) then  ResProj:RunNumber  else  UNDEFINED  endif  }
 
+   "Set cseTOP:doMainSim"     cseTOP:doMainSim  =        ; Main/annual (YES) vs. HVAC Sizing (NO) - SAC 05/09/22
+      {  if (Proj:IsComRuleset)
+         then  if (IfValidAnd( Proj:HVACAutoSizing > 0 ))
+               then  "NO"  else  UNDEFINED  endif
+         else  UNDEFINED  endif  }
+
 ;	"Default cseTOP:begDay=Jan 1                     //
 ;	"Default cseTOP:endDay=Dec 31                    //
 	"Default cseTOP:ebTolHour"		cseTOP:ebTolHour	= {	0.001  }
 	"Default cseTOP:ebTolDay"     cseTOP:ebTolDay	= {	0.001  }
 	"Default cseTOP:ebTolMon"     cseTOP:ebTolMon	= {	0.001  }
 	"Default cseTOP:ebTolSubHr"   cseTOP:ebTolSubHr	= {	0.001  }
+   "Default cseTOP:tol"          cseTOP:tol        = {   0.01   }    ; SAC 05/12/22 (MFam)
 
 ;	"Default cseTOP:jan1DOW"		cseTOP:jan1DOW		= {	"TUE"  }
    ; SAC 7/29/18 - removed all logic pertaining to DHWCalcMethod (related to transition from T24DHW DLLs to CSE)
@@ -345,6 +354,7 @@ RULELIST "CSE_Defaulting_Project" 1 0 0 1
 	"Set Proj:CSE_DefineString[2]"	Proj:CSE_DefineString[2]	= {
          switch (ResProj:RunAbbrev)
            case "u"     :  Format( "          %5.0f   // User",             0 )
+           case "zp"    :  Format( "          %5.0f   // ProposedSizing",  20 )  ; SAC 05/08/22
            case "pp"    :  Format( "          %5.0f   // PrelimProp",       1 )
            case "pp-N"  :  Format( "          %5.0f   // PrelimProp-North", 2 )
            case "pp-E"  :  Format( "          %5.0f   // PrelimProp-East",  3 )
@@ -356,7 +366,8 @@ RULELIST "CSE_Defaulting_Project" 1 0 0 1
            case "p-E"   :  Format( "          %5.0f   // Proposed-East",    9 )
            case "p-S"   :  Format( "          %5.0f   // Proposed-South",  10 )
            case "p-W"   :  Format( "          %5.0f   // Proposed-West",   11 )
-           case "zb"    :  Format( "          %5.0f   // Standard",        12 )  ; SAC 01/13/22
+           case "zb"    :  Format( "          %5.0f   // StandardSizing",  21 )  ; SAC 05/08/22
+      ;     case "zb"    :  Format( "          %5.0f   // Standard",        12 )  ; SAC 01/13/22
            case "s"     :  Format( "          %5.0f   // Standard",        12 )
            case "dr"    :  Format( "          %5.0f   // DesignRating",    13 )
            case "pfx"   :  Format( "          %5.0f   // PropFlex",        14 )
@@ -880,14 +891,22 @@ RULELIST "CSE_SimulationPrep_MetersAndReports" 1 0 0 1
          then  EvalRulelist( "CSE_Project_SetupSolarSysSSFExport" )
          else  UNCHANGED  endif  }
 
-   "Setup HVAC Capacity export for ALL models"     ResProj:Action  =    ; SAC 03/12/21
-      {  if (SumAll( ResHVACSys:FloorAreaServed[1] ) > 0)
+   "Setup HVAC Capacity export for Annual Sim models"    ResProj:Action  =    ; SAC 03/12/21
+      {  if (SumAll( ResHVACSys:FloorAreaServed[1] ) > 0 .AND.
+             IfValidAnd( Proj:HVACAutoSizing > 0 )==0)
          then  EvalRulelist( "CSE_Project_SetupHVACCapacityExport" )
          else  UNCHANGED  endif  }
 
    "Setup Zone UMLHs export if needed"    ResProj:Action  =    ; SAC 03/30/22
-      {  if (SumAll( ResZn:TrackUMLHs ) > 0 .OR. SumAll( ResOtherZn:TrackUMLHs ) > 0)
+      {  if ( (SumAll( ResZn:TrackUMLHs ) > 0 .OR. SumAll( ResOtherZn:TrackUMLHs ) > 0) .AND.
+              IfValidAnd( Proj:HVACAutoSizing > 0 )==0 )
          then  EvalRulelist( "CSE_Project_SetupZoneUMLHsExport" )
+         else  UNCHANGED  endif  }
+
+   "Setup AirSys HVAC Sizing export for Sizing Sim models"     Proj:Action  =    ; SAC 05/10/22
+      {  if (SumAll( AirSys:ServesResZn ) > 0 .AND.
+             IfValidAnd( HVACAutoSizing > 0 ))
+         then  EvalRulelist( "CSE_Project_SetupHVACSizingExport" )
          else  UNCHANGED  endif  }
 
    ; SAC 11/17/16 - rules to prep Zone for ZEB single day reporting
@@ -1052,6 +1071,8 @@ RULELIST "CSE_SimulationCleanUp" 1 0 0 1
 	"Delete all CSE Cons-related components"		ResProj:Action = {	EvalRulelist( "CSE_Cleanup_Surfaces" )  }
 
 	"Delete all cseRSYS components"					ResProj:Action = {	DeleteAllComps( cseRSYS )  }
+	"Blast all cseAIRHANDLER components"	      ResProj:Action	= {	DeleteAllComps( cseAIRHANDLER )  }     ; SAC 04/26/22
+	"Blast all cseTERMINAL components"		      ResProj:Action	= {	DeleteAllComps( cseTERMINAL )  }
 	"Blast all cseIZXFER components"					ResProj:Action	= {	DeleteAllComps( cseIZXFER )  }
 
 	"Delete all CSE Cons-related components"		ResProj:Action = {	EvalRulelist( "CSE_Cleanup_DHW" )  }
@@ -1122,7 +1143,7 @@ END
 
 ;*************************************************************************
 RULELIST "ExportFile_AirNetDetails" 1 0 0 0
-   "Open CSV file"         ResProj:FileIdx_AirNetDetails = {  OpenExportFile( ProcessingPath + ModelFile + " - " + ValidOr( Proj:RunAbbrev, "" ) + " - IZXFERs.csv", "wt" )  }
+   "Open CSV file"         ResProj:FileIdx_AirNetDetails = {  OpenExportFile( ValidOr( ProcessingPath, "" ) + ModelFile + " - " + ValidOr( Proj:RunAbbrev, "" ) + " - IZXFERs.csv", "wt" )  }   ; check validity of ProcessingPath for use in CBECC - SAC 04/13/22
    ;"Open CSV file"         ResProj:FileIdx_AirNetDetails = {  OpenExportFile( ProcessingPath + ModelFile + RunIDProcFile + " - IZXFERs.csv", "wt" )  }
    "Write CSV hdrs-1"      ResProj:Action  =
       {  if (IfValidAnd( FileIdx_AirNetDetails >= 0 )==0)
@@ -2117,6 +2138,142 @@ RULELIST "CSE_HVACSys_SetupHVACCapacityExport" 1 0 0 1
 ;   "Set ResHVACSys:CSE_HVACCapsExpCol[7]:colhead"     ResHVACSys:CSE_HVACCapsExpCol[7]:colhead   = {  "HrlyHtgCap (kBtu)"  }
 ;   "Set ResHVACSys:CSE_HVACCapsExpCol[7]:colVal_x"    ResHVACSys:CSE_HVACCapsExpCol[7]:colVal_x  =
 ;      {  Format( "@RSYS[%c%s%c].capH_As/1000", 34, cseRSYS:Name, 34 )  }
+END
+;*************************************************************************
+
+
+;************************************************************************* SAC 05/10/22
+RULELIST "CSE_Project_SetupHVACSizingExport" 1 0 0 1
+;*************************************************************************
+   "Create ResProj:CSE_HVACSizingExportFile"            ResProj:CSE_HVACSizingExportFile  = {   CreateComp( cseEXPORTFILE, "xf-hvacSzg" )  }
+   "Set ResProj:CSE_HVACSizingExportFile:xfFileName"    ResProj:CSE_HVACSizingExportFile:xfFileName  =
+      {  ValidOr( ProjFileNameNoExt, "" ) + " - " + ValidOr( Proj:RunAbbrev, "" ) + "-hvacSzg.csv"  }
+;"dbg" ResProj:Action = { PostMessageToLog( "CSE_HVACSizingExportFile '%s' created -> %s", CSE_HVACSizingExportFile:Name, CSE_HVACSizingExportFile:xfFileName ) }
+
+   "Create ResProj:CSE_HVACSizingExport"             ResProj:CSE_HVACSizingExport  = {   CreateComp( cseEXPORT, "x-hvacSzg" )  }
+   "Set ResProj:CSE_HVACSizingExport:exExportfile"   ResProj:CSE_HVACSizingExport:exExportfile  = {  CSE_HVACSizingExportFile:Name  }
+   "Set ResProj:CSE_HVACSizingExport:exType"         ResProj:CSE_HVACSizingExport:exType    = {  "UDT"   }
+   "Set ResProj:CSE_HVACSizingExport:exFreq"         ResProj:CSE_HVACSizingExport:exFreq    = {  "YEAR"  }
+   "Set ResProj:CSE_HVACSizingExport:exHeader"       ResProj:CSE_HVACSizingExport:exHeader  = {  "COLUMNSONLY"    }
+;   "Set ResProj:CSE_HVACSizingExport:exHeader"       ResProj:CSE_HVACSizingExport:exHeader  = {  "YESIFNEW"    }
+;   "Set ResProj:CSE_HVACSizingExport:exFooter"       ResProj:CSE_HVACSizingExport:exFooter  = {  "NO"     }
+
+   "Create ResProj:CSE_HVACSizingExportCol"          ResProj:CSE_HVACSizingExportCol  = {   CreateComp( cseEXPORTCOL, "xc-hvacSzg" )  } 
+   "Set ResProj:CSE_HVACSizingExportCol - Parent"    ResProj:CSE_HVACSizingExportCol:Parent    = {  CSE_HVACSizingExport:Name  }
+   "Set ResProj:CSE_HVACSizingExportCol:colVal_x"    ResProj:CSE_HVACSizingExportCol:colVal_x  = {  "@top.runDateTime"  }
+   "Set ResProj:CSE_HVACSizingExportCol:colHead"     ResProj:CSE_HVACSizingExportCol:colHead   = {  "runDateTime"  }
+
+   "Create AirSys Cap ExportCols via subordinate rulelist"     AirSys:Action =
+      {  if (IfValidAnd( ServesResZn > 0 ) .AND. LocalCompAssigned( CSE_AirHandlerRef ))
+         then  EvalRulelist( "CSE_AirSys_SetupHVACSizingExport", 1 )
+         else  UNDEFINED  endif  }
+
+
+   "Create ResProj:CSE_TrmlSizingExportFile"            ResProj:CSE_TrmlSizingExportFile  = {   CreateComp( cseEXPORTFILE, "xf-trmlSzg" )  }
+   "Set ResProj:CSE_TrmlSizingExportFile:xfFileName"    ResProj:CSE_TrmlSizingExportFile:xfFileName  =
+      {  ValidOr( ProjFileNameNoExt, "" ) + " - " + ValidOr( Proj:RunAbbrev, "" ) + "-trmlSzg.csv"  }
+;"dbg" ResProj:Action = { PostMessageToLog( "CSE_TrmlSizingExportFile '%s' created -> %s", CSE_TrmlSizingExportFile:Name, CSE_TrmlSizingExportFile:xfFileName ) }
+
+   "Create ResProj:CSE_TrmlSizingExport"             ResProj:CSE_TrmlSizingExport  = {   CreateComp( cseEXPORT, "x-trmlSzg" )  }
+   "Set ResProj:CSE_TrmlSizingExport:exExportfile"   ResProj:CSE_TrmlSizingExport:exExportfile  = {  CSE_TrmlSizingExportFile:Name  }
+   "Set ResProj:CSE_TrmlSizingExport:exType"         ResProj:CSE_TrmlSizingExport:exType    = {  "UDT"   }
+   "Set ResProj:CSE_TrmlSizingExport:exFreq"         ResProj:CSE_TrmlSizingExport:exFreq    = {  "YEAR"  }
+   "Set ResProj:CSE_TrmlSizingExport:exHeader"       ResProj:CSE_TrmlSizingExport:exHeader  = {  "COLUMNSONLY"    }
+;   "Set ResProj:CSE_TrmlSizingExport:exHeader"       ResProj:CSE_TrmlSizingExport:exHeader  = {  "YESIFNEW"    }
+;   "Set ResProj:CSE_TrmlSizingExport:exFooter"       ResProj:CSE_TrmlSizingExport:exFooter  = {  "NO"     }
+
+   "Create ResProj:CSE_TrmlSizingExportCol"          ResProj:CSE_TrmlSizingExportCol  = {   CreateComp( cseEXPORTCOL, "xc-trmlSzg" )  } 
+   "Set ResProj:CSE_TrmlSizingExportCol - Parent"    ResProj:CSE_TrmlSizingExportCol:Parent    = {  CSE_TrmlSizingExport:Name  }
+   "Set ResProj:CSE_TrmlSizingExportCol:colVal_x"    ResProj:CSE_TrmlSizingExportCol:colVal_x  = {  "@top.runDateTime"  }
+   "Set ResProj:CSE_TrmlSizingExportCol:colHead"     ResProj:CSE_TrmlSizingExportCol:colHead   = {  "runDateTime"  }
+
+   "Create ResOtherZn (terminal) Sizing ExportCols via subordinate rulelist"     ResOtherZn:Action =
+      {  if (LocalCompAssigned( ActiveHVACSystem ) == ComponentType( "AirSys" ) .AND. LocalCompAssigned( CSE_TerminalRef ))
+         then  EvalRulelist( "CSE_ResOtherZn_SetupTrmlSizingExport", 1 )
+         else  UNDEFINED  endif  }
+END
+
+;*************************************************************************
+RULELIST "CSE_AirSys_SetupHVACSizingExport" 1 0 0 1
+;*************************************************************************
+   "Create AirSys:CSE_HVACSizingExpCol[1] - Name"     AirSys:CSE_HVACSizingExpCol[1]  = {  CreateComp( cseEXPORTCOL, "xc-" + substr( Name, 0, 39 ) + "-Name" )  }
+   "Set AirSys:CSE_HVACSizingExpCol[1]:Parent"        AirSys:CSE_HVACSizingExpCol[1]:Parent    = {  ResProj:CSE_HVACSizingExport:Name  }
+;   "Set AirSys:CSE_HVACSizingExpCol[1]:colhead"      AirSys:CSE_HVACSizingExpCol[1]:colhead   = {  "AirSys Name"  }
+   "Set AirSys:CSE_HVACSizingExpCol[1]:colhead"       AirSys:CSE_HVACSizingExpCol[1]:colhead   = {  "SysName"  }
+   "Set AirSys:CSE_HVACSizingExpCol[1]:colVal_x"      AirSys:CSE_HVACSizingExpCol[1]:colVal_x  = {  Format( "%c%s%c", 34, Name, 34 )  }
+   "Create AirSys:CSE_HVACSizingExpCol[2] - HtgCap"   AirSys:CSE_HVACSizingExpCol[2]  = {  CreateComp( cseEXPORTCOL, "xc-" + substr( Name, 0, 39 ) + "-HtgCap" )  }
+   "Set AirSys:CSE_HVACSizingExpCol[2]:Parent"        AirSys:CSE_HVACSizingExpCol[2]:Parent    = {  ResProj:CSE_HVACSizingExport:Name  }
+;   "Set AirSys:CSE_HVACSizingExpCol[2]:colhead"      AirSys:CSE_HVACSizingExpCol[2]:colhead   = {  "HtgCap (Btuh)"  }
+   "Set AirSys:CSE_HVACSizingExpCol[2]:colhead"       AirSys:CSE_HVACSizingExpCol[2]:colhead   = {  "HtgCap"  }
+   "Set AirSys:CSE_HVACSizingExpCol[2]:colVal_x"      AirSys:CSE_HVACSizingExpCol[2]:colVal_x  =
+      {  Format( "@airHandler[%c%s%c].ahhc.captRat", 34, CSE_AirHandlerRef:Name, 34 )  }
+;      {  Format( "@airHandler[%c%s%c].ahhc.captRat_As", 34, CSE_AirHandlerRef:Name, 34 )  }
+   ;   {  if (IfValidAnd( Type = 2 ))  ; HtPump
+   ;      then  Format( "@airHandler[%c%s%c].Cap47", 34, CSE_AirHandlerRef:Name, 34 )
+   ;      else  Format( "@airHandler[%c%s%c].CapH",  34, CSE_AirHandlerRef:Name, 34 )
+   ;      endif  }
+   "Create AirSys:CSE_HVACSizingExpCol[3] - ClgTCap"  AirSys:CSE_HVACSizingExpCol[3]  = {  CreateComp( cseEXPORTCOL, "xc-" + substr( Name, 0, 39 ) + "-ClgTCap" )  }
+   "Set AirSys:CSE_HVACSizingExpCol[3]:Parent"        AirSys:CSE_HVACSizingExpCol[3]:Parent    = {  ResProj:CSE_HVACSizingExport:Name  }
+;   "Set AirSys:CSE_HVACSizingExpCol[3]:colhead"      AirSys:CSE_HVACSizingExpCol[3]:colhead   = {  "ClgTCap (Btuh)"  }
+   "Set AirSys:CSE_HVACSizingExpCol[3]:colhead"       AirSys:CSE_HVACSizingExpCol[3]:colhead   = {  "ClgTCap"  }
+   "Set AirSys:CSE_HVACSizingExpCol[3]:colVal_x"      AirSys:CSE_HVACSizingExpCol[3]:colVal_x  =
+      {  Format( "-@airHandler[%c%s%c].ahcc.captRat", 34, CSE_AirHandlerRef:Name, 34 )  }
+;      {  Format( "@airHandler[%c%s%c].ahcc.captRat_As", 34, CSE_AirHandlerRef:Name, 34 )  }
+   "Create AirSys:CSE_HVACSizingExpCol[4] - ClgSCap"  AirSys:CSE_HVACSizingExpCol[4]  = {  CreateComp( cseEXPORTCOL, "xc-" + substr( Name, 0, 39 ) + "-ClgSCap" )  }
+   "Set AirSys:CSE_HVACSizingExpCol[4]:Parent"        AirSys:CSE_HVACSizingExpCol[4]:Parent    = {  ResProj:CSE_HVACSizingExport:Name  }
+;   "Set AirSys:CSE_HVACSizingExpCol[4]:colhead"      AirSys:CSE_HVACSizingExpCol[4]:colhead   = {  "ClgSCap (Btuh)"  }
+   "Set AirSys:CSE_HVACSizingExpCol[4]:colhead"       AirSys:CSE_HVACSizingExpCol[4]:colhead   = {  "ClgSCap"  }
+   "Set AirSys:CSE_HVACSizingExpCol[4]:colVal_x"      AirSys:CSE_HVACSizingExpCol[4]:colVal_x  =
+      {  Format( "-@airHandler[%c%s%c].ahcc.capsRat", 34, CSE_AirHandlerRef:Name, 34 )  }
+;      {  Format( "@airHandler[%c%s%c].ahcc.capsRat_As", 34, CSE_AirHandlerRef:Name, 34 )  }
+   "Create AirSys:CSE_HVACSizingExpCol[5] - SFanFlow" AirSys:CSE_HVACSizingExpCol[5]  = {  CreateComp( cseEXPORTCOL, "xc-" + substr( Name, 0, 39 ) + "-SFanFlow" )  }
+   "Set AirSys:CSE_HVACSizingExpCol[5]:Parent"        AirSys:CSE_HVACSizingExpCol[5]:Parent    = {  ResProj:CSE_HVACSizingExport:Name  }
+;   "Set AirSys:CSE_HVACSizingExpCol[5]:colhead"      AirSys:CSE_HVACSizingExpCol[5]:colhead   = {  "SFanFlow (cfm)"  }
+   "Set AirSys:CSE_HVACSizingExpCol[5]:colhead"       AirSys:CSE_HVACSizingExpCol[5]:colhead   = {  "SFanFlow"  }
+   "Set AirSys:CSE_HVACSizingExpCol[5]:colVal_x"      AirSys:CSE_HVACSizingExpCol[5]:colVal_x  =
+      {  Format( "@airHandler[%c%s%c].sfan.vfDs", 34, CSE_AirHandlerRef:Name, 34 )  }
+;      {  Format( "@airHandler[%c%s%c].sfan.vfDs_As", 34, CSE_AirHandlerRef:Name, 34 )  }
+   "Create AirSys:CSE_HVACSizingExpCol[6] - RFanFlow" AirSys:CSE_HVACSizingExpCol[6]  = {  CreateComp( cseEXPORTCOL, "xc-" + substr( Name, 0, 39 ) + "-RFanFlow" )  }
+   "Set AirSys:CSE_HVACSizingExpCol[6]:Parent"        AirSys:CSE_HVACSizingExpCol[6]:Parent    = {  ResProj:CSE_HVACSizingExport:Name  }
+;   "Set AirSys:CSE_HVACSizingExpCol[6]:colhead"      AirSys:CSE_HVACSizingExpCol[6]:colhead   = {  "RFanFlow (cfm)"  }
+   "Set AirSys:CSE_HVACSizingExpCol[6]:colhead"       AirSys:CSE_HVACSizingExpCol[6]:colhead   = {  "RFanFlow"  }
+   "Set AirSys:CSE_HVACSizingExpCol[6]:colVal_x"      AirSys:CSE_HVACSizingExpCol[6]:colVal_x  =
+      {  Format( "@airHandler[%c%s%c].rfan.vfDs", 34, CSE_AirHandlerRef:Name, 34 )  }
+;      {  Format( "@airHandler[%c%s%c].rfan.vfDs_As", 34, CSE_AirHandlerRef:Name, 34 )  }
+END
+
+;*************************************************************************
+RULELIST "CSE_ResOtherZn_SetupTrmlSizingExport" 1 0 0 1
+;*************************************************************************
+   "Create ResOtherZn:CSE_TrmlSizingExpCol[1] - Name"     ResOtherZn:CSE_TrmlSizingExpCol[1]  = {  CreateComp( cseEXPORTCOL, "xc-" + substr( Name, 0, 39 ) + "-Name" )  }
+   "Set ResOtherZn:CSE_TrmlSizingExpCol[1]:Parent"        ResOtherZn:CSE_TrmlSizingExpCol[1]:Parent    = {  ResProj:CSE_TrmlSizingExport:Name  }
+;   "Set ResOtherZn:CSE_TrmlSizingExpCol[1]:colhead"      ResOtherZn:CSE_TrmlSizingExpCol[1]:colhead   = {  "ResOtherZn Name"  }
+   "Set ResOtherZn:CSE_TrmlSizingExpCol[1]:colhead"       ResOtherZn:CSE_TrmlSizingExpCol[1]:colhead   = {  "ResOtherZn"  }
+   "Set ResOtherZn:CSE_TrmlSizingExpCol[1]:colVal_x"      ResOtherZn:CSE_TrmlSizingExpCol[1]:colVal_x  = {  Format( "%c%s%c", 34, Name, 34 )  }
+   "Create ResOtherZn:CSE_TrmlSizingExpCol[2] - HtgCap"   ResOtherZn:CSE_TrmlSizingExpCol[2]  = {  CreateComp( cseEXPORTCOL, "xc-" + substr( Name, 0, 39 ) + "-PkHtgLd" )  }
+   "Set ResOtherZn:CSE_TrmlSizingExpCol[2]:Parent"        ResOtherZn:CSE_TrmlSizingExpCol[2]:Parent    = {  ResProj:CSE_TrmlSizingExport:Name  }
+;   "Set ResOtherZn:CSE_TrmlSizingExpCol[2]:colhead"      ResOtherZn:CSE_TrmlSizingExpCol[2]:colhead   = {  "PkHtgLd (Btuh)"  }
+   "Set ResOtherZn:CSE_TrmlSizingExpCol[2]:colhead"       ResOtherZn:CSE_TrmlSizingExpCol[2]:colhead   = {  "PkHtgLd"  }
+   "Set ResOtherZn:CSE_TrmlSizingExpCol[2]:colVal_x"      ResOtherZn:CSE_TrmlSizingExpCol[2]:colVal_x  =
+      {  Format( "@terminal[%c%s%c].qhPk", 34, CSE_TerminalRef:Name, 34 )  }
+   "Create ResOtherZn:CSE_TrmlSizingExpCol[3] - ClgCap"   ResOtherZn:CSE_TrmlSizingExpCol[3]  = {  CreateComp( cseEXPORTCOL, "xc-" + substr( Name, 0, 39 ) + "-PkClgLd" )  }
+   "Set ResOtherZn:CSE_TrmlSizingExpCol[3]:Parent"        ResOtherZn:CSE_TrmlSizingExpCol[3]:Parent    = {  ResProj:CSE_TrmlSizingExport:Name  }
+;   "Set ResOtherZn:CSE_TrmlSizingExpCol[3]:colhead"      ResOtherZn:CSE_TrmlSizingExpCol[3]:colhead   = {  "PkClgLd (Btuh)"  }
+   "Set ResOtherZn:CSE_TrmlSizingExpCol[3]:colhead"       ResOtherZn:CSE_TrmlSizingExpCol[3]:colhead   = {  "PkClgLd"  }
+   "Set ResOtherZn:CSE_TrmlSizingExpCol[3]:colVal_x"      ResOtherZn:CSE_TrmlSizingExpCol[3]:colVal_x  =
+      {  Format( "-@terminal[%c%s%c].qcPk", 34, CSE_TerminalRef:Name, 34 )  }
+   "Create ResOtherZn:CSE_TrmlSizingExpCol[4] - HtgMxFlw" ResOtherZn:CSE_TrmlSizingExpCol[4]  = {  CreateComp( cseEXPORTCOL, "xc-" + substr( Name, 0, 39 ) + "-HtgMxFlw" )  }
+   "Set ResOtherZn:CSE_TrmlSizingExpCol[4]:Parent"        ResOtherZn:CSE_TrmlSizingExpCol[4]:Parent    = {  ResProj:CSE_TrmlSizingExport:Name  }
+;   "Set ResOtherZn:CSE_TrmlSizingExpCol[4]:colhead"      ResOtherZn:CSE_TrmlSizingExpCol[4]:colhead   = {  "HtgMxFlw (cfm)"  }
+   "Set ResOtherZn:CSE_TrmlSizingExpCol[4]:colhead"       ResOtherZn:CSE_TrmlSizingExpCol[4]:colhead   = {  "HtgMxFlw"  }
+   "Set ResOtherZn:CSE_TrmlSizingExpCol[4]:colVal_x"      ResOtherZn:CSE_TrmlSizingExpCol[4]:colVal_x  =
+      {  Format( "@terminal[%c%s%c].tuVfMxH", 34, CSE_TerminalRef:Name, 34 )  }
+   "Create ResOtherZn:CSE_TrmlSizingExpCol[5] - ClgMxFlw" ResOtherZn:CSE_TrmlSizingExpCol[5]  = {  CreateComp( cseEXPORTCOL, "xc-" + substr( Name, 0, 39 ) + "-ClgMxFlw" )  }
+   "Set ResOtherZn:CSE_TrmlSizingExpCol[5]:Parent"        ResOtherZn:CSE_TrmlSizingExpCol[5]:Parent    = {  ResProj:CSE_TrmlSizingExport:Name  }
+;   "Set ResOtherZn:CSE_TrmlSizingExpCol[5]:colhead"      ResOtherZn:CSE_TrmlSizingExpCol[5]:colhead   = {  "ClgMxFlw (cfm)"  }
+   "Set ResOtherZn:CSE_TrmlSizingExpCol[5]:colhead"       ResOtherZn:CSE_TrmlSizingExpCol[5]:colhead   = {  "ClgMxFlw"  }
+   "Set ResOtherZn:CSE_TrmlSizingExpCol[5]:colVal_x"      ResOtherZn:CSE_TrmlSizingExpCol[5]:colVal_x  =
+      {  Format( "@terminal[%c%s%c].tuVfMxC", 34, CSE_TerminalRef:Name, 34 )  }
 END
 ;*************************************************************************
 

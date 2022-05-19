@@ -163,11 +163,25 @@ RULELIST "ProposedInput_ResOtherZone" 0 0 0 0
          endif  }
 
    "Set OtherZone:CodeExhPerArea"      OtherZone:CodeExhPerArea    =       ; SAC 10/19/20
-      {  if (VentSpcFunc != 34 .OR. IfValidAnd( Area > 0 )==0) then  0
+      {  if (VentSpcFunc < 1 .OR. IfValidAnd( Area > 0 )==0) then  0
          else  VentilationSpaceFunctionData:CodeExhPerArea( "VentFuncType", EnumString( VentSpcFunc ) )
          endif  }
-   "Set OtherZone:CodeExhFanPwr"       OtherZone:CodeExhFanPwr    = 
-      {  if (CodeExhPerArea > 0) then  0.35
+  "Set OtherZone:CodeExhPerFixture"  OtherZone:CodeExhPerFixture = ; JP 5/16/22
+      {  if (VentSpcFunc < 1 ) then  0
+         else  VentilationSpaceFunctionData:CodeExhContPerFixture( "VentFuncType", EnumString( VentSpcFunc ) )
+         endif  }
+  "Set OtherZone:MinExhCFM" OtherZone:MinExhCFM =
+      {  if (VentSpcFunc < 1 .OR. IfValidAnd( Area > 0 )==0) then  0
+         else  Area * CodeExhPerArea + ValidOr( ExhNumFixtures, 0 ) * CodeExhPerFixture
+         endif  }
+
+; Default parking garage exhaust fan 
+  "Set OtherZone:PrkgGarExhFlow" OtherZone:PrkgGarExhFlow =
+      {  if( SpcFunc = 355 ) then  MinExhCFM
+         else  0 endif  }
+         
+   "Set OtherZone:PrkgGarExhFanPwr"       OtherZone:PrkgGarExhFanPwr    = 
+      {  if( SpcFunc = 355 ) then  0.35
          else  0  endif  }
 
    "Set OtherZone:ExhstOutsideOpening"    OtherZone:ExhstOutsideOpening    =     ; SAC 10/19/20
@@ -188,16 +202,23 @@ RULELIST "ProposedInput_ResOtherZone" 0 0 0 0
 	; SAC 7/29/15 - added properties to disable all IAQ ventilation
 	"Default OtherZone:DisableIAQ flag"	   OtherZone:DisableIAQ		   = {	0  }		; option to toggle OFF all IAQ ventilation
 	"Set OtherZone:IAQDisabled"				OtherZone:IAQDisabled		= {	if (ResProj:BypassRuleLimits > 0 .AND. DisableIAQ > 0) then  1  else  0  endif  }		; Flag indicating that IAQ vent has been toggled OFF
+	"Set OtherZone:ServedByAirSys" OtherZone:ServedByAirSys = { if( LocalCompAssigned( ActiveHVACSystem ) = ComponentType( "AirSys" ) ) then 1 else 0 endif }
+	"Set OtherZone:AllowIAQInps"  OtherZone:AllowIAQInps = { if( IAQDisabled < 1 .AND. ServedByAirSys = 0 .AND. SpcFunc != 355 ) then  1  else  0  endif  }		; Flag indicating that ventilation system can be specified using IAQOption
 
    "Default OtherZone:IAQOption based on ResProj:MostDUIAQ_*"     OtherZone:IAQOption  = 
-      {  if (     ResProj:MostDUIAQ_Exhaust) then  5
-         else if (ResProj:MostDUIAQ_Supply ) then  6
-         else  4  endif endif  }
+      { 2 } ; Minimum IAQ fans are not applicable to ResOtherZn
+;      {  if (     ResProj:MostDUIAQ_Exhaust) then  5
+;         else if (ResProj:MostDUIAQ_Supply ) then  6
+;         else  4  endif endif  }
 	"Set OtherZone:MinIAQCFM"					OtherZone:MinIAQCFM			=     ; prevent MinOccNumSim and/or Area undefined error - SAC 05/28/21
       {  int( max( (CodeVentPerPerson * ValidOr( MinOccNumSim, 0 )),
                    (CodeVentPerArea   * ValidOr( Area        , 0 )) )*10 ) / 10  }    ; round to nearest tenth CFM
    ; "Default OtherZone:IAQFanRef[1-4]			- no default
-   "Set OtherZone:IAQNumFanRefs"			OtherZone:IAQNumFanRefs	   = {	if (IAQDisabled > 0 .OR. MinIAQCFM <= 0 .OR. IAQOption != 2) then  0
+   
+  "Set ResOtherZn:AirSysVentCFM" ResOtherZn:AirSysVentCFM = ; for zone ventilated by an AirSys
+      { if( ServedByAirSys > 0 ) then MinIAQCFM else UNDEFINED endif }
+   
+   "Set OtherZone:IAQNumFanRefs"			OtherZone:IAQNumFanRefs	   = {	if (IAQDisabled > 0 .OR. MinIAQCFM <= 0 .OR. IAQOption != 2 .OR. AllowIAQInps < 1 ) then  0
    																							else if (LocalCompAssigned( IAQFanRef[4]  )) then  4		else if (LocalCompAssigned( IAQFanRef[3]  )) then  3
    																							else if (LocalCompAssigned( IAQFanRef[2]  )) then  2		else if (LocalCompAssigned( IAQFanRef[1]  )) then  1
    																							else  0  endif endif endif endif endif  }
@@ -207,125 +228,125 @@ RULELIST "ProposedInput_ResOtherZone" 0 0 0 0
    "Default OtherZone:IAQFanCnt[3]"		OtherZone:IAQFanCnt[3]	= {	1  }
    "Default OtherZone:IAQFanCnt[4]"		OtherZone:IAQFanCnt[4]	= {	1  }
 
-   "Set OtherZone:IAQCFM[1]"				OtherZone:IAQCFM[1]		= {	if (IAQDisabled > 0 .OR. IAQOption != 2 .OR. LocalCompAssigned( IAQFanRef[1] ) < 0.5) then  0  else  IAQFanRef[1]:IAQCFM * IAQFanCnt[1]   endif  }
-   "Set OtherZone:IAQCFM[2]"				OtherZone:IAQCFM[2]		= {	if (IAQDisabled > 0 .OR. IAQOption != 2 .OR. LocalCompAssigned( IAQFanRef[2] ) < 0.5) then  0  else  IAQFanRef[2]:IAQCFM * IAQFanCnt[2]   endif  }
-   "Set OtherZone:IAQCFM[3]"				OtherZone:IAQCFM[3]		= {	if (IAQDisabled > 0 .OR. IAQOption != 2 .OR. LocalCompAssigned( IAQFanRef[3] ) < 0.5) then  0  else  IAQFanRef[3]:IAQCFM * IAQFanCnt[3]   endif  }
-   "Set OtherZone:IAQCFM[4]"				OtherZone:IAQCFM[4]		= {	if (IAQDisabled > 0 .OR. IAQOption != 2 .OR. LocalCompAssigned( IAQFanRef[4] ) < 0.5) then  0  else  IAQFanRef[4]:IAQCFM * IAQFanCnt[4]   endif  }
+   "Set OtherZone:IAQCFM[1]"				OtherZone:IAQCFM[1]		= {	if (IAQDisabled > 0 .OR. AllowIAQInps < 1 .OR. IAQOption != 2 .OR. LocalCompAssigned( IAQFanRef[1] ) < 0.5) then  0  else  IAQFanRef[1]:IAQCFM * IAQFanCnt[1]   endif  }
+   "Set OtherZone:IAQCFM[2]"				OtherZone:IAQCFM[2]		= {	if (IAQDisabled > 0 .OR. AllowIAQInps < 1 .OR. IAQOption != 2 .OR. LocalCompAssigned( IAQFanRef[2] ) < 0.5) then  0  else  IAQFanRef[2]:IAQCFM * IAQFanCnt[2]   endif  }
+   "Set OtherZone:IAQCFM[3]"				OtherZone:IAQCFM[3]		= {	if (IAQDisabled > 0 .OR. AllowIAQInps < 1 .OR. IAQOption != 2 .OR. LocalCompAssigned( IAQFanRef[3] ) < 0.5) then  0  else  IAQFanRef[3]:IAQCFM * IAQFanCnt[3]   endif  }
+   "Set OtherZone:IAQCFM[4]"				OtherZone:IAQCFM[4]		= {	if (IAQDisabled > 0 .OR. AllowIAQInps < 1 .OR. IAQOption != 2 .OR. LocalCompAssigned( IAQFanRef[4] ) < 0.5) then  0  else  IAQFanRef[4]:IAQCFM * IAQFanCnt[4]   endif  }
 
    ; SAC 11/18/16 - modified rules to set IAQPwr_Exhaust for Balanced fans (as well as Exhaust) (tic #765)
    ; SAC 11/11/17 - revised IAQPwr_Exhaust rules to exclude Balanced fans - now to be simulated as HRV IAQ (tic #915)
-	"Set OtherZone:IAQPwr_Exhaust - 1"		OtherZone:IAQPwr_Exhaust	= {	if (IAQDisabled > 0) then  0
+	"Set OtherZone:IAQPwr_Exhaust - 1"		OtherZone:IAQPwr_Exhaust	= {	if (IAQDisabled > 0 .OR. AllowIAQInps < 1 ) then  0
 																									else if (IAQOption == 5) then  MinIAQCFM * ResProj:DefaultIAQFanPwr
 																									else if (IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[1] ) > 0.5)
 																									then	if (IAQFanRef[1]:IAQFanType == 1)
 																									      then  IAQCFM[1] * ValidOr( IAQFanRef[1]:WperCFMIAQ, 0 )  else  0  endif
 																									else	0  endif endif endif  }
-	"Set OtherZone:IAQPwr_Exhaust - 2"		OtherZone:IAQPwr_Exhaust	= {	if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[2] ) > 0.5)
+	"Set OtherZone:IAQPwr_Exhaust - 2"		OtherZone:IAQPwr_Exhaust	= {	if (IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[2] ) > 0.5)
 																									then	if (IAQFanRef[2]:IAQFanType == 1) 
 																									      then  IAQPwr_Exhaust + (IAQCFM[2] * ValidOr( IAQFanRef[2]:WperCFMIAQ, 0 ))  else  UNCHANGED  endif
 																									else	UNCHANGED  endif  }
-	"Set OtherZone:IAQPwr_Exhaust - 3"		OtherZone:IAQPwr_Exhaust	= {	if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[3] ) > 0.5)
+	"Set OtherZone:IAQPwr_Exhaust - 3"		OtherZone:IAQPwr_Exhaust	= {	if (IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[3] ) > 0.5)
 																									then	if (IAQFanRef[3]:IAQFanType == 1) 
 																									      then  IAQPwr_Exhaust + (IAQCFM[3] * ValidOr( IAQFanRef[3]:WperCFMIAQ, 0 ))  else  UNCHANGED  endif
 																									else	UNCHANGED  endif  }
-	"Set OtherZone:IAQPwr_Exhaust - 4"		OtherZone:IAQPwr_Exhaust	= {	if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[4] ) > 0.5)
+	"Set OtherZone:IAQPwr_Exhaust - 4"		OtherZone:IAQPwr_Exhaust	= {	if (IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[4] ) > 0.5)
 																									then	if (IAQFanRef[4]:IAQFanType == 1) 
 																									      then  IAQPwr_Exhaust + (IAQCFM[4] * ValidOr( IAQFanRef[4]:WperCFMIAQ, 0 ))  else  UNCHANGED  endif
 																									else	UNCHANGED  endif  }
 
    ; SAC 11/11/17 - added IAQCFM_Exhaust to ensure mixture of IAQ fans simulated (tic #915)
-	"Set OtherZone:IAQCFM_Exhaust - 1"		OtherZone:IAQCFM_Exhaust	= {	if (IAQDisabled > 0) then  0
+	"Set OtherZone:IAQCFM_Exhaust - 1"		OtherZone:IAQCFM_Exhaust	= {	if (IAQDisabled > 0 .OR. AllowIAQInps < 1 ) then  0
 																									else if (IAQOption == 5) then  MinIAQCFM
 																									else if (IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[1] ) > 0.5)
 																									then	if (IAQFanRef[1]:IAQFanType == 1)
 																									      then  IAQCFM[1]  else  0  endif
 																									else	0  endif endif endif  }
-	"Set OtherZone:IAQCFM_Exhaust - 2"		OtherZone:IAQCFM_Exhaust	= {	if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[2] ) > 0.5)
+	"Set OtherZone:IAQCFM_Exhaust - 2"		OtherZone:IAQCFM_Exhaust	= {	if (IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[2] ) > 0.5)
 																									then	if (IAQFanRef[2]:IAQFanType == 1) 
 																									      then  IAQCFM_Exhaust + IAQCFM[2]  else  UNCHANGED  endif
 																									else	UNCHANGED  endif  }
-	"Set OtherZone:IAQCFM_Exhaust - 3"		OtherZone:IAQCFM_Exhaust	= {	if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[3] ) > 0.5)
+	"Set OtherZone:IAQCFM_Exhaust - 3"		OtherZone:IAQCFM_Exhaust	= {	if (IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[3] ) > 0.5)
 																									then	if (IAQFanRef[3]:IAQFanType == 1) 
 																									      then  IAQCFM_Exhaust + IAQCFM[3]  else  UNCHANGED  endif
 																									else	UNCHANGED  endif  }
-	"Set OtherZone:IAQCFM_Exhaust - 4"		OtherZone:IAQCFM_Exhaust	= {	if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[4] ) > 0.5)
+	"Set OtherZone:IAQCFM_Exhaust - 4"		OtherZone:IAQCFM_Exhaust	= {	if (IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[4] ) > 0.5)
 																									then	if (IAQFanRef[4]:IAQFanType == 1) 
 																									      then  IAQCFM_Exhaust + IAQCFM[4]  else  UNCHANGED  endif
 																									else	UNCHANGED  endif  }
 
-	"Set OtherZone:IAQCFM_Supply - 1"		OtherZone:IAQCFM_Supply	= {	if (IAQDisabled > 0) then  0
+	"Set OtherZone:IAQCFM_Supply - 1"		OtherZone:IAQCFM_Supply	= {	if (IAQDisabled > 0 .OR. AllowIAQInps < 1 ) then  0
 																								else if (IAQOption == 6) then  MinIAQCFM
 																								else if (IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[1] ) > 0.5)
 																								then	if (IAQFanRef[1]:IAQFanType == 2) then                  IAQCFM[1]  else      0      endif    else      0      endif endif endif  }
-	"Set OtherZone:IAQCFM_Supply - 2"		OtherZone:IAQCFM_Supply	= {	if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[2] ) > 0.5)
+	"Set OtherZone:IAQCFM_Supply - 2"		OtherZone:IAQCFM_Supply	= {	if (IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[2] ) > 0.5)
 																								then	if (IAQFanRef[2]:IAQFanType == 2) then  IAQCFM_Supply + IAQCFM[2]  else  UNCHANGED  endif    else  UNCHANGED  endif  }
-	"Set OtherZone:IAQCFM_Supply - 3"		OtherZone:IAQCFM_Supply	= {	if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[3] ) > 0.5)
+	"Set OtherZone:IAQCFM_Supply - 3"		OtherZone:IAQCFM_Supply	= {	if (IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[3] ) > 0.5)
 																								then	if (IAQFanRef[3]:IAQFanType == 2) then  IAQCFM_Supply + IAQCFM[3]  else  UNCHANGED  endif    else  UNCHANGED  endif  }
-	"Set OtherZone:IAQCFM_Supply - 4"		OtherZone:IAQCFM_Supply	= {	if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[4] ) > 0.5)
+	"Set OtherZone:IAQCFM_Supply - 4"		OtherZone:IAQCFM_Supply	= {	if (IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[4] ) > 0.5)
 																								then	if (IAQFanRef[4]:IAQFanType == 2) then  IAQCFM_Supply + IAQCFM[4]  else  UNCHANGED  endif    else  UNCHANGED  endif  }
 
-	"Set OtherZone:IAQPwr_Supply - 1"		OtherZone:IAQPwr_Supply	= {	if (IAQDisabled > 0) then  0
+	"Set OtherZone:IAQPwr_Supply - 1"		OtherZone:IAQPwr_Supply	= {	if (IAQDisabled > 0 .OR. AllowIAQInps < 1 ) then  0
 																								else if (IAQOption == 6) then  MinIAQCFM * ResProj:DefaultIAQFanPwr
 																								else if (IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[1] ) > 0.5)
 																								then	if (IAQFanRef[1]:IAQFanType == 2) then                   IAQCFM[1] * ValidOr( IAQFanRef[1]:WperCFMIAQ, 0 )   else      0      endif    else      0      endif endif endif  }
-	"Set OtherZone:IAQPwr_Supply - 2"		OtherZone:IAQPwr_Supply	= {	if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[2] ) > 0.5)
+	"Set OtherZone:IAQPwr_Supply - 2"		OtherZone:IAQPwr_Supply	= {	if (IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[2] ) > 0.5)
 																								then	if (IAQFanRef[2]:IAQFanType == 2) then  IAQCFM_Supply + (IAQCFM[2] * ValidOr( IAQFanRef[2]:WperCFMIAQ, 0 ))  else  UNCHANGED  endif    else  UNCHANGED  endif  }
-	"Set OtherZone:IAQPwr_Supply - 3"		OtherZone:IAQPwr_Supply	= {	if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[3] ) > 0.5)
+	"Set OtherZone:IAQPwr_Supply - 3"		OtherZone:IAQPwr_Supply	= {	if (IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[3] ) > 0.5)
 																								then	if (IAQFanRef[3]:IAQFanType == 2) then  IAQCFM_Supply + (IAQCFM[3] * ValidOr( IAQFanRef[3]:WperCFMIAQ, 0 ))  else  UNCHANGED  endif    else  UNCHANGED  endif  }
-	"Set OtherZone:IAQPwr_Supply - 4"		OtherZone:IAQPwr_Supply	= {	if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[4] ) > 0.5)
+	"Set OtherZone:IAQPwr_Supply - 4"		OtherZone:IAQPwr_Supply	= {	if (IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[4] ) > 0.5)
 																								then	if (IAQFanRef[4]:IAQFanType == 2) then  IAQCFM_Supply + (IAQCFM[4] * ValidOr( IAQFanRef[4]:WperCFMIAQ, 0 ))  else  UNCHANGED  endif    else  UNCHANGED  endif  }
 
    ; SAC 11/11/17 - added IAQHRV* to enable Balanced fans to be simulated as HRV IAQ (tic #915)
    ; SAC 12/16/19 - added new IAQOption == 4 (default balanced) logic
    "Set OtherZone:IAQHRVCFM - 1"      OtherZone:IAQHRVCFM	= {
-         if (IAQDisabled > 0) then  0
+         if (IAQDisabled > 0 .OR. AllowIAQInps < 1 ) then  0
          else if (IAQOption == 4) then  MinIAQCFM
          else if (IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[1] ) > 0.5)
          then	if (IAQFanRef[1]:IAQFanType == 3)
                then  IAQCFM[1]  else  0  endif
          else	0  endif endif endif  }
    "Set OtherZone:IAQHRVCFM - 2"      OtherZone:IAQHRVCFM	= {
-         if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[2] ) > 0.5)
+         if (IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[2] ) > 0.5)
          then	if (IAQFanRef[2]:IAQFanType == 3) 
                then  IAQHRVCFM + IAQCFM[2]  else  UNCHANGED  endif
          else	UNCHANGED  endif  }
    "Set OtherZone:IAQHRVCFM - 3"      OtherZone:IAQHRVCFM	= {
-         if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[3] ) > 0.5)
+         if (IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[3] ) > 0.5)
          then	if (IAQFanRef[3]:IAQFanType == 3) 
                then  IAQHRVCFM + IAQCFM[3]  else  UNCHANGED  endif
          else	UNCHANGED  endif  }
    "Set OtherZone:IAQHRVCFM - 4"      OtherZone:IAQHRVCFM	= {
-         if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[4] ) > 0.5)
+         if (IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[4] ) > 0.5)
          then	if (IAQFanRef[4]:IAQFanType == 3) 
                then  IAQHRVCFM + IAQCFM[4]  else  UNCHANGED  endif
          else	UNCHANGED  endif  }
 
    "Set OtherZone:IAQHRVPwr - 1"      OtherZone:IAQHRVPwr	= {
-         if (IAQDisabled > 0) then  0
+         if (IAQDisabled > 0 .OR. AllowIAQInps < 1 ) then  0
          else if (IAQOption == 4) then  MinIAQCFM * ResProj:DefaultIAQFanPwr
          else if (IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[1] ) > 0.5)
          then	if (IAQFanRef[1]:IAQFanType == 3)
                then  IAQCFM[1] * ValidOr( IAQFanRef[1]:WperCFMIAQ, 0 )  else  0  endif
          else	0  endif endif endif  }
    "Set OtherZone:IAQHRVPwr - 2"      OtherZone:IAQHRVPwr	= {
-         if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[2] ) > 0.5)
+         if (IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[2] ) > 0.5)
          then	if (IAQFanRef[2]:IAQFanType == 3) 
                then  IAQHRVPwr + (IAQCFM[2] * ValidOr( IAQFanRef[2]:WperCFMIAQ, 0 ))  else  UNCHANGED  endif
          else	UNCHANGED  endif  }
    "Set OtherZone:IAQHRVPwr - 3"      OtherZone:IAQHRVPwr	= {
-         if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[3] ) > 0.5)
+         if (IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[3] ) > 0.5)
          then	if (IAQFanRef[3]:IAQFanType == 3) 
                then  IAQHRVPwr + (IAQCFM[3] * ValidOr( IAQFanRef[3]:WperCFMIAQ, 0 ))  else  UNCHANGED  endif
          else	UNCHANGED  endif  }
    "Set OtherZone:IAQHRVPwr - 4"      OtherZone:IAQHRVPwr	= {
-         if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[4] ) > 0.5)
+         if (IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[4] ) > 0.5)
          then	if (IAQFanRef[4]:IAQFanType == 3) 
                then  IAQHRVPwr + (IAQCFM[4] * ValidOr( IAQFanRef[4]:WperCFMIAQ, 0 ))  else  UNCHANGED  endif
          else	UNCHANGED  endif  }
 
    ; SAC 7/25/20 (tic #1174)
    "Set OtherZone:IAQBalCFM - 1"      OtherZone:IAQBalCFM	= {
-         if (IAQDisabled > 0) then  0
+         if (IAQDisabled > 0 .OR. AllowIAQInps < 1 ) then  0
          else if (IAQOption == 4) then  MinIAQCFM
          else if (IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[1] ) > 0.5)
          then	if (IAQFanRef[1]:IAQFanType == 3 .AND.
@@ -334,21 +355,21 @@ RULELIST "ProposedInput_ResOtherZone" 0 0 0 0
                then  IAQCFM[1]  else  0  endif
          else	0  endif endif endif  }
    "Set OtherZone:IAQBalCFM - 2"      OtherZone:IAQBalCFM	= {
-         if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[2] ) > 0.5)
+         if (IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[2] ) > 0.5)
          then	if (IAQFanRef[2]:IAQFanType == 3 .AND.
                      ( (IfValidAnd( Proj:AnalysisVersion >= 190200 )==0 .AND. IfValidAnd( IAQFanRef[2]:IAQRecovEffect = 0 )) .OR.
                        (IfValidAnd( Proj:AnalysisVersion >= 190200 )    .AND. IfValidAnd( IAQFanRef[2]:IncludesRecov  = 0 )) )) 
                then  IAQBalCFM + IAQCFM[2]  else  UNCHANGED  endif
          else	UNCHANGED  endif  }
    "Set OtherZone:IAQBalCFM - 3"      OtherZone:IAQBalCFM	= {
-         if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[3] ) > 0.5)
+         if (IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[3] ) > 0.5)
          then	if (IAQFanRef[3]:IAQFanType == 3 .AND.
                      ( (IfValidAnd( Proj:AnalysisVersion >= 190200 )==0 .AND. IfValidAnd( IAQFanRef[3]:IAQRecovEffect = 0 )) .OR.
                        (IfValidAnd( Proj:AnalysisVersion >= 190200 )    .AND. IfValidAnd( IAQFanRef[3]:IncludesRecov  = 0 )) )) 
                then  IAQBalCFM + IAQCFM[3]  else  UNCHANGED  endif
          else	UNCHANGED  endif  }
    "Set OtherZone:IAQBalCFM - 4"      OtherZone:IAQBalCFM	= {
-         if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[4] ) > 0.5)
+         if (IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[4] ) > 0.5)
          then	if (IAQFanRef[4]:IAQFanType == 3 .AND.
                      ( (IfValidAnd( Proj:AnalysisVersion >= 190200 )==0 .AND. IfValidAnd( IAQFanRef[4]:IAQRecovEffect = 0 )) .OR.
                        (IfValidAnd( Proj:AnalysisVersion >= 190200 )    .AND. IfValidAnd( IAQFanRef[4]:IncludesRecov  = 0 )) )) 
@@ -356,7 +377,7 @@ RULELIST "ProposedInput_ResOtherZone" 0 0 0 0
          else	UNCHANGED  endif  }
 
    "Set OtherZone:IAQBalPwr - 1"      OtherZone:IAQBalPwr	= {
-         if (IAQDisabled > 0) then  0
+         if (IAQDisabled > 0 .OR. AllowIAQInps < 1 ) then  0
          else if (IAQOption == 4) then  MinIAQCFM * ResProj:DefaultIAQFanPwr
          else if (IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[1] ) > 0.5)
          then	if (IAQFanRef[1]:IAQFanType == 3 .AND.
@@ -365,21 +386,21 @@ RULELIST "ProposedInput_ResOtherZone" 0 0 0 0
                then  IAQCFM[1] * ValidOr( IAQFanRef[1]:WperCFMIAQ, 0 )  else  0  endif
          else	0  endif endif endif  }
    "Set OtherZone:IAQBalPwr - 2"      OtherZone:IAQBalPwr	= {
-         if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[2] ) > 0.5)
+         if (IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[2] ) > 0.5)
          then	if (IAQFanRef[2]:IAQFanType == 3 .AND.
                      ( (IfValidAnd( Proj:AnalysisVersion >= 190200 )==0 .AND. IfValidAnd( IAQFanRef[2]:IAQRecovEffect = 0 )) .OR.
                        (IfValidAnd( Proj:AnalysisVersion >= 190200 )    .AND. IfValidAnd( IAQFanRef[2]:IncludesRecov  = 0 )) )) 
                then  IAQBalPwr + (IAQCFM[2] * ValidOr( IAQFanRef[2]:WperCFMIAQ, 0 ))  else  UNCHANGED  endif
          else	UNCHANGED  endif  }
    "Set OtherZone:IAQBalPwr - 3"      OtherZone:IAQBalPwr	= {
-         if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[3] ) > 0.5)
+         if (IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[3] ) > 0.5)
          then	if (IAQFanRef[3]:IAQFanType == 3 .AND.
                      ( (IfValidAnd( Proj:AnalysisVersion >= 190200 )==0 .AND. IfValidAnd( IAQFanRef[3]:IAQRecovEffect = 0 )) .OR.
                        (IfValidAnd( Proj:AnalysisVersion >= 190200 )    .AND. IfValidAnd( IAQFanRef[3]:IncludesRecov  = 0 )) )) 
                then  IAQBalPwr + (IAQCFM[3] * ValidOr( IAQFanRef[3]:WperCFMIAQ, 0 ))  else  UNCHANGED  endif
          else	UNCHANGED  endif  }
    "Set OtherZone:IAQBalPwr - 4"      OtherZone:IAQBalPwr	= {
-         if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[4] ) > 0.5)
+         if (IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[4] ) > 0.5)
          then	if (IAQFanRef[4]:IAQFanType == 3 .AND.
                      ( (IfValidAnd( Proj:AnalysisVersion >= 190200 )==0 .AND. IfValidAnd( IAQFanRef[4]:IAQRecovEffect = 0 )) .OR.
                        (IfValidAnd( Proj:AnalysisVersion >= 190200 )    .AND. IfValidAnd( IAQFanRef[4]:IncludesRecov  = 0 )) )) 
@@ -388,22 +409,22 @@ RULELIST "ProposedInput_ResOtherZone" 0 0 0 0
 
    ; SAC 12/16/19 - note: default balanced effectiveness = 0
    "Set OtherZone:IAQHRVCFMxRcvEff - 1"      OtherZone:IAQHRVCFMxRcvEff	= {
-         if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[1] ) > 0.5)
+         if (IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[1] ) > 0.5)
          then	if (IAQFanRef[1]:IAQFanType == 3)
                then  IAQCFM[1] * ValidOr( IAQFanRef[1]:IAQRecovEffect, 0 )  else  0  endif
          else	0  endif  }
    "Set OtherZone:IAQHRVCFMxRcvEff - 2"      OtherZone:IAQHRVCFMxRcvEff	= {
-         if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[2] ) > 0.5)
+         if (IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[2] ) > 0.5)
          then	if (IAQFanRef[2]:IAQFanType == 3) 
                then  IAQHRVCFMxRcvEff + (IAQCFM[2] * ValidOr( IAQFanRef[2]:IAQRecovEffect, 0 ))  else  UNCHANGED  endif
          else	UNCHANGED  endif  }
    "Set OtherZone:IAQHRVCFMxRcvEff - 3"      OtherZone:IAQHRVCFMxRcvEff	= {
-         if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[3] ) > 0.5)
+         if (IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[3] ) > 0.5)
          then	if (IAQFanRef[3]:IAQFanType == 3) 
                then  IAQHRVCFMxRcvEff + (IAQCFM[3] * ValidOr( IAQFanRef[3]:IAQRecovEffect, 0 ))  else  UNCHANGED  endif
          else	UNCHANGED  endif  }
    "Set OtherZone:IAQHRVCFMxRcvEff - 4"      OtherZone:IAQHRVCFMxRcvEff	= {
-         if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[4] ) > 0.5)
+         if (IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[4] ) > 0.5)
          then	if (IAQFanRef[4]:IAQFanType == 3) 
                then  IAQHRVCFMxRcvEff + (IAQCFM[4] * ValidOr( IAQFanRef[4]:IAQRecovEffect, 0 ))  else  UNCHANGED  endif
          else	UNCHANGED  endif  }
@@ -454,10 +475,20 @@ RULELIST "ProposedInput_ResOtherZone" 0 0 0 0
   ; JP 2/4/22 - move TotalIAQCFM down and revise how it is calculated
 	"Set OtherZone:TotalIAQCFM"			OtherZone:TotalIAQCFM	= {	if( IAQOption >= 4 .AND. IAQOption <= 6 .AND. IAQDisabled < 1 ) 
 	                                                          then  MinIAQCFM  
+	                                                          else if( ServedByAirSys > 0 )
+	                                                          then AirSysVentCFM
 	                                                          else if( IAQOption >= 11 .AND. IAQOption <= 15 .AND. IAQDisabled < 1 ) 
 	                                                          then Max( ValidOr( CentralSupplyCFM, 0 ), ValidOr( CentralExhaustCFM, 0 ) )
-	                                                          else Max( IAQBalCFM + IAQCFM_Supply , IAQBalCFM + IAQCFM_Exhaust )
-	                                                          endif endif  }
+	                                                          else Max( IAQHRVCFM + IAQCFM_Supply , IAQHRVCFM + IAQCFM_Exhaust )
+	                                                          endif endif endif }
+	"Set OtherZone:TotalExhCFM"			OtherZone:TotalExhCFM	= {	if( SpcFunc = 355 )
+	                                                          then PrkgGarExhFlow
+	                                                          else if( ServedByAirSys > 0 )
+	                                                          then ValidOr( ActiveHVACSystem:ExhFanCap, 0 )
+	                                                          else if( IAQOption >= 11 .AND. IAQOption <= 15 ) 
+	                                                          then ValidOr( CentralExhaustCFM, 0 )
+	                                                          else IAQHRVCFM + IAQCFM_Exhaust
+	                                                          endif endif endif }
 
    ; SAC 2/6/20 (tic #1174)   ; revised to only apply max HRV CFM for std and drtg models - SAC 7/21/20 (tic #1174)
    ; revised to DEACTIVATE this limit entirely (for 2019.2.0+ releases) - SAC 08/19/21 (tic #1243)
@@ -470,7 +501,13 @@ RULELIST "ProposedInput_ResOtherZone" 0 0 0 0
 
    ; SAC 12/16/19 - IAQOption revisions to labels, CFMs & Powers updated to reflect new settings (default balanced, min exhaust)
    "Set OtherZone:MinIAQCFMLbl"	OtherZone:MinIAQCFMLbl	= {	if (IAQDisabled > 0) then  Format( "IAQ Ventilation disabled (%s required but not met)", FltToStr( MinIAQCFM, 1 ) )
-																					else if (MinIAQCFM < 0.05) then  " "
+																					else if (MinIAQCFM < 0.05 )
+																					     then if( MinExhCFM < 0.05 )
+																					          then " "
+																					          else if( TotalExhCFM < (MinExhCFM - 0.05) )
+																					               then Format( "Min Exhaust -NOT MET-:  %s CFM required, %s entered", FltToStr( MinExhCFM, 1 ), FltToStr( TotalExhCFM, 1 ) )
+																					               else Format( "Minimum Exhaust:  %s CFM  (%s entered)", FltToStr( MinExhCFM, 1 ), FltToStr( TotalExhCFM, 1 ) )
+																					               endif endif
 																					else if (TotalIAQCFM < (MinIAQCFM - 0.05)) then	Format( "Min IAQ Vent -NOT MET-:  %s CFM required, %s entered", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
 																					else  switch (IAQOption)
 																					         case  2:  Format( "Minimum IAQ Ventilation:  %s CFM  (%s entered)", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
@@ -482,8 +519,8 @@ RULELIST "ProposedInput_ResOtherZone" 0 0 0 0
 																									 case 13:  Format( "Minimum IAQ Ventilation:  %s CFM  (%s entered)", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
 																									 case 14:  Format( "Minimum IAQ Ventilation:  %s CFM  (%s supply entered)", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
 																									 case 15:  Format( "Minimum IAQ Ventilation:  %s CFM  (%s exhaust entered)", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
-																					         default:  " "
-																					      endswitch  endif endif endif  }
+																					         default:  Format( "Minimum IAQ Ventilation:  %s CFM  (%s entered)", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
+																					      endswitch  endif endif endif }
 
    ; SAC 12/16/19 - add flag and label indicating whether OtherZone IAQ is balanced
    "Set OtherZone:IAQCFMIsBalanced - flag indicating whether or not IAQ CFM is balanced (supply & exhaust within 20%)"   ; SAC 12/16/19 
@@ -529,6 +566,25 @@ RULELIST "ProposedInput_ResOtherZone" 0 0 0 0
    "Set OtherZone:MaxStdDesignIAQPower - Max IAQ power (MaxStdDesignIAQWperCFM * StdDesignIAQCFM)"   ; SAC 12/15/19
       OtherZone:MaxStdDesignIAQPower           = {  MaxStdDesignIAQWperCFM * ValidOr( StdDesignIAQCFM, 0 )  }
 
+   ; inputs for creation of AirSys to serve active ResOtherZn - SAC 05/17/22
+   "Set ResOtherZn:AirSys_WizDlgDims[1]-Wd"  ResOtherZn:AirSys_WizDlgDims[1]  = {  500  }
+   "Set ResOtherZn:AirSys_WizDlgDims[2]-Ht"  ResOtherZn:AirSys_WizDlgDims[2]  = {  500  }
+   "Set ResOtherZn:AirSys_NameRoot"          ResOtherZn:AirSys_NameRoot  = {  substr( Name, 0, 16 )  }
+   ; "Set ResOtherZn:AirSys_Type",             BEMP_Sym,  1,  "Type of AirSys to create & assign to this ResOtherZn",  ""  
+   ; "Set ResOtherZn:AirSys_HtgType",          BEMP_Sym,  1,  "Type of AirSys heating coil",  ""  
+   ; "Set ResOtherZn:AirSys_EconoType",        BEMP_Sym,  1,  "Type of economizer for the AirSys (or none)",  "" 
+   ; "Set ResOtherZn:AirSys_HtRecovType",      BEMP_Sym,  1,  "Type of heat recovery device for the AirSys (or none)",  "" 
+   
+   "Backward compat for ResOtherZn if IAQFanOption was set to default." ResOtherZn:Action =
+    { if( Proj:DefaultingRounds = 1 .AND. 
+          ( IfValidAnd( IAQOption = 4 ) .OR. IfValidAnd( IAQOption = 5 ) .OR. IfValidAnd( IAQOption = 6 ) .OR.
+            ( LocalStatus( IAQOption ) <= 4 .AND. 
+              LocalCompAssigned( IAQFanRef[1] ) = 0 .AND. LocalCompAssigned( IAQFanRef[2] ) = 0 .AND. 
+              LocalCompAssigned( IAQFanRef[3] ) = 0 .AND. LocalCompAssigned( IAQFanRef[4] ) = 0 ) ) )
+      then EvalRulelist( "Create_Default_ResOtherZnIAQFan", 1 )
+      else UNCHANGED
+      endif }
+
 END
 ;*************************************************************************
 
@@ -573,7 +629,50 @@ RULELIST "ForceReset_ResOtherZone_StdDesignIAQLimits" 1 0 0 0
 END
 ;*************************************************************************
 
+;*************************************************************************
+RULELIST "Create_Default_ResOtherZnIAQFan"  1 0 1 1
 
+   "Post message to log that default IAQFan will be created."  ResOtherZn:Action =
+       { PostWarning("ResidentialOtherZone '%s' is using default minimum IAQ fan
+                      option which is deprecated. IAQOption is set to 
+                      Individual IAQ Fan and a default fan is created.", Name) }
+                      
+   "Blast ResOtherZn:IAQFanRef"          ResOtherZn:IAQFanRef[1] = { UNDEFINED }
+   "Blast ResOtherZn:IAQFanRef"          ResOtherZn:IAQFanRef[2] = { UNDEFINED }
+   "Blast ResOtherZn:IAQFanRef"          ResOtherZn:IAQFanRef[3] = { UNDEFINED }
+   "Blast ResOtherZn:IAQFanRef"          ResOtherZn:IAQFanRef[4] = { UNDEFINED }
+   "Blast ResOtherZn:IAQFanCnt"          ResOtherZn:IAQFanCnt[1] = { UNDEFINED }
+   "Blast ResOtherZn:IAQFanCnt"          ResOtherZn:IAQFanCnt[2] = { UNDEFINED }
+   "Blast ResOtherZn:IAQFanCnt"          ResOtherZn:IAQFanCnt[3] = { UNDEFINED }
+   "Blast ResOtherZn:IAQFanCnt"          ResOtherZn:IAQFanCnt[4] = { UNDEFINED }
+                      
+   "Set ResOtherZn:IAQFanRef[1]"  ResOtherZn:IAQFanRef[1] = 
+       { CreateComp( ResIAQFan, Local( Name ) + "-IAQFan" ) }
+
+   "Set ResOtherZn:IAQFanRef[1]:IAQCFM"  ResOtherZn:IAQFanRef[1]:IAQCFM = 
+       { MinIAQCFM }
+
+   "Set ResOtherZn:IAQFanRef[1]:WperCFMIAQ"  ResOtherZn:IAQFanRef[1]:WperCFMIAQ = 
+       { if( IAQOption = 4 .OR. LocalStatus( IAQOption ) <= 4 ) 
+         then 0.70 ; Default Minimum Balanced IAQ Fan
+         else 0.35 ; Minimum Supply IAQ Fan / Minimum Exhaust IAQ Fan
+         endif }
+
+   "Set ResOtherZn:IAQFanRef[1]:IAQFanType"  ResOtherZn:IAQFanRef[1]:IAQFanType = 
+       { switch( Local( IAQOption ) )
+          case  4  :  3 ; Default Minimum Balanced IAQ Fan
+          case  5  :  1 ; Minimum Exhaust IAQ Fan
+          case  6  :  2 ; Minimum Supply IAQ Fan
+          default  :  3 ; Old default was Balanced IAQ Fan
+         endswitch }
+
+   "Set ResOtherZn:IAQFanRef[1]:IncludesRecov"  ResOtherZn:IAQFanRef[1]:IncludesRecov = { 0 }
+   
+   "Set ResOtherZn:IAQFanRef[1]:IAQRecovEffect"  ResOtherZn:IAQFanRef[1]:IAQRecovEffect = { 0 }   
+   
+   "Set ResOtherZn:IAQOption"  ResOtherZn:IAQOption = { 2 }         
+   
+END
 ;*************************************************************************
 ;*************************************************************************
 

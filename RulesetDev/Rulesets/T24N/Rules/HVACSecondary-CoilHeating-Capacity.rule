@@ -113,6 +113,38 @@ RULE CoilHtg:FluidSegOutRef
 ENDRULE
 
 // -----------------------------------------------------------------------------
+// Create supplemental coils for baseline heat pump systems
+RULE AirSys:AirSeg:CoilHtg:HtPumpSuppCoilHtgRef
+  ANNUAL
+    if( ( AirSys:BaseSysNum = 7 .OR. AirSys:BaseSysNum > 200 ) .AND.
+        Type = "HeatPump" )
+    then 
+      if( AirSys:BaseSysNum = 7 .AND. AirSys:BaseSysNumOpt = "b" )
+      then RuleLibrary( CoilHtg, "BaseSys7or3b SuppCoilHtg", 1, AirSeg:Name )
+      else 
+      if( AirSys:BaseSysNum = 7 .AND. AirSys:BaseSysNumOpt = "c" )
+      then RuleLibrary( CoilHtg, "BaseSys7or3c SuppCoilHtg", 1, AirSeg:Name )
+      else
+      if( AirSys:BaseSysNum = 201 .AND. AirSys:BaseSysNumOpt = "b" )
+      then RuleLibrary( CoilHtg, "ResBaseAirSys_SZHP SuppCoilHtg", 1, AirSeg:Name )
+      else 
+      if( AirSys:BaseSysNum = 201 .AND. AirSys:BaseSysNumOpt = "c" )
+      then RuleLibrary( CoilHtg, "ResBaseAirSys_SZDFHP SuppCoilHtg", 1, AirSeg:Name )
+      else UNCHANGED
+      endif endif endif endif
+    else UNCHANGED
+    endif
+ENDRULE
+// Set BaseSysNum for new supplemental coil
+RULE NEW AirSys:AirSeg:CoilHtg:BaseSysNum
+  ANNUAL
+    if( IfValidAnd( BaseSysNum > 0 ) = 0 )
+    then AirSys:BaseSysNum
+    else UNCHANGED
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
 // ParentComponentType set to property of local component, for screen rules
 RULE NEW CoilHtg:ParentComp
   DATATYPE
@@ -135,6 +167,13 @@ RULE NEW CoilHtg:ParentComp
     else ParentComponentType()
     endif endif
   SIZING
+    if( ParentComponentType() = "AirSeg" )
+    then "AirSys"
+    else if( ParentComponentType() = "ZnSys" )
+    then "ZnSys"
+    else ParentComponentType()
+    endif endif
+  ANNUAL
     if( ParentComponentType() = "AirSeg" )
     then "AirSys"
     else if( ParentComponentType() = "ZnSys" )
@@ -164,6 +203,15 @@ RULE NEW CoilHtg:SysType
     else "NA"
     endif endif endif
   SIZING
+    if( ParentComp = "AirSys" )
+    then AirSys:Type
+    else if( ParentComp = "ZnSys" )
+    then ZnSys:Type
+    else if( ParentComp = "TrmlUnit" )
+    then TrmlUnit:Type
+    else "NA"
+    endif endif endif
+  ANNUAL
     if( ParentComp = "AirSys" )
     then AirSys:Type
     else if( ParentComp = "ZnSys" )
@@ -240,6 +288,18 @@ RULE CoilHtg:SysCnt
       TrmlUnit:SysCnt
     else 0
     endif endif endif
+  ANNUAL
+    if( ParentComp = "AirSys" )
+    then // AirSystem
+      Parent2( Cnt )
+    else if( ParentComp = "ZnSys" )
+    then // ZoneSystem
+      ZnSys:Cnt 
+    else if( ParentComp = "TrmlUnit" )
+    then // TerminalUnit
+      TrmlUnit:SysCnt
+    else 0
+    endif endif endif
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -250,6 +310,11 @@ RULE CoilHtg:IsDummy
   DEFAULT
     0
   SIZING
+    if( LocalStatus( IsDummy ) = 0 )
+    then 0
+    else UNCHANGED
+    endif
+  ANNUAL
     if( LocalStatus( IsDummy ) = 0 )
     then 0
     else UNCHANGED
@@ -346,6 +411,11 @@ RULE NEW CoilHtg:ParentAirSysRef
     then AirSys:Name
     else UNDEFINED
     endif
+  ANNUAL
+    if( ParentComp = "AirSys" .OR. ParentComp = "TrmlUnit" )
+    then AirSys:Name
+    else UNDEFINED
+    endif
 ENDRULE
 RULE NEW CoilHtg:ParentZnSysRef
   DATATYPE
@@ -362,6 +432,11 @@ RULE NEW CoilHtg:ParentZnSysRef
     else UNDEFINED
     endif
   SIZING
+    if( ParentComp = "ZnSys" )
+    then ZnSys:Name
+    else UNDEFINED
+    endif
+  ANNUAL
     if( ParentComp = "ZnSys" )
     then ZnSys:Name
     else UNDEFINED
@@ -387,6 +462,15 @@ RULE NEW CoilHtg:CondHVACZnCntWithMult
     else 0
     endif endif
   SIZING
+    if( ParentComp = "AirSys" .OR. ParentComp = "TrmlUnit" )
+    then // AirSystem
+      AirSys:CondHVACZnCntWithMult
+    else if( ParentComp = "ZnSys" )
+    then // ZoneSystem
+      ZnSys:CondHVACZnCntWithMult
+    else 0
+    endif endif
+  ANNUAL
     if( ParentComp = "AirSys" .OR. ParentComp = "TrmlUnit" )
     then // AirSystem
       AirSys:CondHVACZnCntWithMult
@@ -428,8 +512,6 @@ RULE NEW CoilHtg:IsNew
     then 1
     else 0
     endif
-  SIZING : T24N
-    if( Status = "New" ) then 1 else 0 endif
   SIZING : S901G ECBC
     if( Status = "New" .AND. Parent( IsNew ) = 1 ) then 1 else 0 endif
 ENDRULE
@@ -440,8 +522,6 @@ RULE NEW CoilHtg:IsExisting
   INPUTCLASS
     NotInput
   DEFAULT
-    if( IsNew ) then 0 else 1 endif
-  SIZING
     if( IsNew ) then 0 else 1 endif
 ENDRULE
 
@@ -498,6 +578,7 @@ RULE CoilHtg:Type
     then 
       if( Type = "HeatPump" .AND. 
           ZnSys:Type != "SZHP" .AND. 
+          ZnSys:Type != "SZDFHP" .AND.
           ZnSys:Type != "PTHP" .AND. 
           ZnSys:Type != "WSHP" .AND. 
           ZnSys:Type != "SPVHP" .AND.
@@ -505,7 +586,7 @@ RULE CoilHtg:Type
           ZnSys:Type != "MiniSplitHP" )
       then
         PostError("Coil object '%s' is Type = 'HeatPump', which is only supported
-                   for ZoneSystems of Type = SZHP, PTHP, WSHP, SPVHP, VRF, 
+                   for ZoneSystems of Type = SZHP, SZDFHP, PTHP, WSHP, SPVHP, VRF, 
                    or MiniSplitHP.", Name)
       else if ( Type = "VRF" .AND. ZnSys:Type != "VRF" ) 
       then
@@ -518,12 +599,6 @@ RULE CoilHtg:Type
       else UNCHANGED
       endif endif endif
     else UNCHANGED
-    endif
-  SIZING
-    if( BaseSysNum > 0 )
-    then // Baseline system definitions defined by Library_HVAC.txt file.
-      UNCHANGED
-    else Type
     endif
 ENDRULE
 
@@ -620,6 +695,11 @@ RULE CoilHtg:CndsrType
       endif
     else UNCHANGED
     endif endif ;endif
+  SIZING
+    if( Type != "HeatPump" )
+    then UNDEFINED
+    else UNCHANGED
+    endif
   ANNUAL 
     if( BaseSysNum > 0 .AND. Type = "HeatPump" )
     then "Air"
@@ -649,9 +729,18 @@ RULE CoilHtg:SizingRat
     1.5
   SIZING 
     1.0
-  ANNUAL
+  ANNUAL : T24N_2016 T24N_2019
     if( BaseSysNum > 0 )
     then Proj:HtgSizingRat
+    else 1.0
+    endif  
+  ANNUAL : T24N
+    if( BaseSysNum > 0 )
+    then
+      if( Type = "HeatPump" ) 
+      then Proj:ClgSizingRat // For HPs, heating = cooling 
+      else Proj:HtgSizingRat
+      endif
     else 1.0
     endif
 ENDRULE
@@ -1020,24 +1109,24 @@ RULE CoilHtg:CapTotGrossRtd
       if( IfValidAnd( IsDummy > 0 ) )
       then 1
       else
-      if( Type = "HeatPump" .AND. IfValidAnd( SysClgCap >= 0 ) )
-      then // Base HP heating capacity on cooling capacity
-        SysClgCap - ValidOr( FanHtRtd, 0 ) + ValidOr( HtPumpCprsrHt, 0 )
+      if( Type = "HeatPump" .AND. LocalCompAssigned( CoilClgRef ) )
+      then // Is a HeatPump, See CoilClg:CapTotGrossRtd rule
+        CoilClgRef:CapTotGrossRtd            
       else
-      if( IfValidAnd( z:CapTotGrossRtdSim >= 0 ) .AND. 
-          SysCnt > 0 ) 
-      then
-        if( ParentComp = "ZnSys" )
-        then // Is a ZoneSystem
-          z:CapTotGrossRtdSim / SysCnt * SizingRat
-        else if( ParentComp = "AirSys" ) 
-        then // Is an AirSystem
-          z:CapTotGrossRtdSim / SysCnt * SizingRat   
-        else 0
-        endif endif
+      if( IfValidAnd( z:CapTotGrossRtdSim >= 0 ) .AND. SysCnt > 0 ) 
+      then z:CapTotGrossRtdSim / SysCnt * SizingRat   
       else 0
       endif endif endif
     else z:CapTotGrossRtd
+    endif
+ENDRULE
+// Re-evaluate for baseline HeatPump supplemental coils
+RULE CoilHtg:CapTotGrossRtd
+  ANNUAL
+    if( BaseSysNum > 0 .AND. CountRefs( CoilHtg:HtPumpSuppCoilHtgRef ) > 0 )
+    then // Is supplemental heating coil
+      SumRevRef( CoilHtg:HtPumpSuppCoilHtgRef, CoilHtg:CapTotGrossRtd ) * 1.25
+    else UNCHANGED
     endif
 ENDRULE
 
@@ -1084,6 +1173,13 @@ RULE CoilHtg:NumHtgStages
     else UNDEFINED
     endif
   SIZING
+    if( ( Type = "HeatPump" .OR. Type = "Furnace" ) .AND. 
+        ParentComp = "AirSys" )
+    then // Only 1-stage furnaces/heatpumps are currently supported
+      1 
+    else UNDEFINED
+    endif
+  ANNUAL
     if( ( Type = "HeatPump" .OR. Type = "Furnace" ) .AND. 
         ParentComp = "AirSys" )
     then // Only 1-stage furnaces/heatpumps are currently supported
@@ -1749,3 +1845,4 @@ RULE NEW ZnSys:HtgFuelSrc
     else 0
     endif
 ENDRULE
+

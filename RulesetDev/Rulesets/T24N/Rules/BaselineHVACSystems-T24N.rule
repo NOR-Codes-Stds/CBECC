@@ -734,7 +734,55 @@ RULE NEW Spc:CreateBaseHVAC
     else 0
     endif
 ENDRULE
-      
+
+// Set flag to designate that baseline HVAC should be created for ResOtherZn - SAC 05/06/22
+RULE NEW ResOtherZn:CreateBaseHVAC
+  DATATYPE
+    Integer
+  LONGFORM
+    CreateBaselineHVAC
+  INPUTCLASS
+    NotInput
+  SIZING : T24N_2019 T24N_2016
+    UNCHANGED
+  SIZING_PROPOSED
+    0
+  SIZING_BASELINE
+    if( Proj:CreateBaseHVAC > 0 .AND. EnumValue( Type ) < 10 )
+        ; ( IsNewHVAC = -999 .OR. IsNewHVAC = 1 .OR. HasUnknownHVAC = 1 ) )
+    then 1
+    else 0
+    endif
+ENDRULE
+; add SIZING_PROPOSED logic to handle setup of Proposed baseline system for PropEqStd or other/future 
+;  SIZING_PROPOSED
+;    if( Proj:CreateBaseHVAC > 0 .AND. EnumValue( Type ) < 10 )
+;        ; .AND. ( ( Proj:IsNoMech > 0 .OR. ( Proj:IsNoAddMech > 0 .AND. IfValidAnd( IsExistingHVAC <= 0 ) ) ) .OR.
+;        ;       HasUnknownHVAC = 1 ) )
+;    then 1
+;    else 0
+;    endif
+; may be needed above if/when compliance options added for Res...
+;  CHECKCODE
+;    if( Proj:CreateBaseHVAC > 0 .AND. IsCond > 0 )
+;    then      
+;      if( ( Proj:IsNoMech > 0 .OR. Proj:IsNoAddMech > 0 ) .AND. IfValidAnd( IsNewHVAC >= 0 ) )
+;      then // Partial compliance w/o mechanical, but user has defined a New system
+;        PostWarning("The project's compliance scope does not include mechanical, 
+;                     yet a 'New' HVAC system is defined for ThermalZone '%s'. This system
+;                     will be ignored and a baseline HVAC system will be modeled.", Name)
+;      else
+;      if( IfValidAnd( IsNewHVAC = -999 ) .OR. HasUnknownHVAC > 0 )
+;      then // Partical compliance w/o mechanical and no system defined, or HasUnknownHVAC checked
+;        PostWarning("ThermalZone '%s' has no HVAC, or HasUnknownHVAC is checked.
+;                     A baseline system will be modeled for this zone. If a proposed HVAC
+;                     system has been specified, it will be ignored.", Name)
+;      else UNCHANGED
+;      endif endif
+;    else UNCHANGED
+;    endif
+
+
 // -----------------------------------------------------------------------------
 //            Create baseline single-zone HVAC systems
 // -----------------------------------------------------------------------------
@@ -1019,6 +1067,39 @@ RULE NEW ThrmlZn:BaseZnZnSysRef
     endif
 ENDRULE
 
+// Create single-zone baseline AirSystems
+RULE NEW ResOtherZn:BaseZnAirSysRef
+  DATATYPE
+    AirSys
+  LONGFORM
+    BaselineZoneAirSystemReference
+  INPUTCLASS
+    NotInput
+  SIZING : T24N_2019 T24N_2016
+    UNCHANGED
+  SIZING
+  // 2022 and beyond system map
+    if( CreateBaseHVAC > 0 .AND. LocalCompAssigned( BaseZnAirSysRef ) = 0 )
+    then
+      if( AboveGrdStoryCntForBaseSysMap <= 3 )
+      then ; <= 3 stories: 
+        if( Proj:CliZnNum <= 15 ) 
+        then // CliZn 2-15, ResSZHP
+          RuleLibrary( AirSys, "ResBaseAirSys_SZHP", 1 ) 
+        else // CliZn 16, ResSZAC
+          RuleLibrary( AirSys, "ResBaseAirSys_SZAC", 1 )
+        endif
+      else // Is >3 stories
+      if( Proj:CliZnNum >= 2 .AND. Proj:CliZnNum <= 15 ) 
+      then // CliZn 2-15, ResSZHP
+        RuleLibrary( AirSys, "ResBaseAirSys_SZHP", 1 ) 
+      else // CliZn 1 and 16, ResSZVDFHP
+        RuleLibrary( AirSys, "ResBaseAirSys_SZDFHP", 1 ) 
+      endif endif
+    else UNDEFINED
+    endif
+ENDRULE
+
 
 // Revise coil types for process systems based building area thresholds
 // See System Description Tables in NACM
@@ -1079,8 +1160,14 @@ RULE AirSys:AirSeg:CoilHtg:Type
       endif endif
     else UNCHANGED
     endif
+// In ANNUAL run, change Resistance coils to HeatPump where applicable
+  ANNUAL
+    if( ( AirSys:BaseSysNum = 7 .OR. AirSys:BaseSysNum > 200 ) .AND.
+        Type = "Resistance" )
+    then "HeatPump"
+    else UNCHANGED
+    endif
 ENDRULE
-
 
 
 // -----------------------------------------------------------------------------
@@ -1281,6 +1368,33 @@ RULE ThrmlZn:VentSysRef
     else UNCHANGED
     endif
 ENDRULE
+
+
+// baseline HVAC system reference for ResOtherZn
+RULE ResOtherZn:ozHVACSystem
+// Proposed system assignment is defined by user.
+  SIZING
+    if( CreateBaseHVAC > 0 .AND. EnumValue( Type ) < 10 )
+    then     
+      if( LocalCompAssigned( BaseZnAirSysRef ) )
+      then // Zone served by a baseline single-zone AirSys
+        BaseZnAirSysRef
+      else UNDEFINED
+      endif
+    else UNCHANGED
+    endif
+ENDRULE
+RULE ResOtherZn:ActiveHVACSystem
+  // maintain consistency between ozHVACSystem & ActiveHVACSystem
+  SIZING
+    if( CreateBaseHVAC > 0 .AND. EnumValue( Type ) < 10 .AND.
+        LocalCompAssigned( ozHVACSystem ) )
+    then ozHVACSystem
+    else UNCHANGED
+    endif
+ENDRULE
+
+
 // Create return fan baseline HRR ventilation if it is balanced
 // First set AirSys:IsBalancedVentSys
 RULE NEW AirSys:IsBalancedVentSys
@@ -1371,14 +1485,36 @@ RULE ThrmlZn:TrmlUnitRef
     else UNCHANGED
     endif         
 ENDRULE
+
+RULE NEW ResOtherZn:TrmlUnitRef
+  DATATYPE
+    TerminalUnit
+  LONGFORM
+    TerminalUnitReference
+  INPUTCLASS
+    NotInput
+  SIZING : T24N_2019 T24N_2016
+    UNDEFINED
+  SIZING
+  // 2022 and beyond system map
+    if( LocalCompAssigned( TrmlUnitRef ) = 0 .AND.
+        LocalCompAssigned( BaseZnAirSysRef ) )
+    then
+      RuleLibrary( TerminalUnit, "ResBaseAirSys TrmlUnit", 1, BaseZnAirSysRef ) 
+    else UNCHANGED
+    endif
+ENDRULE
+
 // Assign terminal unit zone served to the thermal zone
 RULE TrmlUnit:ZnServedRef
 // Proposed transformation definitions initialized to be the same as user input.  
   SIZING
-    if( AirSys:BaseSysNum > 0 )
+    if( AirSys:BaseSysNum > 200 )
+    then MaxRevRefComp( ResOtherZn:TrmlUnitRef, ResOtherZn:Area )
+    else if( AirSys:BaseSysNum > 0 )
     then MaxRevRefComp( ThrmlZn:TrmlUnitRef, ThrmlZn:FlrArea )
     else UNCHANGED
-    endif
+    endif endif
 ENDRULE
 // Assign TerminalUnits to AirSegments
 RULE TrmlUnit:PriAirSegRef
@@ -1386,12 +1522,15 @@ RULE TrmlUnit:PriAirSegRef
     if( AirSys:BaseSysNum > 0 .AND.
         LocalCompAssigned( ZnServedRef ) )
     then // Assign terminal unit
-      if( ZnServedRef:IsHighRiseRes > 0 )
+      if (LocalCompAssigned( ZnServedRef ) = ComponentType( "ResOtherZn" ))
+      then 
+        ZnServedRef:ActiveHVACSystem:SupAirSegRef 
+      else if( ZnServedRef:IsHighRiseRes > 0 )
       then 
         ZnServedRef:VentSysRef:SupAirSegRef 
       else
         ZnServedRef:PriAirCondgSysRef[1]:SupAirSegRef 
-      endif
+      endif endif
     else UNCHANGED
     endif
 ENDRULE
@@ -1408,8 +1547,11 @@ RULE AirSys:CtrlZnRef
           ( BaseSysNum = 12 .AND. ( Type = "SZAC" .OR. Type = "SZVAVAC" ) ) .OR. // LAB (SZAC)
           BaseSysNum = 13 )    // KITCH
       then MaxRevRefComp( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:IsCtrlZn )
+      else
+      if( BaseSysNum > 200 )
+      then MaxRevRefComp( ResOtherZn:ActiveHVACSystem, ResOtherZn:Area )
       else UNDEFINED
-      endif
+      endif endif
     else UNCHANGED
     endif
 ENDRULE
@@ -1525,3 +1667,4 @@ RULE AirSys:AirSeg:Fan:CtrlMthd
     else UNCHANGED
     endif
 ENDRULE
+

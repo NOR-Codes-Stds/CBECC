@@ -93,8 +93,18 @@ RULE Fan:SysCnt
       TrmlUnit:SysCnt
     else 0
     endif endif endif
-  ANNUAL
-    z:SysCnt
+  SIZING
+    if( ParentComp = "AirSys" )
+    then // AirSystem
+      AirSys:Cnt
+    else if( ParentComp = "ZnSys" )
+    then // ZoneSystem
+      ZnSys:Cnt
+    else if( ParentComp = "TrmlUnit" )
+    then // TerminalUnit
+      TrmlUnit:SysCnt
+    else 0
+    endif endif endif
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -126,6 +136,65 @@ RULE NEW Fan:SysType
     then TrmlUnit:Type
     else "NA"
     endif endif endif
+  ANNUAL
+    if( ParentComp = "AirSys" )
+    then AirSys:Type
+    else if( ParentComp = "ZnSys" )
+    then ZnSys:Type
+    else if( ParentComp = "TrmlUnit" )
+    then TrmlUnit:Type
+    else "NA"
+    endif endif endif
+ENDRULE
+
+// SystemType set to property of local component, for screens, rules etc
+RULE NEW Fan:IsSupFan
+  DATATYPE
+    Integer
+  LONGFORM
+    IsSupplyFan
+  DESCRIPTION
+    "A flag that indicates the fan is for supply."
+  INPUTCLASS 
+    NotInput 
+  DEFAULT
+    if( ParentComp = "AirSys" )
+    then 
+      if( AirSys:IsExhSys > 0 )
+      then 0
+      else
+      if( AirSeg:Type = "Supply" )
+      then 1
+      else 0
+      endif endif
+    else 
+    if( ParentComp = "ZnSys" )
+    then
+      if( ZnSys:IsExhSys > 0 )
+      then 0
+      else 1
+      endif
+    else 0
+    endif endif
+  ANNUAL
+    if( ParentComp = "AirSys" )
+    then 
+      if( AirSys:IsExhSys > 0 )
+      then 0
+      else
+      if( AirSeg:Type = "Supply" )
+      then 1
+      else 0
+      endif endif
+    else 
+    if( ParentComp = "ZnSys" )
+    then
+      if( ZnSys:IsExhSys > 0 )
+      then 0
+      else 1
+      endif
+    else 0
+    endif endif
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -221,6 +290,28 @@ RULE NEW Fan:IsExisting
     z:IsExisting
 ENDRULE
 
+RULE NEW Fan:IsHlthCare
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( ParentComp = "AirSys" .OR. ParentComp = "TrmlUnit" ) 
+    then
+      if( AirSys:IsHlthCareSys > 0 )
+      then 1 
+      else 0
+      endif
+    else
+    if( ParentComp = "ZnSys" ) 
+    then
+      if( ZnSys:IsHlthCareSys > 0 )
+      then 1 
+      else 0
+      endif
+    else 0
+    endif endif
+ENDRULE
 
 // ********** Classification and Centrifugal Type ******************************
 RULE Fan:Class
@@ -385,14 +476,15 @@ RULE AirSys:AirSeg:Fan:FlowCap
         else
         if( AirSys:Type = "DOASCV" .OR. AirSys:Type = "DOASVAV" )
         then // Take max of total terminal flow or total vent flow
-          Max( AirSys:TotTrmlPriAirFlowMaxSim / SysCnt, AirSys:SysVentFlow )
+          Max( ValidOr( AirSys:TotTrmlPriAirFlowMaxSim, 0 ) / SysCnt, 
+               ValidOr( AirSys:SysVentFlow, 0 ) )
         else
         if( AirSys:IsSglZnSys .AND. 
             CtrlMthd = "ConstantVolume" .AND.
             ValidOr( AirSys:NumTrmlUnitAllTypes, 0 ) / SysCnt = 1 .AND.
             Proj:IsStdModel = 0 )
         then // Is SZ system with only 1 TrmlUnit, use supply Fan:FlowCap
-          AirSys:AirFlowPerSqFt * AirSys:TotCondFlrArea
+          ValidOr( AirSys:AirFlowPerSqFt, 0 ) * ValidOr( AirSys:TotCondFlrArea, 0 )
         else // Is multi-zone, take max of total terminal flow or total vent flow
           Max( AirSys:TotTrmlPriAirFlowMaxSim / SysCnt, AirSys:SysVentFlow )
         endif endif endif
@@ -408,8 +500,8 @@ RULE AirSys:AirSeg:Fan:FlowCap
         then // Is DOAS, set balanced
           ValidOr( AirSys:SupFanCap, 0 ) 
         else // Set ret fan cap to be less than supply for pressurization
-          Max( ValidOr( AirSys:DsgnReliefFlow, 0 ) - 
-              ( AirSys:TotCondFlrArea * 0.05 ), 0 )
+          Max( ValidOr( AirSys:SupFanCap, 0 ) - ValidOr( AirSys:SysVentFlow, 0 ), 
+               0.9 * ValidOr (AirSys:SupFanCap, 0 ) )
         endif endif
       else 0
       endif endif
@@ -419,7 +511,8 @@ RULE AirSys:AirSeg:Fan:FlowCap
         CtrlMthd = "ConstantVolume" .AND.
         ValidOr( AirSys:NumTrmlUnitAllTypes, 0 ) / SysCnt = 1 )
     then // Is SZ system with one terminal unit
-      Max( AirSys:TotTrmlPriAirFlowMaxSim / SysCnt, AirSys:SysVentFlow )
+      Max( ValidOr( AirSys:TotTrmlPriAirFlowMaxSim, 0 ) / SysCnt, 
+           ValidOr( AirSys:SysVentFlow, 0 ) )
     else 0
     endif endif endif
   DEFAULT : S901G ECBC
@@ -506,7 +599,7 @@ RULE AirSys:AirSeg:Fan:FlowCap
   ANNUAL
     if( BaseSysNum > 0 .AND. SysCnt > 0 )
     then
-      if( BaseSysNum > 100 )
+      if( BaseSysNum > 100 .AND. BaseSysNum < 200 )
       then // AirSys (DOAS) VentSys, applies to Fan:FlowCap of supply/return fan
         AirSys:SysVentFlow
       else
@@ -598,11 +691,12 @@ RULE AirSys:AirSeg:Fan:CtrlMthd
       endif endif endif
     else
       switch( AirSys:Type )
-        case "PVAV"    : "VariableSpeedDrive"
-        case "VAV"     : "VariableSpeedDrive"
-        case "SZVAVAC" : "VariableSpeedDrive"
-        case "SZVAVHP" : "VariableSpeedDrive"
-        default        : "ConstantVolume"
+        case "PVAV"      : "VariableSpeedDrive"
+        case "VAV"       : "VariableSpeedDrive"
+        case "SZVAVAC"   : "VariableSpeedDrive"
+        case "SZVAVHP"   : "VariableSpeedDrive"
+        case "SZVAVDFHP" : "VariableSpeedDrive"
+        default          : "ConstantVolume"
        endswitch
      endif
   CHECKSIM
@@ -623,14 +717,14 @@ RULE AirSys:AirSeg:Fan:CtrlMthd
                  consistency.", 
                  AirSystem:Name, AirSys:Type, Name )
     else
-    if( ( AirSys:Type = "SZAC" .OR. AirSys:Type = "SZHP" ) .AND. 
+    if( ( AirSys:Type = "SZAC" .OR. AirSys:Type = "SZHP" .OR. AirSys:Type = "SZDFHP"  ) .AND. 
         Parent ( Type ) != "Relief" .AND.
         CtrlMthd != "ConstantVolume" )
     then
       PostError("AirSystem '%s' is Type = '%s', but the ControlMethod for fan
                  '%s' is not 'ConstantVolume'. Revise these inputs for
                  consistency. To model a variable volume single-zone system, use
-                 Type = 'SZVAVAC' or 'SZVAVHP'.", 
+                 Type = 'SZVAVAC', 'SZVAVHP', or 'SZVAVDFHP'.", 
                  AirSystem:Name, AirSys:Type, Name )
     else
     if( AirSys:IsExhSys > 0 .AND. 
@@ -905,7 +999,7 @@ RULE AirSys:AirSeg:Fan:FlowMin
       else UNCHANGED
       endif 
     else
-    if( (AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" ) .AND. 
+    if( (AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" .OR. AirSys:Type = "SZVAVDFHP" ) .AND. 
         AirSeg:Type = "Supply" )
     then
       if( ValidOr( FlowMin, 0 ) < AirSys:SysMinVentFlow * ( 1 - Proj:VentTolMinLimNonRes - 0.005 ) )
@@ -931,7 +1025,7 @@ RULE AirSys:AirSeg:Fan:FlowMin
     then
       if( LocalStatus( FlowMin ) > 0 .AND. 
           IfValidAnd( ( AirSys:TotTrmlPriAirFlowMinSim / SysCnt * 0.99 ) > FlowMin ) .AND.
-          ( AirSys:Type != "SZVAVAC" .AND. AirSys:Type != "SZVAVHP" ) )
+          ( AirSys:Type != "SZVAVAC" .AND. AirSys:Type != "SZVAVHP" .AND. AirSys:Type != "SZVAVDFHP" ) )
       then // Sum of TerminalUnit:PrimaryAirFlow is greater than supply fan flow
         PostWarning("Total min. primary air flow of terminal units served by
                      Fan '%s' is %.0f, which is greater than the fan min. flow, %.0f", 
@@ -1151,7 +1245,10 @@ RULE Fan:FEI
      All FEI values shall be provided by a manufacturer except FEI values fro embedded fans."
   DEFAULT
     if( Proj:AutoEffInput = 1 )
-    then if( SysType = "PVAV" .OR. SysType = "VAV" .OR. SysType = "SZVAVAC" .OR. SysType = "SZVAVHP" .OR. SysType = "DOASVAV" )
+    then
+      if( SysType = "PVAV" .OR. SysType = "VAV" .OR. 
+          SysType = "SZVAVAC" .OR. SysType = "SZVAVHP" .OR. SysType = "SZVAVDFHP" .OR. 
+          SysType = "DOASVAV" )
          then 0.95
          else 1
          endif
@@ -1159,17 +1256,23 @@ RULE Fan:FEI
     endif
   CHECKCODE
     if( FEIReq = 1 .AND. EnumValue( FEIReqExcept ) = 0 )
-    then if( LocalStatus( FEI ) = 0 )
-         then PostError( "Fan Energy Index shall be provided for Fan %s", Name )
-         else if( SysType = "PVAV" .OR. SysType = "VAV" .OR. SysType = "SZVAVAC" .OR. SysType = "SZVAVHP" .OR. SysType = "DOASVAV" )
-              then if( FEI < 0.95 )
-                   then PostError( "Fan % shall have a Fan Energy Indix of 0.95 or higher", Name )
-                   else UNCHANGED
-                   endif
-         else if( FEI < 1 )
-         then PostError( "Fan % shall have a Fan Energy Indix of 1.00 or higher", Name )
-         else UNCHANGED
-         endif endif endif
+    then
+      if( LocalStatus( FEI ) = 0 )
+      then PostError( "Fan Energy Index shall be provided for Fan %s", Name )
+      else
+      if( SysType = "PVAV" .OR. SysType = "VAV" .OR. 
+          SysType = "SZVAVAC" .OR. SysType = "SZVAVHP" .OR. SysType = "SZVAVDFHP" .OR. 
+          SysType = "DOASVAV" )
+      then
+        if( FEI < 0.95 )
+        then PostError( "Fan % shall have a Fan Energy Indix of 0.95 or higher", Name )
+        else UNCHANGED
+        endif
+      else
+      if( FEI < 1 )
+      then PostError( "Fan % shall have a Fan Energy Indix of 1.00 or higher", Name )
+      else UNCHANGED
+      endif endif endif
     else UNDEFINED
     endif
 ENDRULE
@@ -1308,12 +1411,9 @@ RULE NEW AirSys:RetFanCap
     0
   DEFAULT
     SumChildrenIf( AirSeg:FanFlowCap, AirSeg:Type = "Return" )
-  SIZING
-    SumChildrenIf( AirSeg:FanFlowCap, AirSeg:Type = "Return" )
-  ANNUAL
-    SumChildrenIf( AirSeg:FanFlowCap, AirSeg:Type = "Return" )
   CHECKSIM
-    if( LocalCompAssigned( HtRcvryRef ) .AND. 
+    if( ServesThrmlZn .AND.
+        LocalCompAssigned( HtRcvryRef ) .AND. 
         SumChildren( HtRcvry:RcvryFromExhSys ) = 0 .AND. 
         ( RetFanCap + ExhFanCap ) = 0 )
     then
@@ -1327,6 +1427,10 @@ RULE NEW AirSys:RetFanCap
                    will be set equal to the supply flow", Name)
     else UNCHANGED  
     endif endif
+  SIZING
+    SumChildrenIf( AirSeg:FanFlowCap, AirSeg:Type = "Return" )
+  ANNUAL
+    SumChildrenIf( AirSeg:FanFlowCap, AirSeg:Type = "Return" )
 ENDRULE
 
 RULE NEW AirSys:ReliefFanCap
@@ -1415,6 +1519,47 @@ RULE NEW AirSeg:IsCVSupFan
     else 0
     endif
 ENDRULE
+
+RULE NEW AirSys:SysOARat
+  DATATYPE
+    Float
+  LONGFORM
+    SystemOutsideAirRatio
+  DESCRIPTION
+    "The design outside air flow ratio as a fraction of supply flow rate."
+  INPUTCLASS
+    NotInput
+  DEFAULT  
+    if( IfValidAnd( SysVentFlow >= 0 ) .AND.
+        IfValidAnd( SupFanCap > 0 ) )
+    then Max( SysVentFlow / SupFanCap, 0 )
+    else 0
+    endif
+  CHECKSIM
+    if( SysOARat > 1.005 .AND. IsExhSys = 0 ) 
+    then 
+      PostWarning("The ratio of ventilation air flow to system supply fan capacity for
+                   AirSystem '%s' is > 0, which indicates the space design 
+                   ventilation air flow rates are greater than the system 
+                   supply fan flow. The OA will be limited to the design
+                   supply air flow rate.", Name)
+    else UNCHANGED
+    endif
+  SIZING
+    if( IfValidAnd( SysVentFlow > 0 ) .AND.
+        IfValidAnd( SupFanCap > 0 ) )
+    then Min( Max( SysVentFlow / SupFanCap, 0 ), 1 )
+    else 0
+    endif
+  ANNUAL
+    if( IfValidAnd( SysVentFlow > 0 ) .AND.
+        IfValidAnd( SupFanCap > 0 ) )
+    then Min( Max( SysVentFlow / SupFanCap, 0 ), 1 )
+    else 0
+    endif
+ENDRULE
+
+
 // =========================== ZoneSystem ======================================
 RULE ZnSys:SupFanCap
   DESCRIPTION
@@ -1454,6 +1599,43 @@ RULE NEW ZnSys:IsCVSupFan
   DEFAULT
     if( SumChildrenIf( Fan:FlowCap, Fan:CtrlMthd = "ConstantVolume" ) > 0 )
     then 1
+    else 0
+    endif
+ENDRULE
+
+RULE NEW ZnSys:SysOARat
+  DATATYPE
+    Float
+  LONGFORM
+    SystemOutsideAirRatio
+  INPUTCLASS
+    NotInput
+  DEFAULT  
+    if( IfValidAnd( SysVentFlow > 0 ) .AND.
+        IfValidAnd( SupFanCap > 0 ) )
+    then SysVentFlow / SupFanCap
+    else 0
+    endif
+  CHECKSIM
+    if( SysOARat > 1.005 .AND. IsExhSys = 0 ) 
+    then 
+      PostWarning("The ratio of ventilation air flow to system supply fan capacity for
+                   ZoneSystem '%s' is > 0, which indicates the space design 
+                   ventilation air flow rates are greater than the system 
+                   supply fan flow. The OA will be limited to the design
+                   supply air flow rate.", Name)
+    else UNCHANGED
+    endif
+  SIZING
+    if( IfValidAnd( SysVentFlow > 0 ) .AND.
+        IfValidAnd( SupFanCap > 0 ) )
+    then SysVentFlow / SupFanCap
+    else 0
+    endif
+  ANNUAL
+    if( IfValidAnd( SysVentFlow > 0 ) .AND.
+        IfValidAnd( SupFanCap > 0 ) )
+    then SysVentFlow / SupFanCap
     else 0
     endif
 ENDRULE

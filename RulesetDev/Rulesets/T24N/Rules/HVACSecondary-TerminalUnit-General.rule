@@ -101,6 +101,52 @@ RULE TrmlUnit:ZnServedRef
     z:ZnServedRef
 ENDRULE 
 
+RULE NEW TrmlUnit:ServesThrmlZn
+  DATATYPE
+    Integer
+  LONGFORM
+    ServesThermalZone
+  DESCRIPTION
+    "whether TrmlUnit:ZnServedRef references a ThrmlZn."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( LocalCompAssigned( ZnServedRef ) ==
+        ComponentType( "ThrmlZn" ) )
+    then 1
+    else 0
+    endif
+  SIZING
+    if( LocalCompAssigned( ZnServedRef ) ==
+        ComponentType( "ThrmlZn" ) )
+    then 1
+    else 0
+    endif
+ENDRULE 
+
+RULE NEW TrmlUnit:ServesResZn
+  DATATYPE
+    Integer
+  LONGFORM
+    ServesResidentialZone
+  DESCRIPTION
+    "whether TrmlUnit:ZnServedRef references a ResOtherZn."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( LocalCompAssigned( ZnServedRef ) ==
+        ComponentType( "ResOtherZn" ) )
+    then 1
+    else 0
+    endif
+  SIZING
+    if( LocalCompAssigned( ZnServedRef ) ==
+        ComponentType( "ResOtherZn" ) )
+    then 1
+    else 0
+    endif
+ENDRULE 
+
 RULE NEW TrmlUnit:FlrAreaServed
   DATATYPE
     Float
@@ -169,16 +215,31 @@ RULE NEW TrmlUnit:ParentAirSysRef
                    correct AirSegment.", 
                    Name, ParentAirSysRef:Name, PriAirSegRef:ParentAirSysRef:Name)
       else
-      if( IfValidAnd( ZnServedRef:PriAirCondgSysRef[1]:Name != ParentAirSysRef:Name ) .AND. 
-          IfValidAnd( ZnServedRef:VentSysRef:Name != ParentAirSysRef:Name ) )
-      then
-        PostError("TerminalUnit '%s' is a child of AirSystem '%s', but
-                   ThermalZone '%s' served by the terminal does not reference
-                   this system (as a Primary or Ventilation system). Revise these
-                   inputs for consistency.", 
-                   Name, ParentAirSysRef:Name, ZnServedRef:Name)
+      if (ServesThrmlZn)
+      then 
+        if( IfValidAnd( ZnServedRef:PriAirCondgSysRef[1]:Name != ParentAirSysRef:Name ) .AND. 
+            IfValidAnd( ZnServedRef:VentSysRef:Name != ParentAirSysRef:Name ) )
+        then
+          PostError("TerminalUnit '%s' is a child of AirSystem '%s', but
+                     ThermalZone '%s' served by the terminal does not reference
+                     this system (as a Primary or Ventilation system). Revise these
+                     inputs for consistency.", 
+                     Name, ParentAirSysRef:Name, ZnServedRef:Name)
+        else UNCHANGED
+        endif
+      else
+      if (ServesResZn)
+      then 
+        if( IfValidAnd( ZnServedRef:ActiveHVACSystem:Name != ParentAirSysRef:Name ) )
+        then
+          PostError("TerminalUnit '%s' is a child of AirSystem '%s', but
+                     ResOtherZn '%s' served by the terminal does not reference
+                     this system. Revise these inputs for consistency.", 
+                     Name, ParentAirSysRef:Name, ZnServedRef:Name)
+        else UNCHANGED
+        endif
       else UNCHANGED
-      endif endif
+      endif endif endif
     else UNCHANGED
     endif
   ANNUAL
@@ -339,6 +400,7 @@ RULE TrmlUnit:Cnt
     then
       if( Parent( Type ) = "SZVAVAC" .OR. 
           Parent( Type ) = "SZVAVHP" .OR. 
+          Parent( Type ) = "SZVAVDFHP" .OR. 
           Type = "Uncontrolled")
       then 1
       else ZnServedRef:HVACZnCnt
@@ -633,7 +695,7 @@ RULE TrmlUnit:PriAirFlowMax
         LocalCompAssigned( ZnServedRef ) .AND.
         SysCnt > 0 )
     then
-      if( BaseSysNum > 100 )
+      if( BaseSysNum > 100 .AND. BaseSysNum < 200 )
       then // AirSys (DOAS) VentSys
         z:ZnServedRef:VentFlowWithMult / SysCnt
       else
@@ -644,7 +706,7 @@ RULE TrmlUnit:PriAirFlowMax
         then // Is HtgOnlySys, use max of heating design flow or ventilation flow
           Max( z:ZnServedRef:HtgDsgnFlowSim, z:ZnServedRef:VentFlowWithMult ) / SysCnt
         else
-        if( z:ZnServedRef:HasNoClg > 0 )
+        if( IfValidAnd( z:ZnServedRef:HasNoClg > 0 ) )
         then // HasNoClg is defined, use max of heating design flow or ventilation flow
           Max( z:ZnServedRef:HtgDsgnFlowSim, z:ZnServedRef:VentFlowWithMult ) / SysCnt
         else
@@ -652,7 +714,14 @@ RULE TrmlUnit:PriAirFlowMax
         then // For multizone, cooling sizing ratio is not applied to TerminalUnit flow
           Max( Max( z:ZnServedRef:ClgDsgnFlowSim, z:ZnServedRef:HtgDsgnFlowSim ),
                z:ZnServedRef:VentFlowWithMult ) / SysCnt
-        else // Is single-zone system, three possibilities...
+        else // Is single-zone system
+        if( ( AirSys:BaseSysNum = 7 .OR. AirSys:BaseSysNum = 201 ) .AND. 
+            ( AirSys:BaseSysNumOpt = "b" .OR. AirSys:BaseSysNumOpt = "c" ) )
+        then // Is a baseline HP system
+          Max( Max( z:ZnServedRef:ClgDsgnFlowSim, 
+                    z:ZnServedRef:HtgDsgnFlowSim ) * Proj:ClgSizingRat, 
+               z:ZnServedRef:VentFlowWithMult ) / SysCnt
+        else // Previous rules, for all other single-zone systems
         if( z:ZnServedRef:VentFlowWithMult > 
             Max( z:ZnServedRef:ClgDsgnFlowSim, z:ZnServedRef:HtgDsgnFlowSim ) * ( 1 - Proj:OATolLim ) )
         then // 1) Ventilation flow for terminal is > clg/htg design flow, so do not apply sizing ratio
@@ -665,6 +734,7 @@ RULE TrmlUnit:PriAirFlowMax
              // to ensure total system air flow is consistent with oversized cooling capacity
           z:ZnServedRef:ClgDsgnFlowSim * Proj:ClgSizingRat / SysCnt
         endif endif endif endif endif
+        endif
       else 0
       endif endif
     else z:PriAirFlowMax
@@ -733,7 +803,7 @@ RULE TrmlUnit:PriAirFlowMin
         then // For kitchens, mininimum flow is max of 50% of design vent rate or 50% design flow
           Max( ZnServedRef:VentFlowWithMult * 0.5, 
                PriAirFlowMaxSim * 0.5) / SysCnt
-        else if( AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" )
+        else if( AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" .OR. AirSys:Type = "SZVAVDFHP" )
         then // Is regular SZVAV, mininimum flow is max of min vent rate or 50% design flow
           Min( Max( ZnServedRef:MinVentFlowWithMult, 
                     PriAirFlowMaxSim * 0.5 ),
@@ -761,7 +831,7 @@ RULE TrmlUnit:PriAirFlowMin
 ;       then // Is a SZ system and the fan min flow capacity has been defined
 ;         PriAirFlowMax * AirSys:SupFanFlowMinRat 
 ;       else
-        if( AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" )
+        if( AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" .OR. AirSys:Type = "SZVAVDFHP" )
         then
           if( AirSys:LabArea > 0 )
           then // Is Lab SZVAV, mininimum flow is max of min vent rate or 20% design flow
@@ -790,7 +860,7 @@ RULE TrmlUnit:PriAirFlowMin
       if( AirSys:IsVAVSys > 0  )
       then 
         // Remove unused logic from T24_2019
-        if( AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" )
+        if( AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" .OR. AirSys:Type = "SZVAVHDFP" )
         then
           if( AirSys:LabArea > 0 )
           then // Is Lab SZVAV, mininimum flow is  min vent rate
@@ -827,7 +897,7 @@ RULE TrmlUnit:PriAirFlowMin
         then // Is a SZ system and the fan min flow capacity has been defined
           PriAirFlowMax * AirSys:SupFanFlowMinRat 
         else
-        if( AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" )
+        if( AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" .OR. AirSys:Type = "SZVAVHDFP" )
         then // Is regular SZVAV, mininimum flow is max of min vent rate or 50% design flow
           Min( Max( ZnServedRef:MinVentFlowWithMult, 
                     PriAirFlowMaxSim * 0.5 ),
@@ -848,7 +918,7 @@ RULE TrmlUnit:PriAirFlowMin
   CHECKCODE : T24N_2016 T24N_2019 S901G ECBC
     if( ( Type = "Uncontrolled" .AND. 
           ( AirSys:IsVAVSys < 1 .OR.
-            AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" ) )
+            AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" .OR. AirSys:Type = "SZVAVHDFP" ) )
         .OR.
         ( Type = "ActiveBeam" .AND. AirSys:Type = "DOASCV" ) )
     then UNCHANGED
@@ -897,7 +967,8 @@ RULE TrmlUnit:PriAirFlowMin
     if( ( Type = "Uncontrolled" .AND. 
           ( AirSys:IsVAVSys < 1 .OR.
             AirSys:Type = "SZVAVAC" .OR. 
-            AirSys:Type = "SZVAVHP" ) )
+            AirSys:Type = "SZVAVHP" .OR.
+            AirSys:Type = "SZVAVHDFP" ) )
         .OR.
         ( Type = "ActiveBeam" .AND. AirSys:Type = "DOASCV" ) )
     then UNCHANGED
@@ -946,7 +1017,9 @@ RULE TrmlUnit:PriAirFlowMin
   CHECKSIM
     if( ( Type = "Uncontrolled" .AND. 
           ( AirSys:IsVAVSys < 1 .OR.
-            AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" ) )
+            AirSys:Type = "SZVAVAC" .OR. 
+            AirSys:Type = "SZVAVHP" .OR. 
+            AirSys:Type = "SZVAVHDFP" ) )
         .OR.
         ( Type = "ActiveBeam" .AND. AirSys:Type = "DOASCV" ) )
     then UNCHANGED
@@ -975,7 +1048,7 @@ RULE TrmlUnit:PriAirFlowMin
       else // Use max of vent fraction
         ZnServedRef:VentFlowWithMult / SysCnt
       endif endif
-    else if( AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" )
+    else if( AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" .OR. AirSys:Type = "SZVAVDFHP"  )
     then // Look to system fan for min flow ratio or use 50% of TrmlUnit max flow
          // but no larger than PriAirFlowMax
       Min( PriAirFlowMax * ValidOr( AirSys:SupFanFlowMinRat, 0.5 ), PriAirFlowMax )
@@ -990,7 +1063,7 @@ RULE TrmlUnit:PriAirFlowMin
     then // Is a BASELINE system, use ventilation as minimum
       ZnServedRef:VentFlowWithMult / SysCnt
     else
-    if( AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" )
+    if( AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" .OR. AirSys:Type = "SZVAVDFHP" )
     then // Look to system fan for min flow ratio or use 50% of TrmlUnit max flow
          // but no larger than PriAirFlowMax
       Min( PriAirFlowMax * ValidOr( AirSys:SupFanFlowMinRat, 0.5 ), PriAirFlowMax )
@@ -1014,7 +1087,7 @@ RULE TrmlUnit:PriAirFlowMin
         then // For kitchens, mininimum flow is max of 50% of design vent rate or 50% design flow
           Max( ZnServedRef:VentFlowWithMult * 0.5, 
                PriAirFlowMaxSim * 0.5 ) / SysCnt
-        else if( AirSys:Type = "SZVAVAC" .OR.  AirSys:Type = "SZVAVHP" )
+        else if( AirSys:Type = "SZVAVAC" .OR.  AirSys:Type = "SZVAVHP" .OR. AirSys:Type = "SZVAVDFHP" )
         then // Is regular SZVAV, mininimum flow is max of min vent rate or 50% design flow
           Max( ZnServedRef:MinVentFlowWithMult, 
                PriAirFlowMaxSim * 0.5 ) / SysCnt
@@ -1042,7 +1115,7 @@ RULE TrmlUnit:PriAirFlowMin
 ;          Max( ZnServedRef:VentFlowWithMult * 0.5, 
 ;               PriAirFlowMaxSim * 0.5 ) / SysCnt
 ;        else
-        if( AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" )
+        if( AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" .OR. AirSys:Type = "SZVAVDFHP" )
         then 
           if( AirSys:LabArea > 0 )
           then // Is lab SZVAV, mininimum flow is max of min vent rate or 20% design flow
@@ -1066,7 +1139,7 @@ RULE TrmlUnit:PriAirFlowMin
       if( BaseSysNum > 0 .AND. AirSys:IsVAVSys )
       then // --> Is a BASELINE system
        // Remove unused logic from T24_2019
-        if( AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" )
+        if( AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" .OR. AirSys:Type = "SZVAVDFHP" )
         then 
           if( AirSys:LabArea > 0 )
           then // Is Lab SZVAV, mininimum flow is  min vent rate
@@ -1094,7 +1167,7 @@ RULE TrmlUnit:PriAirFlowMin
     then 
       if( BaseSysNum > 0 .AND. AirSys:IsVAVSys )
       then // --> Is a BASELINE system
-        if( AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" )
+        if( AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" .OR. AirSys:Type = "SZVAVDFHP" )
         then // Is regular SZVAV, mininimum flow is max of min vent rate or 50% design flow
           Max( ZnServedRef:MinVentFlowWithMult, 
                PriAirFlowMaxSim * 0.5 ) / SysCnt
@@ -1468,5 +1541,5 @@ RULE NEW TrmlUnit:OASupFlowWithMult
   UNITS
     cfm
   DEFAULT 
-    PriAirFlowMaxSim * AirSys:OAFlowRat
+    PriAirFlowMaxSim * ValidOr( AirSys:SysOARat, 0 )
 ENDRULE

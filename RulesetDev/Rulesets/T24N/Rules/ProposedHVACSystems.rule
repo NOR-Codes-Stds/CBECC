@@ -265,7 +265,8 @@ ENDRULE
 // This is the current workaround for simulating VAV in E+
 RULE AirSys:TrmlUnit:Type
   SIZING
-    if( ( AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" .OR. AirSys:Type = "DOASVAV" )
+    if( ( AirSys:Type = "SZVAVAC" .OR. AirSys:Type = "SZVAVHP" .OR. AirSys:Type = "SZVAVDFHP" .OR.
+          AirSys:Type = "DOASVAV" )
         .AND. Type = "Uncontrolled" )
     then "VAVNoReheatBox"
     else UNCHANGED
@@ -983,8 +984,6 @@ RULE NEW ThrmlZn:BaseSysNum
       endif
     else 0
     endif endif
-  ANNUAL
-    z:BaseSysNum
 ENDRULE
 
 RULE NEW Spc:BaseSysNum
@@ -993,8 +992,6 @@ RULE NEW Spc:BaseSysNum
     then ThrmlZnRef:BaseSysNum
     else 0
     endif
-  ANNUAL
-    z:BaseSysNum
 ENDRULE
 
 RULE NEW TrmlUnit:BaseSysNum
@@ -1004,8 +1001,6 @@ RULE NEW TrmlUnit:BaseSysNum
     BaselineSystemNumber
   SIZING
     AirSys:BaseSysNum
-  ANNUAL
-    z:BaseSysNum
 ENDRULE
 
 RULE NEW OACtrl:BaseSysNum
@@ -1015,8 +1010,6 @@ RULE NEW OACtrl:BaseSysNum
     BaselineSystemNumber
   SIZING
     AirSys:BaseSysNum
-  ANNUAL
-    z:BaseSysNum
 ENDRULE
 
 RULE NEW Fan:BaseSysNum
@@ -1029,8 +1022,6 @@ RULE NEW Fan:BaseSysNum
     then ZnSys:BaseSysNum
     else AirSys:BaseSysNum
     endif
-  ANNUAL
-    z:BaseSysNum
 ENDRULE
 
 RULE NEW CoilClg:BaseSysNum
@@ -1043,8 +1034,6 @@ RULE NEW CoilClg:BaseSysNum
     then ZnSys:BaseSysNum
     else AirSys:BaseSysNum
     endif
-  ANNUAL
-    z:BaseSysNum
 ENDRULE
 
 RULE NEW CoilHtg:BaseSysNum
@@ -1055,10 +1044,8 @@ RULE NEW CoilHtg:BaseSysNum
   SIZING
     if( ParentComponentType() = "ZnSys" )
     then ZnSys:BaseSysNum
-    else AirSys:BaseSysNum
+    else ValidOr( AirSys:BaseSysNum, 0 )
     endif
-  ANNUAL
-    z:BaseSysNum
 ENDRULE
 
 // Set flag to indicate if the system is a proposed system
@@ -1075,7 +1062,10 @@ RULE NEW AirSys:IsPropSys
     else 0
     endif
   ANNUAL
-    z:IsPropSys
+    if( IfValidAnd( BaseSysNum > 0 ) = 0 )
+    then 1
+    else 0
+    endif
 ENDRULE
 
 RULE NEW ZnSys:IsPropSys
@@ -1091,7 +1081,10 @@ RULE NEW ZnSys:IsPropSys
     else 0
     endif
   ANNUAL
-    z:IsPropSys
+    if( IfValidAnd( BaseSysNum > 0 ) = 0 )
+    then 1
+    else 0
+    endif
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -1143,8 +1136,6 @@ RULE NEW AirSys:BaseHasNoClgZns
       SumRevRef( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:HasNoClg )
     else 0
     endif
-  ANNUAL
-    z:BaseHasNoClgZns
 ENDRULE
 // Set values to revise baseline cooling 
 RULE NEW ZnSys:BaseHasNoClgZns
@@ -1158,9 +1149,29 @@ RULE NEW ZnSys:BaseHasNoClgZns
       SumRevRef( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:HasNoClg )
     else 0
     endif
-  ANNUAL
-    z:BaseHasNoClgZns
 ENDRULE
+
+// -----------------------------------------------------------------------------
+// Whether system is referenced by ResOtherZn(s) vs. ThrmlZn(s)
+RULE NEW AirSys:ServesThrmlZn
+  SIZING
+    if( SumRevRef(ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:Area) > 1 .OR.
+        SumRevRef(ThrmlZn:PriAirCondgSysRef[2], ThrmlZn:Area) > 1 .OR.
+        SumRevRef(ThrmlZn:VentSysRef, ThrmlZn:Area) > 1 .OR.
+        SumRevRef(ThrmlZn:ExhSysRef, ThrmlZn:Area) > 1 .OR.
+        SumRevRef(ThrmlZn:SimSysRef[1], ThrmlZn:Area) > 1 .OR. 
+        SumRevRef(ThrmlZn:SimSysRef[2], ThrmlZn:Area) > 1 )
+    then 1
+    else 0
+    endif
+ENDRULE 
+RULE NEW AirSys:ServesResZn
+  SIZING
+    if( SumRevRef(ResOtherZn:ActiveHVACSystem, ResOtherZn:Area) > 1 )
+    then 1
+    else 0
+    endif
+ENDRULE 
 
 
 // ----------------------------------------------------------------
@@ -1178,27 +1189,33 @@ RULE AirSys:TypeSim
      may trigger special translation rules."   
   DEFAULT
     switch( Type ) 
-      case "SPVAC"   : "SZAC"   
-      case "SPVHP"   : "SZHP"
-      case "DOASCV"  : "SZAC"
-      case "DOASVAV" : "SZVAVAC" 
-      default        : Type
-    endswitch
+      case "SPVAC"           : "SZAC"   
+      case "SPVHP"           : "SZHP"
+      case "DOASCV"          : "SZAC"
+      case "DOASVAV"         : "SZVAVAC" 
+      case "SZDFHP"          : "SZHP"
+      case "SZVAVDFHP"       : "SZVAVHP"
+      default                : Type
+    endswitch         
   SIZING
     switch( Type ) 
-      case "SPVAC"   : "SZAC"   
-      case "SPVHP"   : "SZHP"
-      case "DOASCV"  : "SZAC"
-      case "DOASVAV" : "SZVAVAC" 
-      default        : Type
-    endswitch
-  ANNUAL
-    switch( Type ) 
-      case "SPVAC"   : "SZAC"   
-      case "SPVHP"   : "SZHP"
-      case "DOASCV"  : "SZAC"
-      case "DOASVAV" : "SZVAVAC" 
-      default        : Type
+      case "SPVAC"           : "SZAC"   
+      case "SPVHP"           : "SZHP"
+      case "DOASCV"          : "SZAC"
+      case "DOASVAV"         : "SZVAVAC" 
+      case "SZDFHP"          : "SZHP"
+      case "SZVAVDFHP"       : "SZVAVHP"
+      default                : Type
+    endswitch                
+  ANNUAL                     
+    switch( Type )           
+      case "SPVAC"           : "SZAC"   
+      case "SPVHP"           : "SZHP"
+      case "DOASCV"          : "SZAC"
+      case "DOASVAV"         : "SZVAVAC" 
+      case "SZDFHP"          : "SZHP"
+      case "SZVAVDFHP"       : "SZVAVHP"
+      default                : Type
     endswitch
 ENDRULE
 
@@ -1215,7 +1232,8 @@ RULE ZnSys:TypeSim
   DEFAULT
     switch( Type )
       case "SZAC"            : "PTAC"
-      case "SZHP"            : "PTHP"   
+      case "SZHP"            : "PTHP"
+      case "SZDFHP"          : "PTHP" 
       case "SPVAC"           : "PTAC"   
       case "SPVHP"           : "PTHP"
       case "MiniSplitAC"     : "PTAC"
@@ -1233,7 +1251,8 @@ RULE ZnSys:TypeSim
   SIZING
     switch( Type )
       case "SZAC"            : "PTAC"
-      case "SZHP"            : "PTHP"   
+      case "SZHP"            : "PTHP" 
+      case "SZDFHP"          : "PTHP"   
       case "SPVAC"           : "PTAC"   
       case "SPVHP"           : "PTHP"
       case "MiniSplitAC"     : "PTAC"
@@ -1251,7 +1270,8 @@ RULE ZnSys:TypeSim
   ANNUAL
     switch( Type )
       case "SZAC"            : "PTAC"
-      case "SZHP"            : "PTHP"   
+      case "SZHP"            : "PTHP"
+      case "SZDFHP"          : "PTHP"    
       case "SPVAC"           : "PTAC"   
       case "SPVHP"           : "PTHP"
       case "MiniSplitAC"     : "PTAC"

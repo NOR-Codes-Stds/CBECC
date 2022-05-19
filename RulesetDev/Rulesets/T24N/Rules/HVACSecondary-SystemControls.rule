@@ -57,8 +57,10 @@ RULE AirSys:CtrlZnRef
       then MaxRevRefComp( ThrmlZn:PriAirCondgSysRef[2], ThrmlZn:FlrArea )
       else if( CountRefs( ThrmlZn:VentSysRef ) > 0 )
       then MaxRevRefComp( ThrmlZn:VentSysRef, ThrmlZn:FlrArea )
+      else if( CountRefs( ResOtherZn:ActiveHVACSystem ) > 0 )
+      then MaxRevRefComp( ResOtherZn:ActiveHVACSystem, ResOtherZn:Area )
       else UNDEFINED
-      endif endif endif   
+      endif endif endif endif
     else UNDEFINED
     endif    
   CHECKSIM
@@ -77,20 +79,24 @@ RULE AirSys:CtrlZnRef
         PostError("The control zone '%s' for AirSystem '%s' is 'Plenum'.
                    This is not supported.", CtrlZnRef:Name, Name)
       else
-      if( IfValidAnd( CtrlZnRef:PriAirCondgSysRef[1]:Name != Name ) .AND.
-          IfValidAnd( CtrlZnRef:VentSysRef:Name != Name ) )
-      then // Neither the PriAirCondg or VentSysRef for the CtrlZn is the current AirSys
-        PostError("The control zone '%s' for AirSystem '%s' is not served by the
-                   system. Revise inputs for consistency.", CtrlZnRef:Name, Name)   
-      else
-      if( CtrlZnRef:HasUnknownHVAC > 0 )
-      then
-        PostError("The control zone, '%s' for AirSystem '%s' is defined as
-                   'HasUnknownHVAC'. This is currently not supported. Revise
-                   inputs for consistency.", CtrlZnRef:Name, Name)
-
+      if( ServesThrmlZn > 0 )
+      then // Is an AirSys serving ThrmlZn
+        if( IfValidAnd( CtrlZnRef:PriAirCondgSysRef[1]:Name != Name ) .AND.
+            IfValidAnd( CtrlZnRef:VentSysRef:Name != Name ) )
+        then // Neither the PriAirCondg or VentSysRef for the CtrlZn is the current AirSys
+          PostError("The control zone '%s' for AirSystem '%s' is not served by the
+                     system. Revise inputs for consistency.", CtrlZnRef:Name, Name)   
+        else
+        if( CtrlZnRef:HasUnknownHVAC > 0 )
+        then
+          PostError("The control zone, '%s' for AirSystem '%s' is defined as
+                     'HasUnknownHVAC'. This is currently not supported. Revise
+                     inputs for consistency.", CtrlZnRef:Name, Name)
+  
+        else UNCHANGED
+        endif endif
       else UNCHANGED
-      endif endif endif endif
+      endif endif endif
     else
     if( IsMultiZnSys = 0 )
     then // Is single-zone system
@@ -208,7 +214,7 @@ RULE NEW AirSys:DDCIsRequired
   SIZING : T24N
     if( BaseSysNum > 0 )
     then 
-      if( BaseSysNum > 100 )
+      if( BaseSysNum > 100 .AND. BaseSysNum < 200 )
       then 0 // AirSys (DOAS) VentSys, no DDCToZone control
       else 
       if( IsMultiZnSys > 0 .AND. CondHVACZnCntWithMult > 3 )
@@ -256,14 +262,22 @@ RULE AirSys:CtrlSysType
     else UNCHANGED
     endif
   SIZING
-    if( BaseSysNum > 0 .AND. IfValidAnd( DDCIsRequired > 0 ) )
-    then "DDCToZone"
-    else CtrlSysType
+    if( BaseSysNum > 0 )
+    then 
+      if( IfValidAnd( DDCIsRequired > 0 ) )
+      then "DDCToZone"
+      else "Other"
+      endif
+    else UNCHANGED
     endif
   ANNUAL 
-    if( BaseSysNum > 0 .AND. IfValidAnd( DDCIsRequired > 0 ) )
-    then "DDCToZone"
-    else CtrlSysType
+    if( BaseSysNum > 0 )
+    then 
+      if( IfValidAnd( DDCIsRequired > 0 ) )
+      then "DDCToZone"
+      else "Other"
+      endif
+    else UNCHANGED
     endif
 ENDRULE
 
@@ -401,15 +415,20 @@ RULE AirSys:FanCtrl
   DEFAULT
     if( IsExhSys > 0 )
     then UNDEFINED
-    else if( LocalCompAssigned( CtrlZnRef ) )
-    then 
+    else
+    if( ServesResZn > 0 )
+    then "Continuous"
+    else
+    if( LocalCompAssigned( CtrlZnRef ) = ComponentType( "ThrmlZn" ) )
+    then
       if( IfValidAnd( CtrlZnRef:VentIsRequired = 1 ) .AND.
           IfValidAnd( CtrlZnRef:VentSysRef:Name = Name ) )
-      then "Continuous"
+      then // Is NRes VentSys
+        "Continuous"
       else "Cycling"
       endif
     else "Continuous"
-    endif endif 
+    endif endif endif
   CHECKCODE
     if( BypassCheckCode = 0 .OR. IsExhSys > 0 )
     then UNCHANGED
@@ -436,10 +455,13 @@ RULE AirSys:FanCtrl
     then "Continuous"
     else if( BaseSysNum > 0 )
     then 
+      if( ServesResZn > 0 )  // ResOtherZn system - SAC 05/09/22
+      then "Continuous"
+      else
       if( SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:FlrArea ) > 0 )
       then "Continuous" 
       else "Cycling"
-      endif
+      endif endif
     else
     if( SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:FlrArea ) > 0 )
     then "Continuous" // Is VentSys, so must be 'Continuous' 
@@ -667,7 +689,7 @@ RULE AirSys:NightCycleFanCtrl
       PostWarning("System '%s' specifies night cycling as 'CycleZoneFansOnly'.  
                    This is only allowed if all TerminalUnits are fan-powered.
                    CycleOnCallAnyZone will be simulated.", Name)
-    else if( NightCycleFanCtrl = "StaysOff" )
+    else if( ServesThrmlZn .AND. NightCycleFanCtrl = "StaysOff" )
     then
       PostWarning("System '%s' specifies night cycling as 'StaysOff'.  
                    This is only allowed in Research mode.
@@ -693,7 +715,7 @@ RULE AirSys:NightCycleFanCtrl
     else
     if( BaseSysNum > 0 )
     then
-      if( BaseSysNum > 100 )
+      if( BaseSysNum > 100 .AND. BaseSysNum < 200 )
       then // AirSys (DOAS) VentSys 
         "StaysOff"
       else
@@ -1389,6 +1411,7 @@ RULE ZnSys:HtgDsgnSupAirTemp
       switch ( Type )
         case "SZAC"      :  MaxRevRef(ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:HtgDsgnSupAirTemp)
         case "SZHP"      :  MaxRevRef(ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:HtgDsgnSupAirTemp)
+        case "SZDFHP"    :  MaxRevRef(ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:HtgDsgnSupAirTemp)
         case "PTAC"      :  MaxRevRef(ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:HtgDsgnSupAirTemp)
         case "PTHP"      :  MaxRevRef(ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:HtgDsgnSupAirTemp)   
         case "FPFC"      :  95
@@ -1561,7 +1584,7 @@ RULE AirSys:ClgCtrl
         default : "NoSATControl"
       endswitch
     else
-    if( Type = "SZVAVAC" .OR. Type = "SZVAVHP" )
+    if( Type = "SZVAVAC" .OR. Type = "SZVAVHP" .OR. Type = "SZVAVDFHP" )
     then // See issue 677.  
          // EnergyPlus SingleZoneReheat control used for SZVAV, and the limits for
          // the controller are defined by ClgDsgnSupAirTemp and HtgDsgnSupAirTemp

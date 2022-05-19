@@ -71,6 +71,11 @@ RULELIST "CSE_SimulationPrep_HVAC" 1 0 0 1
 	      Format( "%g * 3.412 * (%g/%g) * (1-@RSYSRES[%c%s%c].prior.H.hrsOn)", ActiveHVACSystem:HPSysVCHPFanPwr,
 	            ValidOr( FloorArea, 0 ), ActiveHVACSystem:FloorAreaServed[1], 34, ActiveHVACSystem:cseRSYS:Name, 34 )  }
 
+   "Eval rules to setup cseAIRHANDLER and cseTERMINAL for ResOtherZn objects"  Proj:Action =       ; SAC 04/26/22 (MFam)
+      {  if (IsComRuleset .AND. SumAll( AirSys:ServesResZn ) > 0)
+         then  EvalRulelist( "CSE_SimulationPrep_HVAC_Terminal_AirSys" )
+         else  UNCHANGED  endif  }
+
   ; Assign elec/fuel meters to RSYS components
 	"Set cseRSYS:rsElecMtr"		cseRSYS:rsElecMtr		= {	     if (Local( Fuel_HaveElec   ) > 0.5) then  Global( Proj:CSE_ElecMETER )
 																			else  UNDEFINED  endif  }
@@ -94,7 +99,9 @@ RULELIST "HVACSys_CSE_Defaulting" 0 0 0 1
 ;																							else  CreateComp( cseMETER, "NatGasHVACMtr" )  endif  }
 
 
-	"Blast all cseRSYS components"		Proj:Action		= {	DeleteAllComps( cseRSYS )  }
+	"Blast all cseRSYS components"		   Proj:Action		= {	DeleteAllComps( cseRSYS )  }
+	"Blast all cseAIRHANDLER components"	Proj:Action		= {	DeleteAllComps( cseAIRHANDLER )  }     ; SAC 04/26/22
+	"Blast all cseTERMINAL components"		Proj:Action		= {	DeleteAllComps( cseTERMINAL )  }
 
   ; CSE RSYS creation & setup
 	"Create a CSE RSYS for each HVACSys"	ResHVACSys:cseRSYS					= {	if (Local( FloorAreaServed[1] ) > 1 .AND.
@@ -112,9 +119,10 @@ RULELIST "HVACSys_CSE_Defaulting" 0 0 0 1
 	"Set ResHVACSys:cseRSYS:rsType"		ResHVACSys:cseRSYS:rsType	=     ; SAC 03/17/22 (WSHP)
 				{	if (Type < 1 .OR. Type > 4) then														0		; -- ERROR --
                else if (Type == 4)     ; Central System
-               then  if (CentralEqpType == 2) then							                  3		; WSHP -->> ASHP
+               then  if (CentralEqpType == 2) then 13 ; WSHP -->> WSHP - SAC 04/05/22
+                     else if (CentralEqpType == 4) then 12 ; VRF -->> VCHP2 - JP 04/26/22
                      else 			                                                      0		; -- ERROR --
-                     endif
+                     endif endif
 					else if (Type == 2)
 					then	if (NumHtPumpSystemTypes > 0 .AND. IfValidAnd( HtPumpSystem[1]:Type == 11 ) .AND. 
 								 ResProj:RunAbbrev != "s"  .AND. ResProj:RunAbbrev != "zb" .AND. ResProj:RunAbbrev != "S" .AND. ResProj:RunAbbrev != "smf" .AND.
@@ -184,7 +192,8 @@ RULELIST "HVACSys_CSE_Defaulting" 0 0 0 1
 ; SAC 5/22/14 - expanded specification of rsCapAuxH to include cseRSYS:rsType = ASHPHydronic
 ; SAC 10/20/14 - added logic to set AUTOSIZE rsCap47  - ONLY FOR Standard design heat pump simulations
       ; SAC 6/27/20 - mod to enable HtPumpCap47AutoSz for rsType = ASHPPkgRoom (tic #1225 & #1226)    ; VCHP2 - SAC 11/09/20   ; SAC 03/18/22 (WSHP)
-	"Set ResHVACSys:HtPumpCap47AutoSz"			ResHVACSys:HtPumpCap47AutoSz		= {	if (ResHVACSys:cseRSYS:rsType != 3 .AND. ResHVACSys:cseRSYS:rsType != 8 .AND. ResHVACSys:cseRSYS:rsType != 12) then  0
+	"Set ResHVACSys:HtPumpCap47AutoSz"			ResHVACSys:HtPumpCap47AutoSz		= {	if (ResHVACSys:cseRSYS:rsType != 3  .AND. ResHVACSys:cseRSYS:rsType != 8 .AND.
+                                                                                        ResHVACSys:cseRSYS:rsType != 12) then  0
 	                                                                           else if ((Type == 2 .OR. (Type == 4 .AND. CentralEqpType == 2)) .AND.
                                                                                        IfValidAnd( HPSysAutoSize > 0 )) then  1
 																										else if (IfValidAnd( HPSysCap47 > 0 )) then  0
@@ -207,11 +216,12 @@ RULELIST "HVACSys_CSE_Defaulting" 0 0 0 1
 																										         LocalRef( cseRSYS:rsType ) == 8) then  "rsCapAuxH"
 																										else if (HtPumpCap47AutoSz > 0.5 .AND. LocalStatus( cseRSYS:AUTOSIZE_x[1] ) > 0.5) then  "rsCap47"
 																										else	UNDEFINED  endif endif endif  }
-   ; revised logic below to autosize rsCapAuxH for VCHP2 systems (per today's conference call) - SAC 07/30/21
+   ; revised logic below to autosize rsCapAuxH for VCHP2 systems (per today's conference call) - SAC 07/30/21   ; SAC 04/05/22 (WSHP)
 	"Set ResHVACSys:cseRSYS:AUTOSIZE_x[3]"		ResHVACSys:cseRSYS:AUTOSIZE_x[3]	= {	if (AutoSizeCool[1] .AND. HaveCooling > 0 .AND. 
-                                                                                  (AutoSizeHeat[1] .OR. LocalRef( cseRSYS:rsType ) == 12) .AND.
+                                                                                  (AutoSizeHeat[1] .OR. LocalRef( cseRSYS:rsType ) == 12 .OR. LocalRef( cseRSYS:rsType ) == 13) .AND.
 																												(LocalRef( cseRSYS:rsType ) == 3 .OR. LocalRef( cseRSYS:rsType ) == 7 .OR.
-																										       LocalRef( cseRSYS:rsType ) == 8 .OR. LocalRef( cseRSYS:rsType ) == 12)) then  "rsCapAuxH"
+																										       LocalRef( cseRSYS:rsType ) == 8 .OR. LocalRef( cseRSYS:rsType ) == 12 .OR.
+                                                                                     LocalRef( cseRSYS:rsType ) == 13)) then  "rsCapAuxH"
 																										else if (HtPumpCap47AutoSz > 0.5 .AND. LocalStatus( cseRSYS:AUTOSIZE_x[2] ) > 0.5 .AND.
 																												IfValidAnd( ResHVACSys:cseRSYS:AUTOSIZE_x[2] == "rsCap47" )==0 ) then  "rsCap47"
 																										else	UNDEFINED  endif endif  }
@@ -278,12 +288,12 @@ RULELIST "HVACSys_CSE_Defaulting" 0 0 0 1
 		; SAC 5/13/13 -  ResHVACSys:HtOrClDucted => 1-Heat / 2-Cool / 3-Ht&Cl / 0-neither
 	; SAC 12/22/14 - REMOVED logic referencing cseRSYS:Cr8SupplyDuct & :Cr8ReturnDuct when setting rsDSEH/rsDSEC so that combination of NO ht or cl ducts & LowLlCod or related settings don't prevent setting of '1' (GC issue 432)
 	"Set ResHVACSys:cseRSYS:rsDSEH"				ResHVACSys:cseRSYS:rsDSEH			= {
-         if (HaveHtPump > 0 .AND. (HtPumpSysType == 22 .OR. HtPumpSysType == 33)) then  UNDEFINED     ; SAC 11/4/18 - VCHP   ; VCHP2 - SAC 11/01/20
+         if (HaveHtPump > 0 .AND. (HtPumpSysType == 22 .OR. HtPumpSysType == 33 .OR. IfValidAnd( CentralEqpType = 4 ))) then  UNDEFINED     ; SAC 11/4/18 - VCHP   ; VCHP2 - SAC 11/01/20 ; VRF - JP 04/28/22
          else if (	; removed - (LocalRef(cseRSYS:Cr8SupplyDuct) > 0 .OR. LocalRef(cseRSYS:Cr8ReturnDuct) > 0) .AND.
                    (HtOrClDucted == 0 .OR. HtOrClDucted == 2) ) then  1.0
          else  UNDEFINED  endif endif  }
 	"Set ResHVACSys:cseRSYS:rsDSEC"				ResHVACSys:cseRSYS:rsDSEC			= {
-         if (HaveHtPump > 0 .AND. (HtPumpSysType == 22 .OR. HtPumpSysType == 33)) then  UNDEFINED     ; SAC 11/4/18 - VCHP   ; VCHP2 - SAC 11/01/20
+         if (HaveHtPump > 0 .AND. (HtPumpSysType == 22 .OR. HtPumpSysType == 33 .OR. IfValidAnd( CentralEqpType = 4 ))) then  UNDEFINED     ; SAC 11/4/18 - VCHP   ; VCHP2 - SAC 11/01/20 ; VRF - JP 04/28/22
          else if (	; removed - (LocalRef(cseRSYS:Cr8SupplyDuct) > 0 .OR. LocalRef(cseRSYS:Cr8ReturnDuct) > 0) .AND.
                    (HtOrClDucted == 0 .OR. HtOrClDucted == 1) .AND. HaveCooling > 0 ) then  1.0
          else  UNDEFINED  endif endif  }
@@ -345,9 +355,9 @@ RULELIST "HVACSys_CSE_Defaulting" 0 0 0 1
 																										else if (IfValidAnd( HPSysCap47 > 0 ))
 																										then  HPSysCap47
 																										else  UNDEFINED  endif endif  }
-	; SAC 6/22/20 - revised to ensure writing of COP47 for ASHPPkgRoom (tic #1226)      ; VCHP2 - SAC 11/09/20
+	; SAC 6/22/20 - revised to ensure writing of COP47 for ASHPPkgRoom (tic #1226)      ; VCHP2 - SAC 11/09/20    ; SAC 04/05/22 (WSHP)
 	"Set ResHVACSys:cseRSYS:rsCOP47"				ResHVACSys:cseRSYS:rsCOP47			= {	if (HaveHtPump < 1 .OR. ((ResProj:ResAnalysisType > 2 .AND. cseRSYS:rsType != 7) .AND.
-	                                                                                                    cseRSYS:rsType != 8 .AND. cseRSYS:rsType != 12)) then  UNDEFINED
+	                                                                                                    cseRSYS:rsType != 8 .AND. cseRSYS:rsType != 12 .AND. cseRSYS:rsType != 13)) then  UNDEFINED
 																										else if (IfValidAnd( HPSysCOP47 > 0 ))
 																										then  HPSysCOP47
 																										else  UNDEFINED  endif endif  }
@@ -405,9 +415,11 @@ RULELIST "HVACSys_CSE_Defaulting" 0 0 0 1
       {  if (cseRSYS:rsType == 8) then  UNDEFINED
          else if (IfValidAnd( HaveHtPump > 0 ) .AND. IfValidAnd( NumHtPumpSysUnits > 0 ))
          then  Format( "($tdboHrAv < 50) * 40 * %g", NumHtPumpSysUnits )
-         else if (Type == 4 .AND. IfValidAnd( CentralEqpType = 2 ) .AND. IfValidAnd( NumCentralEqpUnits > 0 ))  ; WSHP
-         then  Format( "($tdboHrAv < 50) * 40 * %g", NumCentralEqpUnits )
-         else  UNDEFINED  endif endif endif  }
+         else if (Type == 4 .AND. IfValidAnd( CentralEqpType = 2 ) .AND. IfValidAnd( NumCentralEqpUnits > 0 )) ; WSHP
+         then Format( "($tdboHrAv < 50) * 40 * %g", NumCentralEqpUnits )
+         else if (Type == 4 .AND. IfValidAnd( CentralEqpType = 4 ) ) ; VRF
+         then Format( "($tdboHrAv < %.1f) * %.3f", VRFCrankcaseCtrlTemp, VRFTotCprsrCrankcaseHtrCap )
+         else  UNDEFINED  endif endif endif endif }
 
    "Set ResHVACSys:cseRSYS:rsDefrostModel - modeling options for ASHP outdoor coil defrosting when 17°F < TDbO < 45°F"        ; SAC 6/26/20 (tic #1225)
       ResHVACSys:cseRSYS:rsDefrostModel = {  if (cseRSYS:rsType == 8)      ; ASHPPkgRoom
@@ -475,7 +487,7 @@ RULELIST "HVACSys_CSE_Defaulting" 0 0 0 1
 ;																										else  Global( ResProj:cseElecHVACMtr )  endif  }
 
    ; SAC 11/4/18 - separate rules to setup VCHP RSYS inputs  - SAC 11/5/18 - logic to prevent these settings for runs other than User or Prop*   ; VCHP2 - SAC 11/01/20
-   "Setup VCHP RSYS"    ResHVACSys:cseRSYS:Action  =     ; SAC 03/17/22 (WSHP)
+   "Setup VCHP or WSHP RSYS"     ResHVACSys:cseRSYS:Action  =     ; SAC 03/17/22 (WSHP)  ; SAC 04/05/22 (WSHP)
       {  if (HaveHtPump > 0 .AND. 
              (ResProj:RunAbbrev = "p"   .OR. ResProj:RunAbbrev = "p-N" .OR. ResProj:RunAbbrev = "p-E" .OR. 
                                           ResProj:RunAbbrev = "p-S" .OR. ResProj:RunAbbrev = "p-W" .OR.
@@ -489,7 +501,9 @@ RULELIST "HVACSys_CSE_Defaulting" 0 0 0 1
                then  EvalRulelist( "HVACSys_SetupRSYS_VCHP2", 1 )
                else if (Type == 4 .AND. CentralEqpType == 2)
                then  EvalRulelist( "HVACSys_SetupRSYS_CentralWSHP", 1 )
-               else  UNCHANGED  endif endif endif
+               else if (Type == 4 .AND. CentralEqpType == 4)
+               then  EvalRulelist( "HVACSys_SetupRSYS_CentralVRF", 1 )
+               else  UNCHANGED  endif endif endif endif
          else  UNCHANGED  endif  }
 
 ; TO DO - default properly based on the TYPE of HVAC equipment defined
@@ -519,6 +533,7 @@ RULELIST "HVACSys_CSE_Defaulting" 0 0 0 1
 ;																			SourceZone:Name, ResProj:RunScope, SourceZone:HVACSysStatus, SourceZone:HVACSystem:Name, SourceZone:HVACSystem:cseRSYS:Name, SourceZone:HVACSystem:HaveHeating, SourceZone:HVACSystem:HaveCooling )  }
 ; SAC 12/16/13 - mods to rule to assign appropriate new vs. E+A+A system to cseZONE
    ; SAC 9/10/19 - revisions for OtherZone (MFamProto)
+   ; revise logic to ensure no znRSys assigned when ResOtherZn assigns an AirSys (translated to TERMINAL & AIRHANDLER) - SAC 05/11/22
 	"Set cseZONE:znRSys"		cseZONE:znRSys		=
       {  if (LocalCompAssigned( SourceZone ) > 0)
          then  if (ResProj:RunScope == 2 .AND. SourceZone:HVACSysStatus == 2)
@@ -540,7 +555,8 @@ RULELIST "HVACSys_CSE_Defaulting" 0 0 0 1
 							else  LocalRef( SourceZone:HVACSystem:cseRSYS )  endif endif endif
 					endif endif
 			else if (LocalCompAssigned( SourceOtherZone ) > 0)  
-			then       if (LocalCompAssigned( SourceOtherZone:ozHVACSystem ) == 0) then  UNDEFINED
+			then       if (LocalCompAssigned( SourceOtherZone:ozHVACSystem ) == 0 .OR.
+                        LocalCompAssigned( SourceOtherZone:ozHVACSystem ) == ComponentType( "AirSys" )) then  UNDEFINED
 					else if (LocalCompAssigned( SourceOtherZone:ozHVACSystem:cseRSYS ) == 0) then  UNDEFINED
 					else if (SourceOtherZone:ozHVACSystem:HaveHeating == 0 .AND.
 								SourceOtherZone:ozHVACSystem:HaveCooling == 0) then  UNDEFINED
@@ -956,9 +972,9 @@ RULELIST "HVACSys_SetupRSYS_CentralWSHP" 1 0 0 1
 ;*************************************************************************
 
 ; to be updated...
-   "Set ResHVACSys:cseRSYS:rsSEER"     ResHVACSys:cseRSYS:rsSEER    = {  14   } 
-   "Set ResHVACSys:cseRSYS:rsFxCapH"   ResHVACSys:cseRSYS:rsFxCapH  = {  1.2  } 
-   "Set ResHVACSys:cseRSYS:rsHSPF"     ResHVACSys:cseRSYS:rsHSPF    = {  8.2  } 
+;   "Set ResHVACSys:cseRSYS:rsSEER"     ResHVACSys:cseRSYS:rsSEER    = {  14   } 
+;   "Set ResHVACSys:cseRSYS:rsFxCapH"   ResHVACSys:cseRSYS:rsFxCapH  = {  1.2  } 
+;   "Set ResHVACSys:cseRSYS:rsHSPF"     ResHVACSys:cseRSYS:rsHSPF    = {  8.2  } 
 
    "Set ResHVACSys:cseRSYS:rsTdbOut_x"          ResHVACSys:cseRSYS:rsTdbOut_x  =       ; revised per guidance from DR - SAC 03/24/22
       {  if (IfValidAnd( HVACCentralRef[1]:CWFluidSysRef:FixedSupTemp    > 0 ) .AND.
@@ -1005,6 +1021,12 @@ RULELIST "HVACSys_SetupRSYS_CentralWSHP" 1 0 0 1
 ;   rsElecMtr = "MtrElec"                // Electric use meter
 ;   rsFuelMtr = "MtrNatGas"              // Natural gas use meter
 ;   rsSrcSideLoadMtr = "MtrWSHPSrc"      // LOADMETER used to generate pland load profiles for condenser/boiler loops
+
+
+	"Set ResHVACSys:cseRSYS:rsCapAuxH"			ResHVACSys:cseRSYS:rsCapAuxH		=     ; SAC 04/05/22 (WSHP)
+      {  if (IfValidAnd( HPSysAuxHtgCap > 0 ))
+         then  HPSysAuxHtgCap
+         else  UNDEFINED  endif  }
 
 
 
@@ -1235,8 +1257,78 @@ RULELIST "HVACSys_SetupRSYS_CentralWSHP" 1 0 0 1
 END
 ;*************************************************************************
 
+;************************************************************************* - JP 04/28/22 
+RULELIST "HVACSys_SetupRSYS_CentralVRF" 1 0 0 1
+;*************************************************************************
 
+	"throw error if ResHVACSys:cseRSYS:rsOAVType != 'None'"		ResHVACSys:Action		=
+      {	if (IfValidAnd( cseRSYS:rsOAVType > 0 ))
+         then  switch (cseRSYS:rsOAVType)
+                  case  1 :   PostError( "OAV type 'FixedFlow' incompatible with VCHP2 system '%s' (CSE RSYS '%s')", Name, cseRSYS:Name )
+                  case  2 :   PostError( "OAV type 'VarFlow' incompatible with VCHP2 system '%s' (CSE RSYS '%s')", Name, cseRSYS:Name )
+                  default :  UNCHANGED
+               endswitch
+         else  UNCHANGED  endif  }
 
+   "Set ResHVACSys:cseRSYS:rsHSPF"       ResHVACSys:cseRSYS:rsHSPF  = { 8.2 } ; code minimum for split 1 phase heat pump ( not used in simulation )
+
+   "Set ResHVACSys:cseRSYS:rsSEER"       ResHVACSys:cseRSYS:rsSEER  = { 16 } ; code minimum for split 1 phase heat pump ( not used in simulation )
+
+   "Set ResHVACSys:cseRSYS:rsCap115"      ResHVACSys:cseRSYS:rsCap115  = { VRFIndoorMaxClgOut115 }
+   
+   "Set ResHVACSys:cseRSYS:rsCapC"      ResHVACSys:cseRSYS:rsCapC  = { VRFIndoorMaxClgOut95 }
+   
+   "Set ResHVACSys:cseRSYS:rsCap82"      ResHVACSys:cseRSYS:rsCap82  = { VRFIndoorMaxClgOut82 }
+   
+   "Set ResHVACSys:cseRSYS:rsCap47"      ResHVACSys:cseRSYS:rsCap47  = { VRFIndoorMaxHtgOut47 }
+   
+   "Set ResHVACSys:cseRSYS:rsCap17"      ResHVACSys:cseRSYS:rsCap17  = { VRFIndoorMaxHtgOut17 }
+   
+   "Set ResHVACSys:cseRSYS:rsCap05"      ResHVACSys:cseRSYS:rsCap05  = { VRFIndoorMaxHtgOut05 }
+
+   "Set ResHVACSys:cseRSYS:rsCOP115"      ResHVACSys:cseRSYS:rsCOP115 = { VRFMaxClgCOP115 }
+   
+   "Set ResHVACSys:cseRSYS:rsCOP95"      ResHVACSys:cseRSYS:rsCOP95 = { VRFMaxClgCOP95 }
+   
+   "Set ResHVACSys:cseRSYS:rsCOP82"      ResHVACSys:cseRSYS:rsCOP82 = { VRFMaxClgCOP82 }
+   
+   "Set ResHVACSys:cseRSYS:rsCOP47"      ResHVACSys:cseRSYS:rsCOP47 = { VRFMaxHtgCOP47 }
+   
+   "Set ResHVACSys:cseRSYS:rsCOP17"      ResHVACSys:cseRSYS:rsCOP17 = { VRFMaxHtgCOP17 }
+   
+   "Set ResHVACSys:cseRSYS:rsCOP05"      ResHVACSys:cseRSYS:rsCOP05 = { VRFMaxHtgCOP05 }
+
+   "Set ResHVACSys:cseRSYS:rsCOPMin115"      ResHVACSys:cseRSYS:rsCOPMin115 = { VRFMinClgCOP115 }
+   
+   "Set ResHVACSys:cseRSYS:rsCOPMin95"      ResHVACSys:cseRSYS:rsCOPMin95 = { VRFMinClgCOP95 }
+   
+   "Set ResHVACSys:cseRSYS:rsCOPMin82"      ResHVACSys:cseRSYS:rsCOPMin82 = { VRFMinClgCOP82 }
+   
+   "Set ResHVACSys:cseRSYS:rsCOPMin47"      ResHVACSys:cseRSYS:rsCOPMin47 = { VRFMinHtgCOP47 }
+   
+   "Set ResHVACSys:cseRSYS:rsCOPMin17"      ResHVACSys:cseRSYS:rsCOPMin17 = { VRFMinHtgCOP17 }
+   
+   "Set ResHVACSys:cseRSYS:rsCOPMin05"      ResHVACSys:cseRSYS:rsCOPMin05 = { VRFMinHtgCOP05 }
+
+   "Set ResHVACSys:cseRSYS:rsLoadFMin115"    ResHVACSys:cseRSYS:rsLoadFMin115 = { VRFIndoorMinClgOut115 / VRFIndoorMaxClgOut115 }
+
+   "Set ResHVACSys:cseRSYS:rsLoadFMin95"     ResHVACSys:cseRSYS:rsLoadFMin95 = { VRFIndoorMinClgOut95 / VRFIndoorMaxClgOut95 }
+
+   "Set ResHVACSys:cseRSYS:rsLoadFMin82"     ResHVACSys:cseRSYS:rsLoadFMin82 = { VRFIndoorMinClgOut82 / VRFIndoorMaxClgOut82 }
+
+   "Set ResHVACSys:cseRSYS:rsLoadFMin47"     ResHVACSys:cseRSYS:rsLoadFMin47 = { VRFIndoorMinHtgOut47 / VRFIndoorMaxHtgOut47 }
+
+   "Set ResHVACSys:cseRSYS:rsLoadFMin17"     ResHVACSys:cseRSYS:rsLoadFMin17 = { VRFIndoorMinHtgOut17 / VRFIndoorMaxHtgOut17 }
+
+   "Set ResHVACSys:cseRSYS:rsLoadFMin05"     ResHVACSys:cseRSYS:rsLoadFMin05 = { VRFIndoorMinHtgOut05 / VRFIndoorMaxHtgOut05 }
+
+   "Set ResHVACSys:cseRSYS:rsDefrostModel"   ResHVACSys:cseRSYS:rsDefrostModel  = {  "REVCYCLE"  }
+   
+   "Set ResHVACSys:cseRSYS:rsCdH"   ResHVACSys:cseRSYS:rsCdH  = {  0.35  }
+      
+   "Set ResHVACSys:cseRSYS:rsCdC"   ResHVACSys:cseRSYS:rsCdC  = {  0.50  }
+   
+END
 
 ;*************************************************************************
 RULELIST "DOAS_CSE_Defaulting" 1 0 0 1
@@ -1548,18 +1640,18 @@ RULELIST "SimPrep_CSE_AirNet" 0 0 0 1
 	"Setup AirNet (other) IZXFER objects"		ResProj:Action		= {	EvalRulelist( "SimPrep_CSE_AirNet_Other" )  }
 
    ; SAC 10/19/20
-	"Create ResOtherZn:ExhaustIZXFERs[1] (exhaust)"		ResOtherZn:ExhaustIZXFERs[1]	= {	if (CodeExhPerArea <= 0 .OR. Area <= 0) then  UNCHANGED
+	"Create ResOtherZn:ExhaustIZXFERs[1] (exhaust)"		ResOtherZn:ExhaustIZXFERs[1]	= {	if (PrkgGarExhFlow <= 0 .OR. Area <= 0) then  UNCHANGED
 																														else  CreateComp( cseIZXFER, substr( Name, 0, 44 ) + "-Exhst" )  endif  }
 	"Set ResOtherZn:ExhaustIZXFERs[1]:izNVType"			ResOtherZn:ExhaustIZXFERs[1]:izNVType		=	{	6  }		; AIRNETEXTFAN  - Fan from exterior to zone
 	"Set ResOtherZn:ExhaustIZXFERs[1]:izZn1"				ResOtherZn:ExhaustIZXFERs[1]:izZn1			=	{	CSE_ZONE  }
-	"Set ResOtherZn:ExhaustIZXFERs[1]:izVFmin"				ResOtherZn:ExhaustIZXFERs[1]:izVFmin			=	{	CodeExhPerArea * Area * -1  }
-	"Set ResOtherZn:ExhaustIZXFERs[1]:izVFmax"				ResOtherZn:ExhaustIZXFERs[1]:izVFmax   		=	{	CodeExhPerArea * Area * -1  }
-	"Set ResOtherZn:ExhaustIZXFERs[1]:izFanVfDs"			ResOtherZn:ExhaustIZXFERs[1]:izFanVfDs 		=	{	CodeExhPerArea * Area  }
-	"Set ResOtherZn:ExhaustIZXFERs[1]:izFanElecPwr"		ResOtherZn:ExhaustIZXFERs[1]:izFanElecPwr	=	{	if (IfValidAnd( CodeExhFanPwr > 0 )==0) 
+	"Set ResOtherZn:ExhaustIZXFERs[1]:izVFmin"				ResOtherZn:ExhaustIZXFERs[1]:izVFmin			=	{	PrkgGarExhFlow * -1  }
+	"Set ResOtherZn:ExhaustIZXFERs[1]:izVFmax"				ResOtherZn:ExhaustIZXFERs[1]:izVFmax   		=	{	PrkgGarExhFlow * -1  }
+	"Set ResOtherZn:ExhaustIZXFERs[1]:izFanVfDs"			ResOtherZn:ExhaustIZXFERs[1]:izFanVfDs 		=	{	PrkgGarExhFlow  }
+	"Set ResOtherZn:ExhaustIZXFERs[1]:izFanElecPwr"		ResOtherZn:ExhaustIZXFERs[1]:izFanElecPwr	=	{	if (IfValidAnd( PrkgGarExhFanPwr > 0 )==0) 
 	                                                                                                then  UNDEFINED
-                                                                                                  else if( ExhCtrlMthd = 5) 
-                                                                                                       then CodeExhFanPwr * 0.125 ; Reduction for CO controls
-                                                                                                       else CodeExhFanPwr
+                                                                                                  else if( PrkgGarExhCtrlMthd = 5) 
+                                                                                                       then PrkgGarExhFanPwr * 0.125 ; Reduction for CO controls
+                                                                                                       else PrkgGarExhFanPwr
                                                                                                   endif endif   }
 	"Set ResOtherZn:ExhaustIZXFERs[1]:izFanMtr"			ResOtherZn:ExhaustIZXFERs[1]:izFanMtr  		=        ; revised to assign Elec2Mtr if IsGarage (so that result posts to Process Motors enduse) - SAC 04/13/22 (Com tic #3366)
       {  if (IfValidAnd( IsGarage > 0 )) then  Proj:CSE_Elec2METER
@@ -2380,8 +2472,11 @@ RULELIST "SimPrep_CSE_AirNet_ResOtherZone" 0 0 0 1
 	;									2,              2,    "Supply"
 	;									2,              3,    "Balanced"
 
-"Create ResOtherZn:IAQVentAirNetIZXFERs[1] (supply)"   ResOtherZn:IAQVentAirNetIZXFERs[1]	= {	if( (IAQCFM_Supply[1] <= 0 .OR. IAQPwr_Supply[1] <= 0 ) .AND. CentralSupplyCFM <= 0 ) then  UNCHANGED
-																													                                      else  CreateComp( cseIZXFER, substr( Name, 0, 44 ) + "-IAQFanS" )  endif  }
+   ; added logic throughout below to prevent IAQVent IZXFERs for ResOtherZns served by AirSys systems - SAC 05/14/22
+   "Create ResOtherZn:IAQVentAirNetIZXFERs[1] (supply)"   ResOtherZn:IAQVentAirNetIZXFERs[1]	=
+      {  if (IfValidAnd( IsCond > 0 ) .AND. LocalCompAssigned( ActiveHVACSystem ) == ComponentType( "AirSys" )) then  UNCHANGED
+         else if( (IAQCFM_Supply[1] <= 0 .OR. IAQPwr_Supply[1] <= 0 ) .AND. CentralSupplyCFM <= 0 ) then  UNCHANGED
+         else  CreateComp( cseIZXFER, substr( Name, 0, 44 ) + "-IAQFanS" )  endif endif  }
   "Set ResOtherZn:IAQVentAirNetIZXFERs[1]:izNVType"      ResOtherZn:IAQVentAirNetIZXFERs[1]:izNVType     = { if( CentralSupplyCFM > 0 ) then 11 else 6 endif }		; AIRNETEXTFAN  - Fan from exterior to zone
   "Set ResOtherZn:IAQVentAirNetIZXFERs[1]:izZn1"         ResOtherZn:IAQVentAirNetIZXFERs[1]:izZn1        = { CSE_ZONE }
   "Set ResOtherZn:IAQVentAirNetIZXFERs[1]:izDOAS"        ResOtherZn:IAQVentAirNetIZXFERs[1]:izDOAS       = { if( CentralSupplyCFM > 0 ) then CentralVentSysRef:cseDOAS else UNDEFINED endif }
@@ -2392,8 +2487,10 @@ RULELIST "SimPrep_CSE_AirNet_ResOtherZone" 0 0 0 1
   "Set ResOtherZn:IAQVentAirNetIZXFERs[1]:izFanMtr"      ResOtherZn:IAQVentAirNetIZXFERs[1]:izFanMtr     = { if( CentralSupplyCFM > 0 ) then UNDEFINED else Proj:CSE_ElecMETER endif }
   "Set ResOtherZn:IAQVentAirNetIZXFERs[1]:izFanEndUse"   ResOtherZn:IAQVentAirNetIZXFERs[1]:izFanEndUse  = { if( CentralSupplyCFM > 0 ) then UNDEFINED else "FANV" endif }
 
-  "Create ResOtherZn:IAQVentAirNetIZXFERs[2] (exhaust)"  ResOtherZn:IAQVentAirNetIZXFERs[2]	= {	if( (IAQCFM_Exhaust[1] <= 0 .OR. IAQPwr_Exhaust[1] <= 0) .AND. CentralExhaustCFM <= 0 ) then  UNCHANGED
-  																												                                    	else  CreateComp( cseIZXFER, substr( Name, 0, 44 ) + "-IAQFanE" )  endif  }
+  "Create ResOtherZn:IAQVentAirNetIZXFERs[2] (exhaust)"  ResOtherZn:IAQVentAirNetIZXFERs[2]	=
+      {  if (IfValidAnd( IsCond > 0 ) .AND. LocalCompAssigned( ActiveHVACSystem ) == ComponentType( "AirSys" )) then  UNCHANGED
+         else if( (IAQCFM_Exhaust[1] <= 0 .OR. IAQPwr_Exhaust[1] <= 0) .AND. CentralExhaustCFM <= 0 ) then  UNCHANGED
+         else  CreateComp( cseIZXFER, substr( Name, 0, 44 ) + "-IAQFanE" )  endif endif  }
   "Set ResOtherZn:IAQVentAirNetIZXFERs[2]:izNVType"      ResOtherZn:IAQVentAirNetIZXFERs[2]:izNVType     = { if( CentralExhaustCFM > 0 ) then 11 else 6 endif }		; AIRNETEXTFAN  - Fan from exterior to zone
   "Set ResOtherZn:IAQVentAirNetIZXFERs[2]:izZn1"         ResOtherZn:IAQVentAirNetIZXFERs[2]:izZn1			= { CSE_ZONE }
   "Set ResOtherZn:IAQVentAirNetIZXFERs[2]:izDOAS"        ResOtherZn:IAQVentAirNetIZXFERs[2]:izDOAS       = { if( CentralExhaustCFM > 0 ) then CentralVentSysRef:cseDOAS else UNDEFINED endif }
@@ -2407,8 +2504,10 @@ RULELIST "SimPrep_CSE_AirNet_ResOtherZone" 0 0 0 1
          else  Proj:CSE_ElecMETER  endif endif  }
   "Set ResOtherZn:IAQVentAirNetIZXFERs[2]:izFanEndUse"   ResOtherZn:IAQVentAirNetIZXFERs[2]:izFanEndUse  = { if( CentralExhaustCFM > 0 ) then UNDEFINED else "FANV" endif}
 
-	"Create ResOtherZn:IAQVentAirNetIZXFERs[3] (balanced)"	ResOtherZn:IAQVentAirNetIZXFERs[3]	= {	if (IAQHRVCFM[1] <= 0 .OR. IAQHRVPwr[1] <= 0) then  UNCHANGED
-																														else  CreateComp( cseIZXFER, substr( Name, 0, 46 ) + "-IAQHRV" )  endif  }
+	"Create ResOtherZn:IAQVentAirNetIZXFERs[3] (balanced)"	ResOtherZn:IAQVentAirNetIZXFERs[3]	=
+      {  if (IfValidAnd( IsCond > 0 ) .AND. LocalCompAssigned( ActiveHVACSystem ) == ComponentType( "AirSys" )) then  UNCHANGED
+         else if (IAQHRVCFM[1] <= 0 .OR. IAQHRVPwr[1] <= 0) then  UNCHANGED
+         else  CreateComp( cseIZXFER, substr( Name, 0, 46 ) + "-IAQHRV" )  endif endif  }
 	"Set ResOtherZn:IAQVentAirNetIZXFERs[3]:izNVType"			ResOtherZn:IAQVentAirNetIZXFERs[3]:izNVType		=	{	10  }		; AIRNETHERV  - IAQ balanced / heat recovery ventilator
 	"Set ResOtherZn:IAQVentAirNetIZXFERs[3]:izZn1"				ResOtherZn:IAQVentAirNetIZXFERs[3]:izZn1			=	{	CSE_ZONE  }
 	"Set ResOtherZn:IAQVentAirNetIZXFERs[3]:izFanVfDs"			ResOtherZn:IAQVentAirNetIZXFERs[3]:izFanVfDs 	=	{	IAQHRVCFM[1] * ValidOr( IAQCFMScaleFactor, 1 )       }

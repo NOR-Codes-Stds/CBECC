@@ -98,6 +98,12 @@ RULE VRFSys:HtRcvry
     No
   DEFAULT
     "No"
+  CHECKSIM
+    if( HtRcvry = "Yes" .AND. IsMFamSys = 1 )
+    then PostWarning( "VRF system '%s' serves multifamily space(s) and has heat recovery, but
+                      this is currently not supported. Heat recovery won't be simulated.", Name)
+    else UNCHANGED
+    endif
 ENDRULE
 
 RULE VRFSys:FuelType
@@ -305,6 +311,34 @@ RULE VRFSys:IsHlthCareSys
     endif 
 ENDRULE
 
+RULE NEW VRFSys:IsMFamSys
+  DESCRIPTION
+    "A flag that indicates if the VRF system serves ResZn or ResOtherZn."
+  INPUTCLASS
+    NotInput
+  DATATYPE
+    Integer
+  DEFAULT
+    if( SumRevRef( ResHVACSys:VRFSysRef, ResHVACSys:SumCentralClgCap ) +
+        SumRevRef( DwellUnitType:VRFSysRef, DwellUnitType:SumCentralClgCap ) +
+        SumRevRef( ResHVACSys:VRFSysRef, ResHVACSys:SumCentralClgCap ) +
+        SumRevRef( DwellUnitType:VRFSysRef, DwellUnitType:SumCentralClgCap ) > 0 )
+    then 1
+    else 0
+    endif
+  CHECKSIM
+    if( ( SumRevRef( ZnSys:VRFSysRef, ZnSys:VRFNetClgCap ) + 
+          SumRevRef( ZnSys:VRFSysRef, ZnSys:VRFNetHtgCap ) ) > 0 .AND.
+        ( SumRevRef( ResHVACSys:VRFSysRef, ResHVACSys:SumCentralClgCap ) +
+          SumRevRef( DwellUnitType:VRFSysRef, DwellUnitType:SumCentralClgCap ) +
+          SumRevRef( ResHVACSys:VRFSysRef, ResHVACSys:SumCentralClgCap ) +
+          SumRevRef( DwellUnitType:VRFSysRef, DwellUnitType:SumCentralClgCap ) ) > 0 )
+    then PostError("VRF system '%s' serves both multifamily space(s) and non-residential space(s).
+                    This is currently not supported.", Name)
+    else UNCHANGED
+    endif
+ENDRULE
+
 
 // ---------- Capacities ------------------------------------------------------*
 
@@ -340,6 +374,9 @@ RULE NEW VRFSys:NonCoincidentClgCapSum
     SumRevRef( ZnSys:VRFSysRef, ZnSys:VRFNetClgCap ) + 
     SumRevRef( ResHVACSys:VRFSysRef, ResHVACSys:SumCentralClgCap ) +
     SumRevRef( DwellUnitType:VRFSysRef, DwellUnitType:SumCentralClgCap )
+  SIZING
+    SumRevRef( ZnSys:VRFSysRef, ZnSys:VRFNetClgCap ) + 
+    SumRevRef( ResHVACSys:VRFSysRef, ResHVACSys:SumCentralClgCap )
 ENDRULE
 
 RULE NEW VRFSys:NonCoincidentHtgCapSum
@@ -353,6 +390,9 @@ RULE NEW VRFSys:NonCoincidentHtgCapSum
     SumRevRef( ZnSys:VRFSysRef, ZnSys:VRFNetHtgCap ) + 
     SumRevRef( ResHVACSys:VRFSysRef, ResHVACSys:SumCentralHtgCap ) +
     SumRevRef( DwellUnitType:VRFSysRef, DwellUnitType:SumCentralHtgCap )
+  SIZING
+    SumRevRef( ZnSys:VRFSysRef, ZnSys:VRFNetHtgCap ) + 
+    SumRevRef( ResHVACSys:VRFSysRef, ResHVACSys:SumCentralHtgCap )
 ENDRULE
 
 // outdoor unit is typically sized to peak coincident sum of indoor unit capaicty, however
@@ -1163,13 +1203,16 @@ RULE VRFSys:CtrlPriority
     "MasterThermostatPriority"
   CHECKSIM
     if( IfValidAnd( CtrlPriority = "MasterThermostatPriority" ) .AND.
-        LocalCompAssigned( CtrlZnRef ) = 0 )
-    then
-      PostError( "In VRF System '%s', Control Priority is set to 'MasterThermostatPriority' 
+        IfValidAnd( IsMFamSys > 0 ) )
+    then PostError( "In VRF System '%s', Control Priority is set to 'MasterThermostatPriority' 
+                  but the system serves multifamily space(s). This is currently not supported.", Name )
+    else if( IfValidAnd( CtrlPriority = "MasterThermostatPriority" ) .AND.
+             LocalCompAssigned( CtrlZnRef ) = 0 )
+    then PostError( "In VRF System '%s', Control Priority is set to 'MasterThermostatPriority' 
                   but the Master Control Zone has not been specified.  Master 
                   Control must be specified.", Name )
     else UNCHANGED
-    endif
+    endif endif
 ENDRULE
 
 RULE VRFSys:CtrlZnRef

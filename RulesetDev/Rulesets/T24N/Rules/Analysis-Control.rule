@@ -102,6 +102,20 @@ RULE NEW Proj:SimComFlag
     then  1  else  0  endif
 ENDRULE
 
+// Set flag to designate that baseline HVAC should be created for ResOtherZn - SAC 05/06/22
+RULE NEW ResProj:HVACSizingNeeded
+  DATATYPE
+    Integer
+  LONGFORM
+    HVACSizingNeeded
+  INPUTCLASS
+    NotInput
+  SIZING
+    SumAll( ResOtherZn:CreateBaseHVAC )
+  ANNUAL
+    0
+ENDRULE
+
 
 // -------------- Transform Object EXCLUDE control -----------------------------
 // Set flag to determine when USER/SIZING_PROPOSED model objects are excluded, 
@@ -220,7 +234,8 @@ RULE TrmlUnit:ExcludeFromSizing
   INPUTCLASS
     NotInput
   DEFAULT
-    if( Proj:IsNoMech > 0 .OR. ( Proj:IsNoAddMech > 0 .AND. IsNew > 0 ) .OR. AirSys:ExcludeFromSizing > 0 )
+    if( Proj:IsNoMech > 0 .OR. ( Proj:IsNoAddMech > 0 .AND. IsNew > 0 ) .OR.
+        IfValidAnd( AirSys:ExcludeFromSizing > 0 ) )
     then // Exclude all user-defined HVAC systems for partial compliance types  
          // that do not include permitting of mechanical systems or existing    
          // systems if modeling additions.                                      
@@ -228,7 +243,7 @@ RULE TrmlUnit:ExcludeFromSizing
     else
     if( LocalCompAssigned( ZnServedRef ) )
     then
-      if( ZnServedRef:HasUnknownHVAC > 0 )
+      if( IfValidAnd( ZnServedRef:HasUnknownHVAC > 0 ) )
       then 1    
       else 0
       endif
@@ -363,7 +378,8 @@ RULE VRFSys:ExcludeFromSizing
          // systems if modeling additions.                                      
       1
     else
-    if( SumRevRef( ZnSys:VRFSysRef, ZnSys:ExcludeFromSizing ) = CountRefs( ZnSys:VRFSysRef ) )
+    if( SumRevRef( ZnSys:VRFSysRef, ZnSys:ExcludeFromSizing ) > 0 .AND. ; JP 04/28/22 prevent system excluded when only serving ResZns
+        SumRevRef( ZnSys:VRFSysRef, ZnSys:ExcludeFromSizing ) = CountRefs( ZnSys:VRFSysRef ) )
     then // Exclude VRFSys if all the ZnSys that reference it are excluded
       1    
     else 0
@@ -807,29 +823,63 @@ ENDRULE
 // ----------------------------------------------------------------
 // Define TypeSim for SDD -> OS translation/simulation
 RULE AirSys:TypeSim
+  DEFAULT
+    switch( Type ) 
+      case "SPVAC"           : "SZAC"   
+      case "SPVHP"           : "SZHP"
+      case "DOASCV"          : "SZAC"
+      case "DOASVAV"         : "SZVAVAC" 
+      case "SZDFHP"          : "SZHP"
+      case "SZVAVDFHP"       : "SZVAVHP"
+      default                : Type
+    endswitch 
   SIZING
     switch( Type ) 
-      case "SPVAC"   : "SZAC"   
-      case "SPVHP"   : "SZHP"
-      case "DOASCV"  : "SZAC"
-      case "DOASVAV" : "SZVAVAC" 
-      default        : Type
-    endswitch
-  ANNUAL
-    switch( Type ) 
-      case "SPVAC"   : "SZAC"   
-      case "SPVHP"   : "SZHP"
-      case "DOASCV"  : "SZAC"
-      case "DOASVAV" : "SZVAVAC" 
-      default        : Type
+      case "SPVAC"           : "SZAC"   
+      case "SPVHP"           : "SZHP"
+      case "DOASCV"          : "SZAC"
+      case "DOASVAV"         : "SZVAVAC" 
+      case "SZDFHP"          : "SZHP"
+      case "SZVAVDFHP"       : "SZVAVHP"
+      default                : Type
+    endswitch                
+  ANNUAL                     
+    switch( Type )           
+      case "SPVAC"           : "SZAC"   
+      case "SPVHP"           : "SZHP"
+      case "DOASCV"          : "SZAC"
+      case "DOASVAV"         : "SZVAVAC" 
+      case "SZDFHP"          : "SZHP"
+      case "SZVAVDFHP"       : "SZVAVHP"
+      default                : Type
     endswitch
 ENDRULE
 
 RULE ZnSys:TypeSim
+  DEFAULT
+    switch( Type )
+      case "SZAC"            : "PTAC"
+      case "SZHP"            : "PTHP"
+      case "SZDFHP"          : "PTHP" 
+      case "SPVAC"           : "PTAC"   
+      case "SPVHP"           : "PTHP"
+      case "MiniSplitAC"     : "PTAC"
+      case "MiniSplitHP"     : "PTHP"
+      case "Radiant"         : "Radiant"
+      case "PassiveBeam"     : "FPFC"
+      case "Furnace"         : "PTAC"
+      case "FPFC"            : if( IfValidAnd( CoilClgRef:IsDummy > 0 ) )
+                               then "PTAC" // Switch to PTAC for simulation
+                               else Type
+                               endif
+      case "VentilationOnly" : "Exhaust"
+      default                : Type
+    endswitch
   SIZING
     switch( Type )
       case "SZAC"            : "PTAC"
-      case "SZHP"            : "PTHP"   
+      case "SZHP"            : "PTHP" 
+      case "SZDFHP"          : "PTHP"   
       case "SPVAC"           : "PTAC"   
       case "SPVHP"           : "PTHP"
       case "MiniSplitAC"     : "PTAC"
@@ -847,7 +897,8 @@ RULE ZnSys:TypeSim
   ANNUAL
     switch( Type )
       case "SZAC"            : "PTAC"
-      case "SZHP"            : "PTHP"   
+      case "SZHP"            : "PTHP"
+      case "SZDFHP"          : "PTHP"    
       case "SPVAC"           : "PTAC"   
       case "SPVHP"           : "PTHP"
       case "MiniSplitAC"     : "PTAC"
@@ -912,6 +963,18 @@ RULE WtrHtr:TypeSim
       default                 : "Conventional"
     endswitch
 ENDRULE
+
+// ----------------------------------------------------------------
+// Set AirSys relief fan power to 0 for final simulation. 
+// See Ticket 2843 for reference
+RULE AirSys:AirSeg:Fan:TotStaticPress
+  ANNUAL
+    if( AirSeg:Type = "Relief" ) 
+    then 0
+    else UNCHANGED
+    endif
+ENDRULE
+
 
 // SAC 11/3/19 - replaced by Proj:ElecDemMultTableName[1-10]
 // // ---------------------------------------------------------------- SAC 10/8/16
@@ -1005,3 +1068,68 @@ RULE FluidSys:Action
     else  UNCHANGED  endif
 ENDRULE
 
+// ---------------------------------------------------------------- 
+// To facilitate ResAirSys simulation
+RULE NEW AirSys:ExcludeFromEPlus
+  DATATYPE
+    Integer
+  LONGFORM
+    ExcludeFromEnergyPlus
+  DESCRIPTION
+    "whether this AirSys is to be simulated by EPlus."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( ServesThrmlZn < 1 )
+    then 1
+    else UNDEFINED
+    endif
+  SIZING
+    if( ServesThrmlZn < 1 )
+    then 1
+    else UNDEFINED
+    endif
+ENDRULE 
+
+RULE NEW AirSys:CSE_AirHandlerRef
+  DATATYPE
+    cseAIRHANDLER
+  LONGFORM
+    CSE_AirHandlerReference
+  DESCRIPTION
+    "CSE AIRHANDLER object used to simulate this AirSys."
+  INPUTCLASS
+    NotInput
+ENDRULE 
+RULE NEW cseAIRHANDLER:AirSysRef
+  DATATYPE
+    AirSys
+  LONGFORM
+    AirSystemReference
+  DESCRIPTION
+    "AirSys object that this cseAIRHANDLER is based on."
+  INPUTCLASS
+    NotInput
+ENDRULE 
+
+RULE NEW ResOtherZn:CSE_TerminalRef
+  DATATYPE
+    cseTERMINAL
+  LONGFORM
+    CSE_TerminalReference
+  DESCRIPTION
+    "CSE TERMINAL object used to simulate this ResOtherZn's tstats, etc."
+  INPUTCLASS
+    NotInput
+ENDRULE 
+
+RULE NEW cseTERMINAL:ResOtherZnRef
+  DATATYPE
+    ResOtherZn
+  LONGFORM
+    ResidentialOtherZoneReference
+  DESCRIPTION
+    "ResOtherZn object that this cseTERMINAL is based on."
+  INPUTCLASS
+    NotInput
+ENDRULE 

@@ -159,8 +159,10 @@ RULE AirSys:Type
 // VAV
 // SZAC
 // SZHP
+// SZDFHP
 // SZVAVAC
 // SZVAVHP
+// SZVAVDFHP
 // HV
 // Exhaust
 // SPVAC
@@ -180,9 +182,16 @@ RULE AirSys:Type
     if( BypassCheckSim > 0 )
     then UNCHANGED // Bypass QC checks for system
     else
+    if (ServesThrmlZn > 0 .AND. ServesResZn > 0)
+    then 
+      PostError("AirSystem '%s' serves both residential common areas
+                 (ResOtherZn) and (nonres) ThermalZones, which is not
+                 allowed.", Name)
+    else
     if( SumRevRef(ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:Area) = 0 .AND.
         SumRevRef(ThrmlZn:VentSysRef, ThrmlZn:Area) = 0 .AND.
-        SumRevRef(ThrmlZn:ExhSysRef, ThrmlZn:Area) = 0 )
+        SumRevRef(ThrmlZn:ExhSysRef, ThrmlZn:Area) = 0 .AND.
+        ServesResZn = 0 )
     then 
       PostError("AirSystem '%s' is not referenced as Primary, Ventilation,
                  or Exhaust system by any ThermalZones.", Name)
@@ -194,7 +203,7 @@ RULE AirSys:Type
                  heating and/or cooling coils. This is currently not supported.", 
                  Name)
     else UNCHANGED
-    endif endif endif
+    endif endif endif endif
   SIZING  
 // AirSys:Type for baseline systems defined in Library_HVAC file
   ANNUAL
@@ -238,7 +247,7 @@ RULE ZnSys:Type
     if( BypassCheckCode > 0 )
     then UNCHANGED // Bypass QC checks for system
     else
-    if( ( Type = "SZAC" .OR. Type = "SZHP" ) .AND. 
+    if( ( Type = "SZAC" .OR. Type = "SZHP" .OR. Type = "SZDFHP" ) .AND. 
         IfValidAnd( ClgCap >= 135000 ) )
     then
       PostError("ZoneSystem '%s' is Type = SZAC or SZHP, and has a cooling capacity
@@ -278,6 +287,7 @@ RULE ZnSys:Type
     else
     if( HtPumpCap = 0 .AND. 
         ( Type = "SZHP" .OR. 
+          Type = "SZDFHP" .OR. 
           Type = "PTHP" .OR. 
           Type = "WSHP" .OR. 
           Type = "SPVHP" .OR.
@@ -649,14 +659,16 @@ RULE NEW AirSys:IsResSys
   DEFAULT
     if( IsExhSys = 0 .AND. 
         ( SumRevRef( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:IsRes ) > 0 .OR.
-          SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:IsRes ) > 0 ) )
+          SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:IsRes ) > 0 .OR.
+          SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:ResCondFlrAreaWithMult ) > 0 ) )
     then 1
     else 0
     endif
   ANNUAL
     if( IsExhSys = 0 .AND. 
         ( SumRevRef( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:IsRes ) > 0 .OR.
-          SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:IsRes ) > 0 ) )
+          SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:IsRes ) > 0 .OR.
+          SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:ResCondFlrAreaWithMult ) > 0 ) )
     then 1
     else 0
     endif
@@ -675,6 +687,8 @@ RULE NEW ZnSys:IsResSys
     if( ( IsExhSys = 0 .OR. ( Type = "VentilationOnly" .AND. ExhSysType != "ExhaustOnly" ) ) .AND.
         ( SumRevRef( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:IsRes ) > 0 .OR.
           SumRevRef( ThrmlZn:PriAirCondgSysRef[2], ThrmlZn:IsRes ) > 0 .OR.
+          SumRevRef( ThrmlZn:SimSysRef[1], ThrmlZn:IsRes ) > 0 .OR.
+          SumRevRef( ThrmlZn:SimSysRef[2], ThrmlZn:IsRes ) > 0 .OR.
           SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:IsRes ) > 0 ) )
     then 1
     else 0
@@ -880,6 +894,7 @@ RULE NEW AirSys:IsVAVSys
         case "VAV"       :  1
         case "SZVAVAC"   :  1
         case "SZVAVHP"   :  1
+        case "SZVAVDFHP" :  1
         case "DOASVAV"   :  1
         default          :  0
       endswitch
@@ -893,6 +908,7 @@ RULE NEW AirSys:IsVAVSys
       case "VAV"       :  1
       case "SZVAVAC"   :  1
       case "SZVAVHP"   :  1
+      case "SZVAVDFHP" :  1
       case "DOASVAV"   :  1
       default          :  0
     endswitch
@@ -939,7 +955,8 @@ RULE AirSys:IsHlthCareSys
   DEFAULT : T24N_2016 S901G
     0 
   DEFAULT : T24N
-    if( SumRevRef( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:IsHlthCare ) = 
+    if( ServesThrmlZn .AND.
+        SumRevRef( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:IsHlthCare ) = 
           CountRefs( ThrmlZn:PriAirCondgSysRef[1] ) .AND.
         SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:IsHlthCare ) = 
           CountRefs( ThrmlZn:VentSysRef ) .AND.
@@ -1072,6 +1089,7 @@ RULE ZnSys:TypeRpt
     switch( Type )
       case "SZAC"        : "SZAC" 
       case "SZHP"        : "SZHP"
+      case "SZDFHP"      : "SZHP"
       case "PTAC"        : "PTAC" 
       case "PTHP"        : "PTHP"   
       case "FPFC"        : "FPFC"
@@ -1154,7 +1172,8 @@ RULE NEW AirSys:IsFuture
   INPUTCLASS 
     NotInput
   DEFAULT
-    if( SumRevRef( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:HasUnknownHVAC ) = CountRefs( ThrmlZn:PriAirCondgSysRef[1] ) .AND.
+    if( ServesThrmlZn .AND.
+        SumRevRef( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:HasUnknownHVAC ) = CountRefs( ThrmlZn:PriAirCondgSysRef[1] ) .AND.
         SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:HasUnknownHVAC ) = CountRefs( ThrmlZn:VentSysRef ) .AND.
         SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:HasUnknownHVAC ) = CountRefs( ThrmlZn:ExhSysRef ) )
     then 1
@@ -1220,16 +1239,23 @@ RULE NEW AirSys:IsCondgSys
     if( MaxRevRef( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:IsCond ) = 1 .OR.
         MaxRevRef( ThrmlZn:VentSysRef, ThrmlZn:IsCond ) = 1 ) 
     then 1
+    else
+    if (ServesResZn)
+    then 1
     else 0
-    endif endif
+    endif endif endif
   CHECKSIM
     if( BypassCheckSim > 0 )
     then UNCHANGED // Bypass QC checks for system
     else
     if( IsCondgSys > 0 )
     then     
-      if( ( SumRevRef( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:IsCond ) !=
-            CountRefs( ThrmlZn:PriAirCondgSysRef[1], 1 ) ) )
+      if( ( ServesThrmlZn .AND.
+            ( SumRevRef( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:IsCond ) !=
+              CountRefs( ThrmlZn:PriAirCondgSysRef[1], 1 ) ) ) .OR.
+          ( ServesResZn .AND.
+              SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:CondFlrAreaWithMult ) !=
+              SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:FlrAreaWithMult )   ) )
 ;          .OR.
  ;        ( SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:IsCond ) !=
  ;          CountRefs( ThrmlZn:VentSysRef ) ) )
@@ -1704,12 +1730,16 @@ RULE AirSys:Cnt
       then // LabSys
         MaxRevRef( Story:LabFlrSysRef, Story:Mult )
       else
+      if( BaseSysNum > 200 )
+      then // SZ AirSys serving res common areas (ResOtherZn) - SAC 05/09/22
+        1
+      else
       if( BaseSysNum > 100 )
       then // AirSys (DOAS) VentSys
         MaxRevRef( ThrmlZn:VentSysRef, ThrmlZn:HVACZnCntWithMult )
       else // All other cases where baseline is AirSys 
         MaxRevRef( ThrmlZn:BaseZnAirSysRef, ThrmlZn:HVACZnCntWithMult )
-      endif endif endif
+      endif endif endif endif
     else Cnt
     endif
   SIZING : S901G ECBC
@@ -1904,11 +1934,86 @@ RULE NEW AirSys:SysVentFlowUncorrected
   REPORTPRECISION
     0
   DEFAULT
-    SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:VentFlowWithMult ) / Cnt
+    if( ServesResZn > 0 )
+    then SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:TotalIAQCFM )
+    else SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:VentFlowWithMult ) / Cnt
+    endif 
   SIZING
-    SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:VentFlowWithMult ) / Cnt   
+    if( ServesResZn > 0 )
+    then
+      if( BaseSysNum > 0 )
+      then SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:MinIAQCFM )
+      else SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:TotalIAQCFM )
+      endif
+    else SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:VentFlowWithMult ) / Cnt
+    endif 
   ANNUAL
-    SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:VentFlowWithMult ) / Cnt    
+    if( ServesResZn > 0 )
+    then
+      if( BaseSysNum > 0 )
+      then SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:MinIAQCFM )
+      else SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:TotalIAQCFM )
+      endif
+    else SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:VentFlowWithMult ) / Cnt
+    endif 
+ENDRULE
+
+RULE NEW AirSys:SysMinVentFlow
+  DATATYPE
+    Float
+  LONGFORM
+    SystemMinimumVentilationFlow
+  DESCRIPTION
+    "The total minimum ventilation air flow of the zones served by the AirSystem."
+  INPUTCLASS
+    NotInput       
+  UNITS 
+    cfm
+  REPORTPRECISION
+    0
+  DEFAULT
+    if( ServesResZn > 0 )
+    then SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:StdDesignIAQCFM )
+    else SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:MinVentFlowWithMult ) / Cnt
+    endif 
+  SIZING
+    if( ServesResZn > 0 )
+    then SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:StdDesignIAQCFM )
+    else SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:MinVentFlowWithMult ) / Cnt
+    endif
+  ANNUAL
+    if( ServesResZn > 0 )
+    then SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:StdDesignIAQCFM )
+    else SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:MinVentFlowWithMult ) / Cnt
+    endif 
+ENDRULE
+
+RULE NEW AirSys:SysCodeVentFlow
+  DATATYPE
+    Float
+  LONGFORM
+    SystemCodeVentilationFlow
+  DESCRIPTION
+    "The total code ventilation air flow of the zones served by the AirSystem."
+  INPUTCLASS
+    NotInput
+  UNITS 
+    cfm
+  DEFAULT
+    if( ServesResZn > 0 )
+    then SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:MinIAQCFM )
+    else SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:CodeVentFlowWithMult ) / Cnt
+    endif 
+  SIZING
+    if( ServesResZn > 0 )
+    then SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:MinIAQCFM )
+    else SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:CodeVentFlowWithMult ) / Cnt
+    endif 
+  ANNUAL
+    if( ServesResZn > 0 )
+    then SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:MinIAQCFM )
+    else SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:CodeVentFlowWithMult ) / Cnt
+    endif 
 ENDRULE
 
 RULE AirSys:SysVentFlow 
@@ -1985,65 +2090,25 @@ RULE AirSys:SysVentFlow
 ;   else UNCHANGED
 ;   endif endif
   SIZING
-    SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:VentFlowWithMult ) / Cnt 
+    if( ServesResZn > 0 )
+    then
+      if( BaseSysNum > 0 )
+      then SysCodeVentFlow
+      else SysVentFlowUncorrected
+      endif
+    else SysVentFlowUncorrected
+    endif 
   ANNUAL
-    SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:VentFlowWithMult ) / Cnt 
-ENDRULE
-RULE NEW AirSys:SysMinVentFlow
-  DATATYPE
-    Float
-  LONGFORM
-    SystemMinimumVentilationFlow
-  DESCRIPTION
-    "The total minimum ventilation air flow of the zones served by the AirSystem."
-  INPUTCLASS
-    NotInput       
-  UNITS 
-    cfm
-  REPORTPRECISION
-    0
-  DEFAULT
-    SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:MinVentFlowWithMult ) / Cnt
-  SIZING
-    SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:MinVentFlowWithMult ) / Cnt
-  ANNUAL
-    SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:MinVentFlowWithMult ) / Cnt
-ENDRULE
-RULE NEW AirSys:SysCodeVentFlow
-  DATATYPE
-    Float
-  LONGFORM
-    SystemCodeVentilationFlow
-  DESCRIPTION
-    "The total code ventilation air flow of the zones served by the AirSystem."
-  INPUTCLASS
-    NotInput
-  UNITS 
-    cfm
-  DEFAULT
-    SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:CodeVentFlowWithMult ) / Cnt
-  SIZING
-    SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:CodeVentFlowWithMult ) / Cnt
-  ANNUAL
-    SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:CodeVentFlowWithMult ) / Cnt
+    if( ServesResZn > 0 )
+    then
+      if( BaseSysNum > 0 )
+      then SysCodeVentFlow
+      else SysVentFlowUncorrected
+      endif
+    else SysVentFlowUncorrected
+    endif 
 ENDRULE
 
-RULE NEW AirSys:OAFlowRat
-  DATATYPE
-    Float
-  LONGFORM
-    OutsideAirFlowRatio
-  DESCRIPTION
-    "The design outside air flow ratio as a fraction of supply flow rate."
-  INPUTCLASS
-    NotInput
-  DEFAULT
-    if( IfValidAnd( SysVentFlow >= 0 ) .AND.
-        IfValidAnd( SupFanCap > 0 ) )
-    then Max( SysVentFlow / SupFanCap, 0 )
-    else 0
-    endif
-ENDRULE
 
 RULE AirSys:RetAirFlowRat
   DESCRIPTION
@@ -2172,23 +2237,6 @@ RULE NEW ZnSys:SysCodeVentFlow
     SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:CodeVentFlowWithMult ) / Cnt
   ANNUAL
     SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:CodeVentFlowWithMult ) / Cnt
-ENDRULE
-
-RULE NEW ZnSys:OAFlowRat
-  DATATYPE
-    Float
-  LONGFORM
-    OutsideAirFlowRatio
-  DESCRIPTION
-    "The design outside air flow ratio as a fraction of supply flow rate."
-  INPUTCLASS
-    NotInput
-  DEFAULT
-    if( IfValidAnd( SysVentFlow >= 0 ) .AND.
-        IfValidAnd( SupFanCap > 0 ) )
-    then Max( SysVentFlow / SupFanCap, 0 )
-    else 0
-    endif
 ENDRULE
 
 
@@ -2554,11 +2602,13 @@ RULE NEW AirSys:TotCondFlrArea
   INPUTCLASS 
     NotInput
   DEFAULT
-    Max( SumRevRef( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:CondFlrAreaWithMult ),
-         SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:CondFlrAreaWithMult ) )
+    Max( Max( SumRevRef( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:CondFlrAreaWithMult ),
+              SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:CondFlrAreaWithMult ) ),
+              SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:CondFlrAreaWithMult ) )
   SIZING
-    Max( SumRevRef( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:CondFlrAreaWithMult ),
-         SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:CondFlrAreaWithMult ) )
+    Max( Max( SumRevRef( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:CondFlrAreaWithMult ),
+              SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:CondFlrAreaWithMult ) ),
+              SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:CondFlrAreaWithMult ) )
   ANNUAL
     z:TotCondFlrArea
 ENDRULE 
@@ -2650,6 +2700,45 @@ RULE AirSeg:CoilHtgRef
     if( IfValidAnd( MaxChild( CoilHtg:CoilHtgIdx ) > 0 ) )
     then ChildRef( CoilHtg:Name, MaxChild( CoilHtg:CoilHtgIdx ) )
     else UNDEFINED
+    endif
+ENDRULE 
+RULE NEW AirSeg:CoilHtgHtPumpRef
+  DATATYPE
+    CoilHtg
+  LONGFORM
+    CoilHeatingHeatPumpReference
+  DESCRIPTION
+    "Reference to the primary Heat Pump heating coil for the AirSystem."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if (MaxChild( CoilHtg:HtPumpCprsrHt ) > 0)
+    then  MaxChildComp( CoilHtg:HtPumpCprsrHt )
+    else  UNDEFINED
+    endif
+  SIZING
+    if (MaxChild( CoilHtg:HtPumpCprsrHt ) > 0)
+    then  MaxChildComp( CoilHtg:HtPumpCprsrHt )
+    else  UNDEFINED
+    endif
+  ANNUAL
+    if (MaxChild( CoilHtg:HtPumpCprsrHt ) > 0)
+    then  MaxChildComp( CoilHtg:HtPumpCprsrHt )
+    else  UNDEFINED
+    endif
+ENDRULE 
+RULE AirSeg:FanRef
+  DESCRIPTION
+    "Reference to the primary fan for this AirSeg."
+  HELP
+    "This property is only used for default of proposed inputs and creating
+     baseline systems."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( IfValidAnd( MaxChild( Fan:FanIdx ) > 0 ) )
+    then ChildRef( Fan:Name, MaxChild( Fan:FanIdx ) )
+    else UNCHANGED
     endif
 ENDRULE 
 

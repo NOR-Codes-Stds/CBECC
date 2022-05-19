@@ -355,14 +355,52 @@ RULE NEW CoilClg:CondHVACZnCntWithMult
     endif endif
 ENDRULE
 
+// Set reference relationship between heating/cooling coils for heat pumps
+RULE NEW CoilHtg:CoilClgRef
+  DATATYPE
+    CoilClg
+  DEFAULT
+    if( Type = "HeatPump" )
+    then 
+      if( ParentComp = "AirSys" )
+      then AirSeg:CoilClgRef
+      else
+      if( ParentComp = "ZnSys" )
+      then ZnSys:CoilClgRef
+      else UNDEFINED
+      endif endif
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( Type = "HeatPump" )
+    then 
+      if( ParentComp = "AirSys" )
+      then AirSeg:CoilClgRef
+      else
+      if( ParentComp = "ZnSys" )
+      then ZnSys:CoilClgRef
+      else UNDEFINED
+      endif endif
+    else UNDEFINED
+    endif
+ENDRULE
+RULE NEW CoilClg:CoilHtgRef
+  DATATYPE
+    CoilHtg
+  DEFAULT
+    MaxRevRefComp( CoilHtg:CoilClgRef, CoilHtg:SysCnt )
+  ANNUAL
+    MaxRevRefComp( CoilHtg:CoilClgRef, CoilHtg:SysCnt ) 
+ENDRULE
+
 
 // Calculate actual fan heat at design condition
 // =========================== AirSystem ======================================
-RULE NEW AirSys:FanHtDsgn
+RULE NEW AirSys:SupFanHtDsgn
   DATATYPE
     Float
   LONGFORM
-    FanHeatDesign
+    SupplyFanHeatDesign
   DESCRIPTION
     "The total supply fan heat of the AirSystem at design conditions."
   INPUTCLASS 
@@ -372,15 +410,15 @@ RULE NEW AirSys:FanHtDsgn
   SIZING
     0
   ANNUAL
-    SumChildren( Fan:SupFanHtDsgn )
+    SumChildrenIf( Fan:FanHtDsgn, Fan:IsSupFan )
 ENDRULE
 
 // =========================== ZoneSystem ======================================
-RULE NEW ZnSys:FanHtDsgn
+RULE NEW ZnSys:SupFanHtDsgn
   DATATYPE
     Float
   LONGFORM
-    FanHeatDesign
+    SupplyFanHeatDesign
   DESCRIPTION
     "The total supply fan heat of the ZoneSystem at design conditions."
   INPUTCLASS 
@@ -390,7 +428,36 @@ RULE NEW ZnSys:FanHtDsgn
   SIZING
     0
   ANNUAL
-    SumChildren( Fan:SupFanHtDsgn )
+    SumChildrenIf( Fan:FanHtDsgn, Fan:IsSupFan )
+ENDRULE
+// Transfer to coils
+RULE NEW CoilClg:SupFanHtDsgn
+  DATATYPE
+    Float
+  LONGFORM
+    FanHeatDesign
+  ANNUAL
+    if( ParentComp = "ZnSys" )
+    then ZnSys:SupFanHtDsgn
+    else 
+    if( ParentComp = "AirSys" )
+    then AirSys:SupFanHtDsgn
+    else 0
+    endif endif
+ENDRULE
+RULE NEW CoilHtg:SupFanHtDsgn
+  DATATYPE
+    Float
+  LONGFORM
+    FanHeatDesign
+  ANNUAL
+    if( ParentComp = "ZnSys" )
+    then ZnSys:SupFanHtDsgn
+    else 
+    if( ParentComp = "AirSys" )
+    then AirSys:SupFanHtDsgn
+    else 0
+    endif endif
 ENDRULE
 
 
@@ -813,6 +880,73 @@ RULE NEW CoilClg:PumpPwrRtd
     endif
 ENDRULE
 
+RULE NEW CoilHtg:HtPumpCap47Rat
+  DATATYPE
+    Float
+  LONGFORM
+    HeatPumpCapacity47Ratio
+  DESCRIPTION
+    "The adjustment ratio for converting the desgin capacity (DsgnHtgCap) of a heat pump coil at 
+     a the heating design temperature (DsgnHtgDBT) to the capacity at 47°F."
+  HELP
+    "A linear equation is used to adjust the heating capacity determined using a sizing run 
+     at a lower temperature to the capacity at 47°F."
+  ANNUAL
+    if( Type = "HeatPump" )
+    then // Heat pump system sizing performed with resistance coil; adjust to Cap47
+      1 + 0.0167 * ( 47 - Proj:DsgnHtgDBT)
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW CoilHtg:HtPumpCapTotGrossRtd47
+  DATATYPE
+    Float
+  LONGFORM
+    HeatPumpCapacityTotalGrossRated47
+  DESCRIPTION
+    "The gross capacity of a heat pump coil at 47°F using the capacity determined at 
+     a lower temperature."
+  HELP
+    "A linear equation is used to adjust the heating capacity determined using a sizing run 
+     at a lower temperature to the capacity of a heat pump that can achieve that capacity
+     at 47°F."
+  ANNUAL
+    if( BaseSysNum > 0 .AND. Type = "HeatPump" .AND. IfValidAnd( z:CapTotGrossRtdSim >= 0) )
+    then // Heat pump system sizing performed with resistance coil; adjust to Cap47
+      CapTotGrossRtdSim / SysCnt * HtPumpCap47Rat
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW CoilClg:HtPumpSizingCriteria
+  DATATYPE
+    String
+  LONGFORM
+    HeatPumpSizingCriteria
+  DESCRIPTION
+    "The gross capacity of a heat pump coil at 47°F using the capacity determined at 
+     a lower temperature."
+  HELP
+    "A linear equation is used to adjust the heating capacity determined using a sizing run 
+     at a lower temperature to the capacity of a heat pump that can achieve that capacity
+     at 47°F."
+  ANNUAL
+    if( BaseSysNum > 0 .AND. LocalCompAssigned( CoilHtgRef ) )
+    then 
+      if( CoilHtgRef:Type = "HeatPump" )
+      then
+        if( z:CapTotGrossRtdSim / SysCnt + SupFanHtDsgn < 
+             0.75 * CoilHtgRef:HtPumpCapTotGrossRtd47 - SupFanHtDsgn )
+         then "SizedForHeating"
+         else "SizedForCooling"
+         endif
+      else UNDEFINED
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
 // -----------------------------------------------------------------------------
 RULE CoilClg:CapTotGrossRtd
   DESCRIPTION
@@ -871,7 +1005,7 @@ RULE CoilClg:CapTotGrossRtd
       CapTotNetRtd + FanHtRtd
     else 0
     endif endif endif
-  ANNUAL
+  ANNUAL : T24N_2016 T24N_2019
     if( BaseSysNum > 0 )
     then
       if( IfValidAnd( IsDummy > 0 ) )
@@ -887,15 +1021,15 @@ RULE CoilClg:CapTotGrossRtd
           else
           if( ZnSys:SysVentFlow > ZnSys:SupFanCap * ( 1 - Proj:OATolLim ) )
           then // System is 100 % OA, do not apply coil sizing ratio
-            z:CapTotGrossRtdSim / SysCnt + ZnSys:FanHtDsgn
+            z:CapTotGrossRtdSim / SysCnt + SupFanHtDsgn
           else
           if( Type = "DirectExpansion" .OR. Type = "VRF")
           then  // Ensure DX coil cap results in at >280 cfm/ton & < 450 cfm/ton
-            Max( Min( z:CapTotGrossRtdSim / SysCnt * SizingRat + ZnSys:FanHtDsgn,
+            Max( Min( z:CapTotGrossRtdSim / SysCnt * SizingRat + SupFanHtDsgn,
                       ZnSys:SupFanCap / 280 * 12000 ),
                  ZnSys:SupFanCap / 450 * 12000 ) 
           else  // For non-DX system, not need to ensure min cfm/ton
-            z:CapTotGrossRtdSim / SysCnt * SizingRat + ZnSys:FanHtDsgn
+            z:CapTotGrossRtdSim / SysCnt * SizingRat + SupFanHtDsgn
           endif endif endif
         else if( ParentComp = "AirSys" ) 
         then // Is an AirSystem
@@ -908,15 +1042,80 @@ RULE CoilClg:CapTotGrossRtd
 // Remove this case that primarily applies to Labs. See issue 2639
 ;          if( AirSys:SysVentFlow > AirSys:SupFanCap * ( 1 - Proj:OATolLim ) )
 ;          then // System is 100 % OA, do not apply coil sizing ratio
-;            z:CapTotGrossRtdSim / SysCnt + AirSys:FanHtDsgn
+;            z:CapTotGrossRtdSim / SysCnt + SupFanHtDsgn
 ;          else           
           if( Type = "DirectExpansion" )
           then // Ensure DX coil cap results in at >280 cfm/ton & < 450 cfm/ton
-            Max( Min( z:CapTotGrossRtdSim / SysCnt * SizingRat + AirSys:FanHtDsgn,
+            Max( Min( z:CapTotGrossRtdSim / SysCnt * SizingRat + SupFanHtDsgn,
                       AirSys:SupFanCap / 280 * 12000 ),
                  AirSys:SupFanCap / 450 * 12000 )
           else // For non-DX system, not need to ensure min cfm/ton
-            z:CapTotGrossRtdSim / SysCnt * SizingRat + AirSys:FanHtDsgn
+            z:CapTotGrossRtdSim / SysCnt * SizingRat + SupFanHtDsgn
+          endif endif endif
+        else 0
+        endif endif
+      else 0
+      endif endif
+    else z:CapTotGrossRtd
+    endif
+  ANNUAL : T24N
+// For 2022, set HP capacity to be consistent with cooling capacity
+    if( BaseSysNum > 0 )
+    then
+      if( IfValidAnd( IsDummy > 0 ) )
+      then 1
+      else
+      if( IfValidAnd( z:CapTotGrossRtdSim >= 0) .AND. 
+          SysCnt > 0 ) 
+      then
+        if( ParentComp = "ZnSys" )
+        then // Is a ZoneSystem
+          if( ZnSys:BaseHasNoClgZns > 0 )
+          then 1 // Set capacity to 1 if ZnSys serves HasNoClg zone
+          else
+          if( ZnSys:SysVentFlow > ZnSys:SupFanCap * ( 1 - Proj:OATolLim ) )
+          then // System is 100 % OA, do not apply coil sizing ratio
+            z:CapTotGrossRtdSim / SysCnt + SupFanHtDsgn
+          else
+          if( Type = "DirectExpansion" .OR. Type = "VRF")
+          then  // Ensure DX coil cap results in at >280 cfm/ton & < 450 cfm/ton
+            if( LocalCompAssigned( CoilHtgRef ) )
+            then // Is a heat pump
+              Max( Min( Max( z:CapTotGrossRtdSim / SysCnt + SupFanHtDsgn, 
+                             0.75 * CoilHtgRef:HtPumpCapTotGrossRtd47 - SupFanHtDsgn ) * SizingRat,
+                        ZnSys:SupFanCap / 280 * 12000 ),
+                   ZnSys:SupFanCap / 450 * 12000 )
+            else // Is not a heat pump
+              Max( Min( ( z:CapTotGrossRtdSim / SysCnt + SupFanHtDsgn ) * SizingRat,
+                      ZnSys:SupFanCap / 280 * 12000 ),
+                 ZnSys:SupFanCap / 450 * 12000 )
+            endif
+          else  // For non-DX system, not need to ensure min cfm/ton
+            z:CapTotGrossRtdSim / SysCnt * SizingRat + SupFanHtDsgn
+          endif endif endif
+        else if( ParentComp = "AirSys" ) 
+        then // Is an AirSystem
+          if( AirSys:IsSglZnSys .AND. AirSys:BaseHasNoClgZns > 0 )
+          then 1 // Set capacity to 1 if is single-zone AirSys it HasNoClgZns
+          else
+          if( AirSys:IsMultiZnSys .AND. AirSys:BaseHasNoClgZns = AirSys:NumThrmlZnCond )
+          then 1 // Set capacity to 1 if is multi-zone AirSys all zones are HasNoClgZns
+          else      
+          if( Type = "DirectExpansion" )
+          then  // Ensure DX coil cap results in at >280 cfm/ton & < 450 cfm/ton
+            if( LocalCompAssigned( CoilHtgRef ) )
+            then // Is a heat pump
+              Max( Min( Max( ( z:CapTotGrossRtdSim / SysCnt ) + SupFanHtDsgn, 
+                             ( 0.75 * CoilHtgRef:HtPumpCapTotGrossRtd47 ) - SupFanHtDsgn ) * SizingRat,
+                        AirSys:SupFanCap / 280 * 12000 ),
+                   AirSys:SupFanCap / 450 * 12000 )
+            else // Is not a heat pump
+              Max( Min( ( z:CapTotGrossRtdSim / SysCnt + SupFanHtDsgn ) * SizingRat ,
+                      AirSys:SupFanCap / 280 * 12000 ),
+                 AirSys:SupFanCap / 450 * 12000 )
+            endif
+          else // For non-DX system, not need to ensure min cfm/ton
+            z:CapTotGrossRtdSim / SysCnt + SupFanHtDsgn * SizingRat
           endif endif endif
         else 0
         endif endif
@@ -1087,27 +1286,42 @@ RULE AirSys:Type
     then
       if( BaseSysNum = 7 ) 
       then // Is SZVAV
-        if( IsRetailBaseSys > 0 .AND. AirSys:Type = "SZVAVHP" )
+        if( IsRetailBaseSys > 0 )
         then // Is Retail building system
-          if( Proj:CliZnNum >= 2 .AND. Proj:CliZnNum <= 15 ) 
-          then "SZHP"
-          else "SZAC"
-          endif
+          if( AirSys:Type = "SZVAVHP" .AND. Proj:CliZnNum >= 2 .AND. Proj:CliZnNum <= 15 ) 
+          then "SZHP" // Change SZVAVHP -> SZHP for CZ 2-15
+          else
+          if( AirSys:Type = "SZVAVDFHP" )
+          then "SZAC" // Change SZVAVDFHP -> SZAC for CZ 1 & 16
+          else UNCHANGED
+          endif endif
         else
-        if( IsSchoolBaseSys > 0 .AND. Type = "SZVAVHP" )
+        if( IsSchoolBaseSys > 0 )
         then // Is School building system
-          "SZHP"
+          if( AirSys:Type = "SZVAVHP" .AND. Proj:CliZnNum >= 2 .AND. Proj:CliZnNum <= 15 ) 
+          then "SZHP" // Change SZVAVHP -> SZHP for CZ 2-15
+          else
+          if( AirSys:Type = "SZVAVDFHP" )
+          then "SZDFHP" // Change SZVAVDFHP -> SZDFHP for CZ 1 & 16
+          else UNCHANGED
+          endif endif 
         else
-        if( IsOfficeBaseSys > 0 .AND. Type = "SZVAVHP" )
+        if( IsOfficeBaseSys > 0 )
         then // Is Office building system
-          if( Proj:CliZnNum >= 1 .AND. Proj:CliZnNum <= 15 ) 
-          then "SZHP"
-          else "SZAC"
-          endif
+          if( AirSys:Type = "SZVAVHP" .AND. Proj:CliZnNum >= 1 .AND. Proj:CliZnNum <= 15 ) 
+          then "SZHP" // Change SZVAVHP -> SZHP for CZ 1-15
+          else
+          if( AirSys:Type = "SZVAVDFHP" )
+          then "SZDFHP" // Change SZVAVDFHP -> SZHP for CZ 16
+          else UNCHANGED
+          endif endif
         else
-        if( IsWarehouseOfficeBaseSys > 0 .AND. Type = "SZVAVHP" )
+        if( IsWarehouseOfficeBaseSys > 0 )
         then // Is Warehouse building 'Office' system
-          "SZHP"
+          if( AirSys:Type = "SZVAVHP" )
+          then "SZHP" // Change SZVAVHP -> SZHP for all CZ
+          else UNCHANGED
+          endif
         else // Regular NonRes system map
           "SZAC" 
         endif endif endif endif
@@ -1174,7 +1388,7 @@ RULE AirSys:BaseSysNumOpt
   ANNUAL : T24N_2016
     UNCHANGED
   ANNUAL : T24N
-    if( BaseSysNum = 7 .AND.  
+    if( ( BaseSysNum = 7 .OR. BaseSysNum = 3 ) .AND. 
         ( Type = "SZAC" .OR. Type = "SZVAVAC" ) ) 
     then "a"
     else UNCHANGED
@@ -1185,10 +1399,11 @@ RULE NEW AirSys:IsVAVSys
   ANNUAL : T24N_2016
     UNCHANGED
   ANNUAL : T24N
-    if( ( Type = "SZAC" .OR. Type = "SZHP" ) .AND.
-        ( BaseSysNum = 7 .OR.
-          BaseSysNum = 12 .OR.
-          BaseSysNum = 13 ) )
+    if( ( Type = "SZAC" .OR. Type = "SZHP" .OR. Type = "SZDFHP" ) .AND.
+        (  BaseSysNum = 3 .OR.
+           BaseSysNum = 7 .OR.
+           BaseSysNum = 12 .OR.
+           BaseSysNum = 13 ) )
     then 0
     else UNCHANGED
     endif
@@ -1198,10 +1413,11 @@ RULE NEW AirSys:SupFanFlowMin
   ANNUAL : T24N_2016
     UNCHANGED
   ANNUAL : T24N
-    if( ( Type = "SZAC" .OR. Type = "SZHP" ) .AND.
-        ( BaseSysNum = 7 .OR.
-          BaseSysNum = 12 .OR.
-          BaseSysNum = 13 ) )
+    if( ( Type = "SZAC" .OR. Type = "SZHP" .OR. Type = "SZDFHP" ) .AND.
+        (  BaseSysNum = 3 .OR.
+           BaseSysNum = 7 .OR.
+           BaseSysNum = 12 .OR.
+           BaseSysNum = 13 ) )
     then 0
     else UNCHANGED
     endif
@@ -1213,8 +1429,11 @@ RULE ThrmlZn:HtgDsgnMaxFlowFrac
   ANNUAL : T24N
     if( LocalCompAssigned( PriAirCondgSysRef[1] ) > 0 )
     then
-      if( ( PriAirCondgSysRef[1]:Type = "SZAC" .OR. PriAirCondgSysRef[1]:Type = "SZHP" ) .AND.
-          ( PriAirCondgSysRef[1]:BaseSysNum = 7 .OR.
+      if( ( PriAirCondgSysRef[1]:Type = "SZAC" .OR. 
+            PriAirCondgSysRef[1]:Type = "SZHP" .OR.
+            PriAirCondgSysRef[1]:Type = "SZDFHP" ) .AND.
+          ( PriAirCondgSysRef[1]:BaseSysNum = 3 .OR.
+            PriAirCondgSysRef[1]:BaseSysNum = 7 .OR.
             PriAirCondgSysRef[1]:BaseSysNum = 12 .OR.
             PriAirCondgSysRef[1]:BaseSysNum = 13 ) )
       then 0.0 // Setting to 0 results in E+ Sizing:Zone !- Heating Design Air Flow Method
@@ -1229,10 +1448,11 @@ RULE AirSys:AirSeg:Fan:CtrlMthd
   ANNUAL : T24N_2016
     UNCHANGED
   ANNUAL : T24N
-    if( ( SysType = "SZAC" .OR. SysType = "SZHP" ) .AND.
-        ( BaseSysNum = 7 .OR.
-          BaseSysNum = 12 .OR.
-          BaseSysNum = 13 ) )
+    if( ( SysType = "SZAC" .OR. SysType = "SZHP" .OR. SysType = "SZDFHP" ) .AND.
+        (  BaseSysNum = 3 .OR.
+           BaseSysNum = 7 .OR.
+           BaseSysNum = 12 .OR.
+           BaseSysNum = 13 ) )
     then "ConstantVolume"
     else UNCHANGED
     endif
@@ -1242,10 +1462,11 @@ RULE AirSys:AirSeg:Fan:FlowMin
   ANNUAL : T24N_2016
     UNCHANGED
   ANNUAL : T24N
-    if( ( SysType = "SZAC" .OR. SysType = "SZHP" ) .AND.
-        ( BaseSysNum = 7 .OR.
-          BaseSysNum = 12 .OR.
-          BaseSysNum = 13 ) )
+    if( ( SysType = "SZAC" .OR. SysType = "SZHP" .OR. SysType = "SZDFHP" ) .AND.
+        (  BaseSysNum = 3 .OR.
+           BaseSysNum = 7 .OR.
+           BaseSysNum = 12 .OR.
+           BaseSysNum = 13 ) )
     then UNDEFINED
     else UNCHANGED
     endif
@@ -1254,12 +1475,21 @@ RULE AirSys:AirSeg:Fan:FlowMinSim
   ANNUAL : T24N_2016
     UNCHANGED
   ANNUAL : T24N
-    if( ( SysType = "SZAC" .OR. SysType = "SZHP" ) .AND.
-        ( BaseSysNum = 7 .OR.
-          BaseSysNum = 12 .OR.
-          BaseSysNum = 13 ) )
+    if( ( SysType = "SZAC" .OR. SysType = "SZHP" .OR. SysType = "SZDFHP" ) .AND.
+        (  BaseSysNum = 3 .OR.
+           BaseSysNum = 7 .OR.
+           BaseSysNum = 12 .OR.
+           BaseSysNum = 13 ) )
     then UNDEFINED
     else UNCHANGED
+    endif
+ENDRULE
+RULE Fan:FlowMinFrac
+  ANNUAL 
+    if( IfValidAnd( FlowMin > 0 ) .AND.
+        IfValidAnd( FlowCap > 0 ) )
+    then FlowMin / FlowCap
+    else UNDEFINED
     endif
 ENDRULE
 
@@ -1267,10 +1497,11 @@ RULE AirSys:AirSeg:Fan:Pwr_fPLRCrvRef
   ANNUAL : T24N_2016
     UNCHANGED
   ANNUAL : T24N
-    if( ( SysType = "SZAC" .OR. SysType = "SZHP" ) .AND.
-        ( BaseSysNum = 7 .OR.
-          BaseSysNum = 12 .OR.
-          BaseSysNum = 13 ) )
+    if( ( SysType = "SZAC" .OR. SysType = "SZHP" .OR. SysType = "SZDFHP" ) .AND.
+        (  BaseSysNum = 3 .OR.
+           BaseSysNum = 7 .OR.
+           BaseSysNum = 12 .OR.
+           BaseSysNum = 13 ) )
     then UNDEFINED
     else UNCHANGED
     endif
@@ -1280,10 +1511,11 @@ RULE AirSys:TrmlUnit:Type
   ANNUAL : T24N_2016
     UNCHANGED
   ANNUAL : T24N
-    if( ( AirSys:Type = "SZAC" .OR. AirSys:Type = "SZHP" ) .AND.
-        ( BaseSysNum = 7 .OR.
-          BaseSysNum = 12 .OR.
-          BaseSysNum = 13 ) )
+    if( ( AirSys:Type = "SZAC" .OR. AirSys:Type = "SZHP" .OR. AirSys:Type = "SZDFHP" ) .AND.
+        (  BaseSysNum = 3 .OR.
+           BaseSysNum = 7 .OR.
+           BaseSysNum = 12 .OR.
+           BaseSysNum = 13 ) )
     then "Uncontrolled"
     else UNCHANGED
     endif
@@ -1293,8 +1525,9 @@ RULE AirSys:TrmlUnit:PriAirFlowMin
   ANNUAL : T24N_2016
     UNCHANGED
   ANNUAL : T24N
-    if( ( AirSys:Type = "SZAC" .OR. AirSys:Type = "SZHP" ) .AND.
-        ( BaseSysNum = 7 .OR.
+    if( ( AirSys:Type = "SZAC" .OR. AirSys:Type = "SZHP" .OR. AirSys:Type = "SZDFHP" ) .AND.
+        ( BaseSysNum = 3 .OR.
+          BaseSysNum = 7 .OR.
           BaseSysNum = 12 .OR.
           BaseSysNum = 13 ) )
     then UNDEFINED
@@ -1305,10 +1538,11 @@ RULE AirSys:TrmlUnit:PriAirFlowMinSim
   ANNUAL : T24N_2016
     UNCHANGED
   ANNUAL : T24N
-    if( ( AirSys:Type = "SZAC" .OR. AirSys:Type = "SZHP" ) .AND.
-        ( BaseSysNum = 7 .OR.
-          BaseSysNum = 12 .OR.
-          BaseSysNum = 13 ) )
+    if( ( AirSys:Type = "SZAC" .OR. AirSys:Type = "SZHP" .OR. AirSys:Type = "SZDFHP" ) .AND.
+        (  BaseSysNum = 3 .OR.
+           BaseSysNum = 7 .OR.
+           BaseSysNum = 12 .OR.
+           BaseSysNum = 13 ) )
     then UNDEFINED
     else UNCHANGED
     endif
@@ -1364,6 +1598,7 @@ RULE CoilClg:NumClgStages
       then
         if( ( SysType = "SZVAVAC" .OR. 
               SysType = "SZVAVHP" .OR.
+              SysType = "SZVAVDFHP" .OR.
               SysType = "PVAV" ) .AND.
             CndsrType = "Air" )
         then 2 // 2 stage cooling for SZVAV and PVAV systems if 'Air' source
