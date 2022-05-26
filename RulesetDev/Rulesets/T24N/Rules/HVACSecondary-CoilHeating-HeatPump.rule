@@ -477,6 +477,11 @@ TABLE StdHPHtgEfficiency
 ENDTABLE  
 
 // -----------------------------------------------------------------------------
+;; DEBUGGING
+;RULE CoilHtg:Action
+;  SIZING
+;    PostMessageToLog( "      b4 CoilHtg:HtPumpCOP Sizing rule for '%s':  BaseSysNum %g  /  Type %s  /  UserTypeToRestore %s", Name, ValidOr( BaseSysNum, -999 ), Type, ValidOr( UserTypeToRestore, "undef" ) )
+;ENDRULE
 RULE CoilHtg:HtPumpCOP
   DESCRIPTION
     "The heating efficiency of a heat pump at AHRI rated conditions."
@@ -539,7 +544,7 @@ RULE CoilHtg:HtPumpCOP
     else UNCHANGED 
     endif 
   SIZING
-    if( BaseSysNum > 200 .AND. Type = "HeatPump" )
+    if( BaseSysNum > 200 .AND. (Type = "HeatPump" .OR. IfValidAnd( UserTypeToRestore = "HeatPump" )) )
     then
       // default for sizing run purposes (for Res baseline systems only)
       3.0
@@ -616,6 +621,12 @@ ENDRULE
 
 //   -----------------------------------------------------------------------------
 // Adjust rated COP to remove fan heat at AHRI rating condtion
+;; DEBUGGING
+;RULE CoilHtg:Action
+;  ANNUAL
+;    PostMessageToLog( "      b4 CoilHtg:HtPumpCOPAdj Annual rule for '%s':  Type %s  /  BaseSysNum %g  /  CapTotGrossRtd %g  /  HtPumpCOPRnd %g  /  CapTotNetRtd %g", 
+;                                     Name, Type, ValidOr( BaseSysNum, 0 ), ValidOr( CapTotGrossRtd, -999 ), ValidOr( HtPumpCOPRnd, -999 ), ValidOr( CapTotNetRtd, -999 ) )
+;ENDRULE
 RULE CoilHtg:HtPumpCOPAdj
   DESCRIPTION
     "The heating efficiency of a  heat pump heating system at AHRI 
@@ -654,8 +665,10 @@ RULE CoilHtg:HtPumpCOPAdj
       then
         ( CapTotGrossRtd / 3.412 ) / ; CapTotGrossRtd = CapTotNetRtd - FanHtRtd
         ( ( CapTotNetRtd / ( HtPumpCOPRnd * 3.412 ) ) - ( FanHtRtd / 3.412 ) - PumpPwrRtd )
-      else 0
-      endif
+      else if (IfValidAnd( HtPumpCOPRnd > 0 ))
+      then  HtPumpCOPRnd   // handles case where autosized cap(s) are 0 - preventing later eval error
+      else  0
+      endif endif
     else UNCHANGED
     endif
 ENDRULE
@@ -714,13 +727,53 @@ RULE CoilHtg:HtPumpEIR_fTempCrvRef
   SIZING
     if( Type = "HeatPump" .AND. IfValidAnd( CndsrType = "Air" ) )
     then
-      RuleLibrary(CrvCubic, "CoilHtgHPEIRRatio_fToadbSI")
+      if( ServesResZn > 0 )
+      then RuleLibrary(CrvCubic, "CoilHtgHPEIRRatio_fToadbIP") 
+      else RuleLibrary(CrvCubic, "CoilHtgHPEIRRatio_fToadbSI")
+      endif
     else UNDEFINED
     endif
-  ANNUAL 
-    if( Type = "HeatPump" .AND. IfValidAnd( CndsrType = "Air" ) )
+  ANNUAL
+    if( BaseSysNum > 0 .AND. Type = "HeatPump" .AND. IfValidAnd( CndsrType = "Air" ) )
+    then 
+      if( ServesResZn > 0 )
+      then RuleLibrary(CrvCubic, "CoilHtgHPEIRRatio_fToadbIP") 
+      else RuleLibrary(CrvCubic, "CoilHtgHPEIRRatio_fToadbSI")
+      endif
+    else UNCHANGED
+    endif
+ENDRULE
+
+;; DEBUGGING
+;RULE CoilHtg:Action
+;  ANNUAL
+;    PostMessageToLog( "      b4 CoilHtg:HtPumpCOP17Adj Annual rule for '%s':  Type %s  /  HtPumpEIR %g", Name, Type, ValidOr( HtPumpEIR, -999 ) )
+;ENDRULE
+RULE NEW CoilHtg:HtPumpCOP17Adj
+  DATATYPE
+    Float
+  LONGFORM
+    HeatPumpCOP17Adjusted
+  DESCRIPTION
+    "The heating efficiency of aan air-source heat pump at 17°F, adjusted to remove fan energy."
+  SIZING
+    if( Type = "HeatPump" .AND. IfValidAnd( CndsrType = "Air" ) .AND.
+        LocalCompAssigned( HtPumpEIR_fTempCrvRef ) = ComponentType( "CrvCubic" ) )
     then
-      RuleLibrary(CrvCubic, "CoilHtgHPEIRRatio_fToadbSI")
+      1 / ( HtPumpEIR * ( HtPumpEIR_fTempCrvRef:Coef1 + 
+                        ( HtPumpEIR_fTempCrvRef:Coef2 * 17 ) +
+                        ( HtPumpEIR_fTempCrvRef:Coef3 * pow( 17, 2 ) ) +                         
+                        ( HtPumpEIR_fTempCrvRef:Coef4 * pow( 17, 3 ) ) ) )       
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( Type = "HeatPump" .AND. IfValidAnd( CndsrType = "Air" ) .AND.
+        LocalCompAssigned( HtPumpEIR_fTempCrvRef ) = ComponentType( "CrvCubic" ) )
+    then
+      1 / ( HtPumpEIR * ( HtPumpEIR_fTempCrvRef:Coef1 + 
+                        ( HtPumpEIR_fTempCrvRef:Coef2 * 17 ) +
+                        ( HtPumpEIR_fTempCrvRef:Coef3 * pow( 17, 2 ) ) +                         
+                        ( HtPumpEIR_fTempCrvRef:Coef4 * pow( 17, 3 ) ) ) )       
     else UNDEFINED
     endif
 ENDRULE
@@ -738,14 +791,20 @@ RULE CoilHtg:HtPumpEIR_fPLFCrvRef
   SIZING
     if( Type = "HeatPump" .AND. IfValidAnd( CndsrType = "Air" ) )
     then
-      RuleLibrary(CrvQuad, "CoilHtgHPEIRRatio_fQFrac") 
+      if( ServesResZn > 0 )
+      then UNDEFINED
+      else RuleLibrary(CrvQuad, "CoilHtgHPEIRRatio_fQFrac")
+      endif
     else UNDEFINED
     endif
   ANNUAL 
-    if( Type = "HeatPump" .AND. IfValidAnd( CndsrType = "Air" ) )
-    then
-      RuleLibrary(CrvQuad, "CoilHtgHPEIRRatio_fQFrac") 
-    else UNDEFINED
+    if( BaseSysNum > 0 .AND. Type = "HeatPump" .AND. IfValidAnd( CndsrType = "Air" ) )
+    then 
+      if( ServesResZn > 0 )
+      then UNDEFINED 
+      else RuleLibrary(CrvQuad, "CoilHtgHPEIRRatio_fQFrac")
+      endif
+    else UNCHANGED
     endif
 ENDRULE
 
@@ -760,14 +819,20 @@ RULE CoilHtg:HtPumpEIR_fFlowCrvRef
   SIZING
     if( Type = "HeatPump" .AND. IfValidAnd( CndsrType = "Air" ) )
     then
-      RuleLibrary(CrvQuad, "CoilHtgHPEIRRatio_fCFMRatio")
+      if( ServesResZn > 0 )
+      then UNDEFINED
+      else RuleLibrary(CrvQuad, "CoilHtgHPEIRRatio_fCFMRatio")
+      endif
     else UNDEFINED
     endif
   ANNUAL 
-    if( Type = "HeatPump" .AND. IfValidAnd( CndsrType = "Air" ) )
-    then
-      RuleLibrary(CrvQuad, "CoilHtgHPEIRRatio_fCFMRatio")
-    else UNDEFINED
+    if( BaseSysNum > 0 .AND. Type = "HeatPump" .AND. IfValidAnd( CndsrType = "Air" ) )
+    then 
+      if( ServesResZn > 0 )
+      then UNDEFINED 
+      else RuleLibrary(CrvQuad, "CoilHtgHPEIRRatio_fCFMRatio")
+      endif
+    else UNCHANGED
     endif
 ENDRULE
 
@@ -775,8 +840,7 @@ ENDRULE
 // ********** Heat Pump Compressor Minimum Operating Temp **********************
 RULE CoilHtg:HtPumpCprsrLockoutTemp
   DESCRIPTION
-    "The outside dry-bulb temperature below which the heat pump supplemental 
-     heating is allowed to operate."
+    "The outside dry-bulb temperature below which the compressor is shut-off."
   REFERENCE 
     NACM Section 5.7.6.5
   INPUTCLASS 
@@ -789,7 +853,7 @@ RULE CoilHtg:HtPumpCprsrLockoutTemp
     °F
   REPORTPRECISION
     0
-  DEFAULT
+  DEFAULT : T24N_2016 T24N_2016 S901G
     if( Type = "HeatPump" )
     then
       if( CndsrType = "Air" )
@@ -802,6 +866,28 @@ RULE CoilHtg:HtPumpCprsrLockoutTemp
           endif
         else 17
         endif
+      else if( CndsrType = "WaterSource" )
+      then -50
+      else UNDEFINED
+      endif endif
+    else UNDEFINED
+    endif
+  DEFAULT : T24N
+    if( Type = "HeatPump" )
+    then
+      if( CndsrType = "Air" )
+      then 
+        if( ParentComp = "ZnSys" )
+        then
+          if( SysType = "PTHP" )
+          then 35 // For PTHP
+          else 17
+          endif
+        else
+        if( ServesResZn > 0 )
+        then 0 // ResAirSys, per BW
+        else 17 // NRes AirSys
+        endif endif
       else if( CndsrType = "WaterSource" )
       then -50
       else UNDEFINED
@@ -872,10 +958,13 @@ RULE CoilHtg:HtPumpCprsrLockoutTemp
         else
         if( ParentComp = "AirSys" )
         then
+          if( ServesResZn > 0 )
+          then 0 // ResAirSys, revised to 0 per BW
+          else
           if( IfValidAnd( AirSys:BaseSysNumOpt = "c" ) )
           then 45 // Is a dual-fuel (DF) heat pump
-          else 17
-          endif
+          else 17 // Same as previous
+          endif endif
         else 17
         endif endif
       else UNCHANGED
@@ -985,7 +1074,7 @@ RULE CoilHtg:HtPumpSuppCoilHtgRef
                    coil is defined. Coil '%s' must deleted from the system.",
                    Name, HtPumpSuppCoilHtgRef:Name )
       else
-      if( Type = "HeatPump" .AND. AirSys:ServesResZn > 0 .AND. 
+      if( Type = "HeatPump" .AND. ServesResZn > 0 .AND. 
           HtPumpSuppCoilHtgRef:Type != "Resistance" .AND. 
           HtPumpSuppCoilHtgRef:Type != "Furnace" )
       then
@@ -1045,7 +1134,7 @@ RULE CoilHtg:HtPumpSuppTemp
         LocalCompAssigned( HtPumpSuppCoilHtgRef ) > 0 .AND.
         IfValidAnd( HtPumpCprsrLockoutTemp > HtPumpSuppTemp ) )
     then
-      if( AirSys:ServesResZn > 0 )
+      if( ServesResZn > 0 )
       then UNCHANGED // Modeled in CSE
       else 
         PostWarning("The supplemental heating temperature operation (shut-off) limit for 
@@ -1072,7 +1161,7 @@ RULE CoilHtg:HtPumpSuppTemp
         IfValidAnd( CapTotNetRtd > 1 ) .AND.
         LocalCompAssigned( HtPumpSuppCoilHtgRef ) > 0 )
     then
-      if( AirSys:ServesResZn > 0 )
+      if( ServesResZn > 0 )
       then UNCHANGED // Modeled in CSE
       else 
         PostWarning("The heat pump coil '%s' is part of an AirSystem, and therefore
@@ -1087,7 +1176,7 @@ RULE CoilHtg:HtPumpSuppTemp
     if( Type = "HeatPump" .AND. LocalCompAssigned( HtPumpSuppCoilHtgRef ) > 0 )
     then 
       if( BaseSysNum > 0 )
-      then 40
+      then Max( ValidOr( HtPumpCprsrEnableTemp, 0 ), 40 )
       else UNCHANGED
       endif
     else UNDEFINED
@@ -1249,12 +1338,25 @@ RULE CoilHtg:HtPumpCrankcaseHtrCap
     Optional
   UNITS 
     Btu/h
-  ANNUAL 
-    if( BaseSysNum > 0 .OR. 
-        Type != "HeatPump" .OR.
-        IfValidAnd( CndsrType != "Air" ) )
-    then UNDEFINED
-    else HtPumpCrankcaseHtrCap
+  DEFAULT
+    if( Type = "HeatPump" )
+    then 
+      if( LocalCompAssigned( CoilClgRef ) )
+      then // Synchronize w/ DX coil
+        CoilClgRef:DXCrankcaseHtrCap
+      else UNCHANGED
+      endif
+    else 0
+    endif
+  ANNUAL
+    if( Type = "HeatPump" )
+    then 
+      if( LocalCompAssigned( CoilClgRef ) )
+      then // Synchronize w/ DX coil
+        CoilClgRef:DXCrankcaseHtrCap
+      else UNCHANGED
+      endif
+    else 0
     endif
 ENDRULE
 
@@ -1280,7 +1382,7 @@ RULE CoilHtg:HtPumpCrankcaseCtrlTemp
     "The outdoor air dry-bulb temperature above which the crank case heater is 
      not permitted to operate."
   HELP
-    "Only applicable if Type = 'HeatPump' and CondenserType = 'Air'."
+    "Only applicable if Type = 'HeatPump'."
   REFERENCE 
     NACM Section 5.7.6.5
   INPUTCLASS 
@@ -1294,17 +1396,23 @@ RULE CoilHtg:HtPumpCrankcaseCtrlTemp
   REPORTPRECISION
     0
   DEFAULT
-    if( Type = "HeatPump" .AND.
-        IfValidAnd( CndsrType = "Air" ) .AND.
-        IfValidAnd( HtPumpCrankcaseHtrCap > 0 ) )
-    then 50
+    if( Type = "HeatPump" .AND. IfValidAnd( HtPumpCrankcaseHtrCap > 0 ) )
+    then
+      if( LocalCompAssigned( CoilClgRef ) )
+      then // Synchronize w/ DX coil
+        CoilClgRef:DXCrankcaseCtrlTemp
+      else 50
+      endif
     else UNDEFINED
     endif
   ANNUAL
-    if( Type = "HeatPump" .AND.
-        IfValidAnd( CndsrType = "Air" ) .AND.
-        IfValidAnd( HtPumpCrankcaseHtrCap > 0 ) )
-    then HtPumpCrankcaseCtrlTemp
+    if( Type = "HeatPump" .AND. IfValidAnd( HtPumpCrankcaseHtrCap > 0 ) )
+    then
+      if( LocalCompAssigned( CoilClgRef ) )
+      then // Synchronize w/ DX coil
+        CoilClgRef:DXCrankcaseCtrlTemp
+      else UNCHANGED
+      endif
     else UNDEFINED
     endif
 ENDRULE

@@ -144,6 +144,34 @@ RULE NEW CoilClg:ParentComp
 ENDRULE
 
 // -----------------------------------------------------------------------------
+// Whether system serves a ResZn
+RULE NEW CoilClg:ServesResZn
+  DATATYPE
+    Integer
+  LONGFORM
+    ServesResidentialZone
+  DESCRIPTION
+    "Whether the coil is part of an AirSystem that serves a ResOtherZn."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( ParentComp = "AirSys" )
+    then ValidOr( AirSys:ServesResZn, 0 )
+    else 0
+    endif
+  SIZING
+    if( ParentComp = "AirSys" )
+    then ValidOr( AirSys:ServesResZn, 0 )
+    else 0
+    endif
+  ANNUAL
+    if( ParentComp = "AirSys" )
+    then ValidOr( AirSys:ServesResZn, 0 )
+    else 0
+    endif
+ENDRULE 
+
+// -----------------------------------------------------------------------------
 // SystemType set to property of local component, for screens, rules etc
 RULE NEW CoilClg:SysType
   DATATYPE
@@ -555,17 +583,25 @@ RULE CoilClg:Type
       CoilClg:FluidSegInRef
       CoilClg:FluidSegOutRef
   CHECKSIM
+    if( ParentComp = "AirSys" )
+    then 
+      if( ServesResZn > 0 .AND. ( Type = "ChilledWater" .OR. Type = "VRF" ) )
+      then
+        PostError("CoilClg '%s' is part a system that serves a ResidentialOtherZone.
+                   Only Type = 'DirectExpansion' is supported.", Name)
+      else UNCHANGED
+      endif
+    else
     if( ParentComp = "ZnSys" )
     then 
-      if( Type != "ChilledWater" .AND. 
-          ZnSys:Type = "Radiant" )
+      if( Type != "ChilledWater" .AND. ZnSys:Type = "Radiant" )
       then
         PostError(" ZoneSystem '%s' is Type = 'Radiant', which is only
                    supported for Coil of Type = ChilledWater", ZnSys:Name)
       else UNCHANGED
       endif
     else UNCHANGED
-    endif    
+    endif endif  
   SIZING
     if( BaseSysNum > 0 )
     then // Baseline system definitions defined by Library_HVAC.txt file.
@@ -624,24 +660,36 @@ RULE CoilClg:CndsrType
       endif
     else UNDEFINED
     endif
-  CHECKCODE
+  CHECKSIM
     if( Type = "DirectExpansion" .AND. LocalStatus( CndsrType ) = 0 ) 
     then
       PostError("Condenser type is a required input for DX coil '%s'.", Name)
     else
-    if( ParentComp = "ZnSys" .AND. CndsrType = "WaterSource" .AND.
-        SysType != "WSHP" ) 
+    if( ParentComp = "AirSys" )
     then 
-      PostError("Cooling coil '%s' with condenser type = 'WaterSource' is not 
-                 allowed for system Type = '%s'.", Name, SysType)
-    else
-    if( ParentComp = "AirSys" .AND. CndsrType = "WaterSource" .AND. 
+      if( CndsrType = "WaterSource" .AND. 
         ( SysType = "SPVAC" .OR. SysType = "SPVHP" .OR. 
           SysType = "PTAC" .OR. SysType = "PTHP" .OR.
           SysType = "HV") )
+      then
+        PostError("Cooling coil '%s' with condenser type = 'WaterSource' is not 
+                   allowed for system Type = '%s'.", Name, SysType)
+      else
+      if( ServesResZn > 0 .AND. CndsrType = "WaterSource" )
+      then
+        PostError("CoilClg '%s' is part a system that serves a ResidentialOtherZone.
+                   Only CondenserType = 'Air' is supported.", Name)
+      else UNCHANGED
+      endif endif
+    else
+    if( ParentComp = "ZnSys" )
     then
-      PostError("Cooling coil '%s' with condenser type = 'WaterSource' is not 
-                 allowed for system Type = '%s'.", Name, SysType)
+      if( CndsrType = "WaterSource" .AND. SysType != "WSHP" ) 
+      then 
+        PostError("Cooling coil '%s' with condenser type = 'WaterSource' is not 
+                   allowed for system Type = '%s'.", Name, SysType)
+      else UNCHANGED
+      endif
     else UNCHANGED
     endif endif endif
   SIZING
@@ -690,7 +738,7 @@ RULE AirSys:AirSeg:CoilClg:CapTotNetRtd
   HELP
     "The net capacity is the total cooling capacity of the coil after adjusting  
      for fan heat at rated conditions. This is a required input for Type =
-     'DirectExpansion' coils."
+     'DirectExpansion' coils, and for air-source is the capacity at AHRI 95°F condition."
   REFERENCE 
     NACM Section 5.7.5.1
   INPUTCLASS 
@@ -880,6 +928,7 @@ RULE NEW CoilClg:PumpPwrRtd
     endif
 ENDRULE
 
+// CoilHtg/CoilClg properties for sizing heat pumps
 RULE NEW CoilHtg:HtPumpCap47Rat
   DATATYPE
     Float
@@ -894,12 +943,28 @@ RULE NEW CoilHtg:HtPumpCap47Rat
   ANNUAL
     if( Type = "HeatPump" )
     then // Heat pump system sizing performed with resistance coil; adjust to Cap47
-      1 + 0.0167 * ( 47 - Proj:DsgnHtgDBT)
+      1 + 0.0167 * ( 47 - Proj:DsgnHtgDBT )
     else UNDEFINED
     endif
 ENDRULE
 
-RULE NEW CoilHtg:HtPumpCapTotGrossRtd47
+RULE NEW CoilHtg:HtPumpSizingCapTotGrossRtd
+  DATATYPE
+    Float
+  LONGFORM
+    HeatPumpCapacityTotalGrossRated
+  DESCRIPTION
+    "The gross capacity of the coil used for sizing the heat pump (typically electric)."
+  ANNUAL
+    if( BaseSysNum > 0 .AND. Type = "HeatPump" .AND. 
+        IfValidAnd( z:CapTotGrossRtdSim >= 0) )
+    then // Heat pump system sizing performed with resistance coil; adjust to Cap47
+      z:CapTotGrossRtdSim / SysCnt 
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW CoilHtg:HtPumpSizingCapTotGrossRtd47
   DATATYPE
     Float
   LONGFORM
@@ -912,9 +977,10 @@ RULE NEW CoilHtg:HtPumpCapTotGrossRtd47
      at a lower temperature to the capacity of a heat pump that can achieve that capacity
      at 47°F."
   ANNUAL
-    if( BaseSysNum > 0 .AND. Type = "HeatPump" .AND. IfValidAnd( z:CapTotGrossRtdSim >= 0) )
+    if( BaseSysNum > 0 .AND. Type = "HeatPump" .AND. 
+        IfValidAnd( HtPumpSizingCapTotGrossRtd >= 0) )
     then // Heat pump system sizing performed with resistance coil; adjust to Cap47
-      CapTotGrossRtdSim / SysCnt * HtPumpCap47Rat
+      HtPumpSizingCapTotGrossRtd * HtPumpCap47Rat
     else UNDEFINED
     endif
 ENDRULE
@@ -937,8 +1003,9 @@ RULE NEW CoilClg:HtPumpSizingCriteria
       if( CoilHtgRef:Type = "HeatPump" )
       then
         if( z:CapTotGrossRtdSim / SysCnt + SupFanHtDsgn < 
-             0.75 * CoilHtgRef:HtPumpCapTotGrossRtd47 - SupFanHtDsgn )
-         then "SizedForHeating"
+             0.75 * CoilHtgRef:HtPumpSizingCapTotGrossRtd47 - SupFanHtDsgn )
+         then // Cap95 is less than 75% of autosized Cap47
+           "SizedForHeating"
          else "SizedForCooling"
          endif
       else UNDEFINED
@@ -954,7 +1021,8 @@ RULE CoilClg:CapTotGrossRtd
      coil or packaged DX system at AHRI rating conditions."
   HELP
     "The gross capacity is the total cooling capacity without adjustments for 
-     fan heat. This is a required input for Type = 'ChilledWater' coils."
+     fan heat. This is a required input for Type = 'ChilledWater' coils.
+     For air-source DX coils this is the capacity at AHRI 95°F condition."
   REFERENCE 
     NACM Section 5.7.5.1
   INPUTCLASS 
@@ -1082,7 +1150,7 @@ RULE CoilClg:CapTotGrossRtd
             if( LocalCompAssigned( CoilHtgRef ) )
             then // Is a heat pump
               Max( Min( Max( z:CapTotGrossRtdSim / SysCnt + SupFanHtDsgn, 
-                             0.75 * CoilHtgRef:HtPumpCapTotGrossRtd47 - SupFanHtDsgn ) * SizingRat,
+                             0.75 * CoilHtgRef:HtPumpSizingCapTotGrossRtd47 - SupFanHtDsgn ) * SizingRat,
                         ZnSys:SupFanCap / 280 * 12000 ),
                    ZnSys:SupFanCap / 450 * 12000 )
             else // Is not a heat pump
@@ -1106,7 +1174,7 @@ RULE CoilClg:CapTotGrossRtd
             if( LocalCompAssigned( CoilHtgRef ) )
             then // Is a heat pump
               Max( Min( Max( ( z:CapTotGrossRtdSim / SysCnt ) + SupFanHtDsgn, 
-                             ( 0.75 * CoilHtgRef:HtPumpCapTotGrossRtd47 ) - SupFanHtDsgn ) * SizingRat,
+                             ( 0.75 * CoilHtgRef:HtPumpSizingCapTotGrossRtd47 ) - SupFanHtDsgn ) * SizingRat,
                         AirSys:SupFanCap / 280 * 12000 ),
                    AirSys:SupFanCap / 450 * 12000 )
             else // Is not a heat pump
@@ -1574,21 +1642,23 @@ RULE CoilClg:NumClgStages
   REPORTPRECISION
     0
   DEFAULT
-    if( Type = "DirectExpansion" .AND. 
-        ParentComp = "AirSys" )
+    if( Type = "DirectExpansion" .AND. ParentComp = "AirSys" )
     then 1
     else UNDEFINED
     endif
   SIZING
-    if( Type = "DirectExpansion" .AND. 
-        ParentComp = "AirSys" )
+    if( Type = "DirectExpansion" .AND. ParentComp = "AirSys" )
     then
+      if( ServesResZn > 0 )
+      then 1
+      else
       if( BaseSysNum > 0 )
       then 1 // Sizing performed with 1-stage heating/cooling
-      else if( CndsrType != "Air" )
+      else
+      if( CndsrType != "Air" )
       then 1
       else NumClgStages
-      endif endif
+      endif endif endif
     else UNDEFINED
     endif
   ANNUAL
@@ -1745,23 +1815,33 @@ RULE CoilClg:Cap_fTempCrvRef
     then
       if( CndsrType = "WaterSource" ) 
       then UNDEFINED
-        // RuleLibrary(QuadplLin, "CoilClgWSDXQRatio_fTwbRatioTwtRatioCFMRatioGPMRatioSI")
-      else if( ParentComp = "ZnSys" )
-      then if ( SysType = "PTAC" .OR. SysType = "PTHP"  .OR.
-                SysType = "SPVAC" .OR. SysType = "SPVHP" )
+      // Currently the translator is using hard-coded coefficients in the WLHP objects
+      // RuleLibrary(QuadplLin, "CoilClgWSDXQRatio_fTwbRatioTwtRatioCFMRatioGPMRatioSI")
+      else
+      if( ParentComp = "ZnSys" )
+      then
+        if( SysType = "PTAC" .OR. SysType = "PTHP"  .OR.
+            SysType = "SPVAC" .OR. SysType = "SPVHP" )
         then RuleLibrary(CrvDblQuad, "CoilClgPTACQRatio_fTwbToadbSI")
         else RuleLibrary( CrvDblQuad, "CoilClgDXQRatio_fTwbToadbSI" )
         endif
-      else if( ParentComp = "AirSys" )
-      then if( ( SysType = "PTAC" .OR. SysType = "PTHP"  .OR.
-                 SysType = "SPVAC" .OR. SysType = "SPVHP" ) .AND.
-                 Parent2( HasAirEcono ) != 1 )
+      else
+      if( ParentComp = "AirSys" )
+      then
+        if( ServesResZn > 0 )
+        then // Use IP version for CSE
+          RuleLibrary( CrvDblQuad, "CoilClgDXQRatio_fTwbToadbIP" )
+        else
+        if( ( SysType = "PTAC" .OR. SysType = "PTHP"  .OR.
+               SysType = "SPVAC" .OR. SysType = "SPVHP" ) .AND.
+             IfValidAnd( AirSys:HasAirEcono = 0 ) )
         then RuleLibrary(CrvDblQuad, "CoilClgPTACQRatio_fTwbToadbSI")
         else RuleLibrary( CrvDblQuad, "CoilClgDXQRatio_fTwbToadbSI" )
-        endif
+        endif endif
       else UNDEFINED  // Should never land here
       endif endif endif
-    else if( Type = "VRF" )
+    else
+    if( Type = "VRF" )
     then RuleLibrary(CrvDblQuad, "CoilClgVRFClgQratio_fTwbTdbSI")
     else UNDEFINED // Not used for other coils
     endif endif
@@ -1779,11 +1859,6 @@ RULE CoilClg:LatModelingMthd
   OPTION
     NTUEffectiveness
 ;   BypassFactor - Not used with E+
-  DEFAULT
-    if( Type = "DirectExpansion" .AND. CndsrType = "Air" )
-    then "NTUEffectiveness"
-    else UNDEFINED // Not used for other E+ cooling coil models
-    endif
   SIZING
     if( Type = "DirectExpansion" .AND. CndsrType = "Air" )
     then "NTUEffectiveness"
@@ -1803,19 +1878,33 @@ RULE CoilClg:Cap_fFlowCrvRef
   SIZING
     if( Type = "VRF" )
     then RuleLibrary(CrvCubic, "CoilClgVRFClgQratio_fCFMRatioSI")
-    else if( IfValidAnd( LatModelingMthd = "NTUEffectiveness" ) )
-    then RuleLibrary(CrvQuad, "CoilClgDXSnglQRatio_fCFMRatio")
+    else
+    if( Type = "DirectExpansion" )
+    then 
+      if( IfValidAnd( LatModelingMthd = "NTUEffectiveness" ) )
+      then RuleLibrary(CrvQuad, "CoilClgDXSnglQRatio_fCFMRatio")
+      else UNDEFINED
+      endif
     else UNDEFINED
     endif endif
   ANNUAL
     if( Type = "VRF" )
     then RuleLibrary(CrvCubic, "CoilClgVRFClgQratio_fCFMRatioSI")
-    else if( IfValidAnd( LatModelingMthd = "NTUEffectiveness" ) )
-    then 
-      if( IfValidAnd( NumClgStages > 1 ) )
-      then RuleLibrary(CrvCubic, "CoilClgDXDblQRatio_fCFMRatio")
-      else RuleLibrary(CrvQuad, "CoilClgDXSnglQRatio_fCFMRatio")
-      endif
+    else
+    if( Type = "DirectExpansion" )
+    then
+      if( ServesResZn > 0 )
+      then // For CSE
+        RuleLibrary( CrvCubic, "CoilClgDXSnglQRatio_fCFMRatio" )
+      else
+      if( IfValidAnd( LatModelingMthd = "NTUEffectiveness" ) )
+      then 
+        if( IfValidAnd( NumClgStages > 1 ) )
+        then RuleLibrary(CrvCubic, "CoilClgDXDblQRatio_fCFMRatio")
+        else RuleLibrary(CrvQuad, "CoilClgDXSnglQRatio_fCFMRatio")
+        endif
+      else UNDEFINED
+      endif endif
     else UNDEFINED
     endif endif
 ENDRULE

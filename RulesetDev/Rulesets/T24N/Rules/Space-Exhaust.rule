@@ -993,28 +993,36 @@ RULE NEW Spc:CodeExhContPerFixture
     endif
 ENDRULE
 
+RULE NEW Spc:CodeExhIntrmtPerFixture
+  DATATYPE
+    Float
+  LONGFORM
+    CodeExhaustIntermittentPerFixture
+  DESCRIPTION
+    "The code required intermittent exhaust air flow rate per fixture 
+     (toilet, showerhead, etc)."
+  INPUTCLASS
+    NotInput
+  UNITS
+    cfm
+  DEFAULT : T24N_2016
+    0
+  DEFAULT
+    if( VentIsRequired > 0 )
+    then VentilationSpaceFunctionData:CodeExhIntrmtPerFixture("VentFuncType", VentSpcFunc)    
+    else 0
+    endif
+ENDRULE
+
 // Not yet supported
-;RULE NEW Spc:CodeExhIntrmtPerFixture
-;  DATATYPE
-;    Float
-;  LONGFORM
-;    CodeExhaustIntermittentPerFixture
+;RULE Spc:ExhIntrmtPerFixture
 ;  DESCRIPTION
-;    "The code required intermittent exhaust air flow rate per fixture 
+;    "The intermittent exhaust air flow rate per fixture 
 ;     (toilet, showerhead, etc)."
 ;  INPUTCLASS
-;    NotInput
+;    Default
 ;  UNITS
 ;    cfm
-;  DEFAULT : T24N_2016
-;    0
-;  DEFAULT : T24N
-;    if( IfValidAnd( VentSpcFunc != "NA" ) )
-;    then VentilationSpaceFunctionData:CodeExhIntrmtPerFixture("VentFuncType", VentSpcFunc) 
-;    else 0
-;    endif
-;  DEFAULT : S901G ECBC
-;    0
 ;ENDRULE
 
 // Per Spc
@@ -1037,9 +1045,12 @@ RULE NEW Spc:CodeExhPerSpc
     then // For labs use user input
       ValidOr( ExhPerSpc, 0 )
     else
-    if( CodeExhContPerFixture > 0 )
-    then // Use ExhPerSpc for fixture dependent flow
-      CodeExhContPerFixture * ValidOr( ExhNumFixtures, 0 )
+    if( IfValidAnd( CodeExhContPerFixture > 0 ) )
+    then 
+      if( IfValidAnd( IsIntrmtExh > 0 ) .AND. IfValidAnd( CodeExhIntrmtPerFixture > 0 ) )
+      then 0
+      else ValidOr( ExhNumFixtures, 0 ) * CodeExhContPerFixture
+      endif
     else 0
     endif endif endif
 ENDRULE
@@ -1216,10 +1227,13 @@ RULE Spc:ExhContPerFixture
   DEFAULT : T24N_2016
     0
   DEFAULT
+    if( IfValidAnd( IsIntrmtExh > 0 ) )
+    then 0
+    else
     if( LocalCompAssigned( SpcFuncDefaultsRef ) .AND. LocalStatus( SpcFunc ) < 5 )
     then SpcFuncDefaultsRef:ExhContPerFixture
     else CodeExhContPerFixture
-    endif
+    endif endif
 ENDRULE
 
 RULE Spc:ExhNumFixtures
@@ -1237,6 +1251,7 @@ RULE Spc:ExhNumFixtures
     endif
   CHECKCODE
     if( IfValidAnd( CodeExhContPerFixture > 0 ) .AND.
+        IfValidAnd( IsIntrmtExh = 0 ) .AND.
         IfValidAnd( ExhNumFixtures = 0 ) )
     then
       PostError("Space '%s' has a VentilationSpaceFunction specified that has
@@ -1244,6 +1259,23 @@ RULE Spc:ExhNumFixtures
                  0 fixtures has been specified.", Name)
     else UNCHANGED
     endif
+ENDRULE
+
+RULE Spc:IsIntrmtExh
+  DESCRIPTION
+    "A flag that indicates the exhaust system is intermittent. 
+     (toilet, showerhead, etc)."
+  HELP
+    "If the space requires exhaust but it can be an intermittentantly operating system, 
+     checking this flag zeros out the default calculated exhaust and removes the requirement 
+     to model an exhaust system. 
+     However, if the proposed model still has a user-specified non-zero TOTAL exhaust flow
+     specified for the space, an exhaust system must be defined. Set the exhaust flow to 0 to
+     to eliminate the requirement to modeling it."
+  INPUTCLASS
+    Optional
+  DEFAULT
+    0
 ENDRULE
 
 RULE Spc:ExhPerSpc
@@ -1265,8 +1297,8 @@ RULE Spc:ExhPerSpc
     else 0
     endif endif
   DEFAULT
-    if( ExhContPerFixture > 0 )
-    then ExhContPerFixture * ExhNumFixtures
+    if( IfValidAnd( CodeExhContPerFixture > 0 ) )
+    then ExhNumFixtures * ExhContPerFixture
     else
     if( LocalCompAssigned( SpcFuncDefaultsRef ) .AND. LocalStatus( SpcFunc ) < 5 )
     then SpcFuncDefaultsRef:ExhPerSpc

@@ -183,6 +183,34 @@ RULE NEW CoilHtg:ParentComp
 ENDRULE
 
 // -----------------------------------------------------------------------------
+// Whether system serves a ResZn
+RULE NEW CoilHtg:ServesResZn
+  DATATYPE
+    Integer
+  LONGFORM
+    ServesResidentialZone
+  DESCRIPTION
+    "Whether the coil is part of an AirSystem that serves a ResOtherZn."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( ParentComp = "AirSys" )
+    then ValidOr( AirSys:ServesResZn, 0 )
+    else 0
+    endif
+  SIZING
+    if( ParentComp = "AirSys" )
+    then ValidOr( AirSys:ServesResZn, 0 )
+    else 0
+    endif
+  ANNUAL
+    if( ParentComp = "AirSys" )
+    then ValidOr( AirSys:ServesResZn, 0 )
+    else 0
+    endif
+ENDRULE 
+
+// -----------------------------------------------------------------------------
 // SystemType set to property of local component, for screens, rules etc
 RULE NEW CoilHtg:SysType
   DATATYPE
@@ -574,6 +602,15 @@ RULE CoilHtg:Type
       CoilHtg:FluidSegInRef
       CoilHtg:FluidSegOutRef
   CHECKSIM
+    if( ParentComp = "AirSys" )
+    then 
+      if( ServesResZn .AND. ( Type = "HotWater" .OR. Type = "VRF" ) )
+      then
+        PostError("CoilHeating '%s' is part a system that serves a ResidentialOtherZone.
+                   Only Type = 'Resistance', 'Furnace', and 'Heat Pump' is supported.", Name)
+      else UNCHANGED
+      endif
+    else
     if( ParentComp = "ZnSys" )
     then 
       if( Type = "HeatPump" .AND. 
@@ -588,18 +625,20 @@ RULE CoilHtg:Type
         PostError("Coil object '%s' is Type = 'HeatPump', which is only supported
                    for ZoneSystems of Type = SZHP, SZDFHP, PTHP, WSHP, SPVHP, VRF, 
                    or MiniSplitHP.", Name)
-      else if ( Type = "VRF" .AND. ZnSys:Type != "VRF" ) 
+      else
+      if ( Type = "VRF" .AND. ZnSys:Type != "VRF" ) 
       then
         PostError("Coil object '%s' is Type = 'VRF', which is only
                    supported for ZoneSystems of Type = VRF", Name)   
-      else if ( ZnSys:Type = "Radiant" .AND. ( Type = "Resistance" .OR. Type = "HotWater" ) = 0 )
+      else
+      if ( ZnSys:Type = "Radiant" .AND. ( Type = "Resistance" .OR. Type = "HotWater" ) = 0 )
       then
         PostError(" ZoneSystem '%s' is Type = 'Radiant', which is only
                    supported for Coil of Type = Resistanc or HotWater", ZnSys:Name)  
       else UNCHANGED
       endif endif endif
     else UNCHANGED
-    endif
+    endif endif
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -675,8 +714,9 @@ RULE CoilHtg:CndsrType
       endif
     else UNDEFINED
     endif
-  CHECKCODE
-    if( Type = "HeatPump" .AND. LocalStatus( CndsrType ) = 0 ) then
+  CHECKSIM
+    if( Type = "HeatPump" .AND. LocalStatus( CndsrType ) = 0 )
+    then
       PostError("Condenser type is a required input for HP coil '%s'.", Name)
 ;    else if( Type = "HeatPump" .AND. CndsrType = "WaterSource" ) then
 ;      if( ParentComp != "ZnSys" ) then
@@ -687,14 +727,26 @@ RULE CoilHtg:CndsrType
 ;                   be assigned to WSHP type zone systems.", Name)
 ;      else UNCHANGED
 ;      endif endif
-    else if( Type = "HeatPump" .AND. CndsrType = "Air" ) then
-      if( ParentComp = "ZnSys" .AND. Parent( Type ) = "WSHP" ) then
-        PostError("Air source heat pump coils such as coil '%s' may not 
-                   be assigned to WSHP zone systems.", Name)
+    else
+    if( ParentComp = "AirSys" )
+    then
+      if( Type = "HeatPump" .AND. ServesResZn > 0 .AND. Type = "WaterSource" )
+      then
+        PostError("CoilHeating '%s' is part a system that serves a ResidentialOtherZone.
+                   Only CondenserType = 'Air' is supported.", Name)
+      else UNCHANGED
+      endif
+    else
+    if( ParentComp = "ZnSys" )
+    then 
+      if( SysType = "WSHP" .AND. IfValidAnd( CndsrType = "WaterSource" ) = 0 )
+      then
+        PostError("CoilHeating '%s' is part of a WSHP system; CondenserType
+                   must be 'WaterSource'.", Name)
       else UNCHANGED
       endif
     else UNCHANGED
-    endif endif ;endif
+    endif endif endif
   SIZING
     if( Type != "HeatPump" )
     then UNDEFINED
@@ -753,7 +805,7 @@ RULE AirSys:AirSeg:CoilHtg:CapTotNetRtd
   HELP
     "The net capacity is the total heating capacity of the coil after adjusting  
      for fan heat at rated conditions. This is a required input for Type =
-     'HeatPump' coils."
+     'HeatPump' coils, and for air-source is the capacity at AHRI 47°F condition."
   INPUTCLASS
     CondRequired
   RESETS
@@ -1011,7 +1063,8 @@ RULE CoilHtg:CapTotGrossRtd
     "The gross heating capacity of the coil at AHRI conditions."
   HELP
     "The gross capacity is the total heating capacity without adjustments for 
-     fan heat. This is a required input for Type = 'HotWater' and 'Furnace' coils."
+     fan heat. This is a required input for Type = 'HotWater' and 'Furnace' coils.
+     For air-source heat pumps, this is the capacity at AHRI 47°F condition."
   REFERENCE 
     NACM Section 5.7.6.3
     NACM Section 5.7.6.4
@@ -1125,8 +1178,26 @@ RULE CoilHtg:CapTotGrossRtd
   ANNUAL
     if( BaseSysNum > 0 .AND. CountRefs( CoilHtg:HtPumpSuppCoilHtgRef ) > 0 )
     then // Is supplemental heating coil
-      SumRevRef( CoilHtg:HtPumpSuppCoilHtgRef, CoilHtg:CapTotGrossRtd ) * 1.25
+      SumRevRef( CoilHtg:HtPumpSuppCoilHtgRef, CoilHtg:HtPumpSizingCapTotGrossRtd ) * 1.25
     else UNCHANGED
+    endif
+ENDRULE
+RULE NEW CoilHtg:CapTotGrossRtd17
+  DATATYPE
+    Float
+  LONGFORM
+    CapacityTotalGrossRated17
+  DESCRIPTION
+    "The gross heating capacity air-source heat pump coil at 17°F AHRI condition."
+  INPUTCLASS
+    NotInput
+  UNITS 
+    Btu/h
+  ANNUAL
+    if( Type = "HeatPump" .AND. CndsrType = "Air" )
+    then // Calulate capacity using Res conversion algorithm
+      CapTotGrossRtd * (1 - 0.0167 * ( 47 - 17 ) )
+    else UNDEFINED
     endif
 ENDRULE
 
@@ -1302,7 +1373,7 @@ RULE CoilHtg:HtPumpCap_fTempCrvRef
     if( Type = "HeatPump" )
       then
       if( CndsrType = "WaterSource" )
-      then  UNDEFINED
+      then UNDEFINED
       // Currently the translator is using hard-coded coefficients in the WLHP objects
       //RuleLibrary(QuadplLin, "CoilHtgWSHPQRatio_fTdbRatioTwtRatioCFMRatioGPMRatioSI")
       else RuleLibrary(CrvCubic, "CoilHtgHPQRatio_fToadbSI") 
@@ -1311,23 +1382,29 @@ RULE CoilHtg:HtPumpCap_fTempCrvRef
     then RuleLibrary(CrvDblQuad, "CoilHtgVRFHtgQratio_fTwbTdbSI") 
     else UNDEFINED // Other E+ heating coil objects do not use capacity curves
     endif endif
-  ANNUAL 
+  ANNUAL
+    if( Type = "HeatPump" .AND. CndsrType = "Air" .AND. ServesResZn > 0 )
+    then // Use IP version for CSE
+      RuleLibrary(CrvCubic, "CoilHtgHPQRatio_fToadbIP") 
+    else   
     if( BaseSysNum > 0 )
     then
       if( Type = "HeatPump" )
         then
         if( CndsrType = "WaterSource" )
-        then  UNDEFINED
-        // Currently the translator is using hard-coded coefficients in the WLHP objects
-        //RuleLibrary(QuadplLin, "CoilHtgWSHPQRatio_fTdbRatioTwtRatioCFMRatioGPMRatioSI")
-        else RuleLibrary(CrvCubic, "CoilHtgHPQRatio_fToadbSI") 
+        then // Translator is using hard-coded coefficients in the WLHP objects, so set to UNDEFINED
+             // RuleLibrary(QuadplLin, "CoilHtgWSHPQRatio_fTdbRatioTwtRatioCFMRatioGPMRatioSI")
+          UNDEFINED
+        else
+          RuleLibrary(CrvCubic, "CoilHtgHPQRatio_fToadbSI") 
         endif
-      else if( Type = "VRF" )
+      else
+      if( Type = "VRF" )
       then RuleLibrary(CrvDblQuad, "CoilHtgVRFHtgQratio_fTwbTdbSI") 
       else UNDEFINED // Other E+ heating coil objects do not use capacity curves
       endif endif
     else UNCHANGED
-    endif
+    endif endif
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -1339,22 +1416,36 @@ RULE CoilHtg:HtPumpCap_fFlowCrvRef
     Prescribed
   SIZING
     if( Type = "HeatPump" .AND. CndsrType = "Air" )
-    then RuleLibrary(CrvQuad, "CoilHtgHPQRatio_fCFMRatio") 
-    else if( Type = "VRF" )
+    then
+      if( ServesResZn > 0 )
+      then UNDEFINED // Not used for CSE
+      else RuleLibrary(CrvQuad, "CoilHtgHPQRatio_fCFMRatio") 
+      endif
+    else
+    if( Type = "VRF" )
     then RuleLibrary(CrvCubic, "CoilHtgVRFHtgQratio_fCFMRatioSI") 
     else UNDEFINED
     endif endif
   ANNUAL
+    if( Type = "HeatPump" .AND. CndsrType = "Air" .AND. ServesResZn > 0 )
+    then // Not used for CSE
+      UNDEFINED 
+    else   
     if( BaseSysNum > 0 )
     then
       if( Type = "HeatPump" .AND. CndsrType = "Air" )
-      then RuleLibrary(CrvQuad, "CoilHtgHPQRatio_fCFMRatio") 
-      else if( Type = "VRF" )
+      then
+        if( ServesResZn > 0 )
+        then UNDEFINED // Not used for CSE
+        else RuleLibrary(CrvQuad, "CoilHtgHPQRatio_fCFMRatio") 
+        endif
+      else
+      if( Type = "VRF" )
       then RuleLibrary(CrvCubic, "CoilHtgVRFHtgQratio_fCFMRatioSI") 
       else UNDEFINED
       endif endif
     else UNCHANGED
-    endif
+    endif endif
 ENDRULE
 
 
@@ -1535,7 +1626,7 @@ ENDRULE
 // ********** Simulated Capacities *********************************************
 RULE CoilHtg:CapTotGrossRtdSim
   DESCRIPTION
-    "The total heating capacity at design conditions, for simulation" 
+    "The gross heating capacity at design conditions, for simulation" 
   INPUTCLASS 
     NotInput
   MINIMUM
@@ -1567,7 +1658,7 @@ RULE NEW CoilHtg:CapTotNetRtdSim
   LONGFORM
     CapacityTotalNetRatedSimulated
   DESCRIPTION
-    "The total (net) cooling capacity at design conditions" 
+    "The net heating capacity at design conditions, for simulation" 
   INPUTCLASS 
     NotInput
   MINIMUM 
@@ -1584,6 +1675,24 @@ RULE NEW CoilHtg:CapTotNetRtdSim
   ANNUAL
     if( IfValidAnd( CapTotNetRtd > 0 ) )
     then CapTotNetRtd * SysCnt
+    else 0
+    endif
+ENDRULE
+
+RULE NEW CoilHtg:CapTotGrossRtd17Sim
+  DATATYPE
+    Float
+  LONGFORM
+    CapacityTotalGrossRated17Simulated
+  DESCRIPTION
+    "The gross heating capacity of air-source heat pump coil at 17°F AHRI condition, for simulation."
+  INPUTCLASS
+    NotInput
+  UNITS 
+    Btu/h
+  ANNUAL
+    if( IfValidAnd( CapTotGrossRtd17 > 0 ) )
+    then CapTotGrossRtd17 * SysCnt
     else 0
     endif
 ENDRULE

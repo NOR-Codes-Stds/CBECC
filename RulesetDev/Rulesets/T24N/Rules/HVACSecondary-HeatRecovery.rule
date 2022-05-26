@@ -304,31 +304,6 @@ RULE NEW HtRcvry:RcvryFromExhSys
     endif
 ENDRULE
 
-RULE AirSys:RetAirFlowRat
-  DEFAULT
-    if( SumChildren( HtRcvry:RcvryFromExhSys ) > 0 )
-    then 0
-    else if( IfValidAnd( IsAllOA > 0 ) .AND. IfValidAnd( SupFanCap > 0 ) )
-    then Min( Max( ValidOr( RetFanCap , 0 ), ValidOr( ExhFanCap, 0 ) ) / SupFanCap, 1 )
-    else if( IfValidAnd( SupFanCap > 0 ) .AND. IfValidAnd( RetFanCap > 0 ) )
-    then Min( RetFanCap / SupFanCap, 1 )
-    else if( IfValidAnd( SupFanCap > 0 ) .AND. IfValidAnd( ExhFanCap > 0 ) )
-    then Min( ExhFanCap / SupFanCap, 1 )
-    else 1
-    endif endif endif endif
-  ANNUAL
-    if( SumChildren( HtRcvry:RcvryFromExhSys ) > 0 )
-    then 0
-    else if( IfValidAnd( IsAllOA > 0 ) .AND. IfValidAnd( SupFanCap > 0 ) )
-    then Min( Max( ValidOr( RetFanCap , 0 ), ValidOr( ExhFanCap, 0 ) ) / SupFanCap, 1 )
-    else if( IfValidAnd( SupFanCap > 0 ) .AND. IfValidAnd( RetFanCap > 0 ) )
-    then Min( RetFanCap / SupFanCap, 1 )
-    else if( IfValidAnd( SupFanCap > 0 ) .AND. IfValidAnd( ExhFanCap > 0 ) )
-    then Min( ExhFanCap / SupFanCap, 1 )
-    else 1
-    endif endif endif endif
-ENDRULE
-
 RULE NEW ThrmlZn:HtRcvryExhFlowWithMult
   DATATYPE
     Float
@@ -515,7 +490,11 @@ RULE ZnSys:RcvryType
 ;   LatentOnly // Not supported for this ZnSys implementation
   DEFAULT
     if( IfValidAnd( HasHtRecvry > 0 ) )
-    then "Total"
+    then
+      if( Proj:AutoEffInput > 0 )
+      then "SensibleOnly"
+      else "Total"
+      endif
     else UNDEFINED
     endif 
   SIZING
@@ -531,8 +510,11 @@ ENDRULE
 
 RULE ZnSys:HasHXBypass
   DESCRIPTION
-    "This field denotes whether the heat exchanger is locked out when 
-     economizer is operating."
+    "This field denotes whether the heat exchanger has a supply air bypass 
+     (or wheel speed control) to vary the rate of heat exchange."
+  HELP
+    "This property must be set to 'Yes' if Temperature Control or EconomizerLockout
+     are specified."
   INPUTCLASS
     Default
   OPTION
@@ -540,8 +522,39 @@ RULE ZnSys:HasHXBypass
     No
   DEFAULT
     if( IfValidAnd( HasHtRecvry > 0 ) )
-    then "No"
+    then
+      if( Proj:AutoEffInput > 0 )
+      then "Yes"
+      else "No"
+      endif
     else UNDEFINED
+    endif
+  CHECKCODE
+    if( IfValidAnd( HasHtRecvry > 0 ) )
+    then
+      if( IfValidAnd( HasHXBypass = "No" ) .AND.
+          ( IfValidAnd( TempCtrl != "None" ) .OR. 
+            IfValidAnd( EconoLockout = "Yes" ) ) )
+      then
+        PostWarning("For HeatRecovery '%s', TemperatureControl an/or an EconomizerLockout
+                     is defined. A heat exhanger bypass (or wheel speed modulation)
+                     must be specified for these options to be used.",
+                     Name)
+// Removed the following since a bypass can be specified if there is not TempCtrl. 
+// The bypass is actived by economizer lockout
+      else
+      if( IfValidAnd( HasHXBypass = "Yes" ) .AND.
+          IfValidAnd( TempCtrl = "None" ) .AND. 
+          IfValidAnd( EconoLockout = "No" ) )
+      then 
+        PostWarning("For HeatRecovery '%s', a bypass/wheel control has been specified for
+                     the heat exchanger, but TemperatureControl = 'None' and EconomizerLockout
+                     = 'No. For the heat exhanger to be bypassed (or wheel speed modulated)
+                     temperature control or economizer lockout must be specified",
+                     Name)
+      else UNCHANGED
+      endif endif
+    else UNCHANGED
     endif
   SIZING
     if( IfValidAnd( HasHtRecvry > 0 ) )
@@ -597,7 +610,7 @@ RULE ZnSys:HtgSensEff100
       then 0.69
       else
       if( IfValidAnd( RcvryType = "SensibleOnly" ) )
-      then 0.61
+      then 0.60
       else 0
       endif endif endif
     else UNDEFINED
@@ -661,7 +674,7 @@ RULE ZnSys:HtgTotEff100
       then 0.64
       else
       if( IfValidAnd( RcvryType = "SensibleOnly" ) )
-      then 0.41
+      then 0
       else
       if( IfValidAnd( RcvryType = "LatentOnly" ) )
       then 0.35
@@ -688,7 +701,7 @@ RULE ZnSys:ClgSensEff100
       then 0.69
       else
       if( IfValidAnd( RcvryType = "SensibleOnly" ) )
-      then 0.59
+      then 0.60
       else 0
       endif endif endif
     else UNDEFINED
@@ -752,7 +765,7 @@ RULE ZnSys:ClgTotEff100
       then 0.69
       else
       if( IfValidAnd( RcvryType = "SensibleOnly" ) )
-      then 0.43
+      then 0
       else
       if( IfValidAnd( RcvryType = "LatentOnly" ) )
       then 0.30
@@ -901,7 +914,11 @@ ENDRULE
 RULE ZnSys:TempCtrl
   DESCRIPTION
     "This field determines if the heat exchanger's supply air outlet is 
-    controlled to a temperature set point.."
+    controlled to a temperature set point."
+  HELP
+    "When supply air outlet temperature control is used, the wheel rotational
+     speed modulates or supply air is bypassed around the plate heat exchanger
+     to maintain the desired setpoint temperature."
   INPUTCLASS
     Default
   OPTION
@@ -909,43 +926,11 @@ RULE ZnSys:TempCtrl
     Fixed
     Scheduled
   DEFAULT
-    if( IfValidAnd( HasHtRecvry > 0 ) )
-    then
-      if( IfValidAnd( HasHXBypass = "Yes") )
-      then "Fixed"
-      else "None"
-      endif
-    else UNDEFINED
-    endif
-  CHECKSIM
-    if( IfValidAnd( HasHtRecvry > 0 ) )
-    then
-      if( IfValidAnd( Type = "Plate" ) .AND.
-          IfValidAnd( HasHXBypass = "No" ) .AND.
-          IfValidANd( TempCtrl != "None" ) )
-      then
-        PostWarning("For HeatRecovery '%s' is Type = 'Plate' and temperature control
-                     is set to '%s', but no bypass has been specified. Specify that
-                     HeatRecovery unit has a bypass to simulate temperature control.",
-                     Name, TempCtrl)
-      else
-      if( IfValidAnd( Type = "Plate" ) .AND.
-          IfValidAnd( HasHXBypass = "Yes" ) .AND.
-          IfValidANd( TempCtrl = "None" ) )
-      then 
-        PostWarning("For HeatRecovery '%s', a bypass has been specified but 
-                     temperature control is set to 'None'. For the bypass to be
-                     used, a temperature control method and setpoint must be specified",
-                     Name)
-      else UNCHANGED
-      endif endif
-    else UNCHANGED
-    endif
+    "None"
   SIZING
     if( IfValidAnd( HasHtRecvry > 0 ) )
     then
-      if( IfValidAnd( Type = "Plate" ) .AND.
-          IfValidAnd( HasHXBypass = "No" ) )
+      if( IfValidAnd( HasHXBypass = "No" ) )
       then "None"
       else TempCtrl
       endif
@@ -1133,7 +1118,11 @@ RULE ZnSys:EconoLockout
     No
   DEFAULT
     if( IfValidAnd( HasHtRecvry > 0 ) )
-    then "No" // Not use for ZnSys version of this object
+    then
+      if( Proj:AutoEffInput > 0 )
+      then "Yes"
+      else "No"
+      endif
     else UNDEFINED
     endif
   SIZING
@@ -1350,7 +1339,10 @@ RULE HtRcvry:RcvryType
 ;  SensibleOnly
 ;  LatentOnly
   DEFAULT
-    "Total"
+    if( Proj:AutoEffInput > 0 )
+    then "SensibleOnly"
+    else "Total"
+    endif
   CHECKSIM
     if( RcvryType = "LatentOnly" )
     then
@@ -1367,7 +1359,7 @@ RULE HtRcvry:RcvryType
     else RcvryType
     endif endif
 //ANNUAL
-// Standard design heat recovery is SensibleOnly. See ticket 3317
+// Standard design heat recovery is SensibleOnly. Defined in libary object. See ticket 3317
 ENDRULE
 
 RULE HtRcvry:HasHXBypass
@@ -1380,12 +1372,59 @@ RULE HtRcvry:HasHXBypass
     Yes
     No
   DEFAULT
-    "No"
+    if( Proj:AutoEffInput > 0 )
+    then "Yes"
+    else "No"
+    endif
+  CHECKCODE
+    if( IfValidAnd( HasHXBypass = "No" ) .AND.
+        ( IfValidAnd( TempCtrl != "None" ) .OR. 
+          IfValidAnd( EconoLockout = "Yes" ) ) )
+    then
+      PostWarning("For HeatRecovery '%s', TemperatureControl an/or an EconomizerLockout
+                   is defined. A heat exhanger bypass (or wheel speed modulation)
+                   must be specified for these options to be used.",
+                   Name)
+    else
+    if( IfValidAnd( HasHXBypass = "Yes" ) .AND.
+        IfValidAnd( TempCtrl = "None" ) .AND. 
+        IfValidAnd( EconoLockout = "No" ) )
+    then 
+      PostWarning("For HeatRecovery '%s', a bypass/wheel control has been specified for
+                   the heat exchanger, but TemperatureControl = 'None' and EconomizerLockout
+                   = 'No. For the heat exhanger to be bypassed (or wheel speed modulated)
+                   temperature control or economizer lockout must be specified",
+                   Name)
+    else UNCHANGED
+    endif endif
+// Add checks to ensure a system has an economizer if bypass/temp control is specified.
+// It appears in E+ v9.0.1, an economizer is not required to have bypass. These checks
+// may be required for E+ v8.5
+;   else
+;   if( TempCtrl != "None" )
+;   then
+;     if( LocalCompAssigned( OACtrlRef ) = 0 )
+;     then // No OACtrl object specified
+;       PostWarning("AirSystem '%s' has a HeatRecovery object with temperature control, 
+;                    but no OAControl object has been specified. For temperature control
+;                    to be used, an OAControl with an economizer must be included in the
+;                    model.", AirSys:Name)
+;      else
+;      if( IfValidAnd( OACtrlRef:EconoCtrlMthd = "NoEconomizer" ) )
+;      then // OACtrl object specified, no economizer
+;        PostWarning("AirSystem '%s' has a HeatRecovery object with temperature control, 
+;                     but the OAControl object has 'NoEconomizer' specified. For temperature
+;                     control to be used, an OAControl with an economizer must be included
+;                     in the model.", AirSys:Name)
+;     else UNCHANGED
+;     endif endif
   SIZING
     if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
     then PropVentOnlyZnSysRef:HasHXBypass
     else HasHXBypass
     endif
+//ANNUAL
+// Standard design HX has bypass. Defined in libary object. See ticket 3317
 ENDRULE
 
 RULE HtRcvry:SupInAirSegRef
@@ -1544,7 +1583,7 @@ RULE HtRcvry:HtgSensEff100
     if( RcvryType = "Total" )
     then 0.69
     else if( RcvryType = "SensibleOnly" )
-    then 0.61
+    then 0.60
     else 0
     endif endif
   SIZING
@@ -1593,9 +1632,9 @@ RULE HtRcvry:HtgTotEff100
     if( RcvryType = "Total" )
     then 0.64
     else if( RcvryType = "SensibleOnly" )
-    then 0.41
+    then 0
     else if( RcvryType = "LatentOnly" )
-    then 0.35
+    then 0
     else 0
     endif endif endif
   SIZING
@@ -1619,7 +1658,7 @@ RULE HtRcvry:ClgSensEff100
     if( RcvryType = "Total" )
     then 0.69
     else if( RcvryType = "SensibleOnly" )
-    then 0.59
+    then 0.60
     else 0
     endif endif
   SIZING
@@ -1668,7 +1707,7 @@ RULE HtRcvry:ClgTotEff100
     if( RcvryType = "Total" )
     then 0.69
     else if( RcvryType = "SensibleOnly" )
-    then 0.43
+    then 0
     else if( RcvryType = "LatentOnly" )
     then 0.30
     else 0
@@ -1692,7 +1731,7 @@ RULE HtRcvry:HtgSensEff75
     Default
   DEFAULT
     if( IfValidAnd( HtgSensEff100 > 0 ) )
-    then HtgSensEff100 + 0.03 // Estimate
+    then 0.65
     else 0
     endif  
   SIZING
@@ -1761,7 +1800,7 @@ RULE HtRcvry:ClgSensEff75
     Default
   DEFAULT
     if( IfValidAnd( ClgSensEff100 > 0 ) )
-    then ClgSensEff100 + 0.03 // Estimate
+    then 0.65
     else 0
     endif  
   SIZING
@@ -1825,6 +1864,10 @@ RULE HtRcvry:TempCtrl
   DESCRIPTION
     "This field determines if the heat exchanger's supply air outlet is 
     controlled to a temperature set point."
+  HELP
+    "When supply air outlet temperature control is used, the wheel rotational
+     speed modulates or supply air is bypassed around the plate heat exchanger
+     to maintain the desired setpoint temperature."
   INPUTCLASS
     Default
   OPTION
@@ -1832,55 +1875,17 @@ RULE HtRcvry:TempCtrl
     Fixed
     Scheduled
   DEFAULT
-    if( IfValidAnd( HasHXBypass = "Yes") )
-    then "Fixed"
-    else "None"
-    endif
-  CHECKSIM
-    if( Type = "Plate" .AND. HasHXBypass = "No" .AND. TempCtrl != "None" ) 
-    then
-      PostError("HeatRecovery '%s' is Type = 'Plate' and temperature control
-                 is set to '%s', but no bypass has been specified. Specify that
-                 HeatRecovery unit has a bypass to simulate temperature control, or
-                 set Bypass to 'No'.", Name, TempCtrl)
-    else
-    if( Type = "Plate" .AND. HasHXBypass = "Yes" .AND. TempCtrl = "None" )
-    then 
-      PostWarning("HeatRecovery '%s' is Type = 'Plate' and specified to have a bypass, but 
-                   temperature control is set to 'None'. For the bypass to be
-                   used, a temperature control method and setpoint must be specified.",
-                   Name)
-// Add checks to ensure a system has an economizer if bypass/temp control is specified.
-// It appears in E+ v9.0.1, an economizer is not required to have bypass. These checks
-// may be required for E+ v8.5
-;   else
-;   if( TempCtrl != "None" )
-;   then
-;     if( LocalCompAssigned( OACtrlRef ) = 0 )
-;     then // No OACtrl object specified
-;       PostWarning("AirSystem '%s' has a HeatRecovery object with temperature control, 
-;                    but no OAControl object has been specified. For temperature control
-;                    to be used, an OAControl with an economizer must be included in the
-;                    model.", AirSys:Name)
-;      else
-;      if( IfValidAnd( OACtrlRef:EconoCtrlMthd = "NoEconomizer" ) )
-;      then // OACtrl object specified, no economizer
-;        PostWarning("AirSystem '%s' has a HeatRecovery object with temperature control, 
-;                     but the OAControl object has 'NoEconomizer' specified. For temperature
-;                     control to be used, an OAControl with an economizer must be included
-;                     in the model.", AirSys:Name)
-;     else UNCHANGED
-;     endif endif
-    else UNCHANGED
-    endif endif
+    "None"
   SIZING
-    if( Type = "Plate" .AND. HasHXBypass = "No" )
+    if( IfValidAnd( HasHXBypass = "No" ) )
     then "None"
     else
     if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
     then PropVentOnlyZnSysRef:TempCtrl
     else TempCtrl
     endif endif
+//ANNUAL
+//  Standard design heat recovery does not use TempCtrl. See ticket 3317
 ENDRULE
 
 RULE HtRcvry:FixedSupTemp
@@ -1958,6 +1963,8 @@ RULE HtRcvry:DefrostCtrl
    then PropVentOnlyZnSysRef:DefrostCtrl
    else DefrostCtrl
    endif
+//ANNUAL
+// Standard design has no defrost. Defined in libary object. See ticket 3317
 ENDRULE
 
 RULE HtRcvry:DefrostCtrlTemp
@@ -2056,14 +2063,9 @@ RULE HtRcvry:EconoLockout
     Yes
     No
   DEFAULT
-    "No"
-  CHECKCODE
-    if( Type = "Plate" .AND. HasHXBypass = "No" .AND. EconoLockout = "Yes" )  
-    then
-      PostWarning("HeatRecovery '%s' is a 'Plate' heat exchanger with no bypass.
-                   Heat exchanger lockout with economizer will not be simulated.",
-                  Name)
-    else UNCHANGED
+    if( Proj:AutoEffInput > 0 )
+    then "Yes"
+    else "No"
     endif
   SIZING
     if( Type = "Plate" .AND. HasHXBypass = "No" )  
@@ -2074,7 +2076,7 @@ RULE HtRcvry:EconoLockout
     else EconoLockout
     endif endif
 //ANNUAL
-// Standard design heat recovery includes Econolockout. See ticket 3317
+//  Standard design heat recovery includes Econolockout. Defined in libary object. See ticket 3317
 ENDRULE
 
 RULE HtRcvry:AuxPwr

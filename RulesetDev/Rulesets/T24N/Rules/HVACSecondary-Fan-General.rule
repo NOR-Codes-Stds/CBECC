@@ -32,6 +32,7 @@
 // -------------------------------------------------------------------------
 
 
+// -----------------------------------------------------------------------------
 // ParentComponent set to property of local component, for screen rules
 RULE Fan:ParentComp
   DESCRIPTION
@@ -55,6 +56,35 @@ RULE Fan:ParentComp
     endif
 ENDRULE
 
+// -----------------------------------------------------------------------------
+// Whether system serves a ResZn
+RULE NEW Fan:ServesResZn
+  DATATYPE
+    Integer
+  LONGFORM
+    ServesResidentialZone
+  DESCRIPTION
+    "Whether the coil is part of an AirSystem that serves a ResOtherZn."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( ParentComp = "AirSys" )
+    then ValidOr( AirSys:ServesResZn, 0 )
+    else 0
+    endif
+  SIZING
+    if( ParentComp = "AirSys" )
+    then ValidOr( AirSys:ServesResZn, 0 )
+    else 0
+    endif
+  ANNUAL
+    if( ParentComp = "AirSys" )
+    then ValidOr( AirSys:ServesResZn, 0 )
+    else 0
+    endif
+ENDRULE 
+
+// -----------------------------------------------------------------------------
 // Echo system count for reference in UI and capacity/efficiency adjustment rules
 RULE Fan:SysCnt
   DESCRIPTION
@@ -274,7 +304,7 @@ RULE NEW Fan:IsNew
   SIZING : S901G ECBC
     if( Status = "New" .AND. Parent( IsNew ) = 1 ) then 1 else 0 endif
   ANNUAL
-    z:IsNew    
+    if( Status = "New" ) then 1 else 0 endif  
 ENDRULE
 
 RULE NEW Fan:IsExisting
@@ -287,7 +317,7 @@ RULE NEW Fan:IsExisting
   SIZING
     if( IsNew ) then 0 else 1 endif
   ANNUAL
-    z:IsExisting
+    if( IsNew ) then 0 else 1 endif
 ENDRULE
 
 RULE NEW Fan:IsHlthCare
@@ -496,8 +526,8 @@ RULE AirSys:AirSeg:Fan:FlowCap
         if( Proj:IsStdModel > 0 .AND. Proj:ModelName != "" )
         then UNCHANGED // TableSizing is used, see Project-TableSizing rules
         else
-        if( AirSys:Type = "DOASCV" .OR. AirSys:Type = "DOASVAV" )
-        then // Is DOAS, set balanced
+        if( AirSys:Type = "DOASCV" .OR. AirSys:Type = "DOASVAV" .OR. ServesResZn > 0 )
+        then // Is DOAS or serves a ResOtherZn, set balanced
           ValidOr( AirSys:SupFanCap, 0 ) 
         else // Set ret fan cap to be less than supply for pressurization
           Max( ValidOr( AirSys:SupFanCap, 0 ) - ValidOr( AirSys:SysVentFlow, 0 ), 
@@ -1297,7 +1327,7 @@ RULE Fan:FlowCapSim
           // The return fan capacity is set to be equal to the supply fan capacity
           // to fix the issue that the supply flow is limited by the return flow
           // The simulated return flow rate will still be equal to the calculated
-          // SupFanCap * RetAirFlowRat, where RetAirAirFlowRat is calculated from user
+          // SupFanCap * RetAirFlowRat, where RetAirFlowRat is calculated from user
           // return fan flow
           AirSys:SupFanCap * SysCnt 
         else FlowCap * SysCnt
@@ -1316,7 +1346,8 @@ RULE Fan:FlowCapSim
     then
       if( ParentComp = "AirSys" ) 
       then 
-        if( Parent( Type ) = "Return" .AND. IfValidAnd( AirSys:SupFanCap > 0 ) )
+        if( ( AirSeg:Type = "Return" .OR. AirSeg:Type = "Relief" ) .AND. 
+            IfValidAnd( AirSys:SupFanCap > 0 ) )
         then // See above
           AirSys:SupFanCap * SysCnt 
         else FlowCap * SysCnt
@@ -1412,8 +1443,7 @@ RULE NEW AirSys:RetFanCap
   DEFAULT
     SumChildrenIf( AirSeg:FanFlowCap, AirSeg:Type = "Return" )
   CHECKSIM
-    if( ServesThrmlZn .AND.
-        LocalCompAssigned( HtRcvryRef ) .AND. 
+    if( LocalCompAssigned( HtRcvryRef ) .AND. 
         SumChildren( HtRcvry:RcvryFromExhSys ) = 0 .AND. 
         ( RetFanCap + ExhFanCap ) = 0 )
     then
@@ -1743,7 +1773,8 @@ RULE NEW ZnSys:NoClgSupFanCap
       else
       if( IfValidAnd( IsCVSupFan = 1 ) )
       then FanRef:FlowCap
-      else FanRef:FlowMin
+// See Ticket 3349, VRF min fan flow per NACM is 50%
+      else Max( FanRef:FlowMin, 0.5 * FanRef:FlowCap ) 
       endif endif
     else UNDEFINED
     endif
@@ -1820,7 +1851,8 @@ RULE NEW ZnSys:NoClgHtgSupFanCap
       else
       if( IfValidAnd( IsCVSupFan > 0 ) )
       then FanRef:FlowCap
-      else FanRef:FlowMin
+// See Ticket 3349, VRF min fan flow per NACM is 50%
+      else Max( FanRef:FlowMin, 0.5 * FanRef:FlowCap ) 
       endif endif
     else UNDEFINED
     endif
