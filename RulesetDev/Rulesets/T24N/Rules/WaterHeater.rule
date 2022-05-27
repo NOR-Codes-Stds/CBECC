@@ -1410,6 +1410,54 @@ RULE NEW WtrHtr:BaseHtOutput
 ENDRULE
 
 
+// The following tables are referenced for determing the Max and Min UA
+TABLE BaseHtPumpWtHtrTankLossTbl
+  StorCapRng  BaseHtPumpWtrHtrTankLoss  
+  <=45        778.1066667
+  <=57        895.0416   
+  <=65        1089.349333
+  <=79        1244.970667
+  >79         1556.213333
+ENDTABLE
+
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:BaseHtPumpWtrHtrTankLoss
+  DATATYPE
+    FLoat
+  LONGFORM
+    BaselineHeatPumpWaterHeaterTankLoss
+  DESCRIPTION
+    "Baseline heat-pump water heater tank loss calculated based on storage capacity"
+  INPUTCLASS
+    NotInput
+  UNITS
+    Btu/hr
+  DEFAULT
+    if( Type <> "Conventional" )
+    then 
+      if( LocalStatus( StorCap ) > 0 )
+        then 
+          BaseHtPumpWtHtrTankLossTbl:BaseHtPumpWtrHtrTankLoss("StorCapRng", StorCap)
+      else UNDEFINED
+      endif    
+    else UNDEFINED
+    endif
+  SIZING_BASELINE
+    if( Type <> "Conventional" )
+    then
+      if( LocalStatus( StorCap ) > 0 )
+        then 
+          BaseHtPumpWtHtrTankLossTbl:BaseHtPumpWtrHtrTankLoss("StorCapRng", StorCap)
+      else UNDEFINED
+      endif    
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+    z:BaseHtPumpWtrHtrTankLoss
+ENDRULE  
+
+
+
 // -----------------------------------------------------------------------------
 RULE NEW WtrHtr:BaseEngyInput
   DATATYPE
@@ -1469,7 +1517,7 @@ RULE NEW WtrHtr:BaseEngyInput
           BaseHtOutput
         else if( FuelSrc = "Electricity" .AND. Type <> "Conventional" )
         then
-          ( BaseHtOutput - 1556.21)  / 1.94778   // 1.94778 - Calculated HtPumpEF based on a UEF 2.15, High Draw Pattern. 1556.21 - TankLoss
+          ( BaseHtOutput - BaseHtPumpWtrHtrTankLoss)  / 1.94778   // 1.94778 - Calculated HtPumpEF based on a UEF 2.15
         else UNDEFINED
         endif endif endif
       else if( Proj:SHWNone )
@@ -1499,7 +1547,7 @@ RULE NEW WtrHtr:BaseEngyInput
           BaseHtOutput
         else if( FuelSrc = "Electricity" .AND. Type <> "Conventional" )
         then
-         ( BaseHtOutput - 1556.21)  / 1.94778   // 1.94778 - Calculated HtPumpEF based on a UEF 2.15, High Draw Pattern. 1556.21 - TankLoss
+         ( BaseHtOutput - IfValidAnd(BaseHtPumpWtrHtrTankLoss >0 ) )  / 1.94778   // 1.94778 - Calculated HtPumpEF based on a UEF 2.15
         else UNDEFINED
         endif endif endif
       else if( Proj:SHWPropOnly )
@@ -1704,6 +1752,24 @@ RULE NEW WtrHtr:IsCommHtPumpWtrHtr
     zb:IsCommHtPumpWtrHtr
 ENDRULE
 
+// -------------- Baseline Heat Pump Water Heater COP ----------------------
+// Based on 80 gallon Heat-Pump water, UEF 2.15 and Input Rating of 4.5
+RULE NEW WtrHtr:BaseHtPumpWtrHtrCOP
+  DATATYPE
+    Float
+  LONGFORM
+    BaselineHeatPumpWaterHeaterCOP
+  DESCRIPTION
+    "Baseline heat pump water heater COP"
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    1.94778 + ( 1556.213333 / ( 3412 * 4.5 ) )
+  SIZING_BASELINE
+    1.94778 + ( 1556.213333 / ( 3412 * 4.5 ) )
+  ANNUAL_BASELINE
+    z:BaseHtPumpWtrHtrCOP
+ENDRULE
 
 // -------------- Water Heater Capacity Rated --------------
 RULE WtrHtr:CapRtd
@@ -1822,7 +1888,8 @@ RULE WtrHtr:CapRtd
           BaseEngyInput 
         else if( FuelSrc = "Electricity" .AND. Type <> "Conventional" )
         then
-          BaseHtOutput
+				  InpPwr * BaseHtPumpWtrHtrCOP * 3412        
+//          BaseHtOutput
         else UNDEFINED
         endif endif
       else if( Proj:SHWNone )
@@ -1868,7 +1935,8 @@ RULE WtrHtr:CapRtd
         BaseEngyInput 
         else if( FuelSrc = "Electricity" .AND. Type <> "Conventional" )
         then
-          BaseHtOutput
+          InpPwr * BaseHtPumpWtrHtrCOP * 3412
+//          BaseHtOutput       
 	      else
 	        BaseEngyInput 
 	      endif endif
@@ -2114,9 +2182,14 @@ RULE WtrHtr:RtdEvapInletAirDBTempF
     "The temperature at which the rated performance was determined."
   DEFAULT
     if( Proj:AutoHardSize = 1 .AND. Type <> "Conventional" )
-      then StdEvapInletAirDBTemp
-    else UNDEFINED
-    endif
+      then 
+        StdEvapInletAirDBTemp
+    else if ( Type <> "Conventional" .AND. IsCommHtPumpWtrHtr = 1 )
+    then
+      StdEvapInletAirDBTemp
+    else
+     UNDEFINED
+    endif endif
   CHECKSIM
     if( Proj:AutoHardSize = 1 )
     then
@@ -2136,8 +2209,10 @@ RULE WtrHtr:RtdEvapInletAirDBTempF
     endif endif
   SIZING_BASELINE
     if( Bldg:IsSchoolBldgForWtrHtr = 1 .AND. StdsVersionYr > 2019 .AND. Type <> "Conventional" )
-      then StdEvapInletAirDBTemp
-    else UNDEFINED
+      then 
+        StdEvapInletAirDBTemp
+    else 
+      UNDEFINED
     endif
   ANNUAL_BASELINE
    zb:RtdEvapInletAirDBTempF
@@ -2152,16 +2227,19 @@ RULE WtrHtr:RtdEvapInletAirWBTempF
     "The temperature at which the rated performance was determined."
   DEFAULT
     if( Proj:AutoHardSize = 1 .AND. Type <> "Conventional" )
-    then StdEvapInletAirWBTemp
-//    else if( Type <> "Conventional" .AND. IsCommHtPumpWtrHtr = 1 )
-//    then StdEvapInletAirWBTemp    
+    then 
+      StdEvapInletAirWBTemp
+    else if( Type <> "Conventional" .AND. IsCommHtPumpWtrHtr = 1 )
+    then 
+      StdEvapInletAirWBTemp    
     else UNDEFINED
-    endif
-//    endif
+    endif endif
   SIZING_BASELINE
     if( Bldg:IsSchoolBldgForWtrHtr = 1 .AND. StdsVersionYr > 2019 .AND. Type <> "Conventional" )
-      then StdEvapInletAirWBTemp
-    else UNDEFINED
+      then 
+        StdEvapInletAirWBTemp
+    else 
+      UNDEFINED
     endif
   ANNUAL_BASELINE
    zb:RtdEvapInletAirWBTempF
@@ -2176,12 +2254,14 @@ RULE WtrHtr:RtdCondInletWtrTempF
     "The temperature at which the rated performance was determined."
   DEFAULT
     if( Proj:AutoHardSize = 1 .AND. Type <> "Conventional" )
-    then StdCondInletWtrTemp
-//    else if( Type <> "Conventional" .AND. IsCommHtPumpWtrHtr = 1 )
-//    then StdCondInletWtrTemp    
-    else UNDEFINED
-    endif 
-//    endif
+    then 
+      StdCondInletWtrTemp
+    else if( Type <> "Conventional" .AND. IsCommHtPumpWtrHtr = 1 )
+    then 
+      StdCondInletWtrTemp    
+    else 
+      UNDEFINED
+    endif endif
   CHECKSIM
     if( Proj:AutoHardSize = 1 )
     then
@@ -2792,7 +2872,7 @@ RULE NEW WtrHtr:CapRtdAdjFac
   MINIMUM
     0
   DEFAULT
-    if( Type <> "Conventional" .AND. IsCommHtPumpWtrHtr = 1)
+    if( Type <> "Conventional" .AND. IsCommHtPumpWtrHtr = 1 .AND. FluidSysSHW = 0)
     then
         // x = RtdEvapInletAirDBTempC
         // y = RtdCondInletWtrTempC
@@ -2911,7 +2991,7 @@ RULE NEW WtrHtr:COPRtdAdjFac
   MINIMUM
     0
   DEFAULT
-    if( Type <> "Conventional" .AND. IsCommHtPumpWtrHtr = 1 )
+    if( Type <> "Conventional" .AND. IsCommHtPumpWtrHtr = 1 .AND. FluidSysSHW = 0 )
     then
         // x = RtdEvapInletAirDBTempC
         // y = RtdCondInletWtrTempC
@@ -3380,7 +3460,8 @@ RULE WtrHtr:StorCap
       then
         if ( Bldg:IsSchoolBldgForWtrHtr = 1 .AND. StdsVersionYr > 2019)
         then
-         int( (BaseHtOutput / 0.60 * 0.40 / ( ( DsgnSupWtrTemp - 55 ) * 1 * 8.2877 )) / 80 + 0.5 ) * 80
+          max(BaseHtOutput / 0.60 * 0.40 / ( ( DsgnSupWtrTemp - 55 ) * 1 * 8.2877 ), 30)
+//         int( (BaseHtOutput / 0.60 * 0.40 / ( ( DsgnSupWtrTemp - 55 ) * 1 * 8.2877 )) / 80 + 0.5 ) * 80
         else
         BaseHtOutput / 0.60 * 0.40 / ( ( DsgnSupWtrTemp - 55 ) * 1 * 8.2877 ) 
         endif
@@ -3399,7 +3480,81 @@ RULE WtrHtr:StorCap
     z:StorCap
 ENDRULE
 
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:BaseHtPumpWtrHtrTankLoss
+  DATATYPE
+    FLoat
+  LONGFORM
+    BaselineHeatPumpWaterHeaterTankLoss
+  DESCRIPTION
+    "Baseline heat-pump water heater tank loss calculated based on storage capacity"
+  INPUTCLASS
+    NotInput
+  UNITS
+    Btu/hr
+  DEFAULT
+    if( Type <> "Conventional" )
+    then 
+      if( LocalStatus( StorCap ) > 0 )
+        then 
+          BaseHtPumpWtHtrTankLossTbl:BaseHtPumpWtrHtrTankLoss("StorCapRng", StorCap)
+      else UNDEFINED
+      endif    
+    else UNDEFINED
+    endif
+  SIZING_BASELINE
+    if( Type <> "Conventional" )
+    then
+      if( LocalStatus( StorCap ) > 0 )
+        then 
+          BaseHtPumpWtHtrTankLossTbl:BaseHtPumpWtrHtrTankLoss("StorCapRng", StorCap)
+      else UNDEFINED
+      endif    
+    else UNDEFINED
+    endif
+  ANNUAL_BASELINE
+    z:BaseHtPumpWtrHtrTankLoss
+ENDRULE  
 
+// -----------------------------------------------------------------------------
+RULE NEW WtrHtr:BaseEngyInput
+  SIZING_BASELINE
+    if( FluidSysSHW = 1 ) 
+    then
+      if( IsResAndCombo )
+      then
+        UNDEFINED
+      else if( Proj:SHWUserAndBaseline .OR. Proj:SHWBothBaseline )
+      then 
+        if( FuelSrc = "Gas" )
+        then
+          BaseHtOutput / ValidOr(ThrmlEff, 0.80)
+        else if( FuelSrc = "Electricity" .AND. Type = "Conventional" )
+        then
+          BaseHtOutput
+        else if( FuelSrc = "Electricity" .AND. Type <> "Conventional"  )
+        then
+         ( BaseHtOutput - BaseHtPumpWtrHtrTankLoss )  / 1.94778   // 1.94778 - Calculated HtPumpEF based on a UEF 2.15
+        else UNDEFINED
+        endif endif endif
+      else if( Proj:SHWPropOnly )
+      then 
+        u:InpPwr
+      else if( Proj:SHWNone )
+      then 
+        UNDEFINED
+      else
+        UNDEFINED
+      endif endif endif endif
+    else if( FluidSysHtg = 1 )
+    then
+      UNDEFINED
+    else UNDEFINED
+    endif endif
+ENDRULE
+
+
+// ----------------------------------------
 RULE NEW WtrHtr:BaseHtPumpCnt
   LONGFORM
     BaselineHeatPumpCount
@@ -7343,7 +7498,8 @@ RULE NEW WtrHtr:TankLoss
 		    then
 		      if( IfValidAnd( UEFRtdVal = 50 ) .AND. IfValidAnd(UEFMdlCalcEF >0) ) 
 		      then
-		        ( MaxHPUA - ( UEFMdlCalcEF - MinHPEF) * ( (MaxHPUA - MinHPUA) / (MaxHPEF - MinHPEF) ) ) * 80   // Using look-up table derived from Appliance Database for Small Water Heaters
+            BaseHtPumpWtrHtrTankLoss
+//		        ( MaxHPUA - ( UEFMdlCalcEF - MinHPEF) * ( (MaxHPUA - MinHPUA) / (MaxHPEF - MinHPEF) ) ) * 80   // Using look-up table derived from Appliance Database for Small Water Heaters
 		      else UNDEFINED
 		      endif
 		    else
@@ -7372,7 +7528,8 @@ RULE NEW WtrHtr:TankLoss
 		    then
 		      if( IfValidAnd( UEFRtdVal = 50 ) .AND. IfValidAnd(UEFMdlCalcEF >0) ) 
 		      then
-		        ( MaxHPUA - ( UEFMdlCalcEF - MinHPEF) * ( (MaxHPUA - MinHPUA) / (MaxHPEF - MinHPEF) ) ) * 80   // Using look-up table derived from Appliance Database for Small Water Heaters
+		        BaseHtPumpWtrHtrTankLoss
+//		        ( MaxHPUA - ( UEFMdlCalcEF - MinHPEF) * ( (MaxHPUA - MinHPUA) / (MaxHPEF - MinHPEF) ) ) * 80   // Using look-up table derived from Appliance Database for Small Water Heaters
 		      else UNDEFINED
 		      endif
 		    else
@@ -7558,7 +7715,12 @@ RULE WtrHtr:COP
         endif
       else if( Type <> "Conventional" .AND. IfValidAnd ( CapRtd > 0 ) .AND. IfValidAnd( CprsrPwr > 0 ) )
       then
+        if ( Proj:IsStdModel = 1 )
+        then 
+          BaseHtPumpWtrHtrCOP
+        else
         CapRtd / 3.412 / CprsrPwr    // This may differ from COP from Manufacturer’s specification because we are assuming the tank losses. 
+        endif
       else UNDEFINED
       endif endif
     else if( FluidSysHtg = 1 )
@@ -7598,7 +7760,12 @@ RULE WtrHtr:COP
           COP
         else if( Type <> "Conventional" .AND. IfValidAnd ( CapRtd > 0 ) .AND. IfValidAnd( CprsrPwr > 0 ) )
         then 
+          if ( Proj:IsStdModel )
+          then
+            BaseHtPumpWtrHtrCOP
+          else
           CapRtd / 3.412 / CprsrPwr 
+          endif
         else 
           UNDEFINED
         endif endif
@@ -7647,8 +7814,11 @@ RULE WtrHtr:COP
       else if( Proj:SHWUserAndBaseline .OR. Proj:SHWBothBaseline )
       then
 			  if ( Bldg:IsSchoolBldgForWtrHtr = 1 )
-			  then CapRtd / 3.412 / CprsrPwr
-			  else UNDEFINED
+			  then 
+			    BaseHtPumpWtrHtrCOP
+			    // CapRtd / 3.412 / CprsrPwr
+			  else 
+			    UNDEFINED
 			  endif
       else if( Proj:SHWNone )
       then
