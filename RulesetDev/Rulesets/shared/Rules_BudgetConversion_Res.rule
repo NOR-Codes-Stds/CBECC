@@ -1763,10 +1763,26 @@ END
 ;*************************************************************************  - rules to PREVENT any Proposed model IAQ credit (results in std model higher or equal eff to prop) - SAC 01/26/21 (tic #1243)
 RULELIST  "BudgetConversion_IAQ_SupplyInletsNotAccessible" 1 0 1 0
 
+   ; updated following rules w/ data from 2022.1.0 Multifamily IAQ Summary writeup from OB360/DR - SAC 06/07/22
+
+   "Set IAQFan:StdWperCFM - default std design IAQ fan power"     IAQFan:StdWperCFM =     ; added to simplify following rules - sac 06/07/22
+      {  if (Proj:IsComRuleset .AND. IfValidAnd( Proj:AnalysisVersion >= 220100 ))
+         then  if (IfValidAnd( ResProj:MostDUIAQ_Exhaust > 0 ) .OR. IfValidAnd( ResProj:MostDUIAQ_Supply > 0 ))
+               then  0.35
+               else if (IfValidAnd( Proj:CliZnNum <= 2 ) .OR. (IfValidAnd( Proj:CliZnNum >= 11 ) .AND. IfValidAnd( Proj:CliZnNum <= 16 )))
+               then  0.6   ; bal w/ HtRecov
+               else if (IfValidAnd( ResProj:NumStories < 4 ) .AND. (IfValidAnd( Proj:CliZnNum >= 4 ) .AND. IfValidAnd( Proj:CliZnNum <= 10 )))
+               then  0.4
+               else  0.7
+               endif endif endif
+         else if (IAQFanType == 3)
+         then  0.7
+         else  0.35
+         endif endif  }
+
    "Set IAQFan:HardwireStdFanPower flag"     IAQFan:HardwireStdFanPower =     ; SAC 03/18/21 (tic #1243)
       {  if ( (ResProj:RunAbbrev == "s" .OR. ResProj:RunAbbrev == "zb" .OR. ResProj:RunAbbrev == "smf") .AND.
-              ( (IAQFanType == 3 .AND. (ValidOr( WperCFMIAQ, 0 ) * ValidOr( FanPowerMult, 1 )) > 0.7 ) .OR.  ; Balanced
-                (IAQFanType != 3 .AND. (ValidOr( WperCFMIAQ, 0 ) * ValidOr( FanPowerMult, 1 )) > 0.35) ) )   ; Exhaust or Supply
+              (ValidOr( WperCFMIAQ, 0 ) * ValidOr( FanPowerMult, 1 )) > StdWperCFM ) 
          then  1.0
          else  UNDEFINED  endif  }
    "Hardwire IAQFan:FanPowerMult to 1.0 if Std/SMF power lower than Prop"     IAQFan:FanPowerMult =      ; SAC 03/18/21 (tic #1243)
@@ -1775,9 +1791,7 @@ RULELIST  "BudgetConversion_IAQ_SupplyInletsNotAccessible" 1 0 1 0
          else  UNCHANGED  endif  }  
 	"Ensure Std Watts per CFM <= Proposed"    IAQFan:WperCFMIAQ =     ; revised to reference HardwireStdFanPower - SAC 03/18/21 (tic #1243)
 		{  if (IfValidAnd( HardwireStdFanPower > 0 ))
-         then  if (IAQFanType == 3)        ; Balanced
-               then  0.7
-               else  0.35  endif
+         then  StdWperCFM
          else  UNCHANGED  endif  }
 
 ;   "Reset IAQFan:IAQRecovEffect"	IAQFan:IAQRecovEffect = {  0  }      - RETAIN heat recovery settings
@@ -1830,6 +1844,17 @@ RULELIST  "BudgetConversion_IAQ_SupplyInletsNotAccessible" 1 0 1 0
          then  min( 1, MaxStdDesignIAQPower / (IAQPwr_Exhaust[1] + IAQPwr_Supply[1] + IAQHRVPwr[1]) )
          else  UNDEFINED  endif  }
 
+   "Call subordinate rulelist to turn on or adjust IAQ heat recovery"   IAQFan:Action =      ; SAC 06/07/22
+      {  if (Proj:IsComRuleset .AND. IfValidAnd( Proj:AnalysisVersion >= 220100 ) .AND.
+             ResProj:RunAbbrev == "zb" .AND. IAQFanType == 3)
+         then  if ( ( IfValidAnd( IncludesRecov > 0 )==0 .AND.    ; if no htrecov & CZ requires it
+                      (IfValidAnd( Proj:CliZnNum <= 2 ) .OR. (IfValidAnd( Proj:CliZnNum >= 11 ) .AND. IfValidAnd( Proj:CliZnNum <= 16 ))) ) .OR.
+                    ( IfValidAnd( IncludesRecov > 0 ) .AND.       ; if have htrecov but efficiencies lower than std
+                      (IfValidAnd( SensRecovEff >= 67 )==0 .OR. IfValidAnd( AdjSensRecovEff >= 72 )==0) ) )
+               then  EvalRulelist( "ForceStandard_IAQ_HeatRecovery", 1 )   ; add std design heat recovery where called for
+               else  UNCHANGED  endif
+         else  UNCHANGED  endif  }
+
 END
 ;*************************************************************************  - regular std and drtg model rules
 RULELIST  "BudgetConversion_IAQ_SupplyInletsAccessible" 1 0 1 0
@@ -1838,9 +1863,20 @@ RULELIST  "BudgetConversion_IAQ_SupplyInletsAccessible" 1 0 1 0
    ; SAC 10/24/19 - revisions to restore 2019.1.0 logic for 2019.1.1 release     ; SAC 2/12/20 - installed new std design IAQFan:WperCFMIAQ of 0.3 & 0.6 for SFam/MFam (tic #1174)
    ; SAC 4/24/20 - revised to reference ResProj:StdDesignIAQWperCFM as THE SFam Std/DRtg IAQ fan power (tic #1174)
    ; updated MFam to be based on Bal/Unbal, else use StdDesignIAQWperCFM only when BypassRuleLimits, else max of 1.2 W/CFM - SAC 7/20/20 (tic #1174)   ; SAC 7/27/20
-	"Keep Proposed Design IAQ Fans but limit Watts per CFM"     ; updated std design WperCFMIAQ 0.3->0.35 & 0.6->0.7 - SAC 01/19/21 (tic #1243)
-		IAQFan:WperCFMIAQ =                                      ; simplify logic to rely on StdDesignIAQWperCFM regardless of BypassRuleLimits (for AnalysisVersion >= 190200) - SAC 01/25/21 (tic #1243)   ; ApplyStdDesignIAQFromTable - SAC 04/03/21
-		{  if (IfValidAnd( Proj:AnalysisVersion >= 190200 ))
+   ; updated std design WperCFMIAQ 0.3->0.35 & 0.6->0.7 - SAC 01/19/21 (tic #1243)
+   ; simplify logic to rely on StdDesignIAQWperCFM regardless of BypassRuleLimits (for AnalysisVersion >= 190200) - SAC 01/25/21 (tic #1243)   ; ApplyStdDesignIAQFromTable - SAC 04/03/21
+   ; updated w/ data from 2022.1.0 Multifamily IAQ Summary writeup from OB360/DR - SAC 06/07/22
+	"Keep Proposed Design IAQ Fans but limit Watts per CFM"     IAQFan:WperCFMIAQ =  
+		{  if (Proj:IsComRuleset .AND. IfValidAnd( Proj:AnalysisVersion >= 220100 ))
+         then  if (IfValidAnd( ResProj:MostDUIAQ_Exhaust > 0 ) .OR. IfValidAnd( ResProj:MostDUIAQ_Supply > 0 ))
+               then  0.35
+               else if (IfValidAnd( Proj:CliZnNum <= 2 ) .OR. (IfValidAnd( Proj:CliZnNum >= 11 ) .AND. IfValidAnd( Proj:CliZnNum <= 16 )))
+               then  0.6   ; bal w/ HtRecov
+               else if (IfValidAnd( ResProj:NumStories < 4 ) .AND. (IfValidAnd( Proj:CliZnNum >= 4 ) .AND. IfValidAnd( Proj:CliZnNum <= 10 )))
+               then  0.4
+               else  0.7
+               endif endif endif
+         else if (IfValidAnd( Proj:AnalysisVersion >= 190200 ))
 		   then  if (IfValidAnd( ResProj:StdDesignIAQWperCFM > 0 ) .AND.
                    ( IfValidAnd( ResProj:ApplyStdDesignIAQFromTable > 0 ) .OR. 
                      ( IfValidAnd( ResProj:BypassRuleLimits > 0 ) .AND. 
@@ -1865,7 +1901,7 @@ RULELIST  "BudgetConversion_IAQ_SupplyInletsAccessible" 1 0 1 0
                ;   case  4 :   Min( WperCFMIAQ, 0.58 )      ; "Central"  - not yet implemented - MJB 4/22/13 
                   default :   UNDEFINED
                endswitch
-         else  UNCHANGED  endif endif endif endif  }
+         else  UNCHANGED  endif endif endif endif endif  }
 
    ; SAC 1/11/16 - ensure IAQRecovEffect is zero (tic 599)
    "Reset IAQFan:IAQRecovEffect"	IAQFan:IAQRecovEffect = {  0  }     ; No Heat Recovery
@@ -1939,7 +1975,24 @@ RULELIST  "BudgetConversion_IAQ_SupplyInletsAccessible" 1 0 1 0
          then  min( 1, MaxStdDesignIAQPower / (IAQPwr_Exhaust[1] + IAQPwr_Supply[1] + IAQHRVPwr[1]) )
          else  UNDEFINED  endif  }
 
+   "Call subordinate rulelist to turn on or adjust IAQ heat recovery"   IAQFan:Action =         ; SAC 06/07/22
+      {  if (Proj:IsComRuleset .AND. IfValidAnd( Proj:AnalysisVersion >= 220100 ) .AND.
+             ResProj:RunAbbrev == "zb" .AND. IAQFanType == 3)
+         then  if (IfValidAnd( Proj:CliZnNum <= 2 ) .OR. (IfValidAnd( Proj:CliZnNum >= 11 ) .AND. IfValidAnd( Proj:CliZnNum <= 16 )))
+               then  EvalRulelist( "ForceStandard_IAQ_HeatRecovery", 1 )   ; add std design heat recovery where called for
+               else  UNCHANGED  endif
+         else  UNCHANGED  endif  }
+
 END
+
+;************************************************************************* SAC 06/07/22
+RULELIST  "ForceStandard_IAQ_HeatRecovery" 1 0 1 1
+   "Toggle on IAQFan:IncludesRecov"    IAQFan:IncludesRecov    = {   1  }
+   "Set IAQFan:SensRecovEff"           IAQFan:SensRecovEff     = {  67  }
+   "Set IAQFan:AdjSensRecovEff"        IAQFan:AdjSensRecovEff  = {  72  }
+END
+;*************************************************************************
+
 
 
 ;*************************************************************************  - SAC 2/16/18 - rules to override std design window U-factor w/ revised value in models w/ single dwelling unit HPWHs (tic #983)
