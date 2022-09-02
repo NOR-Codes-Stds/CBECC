@@ -110,6 +110,7 @@ RULELIST "CSE_SimulationPrep" 1 0 0 1
 	"Blast all cseIZXFER components"						Proj:Action	= {	DeleteAllComps( cseIZXFER )  }
 	"Blast all cseAFMETER components"					Proj:Action	= {	DeleteAllComps( cseAFMETER )  }  ; SAC 09/17/20 (tic #1247)
 	"Blast all cseEXPORTFILE components"			   Proj:Action = {	DeleteAllComps( cseEXPORTFILE )  }     ; SAC 03/12/21
+	"Blast all cseDESCOND components"			      Proj:Action = {	DeleteAllComps( cseDESCOND )  }        ; SAC 09/02/22
 
 	"Perform CSE simulation engine defaulting"		Proj:Action = {	EvalRulelist( "CSE_Defaulting_Project" )  }
 
@@ -863,8 +864,22 @@ RULELIST "CSE_Defaulting_Project" 1 0 0 1
 	"Set Proj:CSE_DefineString[65]"	Proj:CSE_DefineString[65]  = { UNDEFINED }
 
 
-   "Set cseTOP:heatDsTDbO"       cseTOP:heatDsTDbO		= {	T24RClimateZoneDesignDay:HtgDesign( "WeatherFileSet", Proj:WeatherFileSet, "ClimateZone", Proj:ClimateZone )  }
-   "Set cseTOP:coolDsDay_x"      cseTOP:coolDsDay_x	= {	"DD1"  }   ; trailing '_x' in property name causes output string to NOT be enclosed in double quotes
+   "Set cseTOP:heatDsTDbO"       cseTOP:heatDsTDbO		=                       ; revised for new design day weather data - SAC 08/31/22 (tic #1338)
+      {  if (Proj:AnalysisVersion >= 220000 .AND. IfValidAnd( Proj:WeatherStation > 0 ))
+         then  WeatherCliZnDsgnDay2022:DB996( "Station_Name", EnumString( Proj:WeatherStation ) )
+         else  T24RClimateZoneDesignDay:HtgDesign( "WeatherFileSet", Proj:WeatherFileSet, "ClimateZone", Proj:ClimateZone )
+         endif  }
+   "Set cseTOP:HottestMonthNum"     cseTOP:HottestMonthNum =         ; moved up from below - SAC 09/02/22 (tic #1338)
+      {  if (Proj:AnalysisVersion >= 220000 .AND. IfValidAnd( Proj:WeatherStation > 0 ))
+         then  WeatherCliZnDsgnDay2022:Hottest_Month( "Station_Name", EnumString( Proj:WeatherStation ) )
+         else  UNDEFINED  endif  }
+   "Create cseDESCOND(s) to describe cooling design days"   Proj:Action =     ; SAC 08/31/22 (tic #1338)
+      {  if (IfValidAnd( cseTOP:HottestMonthNum > 0 ))
+         then  EvalRulelist( "CSE_Setup_DESCOND" )
+         else  UNCHANGED  endif  }
+   "Set cseTOP:coolDsDay_x"      cseTOP:coolDsDay_x	=                       ; updated to prevent setting coolDsDay_x if any cseDESCOND objects exist - SAC 08/31/22 (tic #1338)
+      {  if (ComponentCount( cseDESCOND ) > 0) then  UNDEFINED
+         else  "DD1"  endif  }   ; trailing '_x' in property name causes output string to NOT be enclosed in double quotes
 
 	; SAC 5/1/14 - added logic to prevent output of ventAvail_x when CFIClVent not selected @ the project level (mainly to turn off for Std design run - GC #298)
    "Set cseTOP:ventAvail_x"      cseTOP:ventAvail_x	= {	if (Proj:CSEVentAvailZonal) then  "zonal"    ; SAC 7/12/20
@@ -883,6 +898,7 @@ RULELIST "CSE_SimulationCleanUp" 1 0 0 1
 ;*************************************************************************
 
 	"Delete all cseTOP components"					Proj:Action = {	DeleteAllComps( cseTOP )  }
+	"Delete all cseDESCOND components"				Proj:Action = {	DeleteAllComps( cseDESCOND )  }     ; SAC 08/31/22 (tic #1338)
 	"Delete all cseMETER components"					Proj:Action = {	DeleteAllComps( cseMETER )  }
 
 	"Delete all CSE Cons-related components"		Proj:Action = {	EvalRulelist( "CSE_Cleanup_Cons" )  }
@@ -954,6 +970,66 @@ RULELIST "CSE_SimSpeedOption_Custom" 1 0 0 1
    "Set (speed = Custom) cseTOP:auszTol"           cseTOP:auszTol       = {  Proj:CSE_auszTol    }
    "Set (speed = Custom) cseTOP:awTrigT"           cseTOP:awTrigT       = {  Proj:CSE_AWTrigT    }
    "Set (speed = Custom) cseTOP:awTrigH"           cseTOP:awTrigH       = {  Proj:CSE_AWTrigH    }
+END
+;*************************************************************************
+
+
+;************************************************************************* SAC 08/31/22 (tic #1338)
+RULELIST "CSE_Setup_DESCOND" 1 0 0 1
+   "Create & setup cseDESCOND for hottest month"   cseTOP:coolDsCond[1] =
+      {  switch (HottestMonthNum)
+            case   7 :  CreateComp( cseDESCOND, "ClgDC_0p4pct_Jul", "CSE_Setup_DESCOND_Jul" )
+            case   8 :  CreateComp( cseDESCOND, "ClgDC_0p4pct_Aug", "CSE_Setup_DESCOND_Aug" )
+            case   9 :  CreateComp( cseDESCOND, "ClgDC_0p4pct_Sep", "CSE_Setup_DESCOND_Sep" )
+            default  :  EvalRulelist( "CSE_Setup_DESCOND_Error" )
+         endswitch  }
+
+; TESTING
+;   "Create & setup SECOND TEST cseDESCOND for another hot month"   cseTOP:coolDsCond[2] =
+;      {  switch (HottestMonthNum)
+;            case   7 :  CreateComp( cseDESCOND, "ClgDC_0p4pct_Aug", "CSE_Setup_DESCOND_Aug" )
+;            case   8 :  CreateComp( cseDESCOND, "ClgDC_0p4pct_Sep", "CSE_Setup_DESCOND_Sep" )
+;            case   9 :  CreateComp( cseDESCOND, "ClgDC_0p4pct_Jul", "CSE_Setup_DESCOND_Jul" )
+;            default  :  UNCHANGED
+;         endswitch  }
+
+END
+;*************************************************************************
+RULELIST "CSE_Setup_DESCOND_Jul" 1 0 0 1
+   "Set cseDESCOND:dcDay_x"      cseDESCOND:dcDay_x      = {  "Jul 21"  }
+   "Set cseDESCOND:dcDB"         cseDESCOND:dcDB         = {  WeatherCliZnDsgnDay2022:DB004_Jul(      "Station_Name", EnumString( Proj:WeatherStation ) )  }
+   "Set cseDESCOND:dcMCDBR"      cseDESCOND:dcMCDBR      = {  WeatherCliZnDsgnDay2022:MDBR_DB050_Jul( "Station_Name", EnumString( Proj:WeatherStation ) )  }
+   "Set cseDESCOND:dcMCWB"       cseDESCOND:dcMCWB       = {  WeatherCliZnDsgnDay2022:MCWB_DB004_Jul( "Station_Name", EnumString( Proj:WeatherStation ) )  }
+   "Set cseDESCOND:dcMCWBR"      cseDESCOND:dcMCWBR      = {  WeatherCliZnDsgnDay2022:MWBR_DB050_Jul( "Station_Name", EnumString( Proj:WeatherStation ) )  }
+   "Set cseDESCOND:dcTauB"       cseDESCOND:dcTauB       = {  WeatherCliZnDsgnDay2022:Taub_Jul(       "Station_Name", EnumString( Proj:WeatherStation ) )  }
+   "Set cseDESCOND:dcTauD"       cseDESCOND:dcTauD       = {  WeatherCliZnDsgnDay2022:Taud_Jul(       "Station_Name", EnumString( Proj:WeatherStation ) )  }
+   "Set cseDESCOND:dcWindSpeed"  cseDESCOND:dcWindSpeed  = {  WeatherCliZnDsgnDay2022:WSAvg_Jul(      "Station_Name", EnumString( Proj:WeatherStation ) )  }
+END
+;*************************************************************************
+RULELIST "CSE_Setup_DESCOND_Aug" 1 0 0 1
+   "Set cseDESCOND:dcDay_x"      cseDESCOND:dcDay_x      = {  "Aug 21"  }
+   "Set cseDESCOND:dcDB"         cseDESCOND:dcDB         = {  WeatherCliZnDsgnDay2022:DB004_Aug(      "Station_Name", EnumString( Proj:WeatherStation ) )  }
+   "Set cseDESCOND:dcMCDBR"      cseDESCOND:dcMCDBR      = {  WeatherCliZnDsgnDay2022:MDBR_DB050_Aug( "Station_Name", EnumString( Proj:WeatherStation ) )  }
+   "Set cseDESCOND:dcMCWB"       cseDESCOND:dcMCWB       = {  WeatherCliZnDsgnDay2022:MCWB_DB004_Aug( "Station_Name", EnumString( Proj:WeatherStation ) )  }
+   "Set cseDESCOND:dcMCWBR"      cseDESCOND:dcMCWBR      = {  WeatherCliZnDsgnDay2022:MWBR_DB050_Aug( "Station_Name", EnumString( Proj:WeatherStation ) )  }
+   "Set cseDESCOND:dcTauB"       cseDESCOND:dcTauB       = {  WeatherCliZnDsgnDay2022:Taub_Aug(       "Station_Name", EnumString( Proj:WeatherStation ) )  }
+   "Set cseDESCOND:dcTauD"       cseDESCOND:dcTauD       = {  WeatherCliZnDsgnDay2022:Taud_Aug(       "Station_Name", EnumString( Proj:WeatherStation ) )  }
+   "Set cseDESCOND:dcWindSpeed"  cseDESCOND:dcWindSpeed  = {  WeatherCliZnDsgnDay2022:WSAvg_Aug(      "Station_Name", EnumString( Proj:WeatherStation ) )  }
+END
+;*************************************************************************
+RULELIST "CSE_Setup_DESCOND_Sep" 1 0 0 1
+   "Set cseDESCOND:dcDay_x"      cseDESCOND:dcDay_x      = {  "Sep 21"  }
+   "Set cseDESCOND:dcDB"         cseDESCOND:dcDB         = {  WeatherCliZnDsgnDay2022:DB004_Sep(      "Station_Name", EnumString( Proj:WeatherStation ) )  }
+   "Set cseDESCOND:dcMCDBR"      cseDESCOND:dcMCDBR      = {  WeatherCliZnDsgnDay2022:MDBR_DB050_Sep( "Station_Name", EnumString( Proj:WeatherStation ) )  }
+   "Set cseDESCOND:dcMCWB"       cseDESCOND:dcMCWB       = {  WeatherCliZnDsgnDay2022:MCWB_DB004_Sep( "Station_Name", EnumString( Proj:WeatherStation ) )  }
+   "Set cseDESCOND:dcMCWBR"      cseDESCOND:dcMCWBR      = {  WeatherCliZnDsgnDay2022:MWBR_DB050_Sep( "Station_Name", EnumString( Proj:WeatherStation ) )  }
+   "Set cseDESCOND:dcTauB"       cseDESCOND:dcTauB       = {  WeatherCliZnDsgnDay2022:Taub_Sep(       "Station_Name", EnumString( Proj:WeatherStation ) )  }
+   "Set cseDESCOND:dcTauD"       cseDESCOND:dcTauD       = {  WeatherCliZnDsgnDay2022:Taud_Sep(       "Station_Name", EnumString( Proj:WeatherStation ) )  }
+   "Set cseDESCOND:dcWindSpeed"  cseDESCOND:dcWindSpeed  = {  WeatherCliZnDsgnDay2022:WSAvg_Sep(      "Station_Name", EnumString( Proj:WeatherStation ) )  }
+END
+;*************************************************************************
+RULELIST "CSE_Setup_DESCOND_Error" 1 0 0 1
+   "Post error re: DESCOND setup"   cseTOP:Action = {  PostError( "Error creating DESCOND for month # %g", ValidOr( HottestMonthNum, -999 ) )  }
 END
 ;*************************************************************************
 
