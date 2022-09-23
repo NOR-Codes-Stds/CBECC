@@ -386,17 +386,22 @@ RULELIST  "Reporting_HERS_SpecialFeaturesSummary" 1 0 0 0
          if (IfValidAnd( FloorAreaServed > 0.5 )==0 .OR. Status != 2 .OR.
              IfValidAnd( HtOrClDucted > 0 )==0 .OR. LocalCompAssigned( DistribSystem )==0)
          then  0  else  1  endif  }
+   ; added logic to check 40' for <2022 codes and 25' for 2022+ - SAC 09/23/22 (tic #1296)
    "Set HVACSys:TriggerHERS"        HVACSys:TriggerHERS  = {
          if (IsAltSrvdDucted > 0 .AND.
              ( DistribSystem:Status == 1 .OR.
-              (DistribSystem:Status == 4 .AND. IfValidAnd( DistribSystem:IsLessThanFortyFt > 0 ))))
+              (DistribSystem:Status == 4 .AND. 
+               ( (Proj:StdDesignBase <  2022 .AND. IfValidAnd( DistribSystem:IsLessThanFortyFt > 0 )) .OR.
+                 (Proj:StdDesignBase >= 2022 .AND. IfValidAnd( DistribSystem:IsLessThan25Ft    > 0 )) )) ))
          then  1  ; ensure HERS is triggered for Altered systems w/ Existing or Exist+New < 40 combos
          else  0  endif  }
+   ; added logic to check 40' for <2022 codes and 25' for 2022+ - SAC 09/23/22 (tic #1296)
    "Set HVACSys:DuctStatusFlag[1]"     HVACSys:DuctStatusFlag[1]  = {
          if (IfValidAnd( FloorAreaServed > 0.5 )==0 .OR. 
              IfValidAnd( HtOrClDucted > 0 )==0 .OR. LocalCompAssigned( DistribSystem )==0) then  0
          else if (DistribSystem:Status == 4)  ; "Existing + New"
-         then  if (DistribSystem:IsLessThanFortyFt) then  4  else  5  endif
+         then  if ( (Proj:StdDesignBase <  2022 .AND. DistribSystem:IsLessThanFortyFt) .OR.
+                    (Proj:StdDesignBase >= 2022 .AND. DistribSystem:IsLessThan25Ft   ) ) then  4  else  5  endif
          else  DistribSystem:Status
          endif endif  }
    "Set HVACSys:DuctStatusFlag[2]"   HVACSys:DuctStatusFlag[2]  = {  DuctStatusFlag[1]  }
@@ -582,6 +587,7 @@ RULELIST  "Reporting_HERS_SpecialFeaturesSummary" 1 0 0 0
 ; mjb 7/9/14 - avoid setting HERS report flag for existing ducts
 ;	mjb	7/29/14 - use IsLessThanForty flag to keep short additions of ducts from triggering HERS check; also make sure to include Status = 4 (existing + new)
 ; SAC 5/28/19 - split logic into before & after 2019 & added new logic for 2019+
+   ; added logic to check 40' for <2022 codes and 25' for 2022+ - SAC 09/23/22 (tic #1296)
 	"Check for Duct Leakage"					HVACDist:HERSCheck:DuctLeakage = 
       {  if ( FloorAreaServed < 0.5 .OR. IsExisting ) then  0
          else if (Proj:EnergyCodeYearNum < 2019)
@@ -590,7 +596,9 @@ RULELIST  "Reporting_HERS_SpecialFeaturesSummary" 1 0 0 0
          else  ; 2019+
                   if ( Type = 8 ) then  0
                   else if ( IsNew .OR. IsAltered ) then  1
-                  else if ( Status = 4 .AND. IsLessThanFortyFt = 0 ) then  1
+                  else if ( Status = 4 .AND. 
+                            ( (Proj:EnergyCodeYearNum <  2022 .AND. IsLessThanFortyFt = 0) .OR.
+                              (Proj:EnergyCodeYearNum >= 2022 .AND. IsLessThan25Ft    = 0) ) ) then  1
                   else  0  endif endif endif
          endif endif  }
 ;	mjb	7/17/14 - need to set duct leakage flag even if NoCooling; using DuctsCreatedForAnalysis instead of TypeRpt
@@ -618,14 +626,22 @@ RULELIST  "Reporting_HERS_SpecialFeaturesSummary" 1 0 0 0
 																												else FltToStr( DuctLeakageValRpt, 1, 0, 3 ) endif endif endif												
 																											 else UNDEFINED endif }
 ;	mjb	8/1/14	- reset HVACDist:DuctLeakage enumeration for CF1R reporting of Existing Ducts
-	"Reset DuctLeakage enumeration if Existing"		HVACDist:Action	= {	if ( FloorAreaServed  > 0 .AND. (Status == 1 .OR. (Status == 4 .AND. IfValidAnd(IsLessThanFortyFt > 0.5))) ) then EvalRulelist( "Force_Existing_HVACDist_DuctLeakage", 1 ) else UNCHANGED endif	}
+   ; added logic to check 40' for <2022 codes and 25' for 2022+ - SAC 09/23/22 (tic #1296)
+	"Reset DuctLeakage enumeration if Existing"		HVACDist:Action	= {	if ( FloorAreaServed  > 0 .AND.
+                                                                                ( Status == 1 .OR.
+                                                                                  (Proj:StdDesignBase <  2022 .AND. Status == 4 .AND. IfValidAnd(IsLessThanFortyFt > 0.5)) .OR.
+                                                                                  (Proj:StdDesignBase >= 2022 .AND. Status == 4 .AND. IfValidAnd(IsLessThan25Ft    > 0.5)) ) )
+                                                                           then EvalRulelist( "Force_Existing_HVACDist_DuctLeakage", 1 ) else UNCHANGED endif	}
 
 ;	mjb	8/5/14	- added check for proposed duct location before setting HERS flag
 ;  mjb   9/10/14  - changed > to < for proper checking of DuctsCreatedForAnalysis flag
 ; SAC 12/31/15 - added logic to prevent flagging HERS DuctLocation for Existing ducts (tic 498)
 ; SAC 1/4/16 - added more logic to prevent HERS DuctLocation flag for Existing+New status where IsLessThanFortyFt is checked (tic 498)
+   ; added logic to check 40' for <2022 codes and 25' for 2022+ - SAC 09/23/22 (tic #1296)
 	"Check for HERS Req'd Duct Location"		HVACDist:HERSCheck:DuctLocation = { if ( FloorAreaServed  > 0 .AND. IfValidAnd(DuctsCreatedForAnalysis < 0.5) .AND.
-																												  (IsNew .OR. IsAltered .OR. (Status == 4 .AND. IfValidAnd( IsLessThanFortyFt > 0 )==0)) ) then
+																												  ( IsNew .OR. IsAltered .OR.
+                                                                                        (Proj:StdDesignBase <  2022 .AND. Status == 4 .AND. IfValidAnd( IsLessThanFortyFt > 0 )==0) .OR.
+                                                                                        (Proj:StdDesignBase >= 2022 .AND. Status == 4 .AND. IfValidAnd( IsLessThan25Ft    > 0 )==0) ) ) then
 																												if ( Type == 6 .OR. Type == 7 .OR. Type == 12 ) then 1 else 0 endif
 											      														else 0 endif  }
 	"Write Duct Location Msg" 						HVACDist:HERSCheck:DuctLocRptMsg = { if ( HERSCheck:DuctLocation > 0.5 ) then Type else UNDEFINED endif }
@@ -926,10 +942,12 @@ RULELIST  "Reporting_HERS_SpecialFeaturesSummary" 1 0 0 0
          else  "Refrigerant Charge verification required if a refrigerant containing component is altered"  endif  }
 
   ; SAC 3/9/17 - logic for new Altered Duct Leakage HERS message (tic #764)
+   ; added logic to check 40' for <2022 codes and 25' for 2022+ - SAC 09/23/22 (tic #1296)
    "Set HERS flag for Altered Ducts"      HVACDist:HERSCheck:AltDuctLeakage  = {
 	      if ( IfValidAnd( HERSCheck:DuctLeakage = 0 ) .AND.
               ( Status == 1 .OR.
-               (Status == 4 .AND. IfValidAnd( IsLessThanFortyFt > 0 ))) )
+               (Proj:StdDesignBase <  2022 .AND. Status == 4 .AND. IfValidAnd( IsLessThanFortyFt > 0 )) .OR.
+               (Proj:StdDesignBase >= 2022 .AND. Status == 4 .AND. IfValidAnd( IsLessThan25Ft    > 0 )) ) )
 	      then  if ( Proj:ShowNotRegWatermark > 0 .AND. 
 	                 SumRevRef( HVACSys:DistribSystem, HVACSys:HtOrClDucted ) > 0 .AND.
 	                 SumRevRef( HVACSys:DistribSystem, HVACSys:IsExisting   ) > 0 )
@@ -1251,9 +1269,10 @@ RULELIST  "Reporting_HERS_SpecialFeaturesSummary" 1 0 0 0
 	"Write No Cooling Msg" 											Proj:SpeclFeatrs:NoCoolingMsg = { if ( SpeclFeatrs:NoCooling > 0.5 ) then 1 else 0 endif }
 ;	"debug"		HVACSys:Action	= {	MessageBox( "reporting -- HVACSys '%s':  CoolSystem:TypeRpt = %g  NoCoolingRpt = %g", Name, CoolSystem:TypeRpt, NoCoolingRpt )  }
 ;	mjb	7/29/14	added Special Feature message for les than 40ft of added duct
-	"Check for Short Ducts in Project" 							Proj:SpeclFeatrs:AddedShortDuct 		= { if ( SumAcrossIf(HVACDist:IsLessThanFortyFt, HVACDist:FloorAreaServed > 0 ) > 0.5 ) then 1 else 0 endif }
+   ; added logic to check 40' for <2022 codes and 25' for 2022+ - SAC 09/23/22 (tic #1296)
+	"Check for Short Ducts in Project" 							Proj:SpeclFeatrs:AddedShortDuct 		= { if ( (EnergyCodeYearNum <  2022 .AND. SumAcrossIf(HVACDist:IsLessThanFortyFt, HVACDist:FloorAreaServed > 0 ) > 0.5) .OR.
+                                                                                                      (EnergyCodeYearNum >= 2022 .AND. SumAcrossIf(HVACDist:IsLessThan25Ft,    HVACDist:FloorAreaServed > 0 ) > 0.5) ) then 1 else 0 endif }
 	"Write Short Duct Msg" 											Proj:SpeclFeatrs:AddedShortDuctMsg 	= { if ( SpeclFeatrs:AddedShortDuct > 0.5 ) then 1 else 0 endif }
-
 ;       Updated based on changes to address (tic #707)
 	; SAC 6/2/16 - added reporting of Recird DHW scenarios (tic #678)
 ;	"Check for DHWSys:SpeclFeatrsFlags[1] - Pipe Insulation, All Lines" 
