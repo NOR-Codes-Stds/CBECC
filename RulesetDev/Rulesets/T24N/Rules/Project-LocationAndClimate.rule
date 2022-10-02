@@ -138,16 +138,16 @@ RULE Proj:WeatherStationNum
     "California weather station number."
   INPUTCLASS
     Optional
-  DEFAULT 
+  DEFAULT
     if( LocalStatus( WeatherStation ) > 4 ) 
     then // If weather station is user-defined, then station # is based on that
-        WeatherFileClimateZone:WthrStationNum( "WthrFile", u:WeatherStation )
+        WeatherCliZnDsgnDay2022:WMO( "Station_Name", u:WeatherStation )
     else if( LocalStatus( ZipCode ) = 0 .OR. LocalStatus( CliZnNum ) = 0 )
     then // Weather station number set to 0 if ZipCode or CliZnNum not found
       0
-    else if( WeatherFileData:IsValid( "ZipCode", u:ZipCode, "CliZn", u:CliZnNum ) > 0 )
+    else if( ClimateZoneBoundaries:IsValid( "ZipCode", u:ZipCode, "CliZn", u:CliZnNum) > 0 )
     then // ZipCode/CliZnNum is valid, set station # based on these inputs
-      WeatherFileData:WthrStationNum( "ZipCode", u:ZipCode, "CliZn", u:CliZnNum )
+      ClimateZoneBoundaries:WthrStationNum( "ZipCode", u:ZipCode, "CliZn", u:CliZnNum ) 
     else 0
     endif endif endif
   CHECKCODE
@@ -166,10 +166,10 @@ RULE Proj:WeatherStation
     "California weather station."
   INPUTCLASS
     Required
-  DEFAULT 
+  DEFAULT
     if( WeatherStationNum < 1 )
     then "- select -"
-    else WeatherFileClimateZone:WthrFile( "WthrStationNum", u:WeatherStationNum )
+    else WeatherCliZnDsgnDay2022:Station_Name( "WMO", u:WeatherStationNum )
     endif
   CHECKCODE
     if( WeatherStation != "- select -" .AND. WeatherStation != "*" ) 
@@ -192,18 +192,18 @@ RULE Proj:Lat
     -90
   MAXIMUM
      90
-  DEFAULT 
+  DEFAULT
     if( LocalStatus( ZipCode ) > 0 )
     then
       if( ZipCode > 90000 .AND. ZipCode < 99999 )
   	   then ClimateZoneBoundaries:Lat( "ZipCode", u:ZipCode )
       else if( WeatherStationNum > 0 ) 
-  	   then WeatherFileClimateZone:Lat( "WthrStationNum", u:WeatherStationNum )
+  	   then WeatherCliZnDsgnDay2022:Lat( "WMO", u:WeatherStationNum )
   	   else UNDEFINED
       endif endif
     else if( IfValidAnd( WeatherStationNum > 0 )==0 )
     then UNDEFINED
-    else WeatherFileClimateZone:Lat( "WthrStationNum", u:WeatherStationNum )
+    else WeatherCliZnDsgnDay2022:Lat( "WMO", u:WeatherStationNum )
     endif endif
   CHECKCODE
     if( Lat >= 32.4 .AND. Lat <= 42 ) 
@@ -225,18 +225,18 @@ RULE Proj:Long
     -180
   MAXIMUM
      180
-  DEFAULT 
+  DEFAULT
     if( LocalStatus( ZipCode ) > 0 )
   	then
       if( ZipCode > 90000 .AND. ZipCode < 99999)
       then ClimateZoneBoundaries:Long( "ZipCode", u:ZipCode )
       else if( WeatherStationNum > 0) 
-      then WeatherFileClimateZone:Long( "WthrStationNum", u:WeatherStationNum )
+      then WeatherCliZnDsgnDay2022:Lon( "WMO", u:WeatherStationNum )
       else  UNDEFINED
       endif endif
     else if( IfValidAnd( WeatherStationNum > 0 )==0 )
     then UNDEFINED
-	  else WeatherFileClimateZone:Long( "WthrStationNum", u:WeatherStationNum )
+	  else WeatherCliZnDsgnDay2022:Lon( "WMO", u:WeatherStationNum )
     endif endif
   CHECKCODE
     if( Long >= -124.5 .AND. Long <= -113.5)
@@ -261,7 +261,7 @@ RULE Proj:Elevation
   DEFAULT 
     if( IfValidAnd( WeatherStationNum > 0 )==0 )
     then UNDEFINED
-    else WeatherFileClimateZone:Elevation( "WthrStationNum", u:WeatherStationNum )
+    else WeatherCliZnDsgnDay2022:Elev( "WMO", u:WeatherStationNum )
     endif
   SIZING
     u:Elevation
@@ -321,13 +321,17 @@ RULE NEW Proj:WthrFileEPWHash
         PostError( "Title-24 weather station not identified (Proj:WeatherStationNum)." )
     else if( LocalStatus( WthrFileEPWHash ) > 0 )
     then
-      if( WthrFileEPWHash != WeatherFileClimateZone:EPWHash( "WthrStationNum", u:WeatherStationNum ))
+      if (IfValidAnd( AnalysisVersion > 220000 ))
+      then  PostWarning( "Simulation weather file (%s - EPW) doesn't pass consistency 
+                          check.  Re-installation of program software may resolve the
+                          problem.  (WeatherStationNum %g)", WeatherStationFileBase, WeatherStationNum )
+      else if( WthrFileEPWHash != WeatherFileClimateZone:EPWHash( "WthrStationNum", u:WeatherStationNum ))
       then
       PostError( "Simulation weather file (%s - EPW) doesn't pass consistency 
                   check.  Re-installation of program software may resolve the
                   problem.", WeatherStation )
       else UNCHANGED
-      endif
+      endif endif
     else UNCHANGED
     endif endif
 ENDRULE
@@ -348,13 +352,15 @@ RULE NEW Proj:WthrFileDDYHash
         UNCHANGED  
     else if( LocalStatus( WthrFileDDYHash ) > 0 )
     then
-      if( WthrFileDDYHash != WeatherFileClimateZone:DDYHash( "WthrStationNum", u:WeatherStationNum ))
+      if (IfValidAnd( AnalysisVersion > 220000 ) .AND. IfValidAnd( GenerateWeatherLocationDDY > 0 ))
+      then  UNCHANGED   ; no check when generating DDY from weather location data
+      else if( WthrFileDDYHash != WeatherFileClimateZone:DDYHash( "WthrStationNum", u:WeatherStationNum ))
       then 
         PostError( "Simulation design day file (%s - DDY) doesn't pass consistency 
                     check.  Re-installation of program software may resolve the
                     problem.", WeatherStation )
       else UNCHANGED
-      endif
+      endif endif
     else UNCHANGED
     endif endif
 ENDRULE
@@ -520,6 +526,88 @@ RULE Proj:WtrMnTempSchRef
     endif
 ENDRULE
 
+//  ---------- Lookup Hottest Month for weather station in 2022 Design Day Data  ----------
+RULE NEW Proj:HotMonth
+  DATATYPE
+    Integer
+  LONGFORM
+    HottestMonth
+  DESCRIPTION
+    ""
+  INPUTCLASS 
+    NotInput  
+  DEFAULT 
+    if (IfValidAnd(WeatherStationNum > 0 ) )
+    then
+      WeatherCliZnDsgnDay2022:Hottest_Month("Station_Name", u:WeatherStation )  
+    else
+      UNDEFINED
+    endif
+  SIZING
+    u:HotMonth
+  ANNUAL
+    z:HotMonth
+ENDRULE
+
+//  ---------- Get coldest month for weather station in 2022 Design Day Data  ----------
+RULE NEW Proj:ColdMonth
+  DATATYPE
+    Integer
+  LONGFORM
+    ColdMonth
+  DESCRIPTION
+    ""
+  INPUTCLASS 
+    NotInput  
+  DEFAULT 
+    if (IfValidAnd(WeatherStationNum > 0 ) )
+    then
+      WeatherCliZnDsgnDay2022:Coldest_Month("Station_Name", WeatherStation )
+    else
+      UNDEFINED
+    endif
+  SIZING
+    u:ColdMonth
+  ANNUAL
+    z:ColdMonth
+ENDRULE
+
+
+// -------------- Get coldest-month wind speed from Weather Table --------------------------
+RULE NEW Proj:WindSpeedColdestMonth
+  DESCRIPTION
+    "set the correct column lookup for winter DD wind speed"
+  HELP
+    "Locates and sets coldest month for monthly average wind speed lookup"
+  INPUTCLASS
+    NotInput
+  UNITS
+    MPH
+  DEFAULT
+    if (IfValidAnd(WeatherStationNum > 0 ) )
+    then
+      if ( ColdMonth = 11 )
+      then
+        WeatherCliZnDsgnDay2022:WSAvg_Nov("Station_Name", u:WeatherStation ) 
+      else if ( ColdMonth = 12 )
+      then
+        WeatherCliZnDsgnDay2022:WSAvg_Dec("Station_Name", u:WeatherStation )
+      else if ( ColdMonth = 1 )
+      then
+        WeatherCliZnDsgnDay2022:WSAvg_Jan("Station_Name", u:WeatherStation )
+      else if ( ColdMonth = 2 )
+      then
+        WeatherCliZnDsgnDay2022:WSAvg_Feb("Station_Name", u:WeatherStation )
+      else if ( ColdMonth = 3 )
+      then
+        WeatherCliZnDsgnDay2022:WSAvg_Mar("Station_Name", u:WeatherStation )
+      else 
+        UNDEFINED
+      endif endif endif endif endif
+    else
+      UNDEFINED
+    endif
+ENDRULE
 
 // -------------- Project Design Dry-Bulb Temperature --------------------------
 //                Added May 2018 for use by closed cooling towers
@@ -538,7 +626,22 @@ RULE Proj:DsgnDBT
   UNITS
     °F
   DEFAULT
-    WeatherFileClimateZone:DsgnDB("WthrFile",Proj:WeatherStation)
+    if (IfValidAnd(WeatherStationNum > 0 ) )
+    then
+      if ( HotMonth = 7 )
+      then
+        WeatherCliZnDsgnDay2022:DB004_Jul("Station_Name", u:WeatherStation ) 
+      else if ( HotMonth = 8 )
+      then
+        WeatherCliZnDsgnDay2022:DB004_Aug("Station_Name", u:WeatherStation )
+      else if ( HotMonth = 9 )
+      then
+        WeatherCliZnDsgnDay2022:DB004_Sep("Station_Name", u:WeatherStation )
+      else UNDEFINED
+      endif endif endif
+    else
+      UNDEFINED
+    endif  
 ENDRULE
 
 
@@ -560,7 +663,23 @@ RULE Proj:MCWBT
   UNITS
     °F
   DEFAULT
-    WeatherFileClimateZone:MCWB("WthrFile",Proj:WeatherStation)
+    if (IfValidAnd(WeatherStationNum > 0 ) )
+    then
+      if ( HotMonth = 7 )
+      then
+        WeatherCliZnDsgnDay2022:MCWB_DB004_Jul("Station_Name", u:WeatherStation ) 
+      else if ( HotMonth = 8 )
+      then
+        WeatherCliZnDsgnDay2022:MCWB_DB004_Aug("Station_Name", u:WeatherStation )
+      else if ( HotMonth = 9 )
+      then
+        WeatherCliZnDsgnDay2022:MCWB_DB004_Sep("Station_Name", u:WeatherStation )
+      else 
+        UNDEFINED
+      endif endif endif
+    else
+      UNDEFINED
+    endif
 ENDRULE
 
 
@@ -581,12 +700,29 @@ RULE Proj:DsgnWBT
   UNITS
     °F
   DEFAULT
-    WeatherFileClimateZone:DsgnWB("WthrFile",Proj:WeatherStation)
+    if (IfValidAnd(WeatherStationNum > 0 ) )
+    then
+      if ( HotMonth = 7 )
+      then
+        WeatherCliZnDsgnDay2022:WB004_Jul("Station_Name", u:WeatherStation ) 
+      else if ( HotMonth = 8 )
+      then
+        WeatherCliZnDsgnDay2022:WB004_Aug("Station_Name", u:WeatherStation )
+      else if ( HotMonth = 9 )
+      then
+        WeatherCliZnDsgnDay2022:WB004_Sep("Station_Name", u:WeatherStation )
+      else 
+        UNDEFINED
+      endif endif endif
+    else
+      UNDEFINED
+    endif
 ENDRULE
 
 // -------------- Project Design Heating Temperature -------------------------- 
 // Taken from Res TABLE T24RClimateZoneDesignDay. Added by DR for HP Cap47 calculation
 // use Res conventions
+// 9/8/22 NK: Updated to lookup from ASHRAE 2022 Design Day Data file
 RULE Proj:DsgnHtgDBT
   DESCRIPTION
     "The project design heating temperature."
@@ -599,7 +735,12 @@ RULE Proj:DsgnHtgDBT
   UNITS
     °F
   DEFAULT
-    WeatherFileClimateZone:DsgnHtgDB("WthrFile",Proj:WeatherStation)
+    if (IfValidAnd(WeatherStationNum > 0 ) )
+    then
+      WeatherCliZnDsgnDay2022:DB996("Station_Name", u:WeatherStation )
+    else
+      UNDEFINED
+    endif
 ENDRULE
 
 
