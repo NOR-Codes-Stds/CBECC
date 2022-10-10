@@ -53,7 +53,7 @@ RULE NEW CoilHtg:HSPFCOPRndFact
      efficiency per the applicable AHRI testing standard."
   INPUTCLASS
     NotInput
-  SIZING
+  DEFAULT
     if( Type = "HeatPump" )
     then
       if( ParentComp = "ZnSys" )
@@ -158,7 +158,7 @@ RULE NEW CoilHtg:HSPFCOPRndScl
      AHRI testing standard."
   INPUTCLASS
     NotInput
-  SIZING
+  DEFAULT
     if( IfValidAnd( HSPFCOPRndFact = 0.1 ) )
     then 1
     else
@@ -186,7 +186,8 @@ RULE NEW CoilHtg:HSPFCOPRndScl
     endif endif endif
 ENDRULE
 
-// ********** Electric Heat Pump Heating Efficiency (HSPF) *********************
+// ********** Electric Heat Pump Heating Minimum Efficiencies *********************
+// CodeMin for HeatPump HSPF
 RULE NEW CoilHtg:CodeMinHSPF
   DATATYPE
     Float
@@ -197,169 +198,200 @@ RULE NEW CoilHtg:CodeMinHSPF
   UNITS 
     Btu/h-W
   DEFAULT
-    if( Type = "HeatPump" .AND. IfValidAnd( CndsrType = "Air" ) )
+    if( Type = "HeatPump" .AND. IfValidAnd( CndsrType = "Air" ) .AND.
+        IfValidAnd( SysClgCap > 0 ) )
     then // ------------------------------------------------------------------
       if( ParentComp = "AirSys" )
       then // Part of an AirSystem
+        if( IfValidAnd( AirSys:EffMetric = "SEER2/EER2/HSPF2" ) .AND. AirSys:HSPF2IsValid > 0 )
+        then UNDEFINED
+        else
         if(  SysType ="SPVHP" )
         then // efficiency for SPVHP is described in terms of COP
           UNDEFINED
         else
-        if( IfValidAnd( Parent2Valid( ClgCap ) < 65000 ) .AND. 
-            AirSys:SubType != "NA" )
+        if( IfValidAnd( AirSys:UnitaryCat = "HP" ) .AND.
+            IfValidAnd( SysClgCap < 65000 ) .AND. 
+            IfValidAnd( AirSys:SubType != "NA" ) )
         then
-          if( Proj:StdsVersionYr >= 2015 )
-          then // Compliance2015 and beyond
-            if( AirSys:SubType = "Split1Phase" )
-            then 8.2
-            else 8.0
-            endif
-          else 7.7
-          endif
+          UnitaryACHPMinEffReq:HSPF( "StandardsVersion", Proj:StdsVersion,
+                                     "Category", "HP",
+                                     "SubCategory", AirSys:SubType,
+                                     "CondenserType", "Air",
+                                     "SizeCategory", SysClgCap )
         else UNDEFINED
-        endif endif
+        endif endif endif
       else // ------------------------------------------------------------------
       if( ParentComp = "ZnSys" )
       then // Part of a ZoneSystem
+        if( IfValidAnd( ZnSys:EffMetric = "SEER2/EER2/HSPF2" ) .AND. ZnSys:HSPF2IsValid > 0 )
+        then UNDEFINED
+        else
         if( SysType ="SPVHP" )
         then // efficiency for SPVHP is described in terms of COP
           UNDEFINED
         else
-        if( ( SysType = "SZHP" .OR. SysType = "SZDFHP" .OR.
-              SysType = "MiniSplitHP" ) .AND. 
-            IfValidAnd( ParentValid( ClgCap ) < 65000 ) .AND. 
-            ZnSys:SubType != "NA" )
+        if( IfValidAnd( ZnSys:UnitaryCat = "HP" ) .AND.
+            IfValidAnd( SysClgCap < 65000 ) .AND. 
+            IfValidAnd( ZnSys:SubType != "NA" ) )
         then
-          if( Proj:StdsVersionYr >= 2015 )
-          then // Compliance2015 and beyond
-            if( ZnSys:SubType = "Split1Phase" )
-            then 8.2
-            else 8.0
-            endif
-          else 7.7
-          endif
+          UnitaryACHPMinEffReq:HSPF( "StandardsVersion", Proj:StdsVersion,
+                                     "Category", "HP",
+                                     "SubCategory", ZnSys:SubType,
+                                     "CondenserType", "Air",
+                                     "SizeCategory", SysClgCap )
         else UNDEFINED
-        endif endif
+        endif endif endif
       else UNDEFINED
       endif endif
     else UNDEFINED
     endif
+  SIZING
+    if( BaseSysNum > 0 )
+    then UNDEFINED
+    else UNCHANGED
+    endif 
+  ANNUAL : T24N
+    if( BaseSysNum > 0 .AND. Type = "HeatPump" )
+    then
+      if( BaseSysNum = 201 )
+      then // Res Common Area is packaged 1-phase system < 65kBtu/hr, uses SEER2
+        UNDEFINED
+      else
+      if( IfValidAnd( SysClgCap < 65000 ) .AND. ParentComp = "AirSys" )
+      then // All other Baseline NonRes <65kBtu/hr is assumed packaged 3-phase, uses SEER
+        UnitaryACHPMinEffReq:HSPF( "StandardsVersion", Proj:StdsVersion,
+                                   "Category", "HP",
+                                   "SubCategory", "Packaged3Phase",
+                                   "CondenserType", "Air",
+                                   "SizeCategory", SysClgCap ) 
+      else UNDEFINED // Not used if net capacity >= 65 MBH
+      endif endif
+    else UNCHANGED
+    endif 
 ENDRULE
-
-
 // -----------------------------------------------------------------------------
-RULE CoilHtg:HtPumpHSPF
-  DESCRIPTION
-    "The Heating Season Performance Factor (HSPF) is an indicator of expected, 
-     average seasonal heat pump efficiency. It is determined in accordance with 
-     AHRI Standards." 
-  HELP
-    "This is a required input for air-source HeatPump heating coils in packaged/split units
-     where COP is not entered and the net capacity is <65 MBH."
-  REFERENCE 
-    NACM Section 5.7.6.5
-  INPUTCLASS 
-    CondRequired
-  COMMONMINIMUM
-    5.0
-  COMMONMAXIMUM
-    13.0
-  MAXIMUM
-    15.0
+// CodeMin for HeatPump HSPF2
+RULE NEW CoilHtg:CodeMinHSPF2
+  DATATYPE
+    Float
+  LONGFORM
+    CodeMinimumHSPF2
+  INPUTCLASS
+    NotInput
   UNITS 
     Btu/h-W
   REPORTPRECISION
     1
   DEFAULT
-    if( Proj:AutoEffInput = 1 .AND. 
-        IfValidAnd( CodeMinHSPF > 0 ) )   
-    then // For PROPOSED AutoEffInput only 
-      CodeMinHSPF
+    if( Type = "HeatPump" .AND. IfValidAnd( CndsrType = "Air" ) .AND.
+        IfValidAnd( SysClgCap > 0 ) )
+    then // ------------------------------------------------------------------
+      if( ParentComp = "AirSys" )
+      then // Part of an AirSystem
+        if( IfValidAnd( AirSys:EffMetric = "SEER2/EER2/HSPF2" ) .AND. AirSys:HSPF2IsValid > 0 )
+        then
+          UnitaryACHPMinEffReq:HSPF2( "StandardsVersion", Proj:StdsVersion,
+                                      "Category", "HP", 
+                                      "SubCategory", AirSys:SubType,
+                                      "CondenserType", "Air", 
+                                      "SizeCategory", SysClgCap )
+        else UNDEFINED
+        endif
+      else // ------------------------------------------------------------------
+      if( ParentComp = "ZnSys" )
+      then
+        if( IfValidAnd( ZnSys:EffMetric = "SEER2/EER2/HSPF2" ) .AND. ZnSys:HSPF2IsValid > 0 )
+        then
+          UnitaryACHPMinEffReq:HSPF2( "StandardsVersion", Proj:StdsVersion,
+                                      "Category", "HP", 
+                                      "SubCategory", ZnSys:SubType,
+                                      "CondenserType", "Air", 
+                                      "SizeCategory", SysClgCap )
+        else UNDEFINED
+        endif
+      else UNDEFINED
+      endif endif
     else UNDEFINED
     endif
-  CHECKCODE : T24N
-    if( ( BypassMinEffCheck > 0 .OR. BypassCheckCode = 1 ) 
-        .OR. 
-        ( BypassCheckCode = 2 .AND. BypassMinEffCheck > 0 ) )
-    then 
-      UNCHANGED
-    else
-    if( IfValidAnd( CodeMinHSPF > 0 ) .AND. 
-        IfValidAnd( HtPumpHSPF > 0 ) = 0 )
-    then
-      PostError("Heat pump coil '%s' must be specified with AHRI rated HSPF.", Name )
-    else 
-    if( IfValidAnd( HtPumpHSPF < CodeMinHSPF ) )
-    then 
-      PostError("HSPF of coil '%s' is less than the code minimum required 
-                 efficiency of HSPF-%.1f. Select the bypass of efficiency
-                 check at the coil if this is not applicable.",
-                 Name, CodeMinHSPF )
-    else UNCHANGED 
-    endif endif endif
-  CHECKCODE : S901G ECBC
-    // 90.1G does not include mandatory minimum efficiency
-    if( IfValidAnd( CodeMinHSPF > 0 ) .AND. 
-        IfValidAnd( HtPumpHSPF > 0 ) = 0 )
-    then
-      PostError("Heat pump coil '%s' must be specified with AHRI rated HSPF.", Name )
-    else UNCHANGED 
-    endif
   ANNUAL : T24N
-    if( BaseSysNum > 0 .AND. Type = "HeatPump" .AND. IfValidAnd( SysClgCap > 0 ) )
-    then
-      if( ParentComp = "ZnSys" )
-      then UNDEFINED
-      else if( IfValidAnd( SysClgCap < 65000 ) )
-      then 8.0 // Baseline is assumed Packaged, 3Phase
-      else UNDEFINED
-      endif endif
-    else UNCHANGED
-    endif
-  ANNUAL : S901G ECBC
     if( BaseSysNum > 0 .AND. Type = "HeatPump" )
     then
-      if( ParentComp = "ZnSys" )
-      then UNDEFINED
-      else if( IfValidAnd( SysClgCap < 65000 ) )
-      then 7.7 // Baseline is assumed 3Phase
-      else UNDEFINED
-      endif endif
+      if( BaseSysNum = 201 )
+       // Baseline Res Common Area is assumed AirSys packaged 1-phase system < 65kBtu/hr, use SEER2
+      then
+        UnitaryACHPMinEffReq:HSPF2( "StandardsVersion", Proj:StdsVersion,
+                                    "Category", AirSys:UnitaryCat,
+                                    "SubCategory", "Packaged1Phase",
+                                    "CondenserType", "Air", 
+                                    "SizeCategory", 64999 )
+      else UNDEFINED // All other Baseline NonRes <65kBtu/hr is assumed packaged 3-phase, use SEER
+      endif
     else UNCHANGED
-    endif
+    endif 
 ENDRULE
-// -----------------------------------------------------------------------------
-RULE NEW CoilHtg:HtPumpHSPFRnd
+
+RULE NEW CoilHtg:HSPFToHSPF2Rat
   DATATYPE
     Float
   LONGFORM
-    HeatPumpHSPFRound
+    HSPFToHSPF2Ratio
   DESCRIPTION
-    "Round heating coil HSPF value based on AHRI testing standard"
+    "The ratio of HSPF2/HSPF for a given equipment type."
   INPUTCLASS
     NotInput
-  UNITS
-    Btu/h-W
-  SIZING
-    if( IfValidAnd( HSPFCOPRndFact > 0 ) .AND.
-        IfValidAnd( HtPumpHSPF > 0 ) )
+  DEFAULT
+    if( ParentComp = "AirSys" )
+    then // Part of an AirSystem
+      if( AirSys:HSPF2IsValid > 0 )
+      then
+        UnitaryACHPMinEffReq:HSPFToHSPF2Rat( "StandardsVersion", Proj:StdsVersion,
+                                             "Category", "HP",
+                                             "SubCategory", AirSys:SubType,
+                                             "CondenserType", "Air", 
+                                             "SizeCategory", CapTotNetRtd )
+;       if( AirSys:SubType = "Split1Phase" .OR. AirSys:SubType = "Split3Phase" )
+;       then 0.85 // Split AC or HP
+;       else 0.84 // Packaged AC or HP
+;       endif
+      else UNDEFINED
+      endif
+    else // ------------------------------------------------------------------
+    if( ParentComp = "ZnSys" )
     then
-      int( ( HtPumpHSPF / HSPFCOPRndFact ) + 0.5 ) * HSPFCOPRndFact
-    else
-      UNDEFINED
-    endif
+      if( ZnSys:HSPF2IsValid > 0 )
+      then
+        UnitaryACHPMinEffReq:HSPFToHSPF2Rat( "StandardsVersion", Proj:StdsVersion,
+                                             "Category", "HP",
+                                             "SubCategory", ZnSys:SubType,
+                                             "CondenserType", "Air", 
+                                             "SizeCategory", CapTotNetRtd )
+;       if( AirSys:SubType = "Split1Phase" .OR. AirSys:SubType = "Split3Phase" )
+;       then 0.85 // Split AC or HP
+;       else 0.84 // Packaged AC or HP
+;       endif
+      else UNDEFINED
+      endif
+    else UNDEFINED
+    endif endif
   ANNUAL
-    if( IfValidAnd( HSPFCOPRndFact > 0 ) .AND.
-        IfValidAnd( HtPumpHSPF > 0 ) )
+    if( BaseSysNum > 0 .AND. Type = "HeatPump" )
     then
-      int( ( HtPumpHSPF / HSPFCOPRndFact ) + 0.5 ) * HSPFCOPRndFact
-    else
-      UNDEFINED
-    endif
-ENDRULE      
-
-// ********** Electric Heat Pump Heating Efficiency (COP) **********************
-// Calculate code minimum EER for DX cooling coils
+      if( BaseSysNum = 201 )
+       // Baseline Res Common Area is assumed AirSys packaged 1-phase system < 65kBtu/hr, use HSPF2
+      then
+        UnitaryACHPMinEffReq:HSPFToHSPF2Rat( "StandardsVersion", Proj:StdsVersion,
+                                             "Category", "HP",
+                                             "SubCategory", "Packaged1Phase",
+                                             "CondenserType", "Air", 
+                                             "SizeCategory", 64999 )
+      else UNDEFINED // All other Baseline NonRes <65kBtu/hr is assumed packaged 3-phase, use HSPF
+      endif
+    else UNCHANGED
+    endif 
+ENDRULE
+// -----------------------------------------------------------------------------
+// CodeMin for HeatPump COP
 RULE NEW CoilHtg:CodeMinCOP
   DATATYPE
     Float
@@ -457,8 +489,23 @@ RULE NEW CoilHtg:CodeMinCOP
       endif endif
     else UNDEFINED
     endif
+  ANNUAL : T24N
+    if( BaseSysNum > 0 .AND. Type = "HeatPump" .AND. IfValidAnd( SysClgCap > 0 ) )
+    then // Is baseline system
+      if( IfValidAnd( SysClgCap < 65000 ) ) 
+      then UNDEFINED // See HtPumpCOP for HSPF -> COP conversion
+      else // Look-up minimum efficiency based on baseline rated net capacity 
+        UnitaryACHPMinEffReq:COP47( "StandardsVersion", Proj:StdsVersion,
+                                    "Category", AirSys:UnitaryCat,
+                                    "SubCategory", AirSys:SubType,
+                                    "SizeCategory", SysClgCap )
+      endif
+    else UNCHANGED
+    endif
 ENDRULE
 
+// -----------------------------------------------------------------------------
+// T24N_2016 HP heating efficiency
 TABLE StdHPHtgEfficiency
     SizeCategory    COP47   
 //  <65000          Based on HSPF -> COP equation
@@ -466,6 +513,219 @@ TABLE StdHPHtgEfficiency
     <240000         2.8     
     >=240000        2.8  
 ENDTABLE  
+
+
+// ********** Electric Heat Pump Heating Efficiencies **********************
+RULE CoilHtg:HtPumpHSPF2
+  DESCRIPTION
+    "The Heating Season Performance Factor2 (HSPF2) is an indicator of expected, 
+     average seasonal heat pump efficiency. It is determined in accordance with 
+     AHRI Standards." 
+  HELP
+    "This input applies to air-source HeatPump heating coils in packaged/split units
+     with net cooling capacity <65 MBH."
+  INPUTCLASS 
+    CondRequired
+  COMMONMINIMUM
+    5.0
+  COMMONMAXIMUM
+    13.0
+  MAXIMUM
+    15.0
+  UNITS 
+    Btu/h-W
+  REPORTPRECISION
+    1
+  DEFAULT
+    if( Proj:AutoEffInput = 1 .AND. 
+        IfValidAnd( CodeMinHSPF2 > 0 ) )   
+    then // For PROPOSED AutoEffInput only 
+      CodeMinHSPF2
+    else UNDEFINED
+    endif
+  CHECKCODE : T24N
+    if( ( BypassMinEffCheck > 0 .OR. BypassCheckCode = 1 ) 
+        .OR. 
+        ( BypassCheckCode = 2 .AND. BypassMinEffCheck > 0 ) )
+    then 
+      UNCHANGED
+    else
+    if( IfValidAnd( CodeMinHSPF2 > 0 ) .AND. 
+        IfValidAnd( HtPumpHSPF2 > 0 ) = 0 )
+    then
+      PostError("Heat pump coil '%s' must be specified with AHRI rated HSPF2.", Name )
+    else 
+    if( IfValidAnd( HtPumpHSPF2 < CodeMinHSPF2 ) )
+    then 
+      PostError("HSPF of coil '%s' is less than the code minimum required 
+                 efficiency of HSPF2-%.1f. Select the bypass of efficiency
+                 check at the coil if this is not applicable.",
+                 Name, CodeMinHSPF2 )
+    else UNCHANGED 
+    endif endif endif
+  SIZING
+    if( BaseSysNum > 0 .OR. Type != "HeatPump" )
+    then // Not used for non-DX coils and efficiency is unknown for sizing baseline systems
+      UNDEFINED
+    else if( IfValidAnd( CodeMinHSPF2 > 0 ) ) 
+    then // User-equipment is HSPF2-rated
+      CodeMinHSPF2
+    else UNDEFINED
+    endif endif
+  ANNUAL
+    if( BaseSysNum > 0 .AND. Type = "HeatPump" )
+    then // Is baseline system
+      if( IfValidAnd( CodeMinHSPF2 > 0 ) )
+      then CodeMinHSPF2
+      else UNDEFINED
+      endif
+    else UNCHANGED
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE CoilHtg:HtPumpHSPF
+  DESCRIPTION
+    "The Heating Season Performance Factor (HSPF) is an indicator of expected, 
+     average seasonal heat pump efficiency. It is determined in accordance with 
+     AHRI Standards." 
+  HELP
+    "This input applies to air-source HeatPump heating coils in packaged/split units
+     with net cooling capacity <65 MBH."
+  REFERENCE 
+    NACM Section 5.7.6.5
+  INPUTCLASS 
+    CondRequired
+  COMMONMINIMUM
+    5.0
+  COMMONMAXIMUM
+    13.0
+  MAXIMUM
+    15.0
+  UNITS 
+    Btu/h-W
+  REPORTPRECISION
+    1
+  DEFAULT
+    if( Proj:AutoEffInput = 1 ) 
+    then  // For PROPOSED AutoEffInput only 
+      if( IfValidAnd( CodeMinHSPF > 0 ) )
+      then // Is HSPF rated
+        CodeMinHSPF
+      else 
+      if( IfValidAnd( CodeMinHSPF2 > 0 ) .AND. IfValidAnd( HSPFToHSPF2Rat > 0 ) )
+      then // Is HSPF2 rated, calculate HSPF for COP calc
+        CodeMinHSPF2 / HSPFToHSPF2Rat
+      else UNDEFINED
+      endif endif
+    else UNDEFINED
+    endif
+  CHECKCODE : T24N
+    if( ( BypassMinEffCheck > 0 .OR. BypassCheckCode = 1 ) 
+        .OR. 
+        ( BypassCheckCode = 2 .AND. BypassMinEffCheck > 0 ) )
+    then 
+      UNCHANGED
+    else
+    if( IfValidAnd( CodeMinHSPF > 0 ) .AND. 
+        IfValidAnd( HtPumpHSPF > 0 ) = 0 )
+    then
+      PostError("Heat pump coil '%s' must be specified with AHRI rated HSPF.", Name )
+    else 
+    if( IfValidAnd( HtPumpHSPF < CodeMinHSPF ) )
+    then 
+      PostError("HSPF of coil '%s' is less than the code minimum required 
+                 efficiency of HSPF-%.1f. Select the bypass of efficiency
+                 check at the coil if this is not applicable.",
+                 Name, CodeMinHSPF )
+    else UNCHANGED 
+    endif endif endif
+  CHECKCODE : S901G ECBC
+    // 90.1G does not include mandatory minimum efficiency
+    if( IfValidAnd( CodeMinHSPF > 0 ) .AND. 
+        IfValidAnd( HtPumpHSPF > 0 ) = 0 )
+    then
+      PostError("Heat pump coil '%s' must be specified with AHRI rated HSPF.", Name )
+    else UNCHANGED 
+    endif
+  SIZING
+    if( ( BaseSysNum > 0 ) .OR. Type != "HeatPump" )
+    then // Not used for non-HP coils and efficiency is unknown for sizing baseline systems
+      UNDEFINED
+    else
+    if( IfValidAnd( CodeMinHSPF2 > 0 ) .AND. IfValidAnd( HSPFToHSPF2Rat > 0 ) )
+    then // User-equipment is HSPF2-rated
+      HtPumpHSPF2 / HSPFToHSPF2Rat
+    else
+    if( IfValidAnd( CodeMinHSPF > 0 ) ) 
+    then // User-equipment is HSPF-rated
+      HtPumpHSPF
+    else UNDEFINED
+    endif endif endif
+  ANNUAL : S901G ECBC
+    if( BaseSysNum > 0 .AND. Type = "HeatPump" )
+    then
+      if( ParentComp = "ZnSys" )
+      then UNDEFINED
+      else if( IfValidAnd( SysClgCap < 65000 ) )
+      then 7.7 // Baseline is assumed 3Phase
+      else UNDEFINED
+      endif endif
+    else UNCHANGED
+    endif
+  ANNUAL
+    if( BaseSysNum > 0 .AND. Type = "HeatPump" )
+    then // Is baseline system
+      if( IfValidAnd( CodeMinHSPF2 > 0 ) .AND. IfValidAnd( HSPFToHSPF2Rat > 0 ) )
+      then // Baseline uses SEER2
+        CodeMinHSPF2 / HSPFToHSPF2Rat
+      else
+      if( IfValidAnd( CodeMinHSPF > 0 ) )
+      then CodeMinHSPF
+      else UNDEFINED
+      endif endif
+    else UNCHANGED
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// Rounded HP HSPF 
+RULE NEW CoilHtg:HtPumpHSPFRnd
+  DATATYPE
+    Float
+  LONGFORM
+    HeatPumpHSPFRound
+  DESCRIPTION
+    "Round heating coil HSPF value based on AHRI testing standard"
+  INPUTCLASS
+    NotInput
+  UNITS
+    Btu/h-W
+  DEFAULT
+    if( IfValidAnd( HSPFCOPRndFact > 0 ) .AND.
+        IfValidAnd( HtPumpHSPF > 0 ) )
+    then
+      int( ( HtPumpHSPF / HSPFCOPRndFact ) + 0.5 ) * HSPFCOPRndFact
+    else
+      UNDEFINED
+    endif
+  SIZING
+    if( IfValidAnd( HSPFCOPRndFact > 0 ) .AND.
+        IfValidAnd( HtPumpHSPF > 0 ) )
+    then
+      int( ( HtPumpHSPF / HSPFCOPRndFact ) + 0.5 ) * HSPFCOPRndFact
+    else
+      UNDEFINED
+    endif
+  ANNUAL
+    if( IfValidAnd( HSPFCOPRndFact > 0 ) .AND.
+        IfValidAnd( HtPumpHSPF > 0 ) )
+    then
+      int( ( HtPumpHSPF / HSPFCOPRndFact ) + 0.5 ) * HSPFCOPRndFact
+    else
+      UNDEFINED
+    endif
+ENDRULE      
 
 // -----------------------------------------------------------------------------
 ;; DEBUGGING
@@ -493,17 +753,22 @@ RULE CoilHtg:HtPumpCOP
   REPORTPRECISION
     1
   DEFAULT
-    if( Proj:AutoEffInput = 1 ) 
-    then // For PROPOSED AutoEffInput only    
-      if( IfValidAnd( HtPumpHSPF > 0 ) .AND. IfValidAnd( CodeMinHSPF > 0 ) )
-      then // Calulate COP from HSPF for reference
-        ( 0.2778 * HtPumpHSPF ) + 0.9667 
-      else
-      if( IfValidAnd( CodeMinCOP > 0 ) )
-      then // Code minimum COP based on capacity
-        CodeMinCOP
-      else 2.9 // General punitive default
-      endif endif
+    if( Type = "HeatPump" )
+    then
+      if( Proj:AutoEffInput = 1 ) 
+      then // For PROPOSED AutoEffInput only  
+        if( IfValidAnd( CodeMinCOP > 0 ) )
+        then // Code minimum COP based on capacity
+          CodeMinCOP
+        else
+        if( IfValidAnd( HtPumpHSPFRnd > 0 ) .AND. 
+            ( IfValidAnd( CodeMinHSPF > 0 ) .OR. IfValidAnd( CodeMinHSPF2 > 0 ) ) )
+        then // Calulate COP from HSPF for reference
+          ( 0.2778 * HtPumpHSPF ) + 0.9667 
+        else 2.9 // General punitive default
+        endif endif
+      else UNDEFINED
+      endif
     else UNDEFINED
     endif
   CHECKCODE : T24N
@@ -541,32 +806,15 @@ RULE CoilHtg:HtPumpCOP
       3.0
     else
     if( BaseSysNum > 0 .OR. Type != "HeatPump" )
-    then
-      // Not used for non-HP coils, and 
-      // AHRI rated COP unknown for baseline systems 
+    then // Not used for non-HP coils, and AHRI rated COP unknown for baseline systems 
       UNDEFINED
     else
-    if( IfValidAnd( HtPumpHSPF > 0 ) .AND. 
-        IfValidAnd( HtPumpCOP > 0 ) = 0 )
+    if( IfValidAnd( HtPumpHSPFRnd > 0 ) .AND. IfValidAnd( HtPumpCOP > 0 ) = 0 )
     then
       // User has provided HSPF but not COP, so use default equation to calculate COP
-      ( 0.2778 * HtPumpHSPF ) + 0.9667
-    else HtPumpCOP
-    endif endif endif
-  ANNUAL : T24N
-    if( BaseSysNum > 0 .AND. Type = "HeatPump" .AND. IfValidAnd( SysClgCap > 0 ) )
-    then
-      if( SysClgCap < 65000 ) 
-      then // Use HSPF -> COP equation
-        ( 0.2778 * HtPumpHSPF ) + 0.9667
-      else // Look-up minimum efficiency based on baseline rated net capacity 
-        UnitaryACHPMinEffReq:COP47( "StandardsVersion", Proj:StdsVersion,
-                                    "Category", AirSys:UnitaryCat,
-                                    "SubCategory", AirSys:SubType,
-                                    "SizeCategory", SysClgCap )
-      endif
+      ( 0.2778 * HtPumpHSPFRnd ) + 0.9667
     else UNCHANGED
-    endif
+    endif endif endif
   ANNUAL : S901G ECBC
     if( BaseSysNum > 0 .AND. Type = "HeatPump" .AND. IfValidAnd( SysClgCap > 0 ) )
     then
@@ -578,6 +826,19 @@ RULE CoilHtg:HtPumpCOP
         ( 0.2778 * HtPumpHSPF ) + 0.9667
       else // Look-up minimum efficiency based on baseline rated net capacity 
         StdHPHtgEfficiency:COP47( "SizeCategory", SysClgCap )
+      endif endif
+    else UNCHANGED
+    endif
+  ANNUAL
+    if( BaseSysNum > 0 .AND. Type = "HeatPump" .AND. IfValidAnd( SysClgCap > 0 ) )
+    then // Is baseline system
+      if( IfValidAnd( CodeMinHSPF > 0 ) .OR. IfValidAnd( CodeMinHSPF2 > 0 ) )
+      then // Use HSPF -> COP equation
+        ( 0.2778 * HtPumpHSPFRnd ) + 0.9667
+      else
+      if( IfValidAnd( CodeMinCOP > 0 ) )
+      then CodeMinCOP
+      else UNDEFINED
       endif endif
     else UNCHANGED
     endif
@@ -665,7 +926,7 @@ RULE CoilHtg:HtPumpCOPAdj
 ENDRULE
 
 // -----------------------------------------------------------------------------
-// Convert EERAdj to EIR for simulation purposes
+// Convert COP to EIR for simulation purposes
 RULE CoilHtg:HtPumpEIR
   DESCRIPTION
     "The heating efficiency of a heat pump heating coil, described for simulation
