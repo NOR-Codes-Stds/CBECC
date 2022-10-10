@@ -62,6 +62,8 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
 
    "Create nrccNRCCPRF object"
       nrccDocumentData:Action  = {  CreateChildren( nrccNRCCPRF,   1, "NRCC Main" )  }     ; no init needed
+   "set nrccnRCCPRF:noXMLoutput_UseObjectName for LMCC reporting"    nrccnRCCPRF:noXMLoutput_UseObjectName =      ; SAC 10/09/22 (tic #3393)
+      {  if (IfValidAnd( Proj:IsLowRiseMFam > 0 )) then  "lMCCPRF01E"  else  UNDEFINED  endif  }
 
    "Create nrccSection_Info object"
       nrccNRCCPRF:Action    = {  CreateChildren( nrccSection_Info,    1, "NRCC Info" )  }
@@ -70,6 +72,18 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
    "Create nrccSection_Proj object"
       nrccNRCCPRF:Action    = {  CreateChildren( nrccSection_Proj,    1, "NRCC Proj" )  }
 
+
+  ; Section_DwellInfo table only for NRCC-MF & LMCC projects (RJH 10/1/22 Created from CF1RPRF Section_H)
+   "Call subordinate rulelist to handle Section_DwellInfo"
+      nrccNRCCPRF:Action = {  if (IfValidAnd( Proj:ResDwellUnits > 0 )) 
+                              then  EvalRulelist( "CF1RPRF01E_cf1rSection_DwellInfo_Proposed_MultiFamily" )
+                              else  UNCHANGED  endif }
+
+  ; Section_DwellType table only for NRCC-MF & LMCC projects (RJH 10/1/22 Created from CF1RPRF Section_I)
+   "Call subordinate rulelist to handle Section_DwellType"
+      nrccNRCCPRF:Action = {  if (IfValidAnd( Proj:ResDwellUnits > 0 )) 
+                              then  EvalRulelist( "CF1RPRF01E_cf1rSection_DwellType_Proposed_MultiFamily" )
+                              else  UNCHANGED  endif }
 
 ;  ...
 ;  ...
@@ -124,7 +138,23 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
       nrccNRCCPRF:Action    = {  CreateChildren( nrccSection_Except,    1, "NRCC Except" )  }
   ; Rule to Delete empty nrccSection_Except located in RULELIST "NRCCPRF_ap_PostSim"
 
+   "Create cf1rSection_FeatMF object (NRCC-MF & LMCC)"        ; SAC 08/22/22 (LMCC)
+      nrccNRCCPRF:Action    = {  if (IfValidAnd( Proj:ResDwellUnits > 0 )) 
+                                 then  CreateChildren( cf1rSection_FeatMF, 1, "CF1R SecE" )
+                                 else  UNCHANGED  endif  }
+   "Populate NRCC-MF/LMCC Special Features list (cf1rSection_FeatMF)"    cf1rSection_FeatMF:Action =     ; SAC 08/22/22 (LMCC)
+      {  if (ComponentCount( cf1rSection_FeatMF) < 1) then  UNCHANGED
+         else  EvalRulelist( "LMCCPRF_Proposed_MFam_SpecialFeatures" )  endif  }
 
+   "Create cf1rSection_HersSum object (LMCC only)"            ; SAC 08/22/22 (LMCC)
+      nrccNRCCPRF:Action    = {  if (IfValidAnd( Proj:IsLowRiseMFam > 0 ) .OR. IfValidAnd(Proj:IsHighRiseMFam > 0)) 
+                                 then  CreateChildren( cf1rSection_HersSum, 1, "CF1R SecEa" )
+                                 else  UNCHANGED  endif  }
+   "Populate LMCC HERS list (cf1rSection_HersSum)"      cf1rSection_HersSum:Action =    ; SAC 08/22/22 (LMCC)
+      {  if (ComponentCount( cf1rSection_HersSum) < 1) then  UNCHANGED
+         else  EvalRulelist( "CF1RPRF01E_Proposed_HERSFeatures" )  endif  }
+
+; duplicate of above section???
    "Create nrccSection_HERS object"
       nrccNRCCPRF:Action    = {  CreateChildren( nrccSection_HERS,    1, "NRCC HERS" )  }
   ; Rule to Delete empty nrccSection_HERS located in RULELIST "NRCCPRF_ap_PostSim"
@@ -134,12 +164,43 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
   ; Rule to Delete empty nrccSection_Remarks
    "DELETE empty nrccSection_Remarks object"
       nrccSection_Remarks:Action   = {  if (LocalStatus(Remarks01_CommentsToPermitAuthority) > 0) then  UNCHANGED  else  DeleteComp()  endif }
+
+
+   "Create cf1rSection_PV (PV) object (NRCC & LMCC)"           ; SAC 08/23/22
+      nrccNRCCPRF:Action    = {  if ( IfValidAnd( Proj:AnalysisVersion > 220000 ) .AND.
+                                      ( IfValidAnd( Proj:CommunitySolarProjID > 0 ) .OR.
+                                        IfValidAnd( Proj:PVSizeSum > 0 ) ) ) 
+                                 then  CreateChildren( cf1rSection_PV, 1, "CF1R SecDa" )
+                                 else  UNCHANGED  endif  }
+   "Create cf1rTablePV object"
+      cf1rSection_PV:Action = {  CreateChildren( cf1rTablePV, 1, "EDR_PV" )  }  
+   "Populate cf1rTablePV NRCC/LMCC PV table row for CommunitySolar via rulelist"   cf1rTablePV:Action = 
+      {  if (IfValidAnd( Proj:CommunitySolarProjID > 0 ))
+         then  CreateChildren( cf1rtblRowPV, 1, "NRCC CommSlrPVRow", "CF1RPRF01E_Section_Da_Row1_CommunitySolar" )
+         else  UNCHANGED  endif  }
+   "Populate PVArray NRCC/LMCC PV table row via rulelist"      PVArray:Action = 
+      {  if (IfValidAnd( Proj:CommunitySolarProjID > 0 ) .OR. IfValidAnd( DCSysSize > 0 ) == 0 .OR.
+             IfValidAnd( Az >= 0 )==0 .OR. IfValidAnd( Az <= 360 )==0 .OR.
+             IfValidAnd( TiltAngle >= 0 )==0 .OR. IfValidAnd( TiltAngle <= 90 )==0) then  UNDEFINED
+         else  EvalRulelist( "CF1RPRF01E_Section_Da_PVArray", 1 )  endif  }
+
+   "Create cf1rSection_Bat (Batt) object (NRCC & LMCC)"         ; SAC 08/23/22
+      nrccNRCCPRF:Action    = {  if (IfValidAnd( Proj:AnalysisVersion > 220000 ) .AND. IfValidAnd( Proj:SimBatt > 0 )) 
+                                 then  CreateChildren( cf1rSection_Bat, 1, "CF1R SecDb" )
+                                 else  UNCHANGED  endif  }
+   "Create cf1rTableBat object"
+      cf1rSection_Bat:Action = {  CreateChildren( cf1rTableBat, 1, "EDR_Bat" )  }  
+   "Populate Batt NRCC/LMCC table row via rulelist"      Batt:Action = 
+      {  if (ComponentCount( cf1rSection_Bat ) < 1) then  UNDEFINED
+         else  EvalRulelist( "CF1RPRF01E_Section_Db_Batt", 1 )  endif  }
+
+
 ;  ...
 ;  ...
 
 
    "Create nrccSection_Env object"
-      nrccNRCCPRF:Action    = {  if (Proj:CompPathEnv == "Performance") 
+      nrccNRCCPRF:Action    = {  if (Proj:CompPathEnv == "Performance" .OR. Proj:ResCompPathEnv == "Performance") 
                                  then CreateChildren( nrccSection_Env,    1, "NRCC Env" )
                                  else UNCHANGED 
                                  endif }
@@ -163,6 +224,62 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
   ; Rule to Delete empty nrccSection_CRRC
    "DELETE empty nrccSection_CRRC object"
       nrccSection_CRRC:Action   = {  if (ComponentCount( nrcctblRowCRRC ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
+
+
+   "Create nrccSection_CRRCmf object"                               nrccNRCCPRF:Action       =
+      {  if (Proj:ResCompPathEnv != "Performance") then  UNCHANGED
+         else  CreateChildren( nrccSection_CRRCmf, 1, "NRCC CRRCmf" )  endif  }
+   "Create nrccSection_CRRCmf nrccTableCRRCmf object"                 nrccSection_CRRCmf:Action  =
+      {  CreateChildren( nrccTableCRRCmf, 1, "NRCC CRRCmf table" )  }
+
+   "Create nrcctblRowCRRCmf object for each pertinent ResCathedralCeiling"     ResCathedralCeiling:nrcctblRowCRRCmfRef =
+      {  if (LocalCompAssigned( nrcctblRowCRRCmfRef ) > 0 .OR.
+             ComponentCount( nrccTableCRRCmf ) < 1 .OR.
+             IfValidAnd( Area > 0.1 )==0) then  UNDEFINED
+         else CreateComp( nrcctblRowCRRCmf, Format( "%s CRRCmf tblRow", Name ) )
+         endif  }
+   "Set ResCathedralCeiling:nrcctblRowCRRCmfRef:noXMLoutput_ResCathedralCeilingRef"    ResCathedralCeiling:nrcctblRowCRRCmfRef:noXMLoutput_ResCathedralCeilingRef = {  Name  }
+
+   "Create nrcctblRowCRRCmf object for each pertinent ResAttic"     ResAttic:nrcctblRowCRRCmfRef =
+      {  if (LocalCompAssigned( nrcctblRowCRRCmfRef ) > 0 .OR.
+             ComponentCount( nrccTableCRRCmf ) < 1 .OR.
+             IfValidAnd( Area > 0.1 )==0) then  UNDEFINED
+         else CreateComp( nrcctblRowCRRCmf, Format( "%s CRRCmf tblRow", Name ) )
+         endif  }
+   "Set ResAttic:nrcctblRowCRRCmfRef:noXMLoutput_ResAtticRef"    ResAttic:nrcctblRowCRRCmfRef:noXMLoutput_ResAtticRef = {  Name  }
+
+  ; Rule to Delete empty nrccSection_CRRCmf
+   "DELETE empty nrccSection_CRRCmf object"
+      nrccSection_CRRCmf:Action   = {  if (ComponentCount( nrcctblRowCRRCmf ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
+
+
+  ; Section_Attic table only if Attics exist in the project
+   "Call subordinate rulelist to handle Section_Attic"
+      nrccNRCCPRF:Action = {  if (Proj:CompPathEnv == "Performance" .OR. Proj:ResCompPathEnv == "Performance")
+                              then if ( ComponentCount( ResAttic ) > 0 ) 
+                                   then  EvalRulelist( "CF1RPRF01E_cf1rSection_Attic_Proposed" )
+                                   else  UNCHANGED  
+                                   endif
+                              else UNCHANGED
+                              endif }
+
+
+   "Create nrccSection_AirBar object"                               nrccNRCCPRF:Action       =
+      {  if (Proj:CompPathEnv != "Performance") then  UNCHANGED
+         else  CreateChildren( nrccSection_AirBar, 1, "NRCC AirBar" )  endif  }
+   "Create nrccSection_AirBar nrccTableAirBar object"                 nrccSection_AirBar:Action  =
+      {  CreateChildren( nrccTableAirBar, 1, "NRCC AirBar table" )  }
+   "Create nrcctblRowAirBar object for each pertinent Story"     Story:nrcctblRowAirBarRef =
+      {  if (LocalCompAssigned( nrcctblRowAirBarRef ) > 0 .OR. ComponentCount( nrccTableAirBar ) < 1) 
+         then  UNDEFINED
+         else CreateComp( nrcctblRowAirBar, Format( "%s AirBar tblRow", Name ) )
+         endif  }
+   "Set Story:nrcctblRowAirBarRef:noXMLoutput_StoryRef"    Story:nrcctblRowAirBarRef:noXMLoutput_StoryRef = {  Name  }
+
+  ; Rule to Delete empty nrccSection_AirBar
+   "DELETE empty nrccSection_AirBar object"
+      nrccSection_AirBar:Action   = {  if (ComponentCount( nrcctblRowAirBar ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
+
 
    "Create nrccSection_Opaq object"                               nrccNRCCPRF:Action       =
       {  if (Proj:CompPathEnv == "Performance") 
@@ -220,6 +337,18 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
    "DELETE empty nrccTableDoor object"
       nrccSection_Door:Action   = {  if (ComponentCount( nrcctblRowDoor ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
 
+
+  ; Section_Doormf table only if ResDoor instances in the project
+   "Call subordinate rulelist to handle Section_Doormf"
+      nrccNRCCPRF:Action = {  if (Proj:ResCompPathEnv == "Performance")
+                              then if ( ComponentCount( ResDr ) > 0 ) 
+                                   then  EvalRulelist( "CF1RPRF01E_cf1rSection_Doormf_Proposed" )
+                                   else  UNCHANGED  
+                                   endif
+                              else UNCHANGED
+                              endif }
+
+
    "Create nrccSection_Fen object"                               nrccNRCCPRF:Action       =
       {  if (Proj:CompPathEnv == "Performance") 
          then CreateChildren( nrccSection_Fen, 1, "NRCC Fenestration" )
@@ -240,11 +369,28 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
    "DELETE empty nrccSection_Fen object"
       nrccSection_Fen:Action   = {  if (ComponentCount( nrcctblRowFen ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
 
+
+  ; Section_Fenmf table only if ResWin or ResSkylt instances in the project
+   "Call subordinate rulelist to handle Section_Fenmf"
+      nrccNRCCPRF:Action = {  if (Proj:ResCompPathEnv == "Performance")
+                              then if ( ComponentCount( ResWin ) > 0 .OR. ComponentCount( ResSkylt ) > 0 ) 
+                                   then  EvalRulelist( "CF1RPRF01E_cf1rSection_Fenmf_Proposed" )
+                                   else  UNCHANGED  
+                                   endif
+                              else UNCHANGED
+                              endif }
+
+
+   ; setup Window Parent Azimuth to be used in populating Overhang data in table
+   "Set Win:ParentAzimuthRpt"   Win:ParentAzimuthRpt = 
+      {  Parent( Azimuth )  }
+
    "Create nrccSection_OverHang object"                   nrccNRCCPRF:Action       =
-      {  if (Proj:CompPathEnv != "Performance" .OR. SumAcrossIf( Win:Area, Win:EnableWinShades > 0 ) < 1) then  UNCHANGED
+      {  if (Proj:CompPathEnv != "Performance" .AND. Proj:ResCompPathEnv != "Performance") then  UNCHANGED
          else  CreateChildren( nrccSection_OverHang, 1, "NRCC OverHang" )  endif  }
    "Create nrccSection_OverHang nrccTableOverHang object"           nrccSection_OverHang:Action  =
       {  CreateChildren( nrccTableOverHang, 1, "NRCC OverHang table" )  }
+   
    "Create nrcctblRowOverHang object for each pertinent Win"     Win:nrcctblRowOverHangRef =
       {  if (LocalCompAssigned( nrcctblRowOverHangRef ) > 0 .OR.
              ComponentCount( nrccTableOverHang ) < 1 .OR.
@@ -254,15 +400,29 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
          else  CreateComp( nrcctblRowOverHang, Format( "%s OverHang tblRow", Name ) )
          endif  }
    "Set Win:nrcctblRowOverHangRef:noXMLoutput_WinRef"    Win:nrcctblRowOverHangRef:noXMLoutput_WinRef = {  Name  }
+   
+   "Create nrcctblRowOverHang object for each pertinent ResWin"     ResWin:nrcctblRowOverHangRef =
+      {  if (LocalCompAssigned( nrcctblRowOverHangRef ) > 0 .OR.
+             ComponentCount( nrccTableOverHang ) < 1 .OR.
+             IfValidAnd( ModelFinsOverhang > 0 )==0 .OR.
+             IfValidAnd( Area > 0 )==0 .OR.
+             IfValidAnd( OverhangDepth >= 0.05 )==0) then  UNDEFINED
+         else  CreateComp( nrcctblRowOverHang, Format( "%s OverHang tblRow", Name ) )
+         endif  }
+   "Set ResWin:nrcctblRowOverHangRef:noXMLoutput_ResWinRef"    ResWin:nrcctblRowOverHangRef:noXMLoutput_ResWinRef = {  Name  }
+  
   ; Rule to Delete empty nrccSection_OverHang
    "DELETE empty nrccSection_OverHang object"
       nrccSection_OverHang:Action   = {  if (ComponentCount( nrcctblRowOverHang ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
 
+
+
    "Create nrccSection_Fins object"                   nrccNRCCPRF:Action       =
-      {  if (Proj:CompPathEnv != "Performance" .OR. SumAcrossIf( Win:Area, Win:EnableWinShades > 0 ) < 1) then  UNCHANGED
+      {  if (Proj:CompPathEnv != "Performance" .AND. Proj:ResCompPathEnv != "Performance") then  UNCHANGED
          else  CreateChildren( nrccSection_Fins, 1, "NRCC Fins" )  endif  }
    "Create nrccSection_Fins nrccTableFins object"           nrccSection_Fins:Action  =
       {  CreateChildren( nrccTableFins, 1, "NRCC Fins table" )  }
+
    "Create nrcctblRowFins object for each pertinent Win"     Win:nrcctblRowFinsRef =
       {  if (LocalCompAssigned( nrcctblRowFinsRef ) > 0 .OR.
              ComponentCount( nrccTableFins ) < 1 .OR.
@@ -274,6 +434,19 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
                endif
          endif  }
    "Set Win:nrcctblRowFinsRef:noXMLoutput_WinRef"    Win:nrcctblRowFinsRef:noXMLoutput_WinRef = {  Name  }
+
+   "Create nrcctblRowFins object for each pertinent ResWin"     ResWin:nrcctblRowFinsRef =
+      {  if (LocalCompAssigned( nrcctblRowFinsRef ) > 0 .OR.
+             ComponentCount( nrccTableFins ) < 1 .OR.
+             IfValidAnd( ModelFinsOverhang > 0 )==0 .OR.
+             IfValidAnd( Area > 0 )==0 ) then  UNDEFINED
+         else  if (IfValidAnd(LeftFinDepth >= 0.05) .OR. IfValidAnd(RightFinDepth >= 0.05)) 
+               then CreateComp( nrcctblRowFins, Format( "%s Fins tblRow", Name ) )
+               else UNDEFINED
+               endif
+         endif  }
+   "Set ResWin:nrcctblRowFinsRef:noXMLoutput_ResWinRef"    ResWin:nrcctblRowFinsRef:noXMLoutput_ResWinRef = {  Name  }
+
   ; Rule to Delete empty nrccSection_Fins
    "DELETE empty nrccSection_Fins object"
       nrccSection_Fins:Action   = {  if (ComponentCount( nrcctblRowFins ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
@@ -392,6 +565,56 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
       nrccSection_HvacDry:Action   = {  if (ComponentCount( nrcctblRowHvacDry ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
 
 
+
+
+
+
+
+
+
+
+   "Create nrccSection_Hvacdwell object"   nrccNRCCPRF:Action =
+      {  if (Proj:ResCompPathMech == "Performance") 
+         then CreateChildren( nrccSection_Hvacdwell, 1, "Hvacdwell" )
+         else UNCHANGED 
+         endif }
+   "Create nrccSection_Hvacdwell nrccTableHvacdwell object"              nrccSection_Hvacdwell:Action  =
+      {  CreateChildren( nrccTableHvacdwell, 1, "Hvacdwell table" )  }
+   "Create nrcctblRowHvacdwell object for each pertinent DwellUnitType"     DwellUnitType:nrcctblRowHvacdwellRef =
+      {  if (LocalCompAssigned( nrcctblRowHvacdwellRef ) > 0 .OR.
+             ComponentCount( nrccTableHvacdwell ) < 1 .OR.
+             ComponentCount( DwellUnitType ) < 1 ) then  UNDEFINED
+         else  if ( IfValidAnd( NumAssigningDUs > 0 ) )
+               then if ( (HVACSysType = "Heat Pump Heating and Cooling System" .AND. IfValidAnd( HPModelDualFuel = 0)) .OR. HVACSysType = "Other Heating and Cooling System" )
+                    then CreateComp( nrcctblRowHvacdwell, Format( "%s Hvacdwell tblRow", Name ) )
+                    else UNDEFINED
+                    endif
+               else UNDEFINED
+               endif
+         endif  }
+   "Set DwellUnitType:nrcctblRowHvacdwellRef:noXMLoutput_DwellUnitTypeRef"    DwellUnitType:nrcctblRowHvacdwellRef:noXMLoutput_DwellUnitTypeRef = 
+      {  if (ComponentCount( DwellUnitType ) < 1) then  UNDEFINED
+         else Name
+         endif  }
+
+  ; Rule to Delete empty nrccSection_Hvacdwell
+   "DELETE empty nrccSection_Hvacdwell object"
+      nrccSection_Hvacdwell:Action   = {  if (ComponentCount( nrcctblRowHvacdwell ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
    ; setup Fan references to be used in populating Fan data in table - SAC 06/28/21
    ; Also used in populating Section_Zone - RJH 09/30/21
    "Set ZnSys:RptFanRef"   ZnSys:RptFanRef = 
@@ -443,6 +666,22 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
       nrccSection_Fan:Action   = {  if (ComponentCount( nrcctblRowFan ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
 
 
+
+
+
+; RJH 10/1/22 Moved creation of Section_Aa from CF1RPRF01E_Master.rule to NRCCPRF-Rulelists.rule to handle NRCC/LMCC Section_Distmf
+  ; ----------------------------------------------------------------------
+  ; Section_Distmf H4. MULTIFAMILY HVAC DISTRIBUTION
+   "Create & initialize new cf1rSection_Distmf object"    ; SAC 5/25/19 - added logic to prevent cf1rSection_Aa creation when no HVACDist objects serve Zones
+      nrccNRCCPRF:Action  = {  if (SumAll( HVACDist:FloorAreaServed ) < 1) 
+                               then  UNCHANGED
+                               else if (Proj:ResCompPathMech == "Performance") then CreateChildren( cf1rSection_Distmf, 1, "Section_Distmf" ) else UNDEFINED endif
+                               endif  }     ; no init needed
+   "Call subordinate rulelist to populate TableDistributionMF table"
+      nrccNRCCPRF:Action  = {  if (ComponentCount( cf1rSection_Distmf ) < 1) 
+                               then  UNCHANGED
+                               else  EvalRulelist( "CF1RPRF01E_cf1rSection_Distmf_Proposed" )  
+                               endif  }
    ; setup Fan Parent Report properties to be used in populating FanExh data in table - RJH 06/30/21
    "Set Fan:ParentSysNameRpt"   Fan:ParentSysNameRpt = 
       {  if (Parent( Type ) == "Exhaust" .AND. IfValidAnd( ParentComp == "AirSys" ))
@@ -497,6 +736,11 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
       {  Parent( Name )  }
    "Set ThrmlEngyStor:ParentSysNameRpt"   ThrmlEngyStor:ParentSysNameRpt = 
       {  Parent( Name )  }
+; RJH 8/23/22 added for WtrHtr
+   "Set WtrHtr:ParentSysNameRpt"   WtrHtr:ParentSysNameRpt = 
+      {  Parent( Name )  }
+   "Set WtrHtr:ParentSysTypeRpt"   WtrHtr:ParentSysTypeRpt = 
+      {  Parent( Type )  }
 
 
    "Create nrccSection_HvacWet object"   nrccNRCCPRF:Action =
@@ -561,6 +805,22 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
       {  if (ComponentCount( ThrmlEngyStor ) < 1) then  UNDEFINED
          else Name
          endif  }
+; RJH 8/23/22 added for WtrHtr
+   "Create nrcctblRowHvacWet object for each pertinent WtrHtr"     WtrHtr:nrcctblRowHvacWetRef =
+      {  if (LocalCompAssigned( nrcctblRowHvacWetRef ) > 0 .OR.
+             ComponentCount( nrccTableHvacWet ) < 1 .OR.
+             ComponentCount( WtrHtr ) < 1 .OR.
+             Parent( IsBaseSys ) > 0) then  UNDEFINED
+         else if (ParentSysTypeRpt = "HotWater" .AND. Type != "Conventional" .AND. FluidSysHtg = 1)
+              then CreateComp( nrcctblRowHvacWet, Format( "%s HvacWet tblRow", Name ) )
+              else UNDEFINED
+              endif
+         endif  }
+   "Set WtrHtr:nrcctblRowHvacWetRef:noXMLoutput_WtrHtrRef"    WtrHtr:nrcctblRowHvacWetRef:noXMLoutput_WtrHtrRef = 
+      {  if (ComponentCount( WtrHtr ) < 1) then  UNDEFINED
+         else Name
+         endif  }
+
   ; Rule to Delete empty nrccSection_HvacWet
    "DELETE empty nrccSection_HvacWet object"
       nrccSection_HvacWet:Action   = {  if (ComponentCount( nrcctblRowHvacWet ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
@@ -718,7 +978,7 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
 
 
    "Create nrccSection_VentRes object"   nrccNRCCPRF:Action =
-      {  if (Proj:CompPathMech == "Performance") 
+      {  if (Proj:ResCompPathMech == "Performance") 
          then CreateChildren( nrccSection_VentRes, 1, "VentRes" )
          else UNCHANGED 
          endif }
@@ -866,7 +1126,7 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
       {  EnumString( CentralSysType )  }
 
    "Create nrccSection_Water object"   nrccNRCCPRF:Action =
-      {  if (Proj:CompPathDHW == "Performance") 
+      {  if (Proj:CompPathDHW == "Performance" .OR. Proj:ResCompPathDHW == "Performance") 
          then CreateChildren( nrccSection_Water, 1, "NRCC Water" )
          else UNCHANGED 
          endif }
@@ -877,7 +1137,7 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
              ComponentCount( nrccTableWater ) < 1 .OR.
              ComponentCount( ResWtrHtr ) < 1) then  UNDEFINED
          else if (ParentCentralRecircTypeStr == "Non-Central" .OR. ParentCentralSysTypeStr != "HPWH") 
-              then CreateComp( nrcctblRowWater, Format( "%s Water tblRow", Name ) )
+              then if (FloorAreaServed > 0) then CreateComp( nrcctblRowWater, Format( "%s Water tblRow", Name ) ) else UNDEFINED endif
               else UNDEFINED
               endif
          endif  }
@@ -956,7 +1216,7 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
 
 
    "Create nrccSection_WaterMF object"   nrccNRCCPRF:Action =
-      {  if (Proj:CompPathDHW == "Performance") 
+      {  if (Proj:CompPathDHW == "Performance" .OR. Proj:ResCompPathDHW == "Performance") 
          then CreateChildren( nrccSection_WaterMF, 1, "NRCC WaterMF" )
          else UNCHANGED 
          endif }
@@ -966,7 +1226,7 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
       {  if (LocalCompAssigned( nrcctblRowWaterMFRef ) > 0 .OR.
              ComponentCount( nrccTableWaterMF ) < 1 .OR.
              ComponentCount( ResDHWSys ) < 1) then  UNDEFINED
-         else  CreateComp( nrcctblRowWaterMF, Format( "%s WaterMF tblRow", Name ) )
+         else if (FloorAreaServed > 0) then CreateComp( nrcctblRowWaterMF, Format( "%s WaterMF tblRow", Name ) ) else UNDEFINED endif
          endif  }
    "Set ResDHWSys:nrcctblRowWaterMFRef:noXMLoutput_ResDHWSysRef"    ResDHWSys:nrcctblRowWaterMFRef:noXMLoutput_ResDHWSysRef = 
       {  if (ComponentCount( ResDHWSys ) < 1) then  UNDEFINED
@@ -978,31 +1238,36 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
 
 
    "Create nrccSection_WaterCHPWH object"   nrccNRCCPRF:Action =
-      {  if (Proj:CompPathDHW == "Performance") 
+      {  if (Proj:CompPathDHW == "Performance" .OR. Proj:ResCompPathDHW == "Performance") 
          then CreateChildren( nrccSection_WaterCHPWH, 1, "NRCC WaterCHPWH" )
          else UNCHANGED 
          endif }
    "Create nrccSection_WaterCHPWH nrccTableCHPWH object"              nrccSection_WaterCHPWH:Action  =
       {  CreateChildren( nrccTableCHPWH, 1, "NRCC CHPWH table" )  }
 ; NRCC Res DHW
-;   "Create nrcctblRowCHPWH object for each pertinent ResDHWSys"     ResDHWSys:nrcctblRowCHPWHRef =
-;      {  if (LocalCompAssigned( nrcctblRowCHPWHRef ) > 0 .OR.
-;             ComponentCount( nrccTableCHPWH ) < 1 .OR.
-;             ComponentCount( ResDHWSys ) < 1 .OR.
-;             ResDHWSys:CentralSys == 0 .OR.
-;             ResDHWSys:CentralSysType != "HPWH") then  UNDEFINED
-;         else  CreateComp( nrcctblRowCHPWH, Format( "%s CHPWH tblRow", Name ) )
-;         endif  }
+   "Create nrcctblRowCHPWH object for each pertinent ResDHWSys"     ResDHWSys:nrcctblRowCHPWHRef =
+      {  if (LocalCompAssigned( nrcctblRowCHPWHRef ) > 0 .OR.
+             ComponentCount( nrccTableCHPWH ) < 1 .OR.
+             ComponentCount( ResDHWSys ) < 1 .OR.
+             ResDHWSys:CentralDHW == 0 .OR.
+             ResDHWSys:CentralDHWType != "HPWH" .OR.
+             ResDHWSys:FloorAreaServed <= 0) then  UNDEFINED
+         else if(ResDHWSys:CentralRecircType != "Non-Central" .AND. ResDHWSys:CentralDHWType = "HPWH") then CreateComp( nrcctblRowCHPWH, Format( "%s CHPWH tblRow", Name ) ) else UNDEFINED endif
+         endif  }
    "Set ResDHWSys:nrcctblRowCHPWHRef:noXMLoutput_ResDHWSysRef"    ResDHWSys:nrcctblRowCHPWHRef:noXMLoutput_ResDHWSysRef = 
       {  if (ComponentCount( ResDHWSys ) < 1) then  UNDEFINED
          else Name
          endif  }
 
 ; NRCC Res DHW
-;   "Create nrccWaterCHPWH02 child object for each nrcctblRowCHPWH"     ResDHWSys:nrccWaterCHPWH02Ref =
-;      {  if (ComponentCount( ResDHWSys ) < 1 .OR. ResDHWSys:CentralSys == 0 .OR. ResDHWSys:CentralSysType != "HPWH") then  UNDEFINED
-;         else  CreateComp( nrccWaterCHPWH02, Format( "%s WaterCHPWH02", Name ) )
-;         endif  }
+   "Create nrccWaterCHPWH02 child object for each nrcctblRowCHPWH"     ResDHWSys:nrccWaterCHPWH02Ref =
+      {  if (ComponentCount( ResDHWSys ) < 1 .OR.
+             ResDHWSys:CentralDHW == 0 .OR.
+             ResDHWSys:CentralDHWType != "HPWH" .OR.
+             ResDHWSys:FloorAreaServed <= 0) then  UNDEFINED
+         else if(ResDHWSys:CentralRecircType != "Non-Central" .AND. ResDHWSys:CentralDHWType = "HPWH") then CreateComp( nrccWaterCHPWH02, Format( "%s WaterCHPWH02", Name ) ) else UNDEFINED endif
+         endif  }
+
    "Set ResDHWSys:nrccWaterCHPWH02Ref:noXMLoutput_ResDHWSysRef"    ResDHWSys:nrccWaterCHPWH02Ref:noXMLoutput_ResDHWSysRef = {  Name  }
 
   ; Rule to Delete empty nrccSection_WaterCHPWH
@@ -1012,32 +1277,33 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
 
 
    "Create nrccSection_LpTank object"   nrccNRCCPRF:Action =
-      {  if (Proj:CompPathDHW == "Performance") 
+      {  if (Proj:CompPathDHW == "Performance" .OR. Proj:ResCompPathDHW == "Performance") 
          then CreateChildren( nrccSection_LpTank, 1, "NRCC LpTank" )
          else UNCHANGED 
          endif }
    "Create nrccSection_LpTank nrccTableLpTank object"              nrccSection_LpTank:Action  =
       {  CreateChildren( nrccTableLpTank, 1, "NRCC LpTank table" )  }
 ; NRCC Res DHW
-;   "Create nrcctblRowLpTank object for each pertinent ResDHWSys"     ResDHWSys:nrcctblRowLpTankRef =
-;      {  if (LocalCompAssigned( nrcctblRowLpTankRef ) > 0 .OR.
-;             ComponentCount( nrccTableLpTank ) < 1 .OR.
-;             ComponentCount( ResDHWSys ) < 1 .OR.
-;             ResDHWSys:CentralSys == 0 .OR.
-;             ResDHWSys:CentralSysType != "HPWH" .OR.
-;             ResDHWSys:CentralHPWHLpTankType == "- none -") then  UNDEFINED
-;         else  CreateComp( nrcctblRowLpTank, Format( "%s LpTank tblRow", Name ) )
-;         endif  }
+   "Create nrcctblRowLpTank object for each pertinent ResDHWSys"     ResDHWSys:nrcctblRowLpTankRef =
+      {  if (LocalCompAssigned( nrcctblRowLpTankRef ) > 0 .OR.
+             ComponentCount( nrccTableLpTank ) < 1 .OR.
+             ComponentCount( ResDHWSys ) < 1 .OR.
+             ResDHWSys:CentralDHW == 0 .OR.
+             ResDHWSys:CentralDHWType != "HPWH" .OR.
+             ResDHWSys:CHPWHLoopTankConfig == "None (return to Primary)" .OR.
+             ResDHWSys:FloorAreaServed <= 0) then  UNDEFINED
+         else if(ResDHWSys:CentralRecircType != "Non-Central" .AND. ResDHWSys:CentralDHWType = "HPWH") then CreateComp( nrcctblRowLpTank, Format( "%s LpTank tblRow", Name ) ) else UNDEFINED endif
+         endif  }
    "Set ResDHWSys:nrcctblRowLpTankRef:noXMLoutput_ResDHWSysRef"    ResDHWSys:nrcctblRowLpTankRef:noXMLoutput_ResDHWSysRef = 
       {  if (ComponentCount( ResDHWSys ) < 1) then  UNDEFINED
          else Name
          endif  }
 
 ; NRCC Res DHW
-;   "Create nrccLpTank02 child object for each nrcctblRowLpTank"     ResDHWSys:nrccLpTank02Ref =
-;      {  if (ComponentCount( ResDHWSys ) < 1 .OR. ResDHWSys:CentralSys == 0 .OR. ResDHWSys:CentralSysType != "HPWH" .OR. ResDHWSys:CentralHPWHLpTankType == "- none -") then  UNDEFINED
-;         else  CreateComp( nrccLpTank02, Format( "%s LpTank02", Name ) )
-;         endif  }
+   "Create nrccLpTank02 child object for each nrcctblRowLpTank"     ResDHWSys:nrccLpTank02Ref =
+      {  if (ComponentCount( ResDHWSys ) < 1 .OR. ResDHWSys:CentralDHW == 0 .OR. ResDHWSys:CentralDHWType != "HPWH" .OR. ResDHWSys:CHPWHLoopTankConfig == "None (return to Primary)") then  UNDEFINED
+         else  CreateComp( nrccLpTank02, Format( "%s LpTank02", Name ) )
+         endif  }
    "Set ResDHWSys:nrccLpTank02Ref:noXMLoutput_ResDHWSysRef"    ResDHWSys:nrccLpTank02Ref:noXMLoutput_ResDHWSysRef = {  Name  }
 
   ; Rule to Delete empty nrccSection_LpTank
@@ -1046,23 +1312,24 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
 
 
    "Create nrccSection_RecircLp object"   nrccNRCCPRF:Action =
-      {  if (Proj:CompPathDHW == "Performance") 
+      {  if (Proj:CompPathDHW == "Performance" .OR. Proj:ResCompPathDHW == "Performance") 
          then CreateChildren( nrccSection_RecircLp, 1, "NRCC RecircLp" )
          else UNCHANGED 
          endif }
    "Create nrccSection_RecircLp nrccTableRecircLp object"              nrccSection_RecircLp:Action  =
       {  CreateChildren( nrccTableRecircLp, 1, "NRCC RecircLp table" )  }
 ; NRCC Res DHW
-;   "Create nrcctblRowRecircLp object for each pertinent ResDHWSys"     ResDHWSys:nrcctblRowRecircLpRef =
-;      {  if (LocalCompAssigned( nrcctblRowRecircLpRef ) > 0 .OR.
-;             ComponentCount( nrccTableRecircLp ) < 1 .OR.
-;             ComponentCount( ResDHWSys ) < 1 .OR.
-;             IfValidAnd( ResDHWSys:CentralSys != 0 )==0 .OR.
-;             IfValidAnd( ResDHWSys:LpCnt > 0 )==0) then  UNDEFINED
-;         else if (IfValidAnd( ResDHWSys:IsRecircSys == 1 )) 
-;              then CreateComp( nrcctblRowRecircLp, Format( "%s RecircLp tblRow", Name ) ) 
-;              else UNDEFINED endif
-;         endif  }
+   "Create nrcctblRowRecircLp object for each pertinent ResDHWSys"     ResDHWSys:nrcctblRowRecircLpRef =
+      {  if (LocalCompAssigned( nrcctblRowRecircLpRef ) > 0 .OR.
+             ComponentCount( nrccTableRecircLp ) < 1 .OR.
+             ComponentCount( ResDHWSys ) < 1 .OR.
+             IfValidAnd( ResDHWSys:CentralDHW != 0 )==0 .OR.
+             IfValidAnd( ResDHWSys:NRecircLoops > 0 )==0 .OR.
+             ResDHWSys:CentralRecircType != "Central with Recirculation") then  UNDEFINED
+         else if (IfValidAnd( ResDHWSys:IsRecircSystem == 1 ) .AND. IfValidAnd( ResDHWSys:FloorAreaServed > 0 )) 
+              then CreateComp( nrcctblRowRecircLp, Format( "%s RecircLp tblRow", Name ) ) 
+              else UNDEFINED endif
+         endif  }
    "Set ResDHWSys:nrcctblRowRecircLpRef:noXMLoutput_ResDHWSysRef"    ResDHWSys:nrcctblRowRecircLpRef:noXMLoutput_ResDHWSysRef = 
       {  if (ComponentCount( ResDHWSys ) < 1) then  UNDEFINED
          else Name
@@ -1073,21 +1340,21 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
 
 
    "Create nrccSection_WaterSolar object"   nrccNRCCPRF:Action =
-      {  if (Proj:CompPathDHW == "Performance" .AND. Proj:SolThrmlComp == "Performance") 
+      {  if ((Proj:CompPathDHW == "Performance" .OR. Proj:ResCompPathDHW == "Performance") .AND. Proj:SolThrmlComp == "Performance") 
          then CreateChildren( nrccSection_WaterSolar, 1, "NRCC WaterSolar" )
          else UNCHANGED 
          endif }
    "Create nrccSection_WaterSolar nrccTableWaterSolar object"              nrccSection_WaterSolar:Action  =
       {  CreateChildren( nrccTableWaterSolar, 1, "NRCC WaterSolar table" )  }
-   "Create nrcctblRowWaterSolar object for each pertinent DHWSolarSys"     DHWSolarSys:nrcctblRowWaterSolarRef =
+   "Create nrcctblRowWaterSolar object for each pertinent DHWSolSys"     DHWSolSys:nrcctblRowWaterSolarRef =
       {  if (LocalCompAssigned( nrcctblRowWaterSolarRef ) > 0 .OR.
              ComponentCount( nrccTableWaterSolar ) < 1 .OR.
-             ComponentCount( DHWSolarSys ) < 1 .OR.
-             DHWSolarSys:FloorAreaServed <= 0 ) then  UNDEFINED
+             ComponentCount( DHWSolSys ) < 1 .OR.
+             DHWSolSys:FloorAreaServed <= 0 ) then  UNDEFINED
          else  CreateComp( nrcctblRowWaterSolar, Format( "%s WaterSolar tblRow", Name ) )
          endif  }
-   "Set DHWSolarSys:nrcctblRowWaterSolarRef:noXMLoutput_DHWSolarSysRef"    DHWSolarSys:nrcctblRowWaterSolarRef:noXMLoutput_DHWSolarSysRef = 
-      {  if (ComponentCount( DHWSolarSys ) < 1) then  UNDEFINED
+   "Set DHWSolSys:nrcctblRowWaterSolarRef:noXMLoutput_DHWSolSysRef"    DHWSolSys:nrcctblRowWaterSolarRef:noXMLoutput_DHWSolSysRef = 
+      {  if (ComponentCount( DHWSolSys ) < 1) then  UNDEFINED
          else Name
          endif  }
   ; Rule to Delete empty nrccSection_WaterSolar
@@ -1096,67 +1363,138 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
 
 
 
+; RJH 10/5/22 Switched 2022 Section_WaterCompact implementation from previous 2019 NRCC to Res CF1R Section_Tcd implementation
 
    ; setup ResSpcDHWFeatures Parent Space Name and ResDHWSysRef to be used in populating Section_WaterCompact data in table
-   "Set ResSpcDHWFeatures:ParentSpcNameRpt"   ResSpcDHWFeatures:ParentSpcNameRpt = 
-      {  Parent( Name )  }
-   "Set ResSpcDHWFeatures:ParentResDHWSysRefRpt"   ResSpcDHWFeatures:ParentResDHWSysRefRpt = 
-      {  Parent( ResDHWSysRef )  }
+;   "Set ResSpcDHWFeatures:ParentSpcNameRpt"   ResSpcDHWFeatures:ParentSpcNameRpt = 
+;      {  Parent( Name )  }
+;   "Set ResSpcDHWFeatures:ParentResDHWSysRefRpt"   ResSpcDHWFeatures:ParentResDHWSysRefRpt = 
+;      {  Parent( ResDHWSysRef )  }
 
 
-   "Create nrccSection_WaterCompact object"   nrccNRCCPRF:Action =
-      {  if (Proj:CompPathDHW == "Performance") 
-         then CreateChildren( nrccSection_WaterCompact, 1, "WaterCompact" )
-         else UNCHANGED 
-         endif }
-   "Create nrccSection_WaterCompact nrccTableWaterCompact object"              nrccSection_WaterCompact:Action  =
-      {  CreateChildren( nrccTableWaterCompact, 1, "WaterCompact table" )  }
-   "Create nrcctblRowWaterCompact object for each pertinent ResSpcDHWFeatures"     ResSpcDHWFeatures:nrcctblRowWaterCompactRef =
-      {  if (LocalCompAssigned( nrcctblRowWaterCompactRef ) > 0 .OR.
-             ComponentCount( nrccTableWaterCompact ) < 1 .OR.
-             ComponentCount( ResSpcDHWFeatures ) < 1 .OR.
-             IfValidAnd( CompactDistErrorID = 0 )==0 .OR.
-             IfValidAnd( CompactDistIdx > 0 )==0) then  UNDEFINED
-         else  CreateComp( nrcctblRowWaterCompact, Format( "%s WaterCompact tblRow", Name ) )
-         endif  }
-   "Set ResSpcDHWFeatures:nrcctblRowWaterCompactRef:noXMLoutput_ResSpcDHWFeaturesRef"    ResSpcDHWFeatures:nrcctblRowWaterCompactRef:noXMLoutput_ResSpcDHWFeaturesRef = 
-      {  if (ComponentCount( ResSpcDHWFeatures ) < 1) then  UNDEFINED
-         else Name
-         endif  }
+;   "Create nrccSection_WaterCompact object"   nrccNRCCPRF:Action =
+;      {  if (Proj:CompPathDHW == "Performance" .OR. Proj:ResCompPathDHW == "Performance") 
+;         then CreateChildren( nrccSection_WaterCompact, 1, "WaterCompact" )
+;         else UNCHANGED 
+;         endif }
+;   "Create nrccSection_WaterCompact nrccTableWaterCompact object"              nrccSection_WaterCompact:Action  =
+;      {  CreateChildren( nrccTableWaterCompact, 1, "WaterCompact table" )  }
+;   "Create nrcctblRowWaterCompact object for each pertinent ResSpcDHWFeatures"     ResSpcDHWFeatures:nrcctblRowWaterCompactRef =
+;      {  if (LocalCompAssigned( nrcctblRowWaterCompactRef ) > 0 .OR.
+;             ComponentCount( nrccTableWaterCompact ) < 1 .OR.
+;             ComponentCount( ResSpcDHWFeatures ) < 1 .OR.
+;             IfValidAnd( CompactDistErrorID = 0 )==0 .OR.
+;             IfValidAnd( CompactDistIdx > 0 )==0) then  UNDEFINED
+;         else  CreateComp( nrcctblRowWaterCompact, Format( "%s WaterCompact tblRow", Name ) )
+;         endif  }
+;   "Set ResSpcDHWFeatures:nrcctblRowWaterCompactRef:noXMLoutput_ResSpcDHWFeaturesRef"    ResSpcDHWFeatures:nrcctblRowWaterCompactRef:noXMLoutput_ResSpcDHWFeaturesRef = 
+;      {  if (ComponentCount( ResSpcDHWFeatures ) < 1) then  UNDEFINED
+;         else Name
+;         endif  }
 
   ; Rule to Delete empty nrccSection_WaterCompact
-   "DELETE empty nrccSection_WaterCompact object"
-      nrccSection_WaterCompact:Action   = {  if (ComponentCount( nrcctblRowWaterCompact ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
+;   "DELETE empty nrccSection_WaterCompact object"
+;      nrccSection_WaterCompact:Action   = {  if (ComponentCount( nrcctblRowWaterCompact ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
+
+
+; ----------------------------------------------------------------------
+  ; Section_WaterCompact Water Heating - Compact Distribution table
+   "Create & initialize new cf1rSection_WaterCompact object"
+      nrccnRCCPRF:Action  = {  if ( (Proj:CompPathDHW == "Performance" .OR. Proj:ResCompPathDHW == "Performance") .AND. IfValidAnd( ResProj:IsMultiFamily > 0.5 ) .AND. SumAll( DwellUnitType:ReportCompactDist ) > 0 )
+                                  then  CreateChildren( cf1rSection_WaterCompact, 1, "Section_WaterCompact" )
+                                  else  UNCHANGED
+                                  endif  }
+   "Create & initialize new cf1rTableCompact object"
+      cf1rSection_WaterCompact:Action   = {  CreateChildren( cf1rTableCompact, 1, "TableCompact" )  }     ; no init needed
+  ; ----------------------------------------------------------------------
+  ; Rules to create individual Water Heating - Compact Distribution table rows
+
+;ResDHWSys:CentralRecircType = 'Non-Central'
+
+   "Create cf1rtblRowCompact for all MFam DwellUnitType instances w/ Compact Distrib-1"
+      DwellUnitType:CF1R_CompactMFRow[1]   = {  if (ResProj:IsMultiFamily > 0.5 .AND. IfValidAnd( ReportCompactDist > 0 ) .AND. IfValidAnd( CDCompatible[1] > 0 ) .AND. IfValidAnd( DUFloorAreaServed > 0 ) .AND. CompactDistrib != "not compact")
+                                                then  CreateComp( cf1rtblRowCompact, Name + "-1-TableCompactRow" )  else  UNDEFINED  endif  }
+   "Create cf1rtblRowCompact for all MFam DwellUnitType instances w/ Compact Distrib-2"
+      DwellUnitType:CF1R_CompactMFRow[2]   = {  if (ResProj:IsMultiFamily > 0.5 .AND. IfValidAnd( ReportCompactDist > 0 ) .AND. IfValidAnd( CDCompatible[2] > 0 ) .AND. IfValidAnd( DUFloorAreaServed > 0 ) .AND. CompactDistrib != "not compact")
+                                                then  CreateComp( cf1rtblRowCompact, Name + "-2-TableCompactRow" )  else  UNDEFINED  endif  }
+   "Create cf1rtblRowCompact for all MFam DwellUnitType instances w/ Compact Distrib-3"
+      DwellUnitType:CF1R_CompactMFRow[3]   = {  if (ResProj:IsMultiFamily > 0.5 .AND. IfValidAnd( ReportCompactDist > 0 ) .AND. IfValidAnd( CDCompatible[3] > 0 ) .AND. IfValidAnd( DUFloorAreaServed > 0 ) .AND. CompactDistrib != "not compact")
+                                                then  CreateComp( cf1rtblRowCompact, Name + "-3-TableCompactRow" )  else  UNDEFINED  endif  }
+   "Create cf1rtblRowCompact for all MFam DwellUnitType instances w/ Compact Distrib-4"
+      DwellUnitType:CF1R_CompactMFRow[4]   = {  if (ResProj:IsMultiFamily > 0.5 .AND. IfValidAnd( ReportCompactDist > 0 ) .AND. IfValidAnd( CDCompatible[4] > 0 ) .AND. IfValidAnd( DUFloorAreaServed > 0 ) .AND. CompactDistrib != "not compact")
+                                                then  CreateComp( cf1rtblRowCompact, Name + "-4-TableCompactRow" )  else  UNDEFINED  endif  }
+   "Create cf1rtblRowCompact for all MFam DwellUnitType instances w/ Compact Distrib-5"
+      DwellUnitType:CF1R_CompactMFRow[5]   = {  if (ResProj:IsMultiFamily > 0.5 .AND. IfValidAnd( ReportCompactDist > 0 ) .AND. IfValidAnd( CDCompatible[5] > 0 ) .AND. IfValidAnd( DUFloorAreaServed > 0 ) .AND. CompactDistrib != "not compact")
+                                                then  CreateComp( cf1rtblRowCompact, Name + "-5-TableCompactRow" )  else  UNDEFINED  endif  }
+   ; ----------------------------------------------------------------------
+   ; Rules to populate Water Heating - Compact Distribution table rows for all MFam DwellUnitType instances w/ Compact Distrib
+   "Setup DwellUnitType:CF1R_CompactMFRow[1] via subordinate rulelist"     DwellUnitType:Action  = {
+         if (LocalCompAssigned( CF1R_CompactMFRow[1] ) > 0) then  EvalRulelist( "Setup_DwellUnitType_CF1R_CompactMFRow_1", 1 )  else  UNCHANGED  endif  }
+   "Setup DwellUnitType:CF1R_CompactMFRow[2] via subordinate rulelist"     DwellUnitType:Action  = {
+         if (LocalCompAssigned( CF1R_CompactMFRow[2] ) > 0) then  EvalRulelist( "Setup_DwellUnitType_CF1R_CompactMFRow_2", 1 )  else  UNCHANGED  endif  }
+   "Setup DwellUnitType:CF1R_CompactMFRow[3] via subordinate rulelist"     DwellUnitType:Action  = {
+         if (LocalCompAssigned( CF1R_CompactMFRow[3] ) > 0) then  EvalRulelist( "Setup_DwellUnitType_CF1R_CompactMFRow_3", 1 )  else  UNCHANGED  endif  }
+   "Setup DwellUnitType:CF1R_CompactMFRow[4] via subordinate rulelist"     DwellUnitType:Action  = {
+         if (LocalCompAssigned( CF1R_CompactMFRow[4] ) > 0) then  EvalRulelist( "Setup_DwellUnitType_CF1R_CompactMFRow_4", 1 )  else  UNCHANGED  endif  }
+   "Setup DwellUnitType:CF1R_CompactMFRow[5] via subordinate rulelist"     DwellUnitType:Action  = {
+         if (LocalCompAssigned( CF1R_CompactMFRow[5] ) > 0) then  EvalRulelist( "Setup_DwellUnitType_CF1R_CompactMFRow_5", 1 )  else  UNCHANGED  endif  }
+
+   "Set cf1rtblRowCompact parent"   cf1rtblRowCompact:Parent  = { cf1rTableCompact:Name  }
+  ; END of Water Heating - Compact Distribution table rules
+  ; ----------------------------------------------------------------------
 
 
 
+
+; RJH 10/5/22 Switched 2022 Section_WaterDWHR implementation from previous 2019 NRCC to Res CF1R Section_Tdw implementation
 
    ; setup ResSpcDHWFeatures Parent Space Name and ResDHWSysRef to be used in populating Section_WaterDWHR data in table
-   "Set ResSpcDHWFeatures:ParentSpcNameRpt"   ResSpcDHWFeatures:ParentSpcNameRpt = 
-      {  Parent( Name )  }
-   "Set ResSpcDHWFeatures:ParentResDHWSysRefRpt"   ResSpcDHWFeatures:ParentResDHWSysRefRpt = 
-      {  Parent( ResDHWSysRef )  }
+;   "Set ResSpcDHWFeatures:ParentSpcNameRpt"   ResSpcDHWFeatures:ParentSpcNameRpt = 
+;      {  Parent( Name )  }
+;   "Set ResSpcDHWFeatures:ParentResDHWSysRefRpt"   ResSpcDHWFeatures:ParentResDHWSysRefRpt = 
+;      {  Parent( ResDHWSysRef )  }
 
 
-   "Create nrccSection_WaterDWHR object"   nrccNRCCPRF:Action =
-      {  if (Proj:CompPathDHW == "Performance") 
-         then CreateChildren( nrccSection_WaterDWHR, 1, "WaterDWHR" )
-         else UNCHANGED 
-         endif }
-   "Create nrccSection_WaterDWHR nrccTableDWHR object"              nrccSection_WaterDWHR:Action  =
-      {  CreateChildren( nrccTableDWHR, 1, "DWHR table" )  }
+;   "Create nrccSection_WaterDWHR object"   nrccNRCCPRF:Action =
+;      {  if (Proj:CompPathDHW == "Performance" .OR. Proj:ResCompPathDHW == "Performance") 
+;         then CreateChildren( nrccSection_WaterDWHR, 1, "WaterDWHR" )
+;         else UNCHANGED 
+;         endif }
+;   "Create nrccSection_WaterDWHR nrccTableDWHR object"              nrccSection_WaterDWHR:Action  =
+;      {  CreateChildren( nrccTableDWHR, 1, "DWHR table" )  }
 
 
   ; Rules to create individual Water Heating - Drain Water Heat Recovery (DWHR) table rows
-   "Create & populate all DWHR table rows"
-      nrccSection_WaterDWHR:Action = {  EvalRulelist( "NRCCPRF_Section_WaterDWHR" )  }
-   "Set nrcctblRowDWHR parent"   nrcctblRowDWHR:Parent  = { nrccTableDWHR:Name  }
+;   "Create & populate all DWHR table rows"
+;      nrccSection_WaterDWHR:Action = {  EvalRulelist( "NRCCPRF_Section_WaterDWHR" )  }
+;   "Set nrcctblRowDWHR parent"   nrcctblRowDWHR:Parent  = { nrccTableDWHR:Name  }
 
 
   ; Rule to Delete empty nrccSection_WaterDWHR
-   "DELETE empty nrccSection_WaterDWHR object"
-      nrccSection_WaterDWHR:Action   = {  if (ComponentCount( nrcctblRowDWHR ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
+;   "DELETE empty nrccSection_WaterDWHR object"
+;      nrccSection_WaterDWHR:Action   = {  if (ComponentCount( nrcctblRowDWHR ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
 
+
+  ; ----------------------------------------------------------------------
+  ; Section_WaterDWHR Water Heating - Drain Water Heat Recovery (DWHR) table
+      ; SAC 7/16/19 - added logic to create section for MFam models (tic #1139)
+   "Create & initialize new cf1rSection_WaterDWHR object"
+      nrccnRCCPRF:Action  = {  if ( (Proj:CompPathDHW == "Performance" .OR. Proj:ResCompPathDHW == "Performance") .AND. IfValidAnd( ResProj:IsMultiFamily > 0.5 ) .AND. SumAll( DwellUnitType:HaveShowerDWHR ) > 0 )
+                                  then  CreateChildren( cf1rSection_WaterDWHR, 1, "Section_WaterDWHR" )
+                                  else  UNCHANGED
+                                  endif  }
+
+   "Create & initialize new cf1rTableDWHR object"
+      cf1rSection_WaterDWHR:Action   = {  CreateChildren( cf1rTableDWHR, 1, "TableDWHR" )  }     ; no init needed
+  ; ----------------------------------------------------------------------
+  ; Rules to create individual Water Heating - Drain Water Heat Recovery (DWHR) table rows
+   "Create & populate all DWHR table rows"
+      cf1rSection_WaterDWHR:Action   = {  if (ResProj:IsMultiFamily > 0.5)
+                                          then  EvalRulelist( "CF1RPRF01E_TableDWHR_MFam" )
+                                          else  UNCHANGED  endif  }
+   "Set cf1rtblRowDWHR parent"   cf1rtblRowDWHR:Parent  = { cf1rTableDWHR:Name  }
+  ; END of Water Heating - Drain Water Heat Recovery (DWHR) table rules
+  ; ----------------------------------------------------------------------
 
 
 
@@ -1514,11 +1852,12 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
       nrccSection_ProcKitch:Action   = {  if (ComponentCount( nrcctblRowProcKitch ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
 
 
-   "Create nrccSection_ProcComp object"
-      nrccNRCCPRF:Action    = {  if (Proj:CompPathMech == "Performance") 
-                                 then CreateChildren( nrccSection_ProcComp, 1, "NRCC ProcComp" )
-                                 else UNCHANGED 
-                                 endif }
+; RJH 9/19/22 Section_ProcComp removed from NRCC/LMCC 2022, remains in NRCC 2019
+;   "Create nrccSection_ProcComp object"
+;      nrccNRCCPRF:Action    = {  if (Proj:CompPathMech == "Performance") 
+;                                 then CreateChildren( nrccSection_ProcComp, 1, "NRCC ProcComp" )
+;                                 else UNCHANGED 
+;                                 endif }
    "Create nrccSection_ProcComp nrccTableProcComp object"              nrccSection_ProcComp:Action  =
       {  CreateChildren( nrccTableProcComp, 1, "NRCC ProcComp table" )  }
    "Create nrcctblRowProcComp object for each pertinent AirSys"     AirSys:nrcctblRowProcCompRef =
@@ -1714,7 +2053,9 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
          then CreateChildren( nrccSection_LtgControls, 1, "NRCC LtgControls" )
          else UNCHANGED 
          endif }
-   "Create nrccSection_LtgControls nrccTableLtgControls object"              nrccSection_LtgControls:Action  =
+   "Create nrccSection_LtgControls nrccLtgControlsReq object"              nrccSection_LtgControls:Action  =
+      {  CreateChildren( nrccLtgControlsReq, 1, "NRCC LtgControlsReq" )  }
+   "Create nrccLtgControlsReq nrccTableLtgControls object"              nrccLtgControlsReq:Action  =
       {  CreateChildren( nrccTableLtgControls, 1, "NRCC LtgControls table" )  }
 
    "Create nrccSection_LtgControls nrcctblRowLtgControls #1 object"     nrccTableLtgControls:Action  =      ; SAC 05/17/21
@@ -1788,10 +2129,15 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
          then  CreateChildren( nrcctblRowLtgControls, 1, "NRCC LtgControls row10", "NRCCPRF_RowLtgControls_row10" )
          else  UNCHANGED  endif endif  }
 
-  ; Rule to Delete empty nrccSection_LtgControls
-   "DELETE empty nrccTableLtgControls object"
-      nrccSection_LtgControls:Action   = {  if (ComponentCount( nrcctblRowLtgControls ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
-
+  ; Rule to Set LtgControlsNA for empty nrccSection_LtgControls
+   "Set nrccSection_LtgControls:LtgControlsNA"  nrccSection_LtgControls:LtgControlsNA  = {
+         if (ComponentCount( nrcctblRowLtgControls ) < 1)
+         then  "See NRCC-LTI-E for mandatory controls"
+         else  UNDEFINED
+         endif  }
+  ; Rule to Delete empty nrccLtgControlsReq subsection
+   "DELETE empty nrccLtgControlsReq object"
+      nrccLtgControlsReq:Action   = {  if (ComponentCount( nrcctblRowLtgControls ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
 
 
    "Create nrccSection_TailoredSum object"   nrccNRCCPRF:Action =
@@ -1799,7 +2145,6 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
          then CreateChildren( nrccSection_TailoredSum,    1, "NRCC TailoredSum" )
          else UNCHANGED 
          endif }
-
 
 
    "Create nrccSection_TailoredGen object"   nrccNRCCPRF:Action =
@@ -2339,7 +2684,10 @@ END
 
 ;*************************************************************************
 RULELIST "NRCCPRF_Init_nrccComplianceDocumentPackage"  1 0 0 1
-   "Set nrccComplianceDocumentPackage:attrib_xmlns"               nrccComplianceDocumentPackage:attrib_xmlns              = {  "http://www.lmonte.com/besm/NRCCPRF01E"  }     
+   "Set nrccComplianceDocumentPackage:attrib_xmlns"               nrccComplianceDocumentPackage:attrib_xmlns              = {  if (IfValidAnd(Proj:IsLowRiseMFam > 0 ))
+                                                                                                                               then "http://www.lmonte.com/besm/LMCCPRF01E"
+                                                                                                                               else "http://www.lmonte.com/besm/NRCCPRF01E"
+                                                                                                                               endif }
    "Set nrccComplianceDocumentPackage:attrib_xmlns_lit"           nrccComplianceDocumentPackage:attrib_xmlns_lit          = {  "http://www.lmonte.com/besm/lit"  }            
    "Set nrccComplianceDocumentPackage:attrib_xmlns_com"           nrccComplianceDocumentPackage:attrib_xmlns_com          = {  "http://www.lmonte.com/besm/com"  }            
    "Set nrccComplianceDocumentPackage:attrib_xmlns_dtyp"          nrccComplianceDocumentPackage:attrib_xmlns_dtyp         = {  "http://www.lmonte.com/besm/dtyp"  }           
@@ -2350,9 +2698,15 @@ RULELIST "NRCCPRF_Init_nrccComplianceDocumentPackage"  1 0 0 1
    "Set nrccComplianceDocumentPackage:attrib_xmlns_d"             nrccComplianceDocumentPackage:attrib_xmlns_d            = {  "http://www.lmonte.com/besm/d"  }              
    "Set nrccComplianceDocumentPackage:attrib_xmlns_altova"        nrccComplianceDocumentPackage:attrib_xmlns_altova       = {  "http://www.altova.com/xml-schema-extensions"  }
    "Set nrccComplianceDocumentPackage:attrib_xmlns_xsi"           nrccComplianceDocumentPackage:attrib_xmlns_xsi          = {  "http://www.w3.org/2001/XMLSchema-instance"  } 
-   "Set nrccComplianceDocumentPackage:attrib_xsi_schemaLocation"  nrccComplianceDocumentPackage:attrib_xsi_schemaLocation = {  "http://www.lmonte.com/besm/NRCCPRF.xsd"   }
+   "Set nrccComplianceDocumentPackage:attrib_xsi_schemaLocation"  nrccComplianceDocumentPackage:attrib_xsi_schemaLocation = {  if (IfValidAnd(Proj:IsLowRiseMFam > 0 ))
+                                                                                                                               then "http://www.lmonte.com/besm/LMCCPRF01E.xsd"
+                                                                                                                               else "http://www.lmonte.com/besm/NRCCPRF.xsd"
+                                                                                                                               endif }
    "Set nrccComplianceDocumentPackage:attrib_revision"            nrccComplianceDocumentPackage:attrib_revision           = {  "rev 20220601"  } 
-   "Set nrccComplianceDocumentPackage:attrib_doc"                 nrccComplianceDocumentPackage:attrib_doc                = {  "NRCCPRFE"  }     
+   "Set nrccComplianceDocumentPackage:attrib_doc"                 nrccComplianceDocumentPackage:attrib_doc                = {  if (IfValidAnd(Proj:IsLowRiseMFam > 0 ))
+                                                                                                                               then "LMCCPRF01E"
+                                                                                                                               else "NRCCPRFE"
+                                                                                                                               endif }
 END
 ;*************************************************************************
 
@@ -2770,243 +3124,287 @@ RULELIST "NRCCPRF_RowLtgControls_row10"  1 0 0 1
 END
 ;*************************************************************************
 
-;************************************************************************* ; RJH 11/17/2021 - moved rules into this rulelist to support one row per ResDWHRSysRef
-RULELIST "NRCCPRF_Section_WaterDWHR"  1 0 0 1
-   "Create nrcctblRowDWHR for all ResSpcDHWFeatures:ResDWHRSysRef[1] instances"
-      ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[1]   = {   if (LocalCompAssigned( ResDWHRSysRef[1] ) > 0 .AND. IfValidAnd( ResDWHRSysShowers[1] > 0 ))
-                                       then  CreateComp( nrcctblRowDWHR, Name + "TableDWHRRow-1" )
-                                       else  UNDEFINED  endif  }
-   "Populate nrcctblRowDWHR DWHR-1 table row"   ResSpcDHWFeatures:Action  = {
-         if (LocalCompAssigned( NRCCPRF_tblRowDWHR[1] ) < 1) then  UNCHANGED
-         else  EvalRulelist( "NRCCPRF_tblRowDWHR_1", 1 )  endif  }
+; RJH 10/5/22 Switched 2022 Section_WaterDWHR implementation from previous 2019 NRCC to Res CF1R Section_Tdw implementation
 
-   "Create nrcctblRowDWHR for all ResSpcDHWFeatures:ResDWHRSysRef[2] instances"
-      ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[2]   = {   if (LocalCompAssigned( ResDWHRSysRef[2] ) > 0 .AND. IfValidAnd( ResDWHRSysShowers[2] > 0 ))
-                                       then  CreateComp( nrcctblRowDWHR, Name + "TableDWHRRow-2" )
-                                       else  UNDEFINED  endif  }
-   "Populate nrcctblRowDWHR DWHR-2 table row"   ResSpcDHWFeatures:Action  = {
-         if (LocalCompAssigned( NRCCPRF_tblRowDWHR[2] ) < 1) then  UNCHANGED
-         else  EvalRulelist( "NRCCPRF_tblRowDWHR_2", 1 )  endif  }
 
-   "Create nrcctblRowDWHR for all ResSpcDHWFeatures:ResDWHRSysRef[3] instances"
-      ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[3]   = {   if (LocalCompAssigned( ResDWHRSysRef[3] ) > 0 .AND. IfValidAnd( ResDWHRSysShowers[3] > 0 ))
-                                       then  CreateComp( nrcctblRowDWHR, Name + "TableDWHRRow-3" )
-                                       else  UNDEFINED  endif  }
-   "Populate nrcctblRowDWHR DWHR-3 table row"   ResSpcDHWFeatures:Action  = {
-         if (LocalCompAssigned( NRCCPRF_tblRowDWHR[3] ) < 1) then  UNCHANGED
-         else  EvalRulelist( "NRCCPRF_tblRowDWHR_3", 1 )  endif  }
+;*************************************************************************
+; porting of PV & Battery sections/tables from CF1R - require full re-work due to diffs in data model (PV/Batt in Res via Project properties vs. individual objects in Com) - SAC 08/23/22
+;   CF1R Da (PV) & Db (Batt) -> NRCC/LMCC sections F1 & F2 / 
+;*************************************************************************
+;  RULELIST "CF1RPRF01E_Section_Da"  1 0 0 1
+;  
+;     "Create & initialize new cf1rTablePV object"
+;        cf1rSection_Da:Action   = {  CreateChildren( cf1rTablePV, 1, "EDR_PV" )  }     ; no init needed
+;    ; ----------------------------------------------------------------------
+;    ; Section_Da rules to create individual EDR_PV table rows
+;     "Create cf1rtblRowPV for all PVW instances - 1"
+;        Proj:CF1R_PVRow[1]   = {  if (IfValidAnd( CommunitySolarProjID > 0 ))
+;                                      then  CreateComp( cf1rtblRowPV, Name + "EDR_PVRow1", "CF1RPRF01E_Section_Da_Row1_CommunitySolar" )
+;                                      else if (IfValidAnd( PVWDCSysSize[1] > 0 )==0 .OR. IfValidAnd( UseReducedPVReqVal == 0 ))
+;                                      then  CreateComp( cf1rtblRowPV, Name + "EDR_PVRow1", "CF1RPRF01E_Section_Da_Row1_0ReqPVException" )
+;                                      else  CreateComp( cf1rtblRowPV, Name + "EDR_PVRow1", "CF1RPRF01E_Section_Da_Row1" )
+;                                      endif endif  }
+;     "Create cf1rtblRowPV for all PVW instances - 2"
+;        Proj:CF1R_PVRow[2]   = {  if (PVWInputs > 0 .AND. IfValidAnd( PVWDCSysSize[2] > 0 ))
+;                                      then  CreateComp( cf1rtblRowPV, Name + "EDR_PVRow2", "CF1RPRF01E_Section_Da_Row2" )
+;                                      else  UNCHANGED  endif  }
+;     "Create cf1rtblRowPV for all PVW instances - 3"
+;        Proj:CF1R_PVRow[3]   = {  if (PVWInputs > 0 .AND. IfValidAnd( PVWDCSysSize[3] > 0 ))
+;                                      then  CreateComp( cf1rtblRowPV, Name + "EDR_PVRow3", "CF1RPRF01E_Section_Da_Row3" )
+;                                      else  UNCHANGED  endif  }
+;     "Create cf1rtblRowPV for all PVW instances - 4"
+;        Proj:CF1R_PVRow[4]   = {  if (PVWInputs > 0 .AND. IfValidAnd( PVWDCSysSize[4] > 0 ))
+;                                      then  CreateComp( cf1rtblRowPV, Name + "EDR_PVRow4", "CF1RPRF01E_Section_Da_Row4" )
+;                                      else  UNCHANGED  endif  }
+;     "Create cf1rtblRowPV for all PVW instances - 5"
+;        Proj:CF1R_PVRow[5]   = {  if (PVWInputs > 0 .AND. IfValidAnd( PVWDCSysSize[5] > 0 ))
+;                                      then  CreateComp( cf1rtblRowPV, Name + "EDR_PVRow5", "CF1RPRF01E_Section_Da_Row5" )
+;                                      else  UNCHANGED  endif  }
+;  
+;    ; Rule to add EDR_PV table rows to the cf1rTablePV
+;        "Set cf1rtblRowPV:Parent"
+;           cf1rtblRowPV:Parent  = {  cf1rTablePV:Name  }
+;  END
 
-   "Create nrcctblRowDWHR for all ResSpcDHWFeatures:ResDWHRSysRef[4] instances"
-      ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[4]   = {   if (LocalCompAssigned( ResDWHRSysRef[4] ) > 0 .AND. IfValidAnd( ResDWHRSysShowers[4] > 0 ))
-                                       then  CreateComp( nrcctblRowDWHR, Name + "TableDWHRRow-4" )
-                                       else  UNDEFINED  endif  }
-   "Populate nrcctblRowDWHR DWHR-4 table row"   ResSpcDHWFeatures:Action  = {
-         if (LocalCompAssigned( NRCCPRF_tblRowDWHR[4] ) < 1) then  UNCHANGED
-         else  EvalRulelist( "NRCCPRF_tblRowDWHR_4", 1 )  endif  }
+;************************************************************************* SAC 6/12/20 (CommunitySolar)
+RULELIST "CF1RPRF01E_Section_Da_Row1_CommunitySolar"  1 0 0 1
+     "Set cf1rtblRowPV:Pv01_PV_SystemTotalRatedPowerDC"    cf1rtblRowPV:Pv01_PV_SystemTotalRatedPowerDC  = {
+            int((ValidOr( Proj:PrscrpPVSize, 0 ) * 100) + 0.5) / 100  }
 
-   "Create nrcctblRowDWHR for all ResSpcDHWFeatures:ResDWHRSysRef[5] instances"
-      ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[5]   = {   if (LocalCompAssigned( ResDWHRSysRef[5] ) > 0 .AND. IfValidAnd( ResDWHRSysShowers[5] > 0 ))
-                                       then  CreateComp( nrcctblRowDWHR, Name + "TableDWHRRow-5" )
-                                       else  UNDEFINED  endif  }
-   "Populate nrcctblRowDWHR DWHR-5 table row"   ResSpcDHWFeatures:Action  = {
-         if (LocalCompAssigned( NRCCPRF_tblRowDWHR[5] ) < 1) then  UNCHANGED
-         else  EvalRulelist( "NRCCPRF_tblRowDWHR_5", 1 )  endif  }
+     "Set cf1rtblRowPV:Pv02_PhotoVoltaicExceptionRes"    cf1rtblRowPV:Pv02_PhotoVoltaicExceptionRes  = { 
+            "CommunitySolar"  }
+     "Set cf1rtblRowPV:Pv02_PVExceptionString"    cf1rtblRowPV:Pv02_PVExceptionString  = { 
+            EnumString( Proj:CommunitySolarProject )  }
 
-   "Create nrcctblRowDWHR for all ResSpcDHWFeatures:ResDWHRSysRef[6] instances"
-      ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[6]   = {   if (LocalCompAssigned( ResDWHRSysRef[6] ) > 0 .AND. IfValidAnd( ResDWHRSysShowers[6] > 0 ))
-                                       then  CreateComp( nrcctblRowDWHR, Name + "TableDWHRRow-6" )
-                                       else  UNDEFINED  endif  }
-   "Populate nrcctblRowDWHR DWHR-6 table row"   ResSpcDHWFeatures:Action  = {
-         if (LocalCompAssigned( NRCCPRF_tblRowDWHR[6] ) < 1) then  UNCHANGED
-         else  EvalRulelist( "NRCCPRF_tblRowDWHR_6", 1 )  endif  }
-
+     "Set cf1rtblRowPV:Pv03_NotApplicableMessage" cf1rtblRowPV:Pv03_NotApplicableMessage  = { "n/a"  }
+     "Set cf1rtblRowPV:Pv04_NotApplicableMessage" cf1rtblRowPV:Pv04_NotApplicableMessage  = { "n/a"  }
+     "Set cf1rtblRowPV:Pv05_NotApplicableMessage" cf1rtblRowPV:Pv05_NotApplicableMessage  = { "n/a"  }
+     "Set cf1rtblRowPV:Pv06_NotApplicableMessage" cf1rtblRowPV:Pv06_NotApplicableMessage  = { "n/a"  }
+     "Set cf1rtblRowPV:Pv07_NotApplicableMessage" cf1rtblRowPV:Pv07_NotApplicableMessage  = { "n/a"  }
+     "Set cf1rtblRowPV:Pv08_NotApplicableMessage" cf1rtblRowPV:Pv08_NotApplicableMessage  = { "n/a"  }
+     "Set cf1rtblRowPV:Pv09_NotApplicableMessage" cf1rtblRowPV:Pv09_NotApplicableMessage  = { "n/a"  }
+     "Set cf1rtblRowPV:Pv10_NotApplicableMessage" cf1rtblRowPV:Pv10_NotApplicableMessage  = { "n/a"  }
+     "Set cf1rtblRowPV:Pv11_NotApplicableMessage" cf1rtblRowPV:Pv11_NotApplicableMessage  = { "n/a"  }
+     "Set cf1rtblRowPV:Pv12_NotApplicableMessage" cf1rtblRowPV:Pv12_NotApplicableMessage  = { "n/a"  }
 END
-;*************************************************************************  RJH 11/17/2021
-RULELIST "NRCCPRF_tblRowDWHR_1"  1 0 0 1
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[1]:WaterDWHR01_SpaceName"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[1]:WaterDWHR01_SpaceName  = {  ParentSpcNameRpt  }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[1]:WaterDWHR01a_DwellingUnitType"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[1]:WaterDWHR01a_DwellingUnitType  = { 
-        switch (DwellingUnitBedroomCnt)
-            case 0 : "StudioUnit"
-            case 1 : "OneBedroom"
-            case 2 : "TwoBedroom"
-            case 3 : "ThreeBedroom"
-            case 4 : "FourBedroom"
-            case 5 : "FivePlusBedroom"
-            default :  UNDEFINED
-        endswitch }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[1]:WaterDWHR02_WaterHeatingSystemName"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[1]:WaterDWHR02_WaterHeatingSystemName  = {  ParentResDHWSysRefRpt  }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[1]:WaterDWHR02a_DWHR_Name"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[1]:WaterDWHR02a_DWHR_Name  = {  ResDWHRSysRef[1]  }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[1]:WaterDWHR03_DWHR_Configuration"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[1]:WaterDWHR03_DWHR_Configuration  = {  
-        if ( IfValidAnd( ResDWHRSysTakeCold[1] > 0 )==0 .AND.
-             IfValidAnd( ResDWHRSysFeedHeater[1] > 0 )   )
-        then  "UnequalFlowWaterHeater"
-        else if (IfValidAnd( ResDWHRSysTakeCold[1] > 0 )    .AND.
-                IfValidAnd( ResDWHRSysFeedHeater[1] > 0 )==0)
-        then  "UnequalFlowShower"
-        else if (IfValidAnd( ResDWHRSysTakeCold[1] > 0 )    .AND.
-                IfValidAnd( ResDWHRSysFeedHeater[1] > 0 )   )
-        then  "EqualFlow"
-        else  UNDEFINED  endif endif endif }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[1]:WaterDWHR04_DWHR_DrainCount"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[1]:WaterDWHR04_DWHR_DrainCount  = { if (IfValidAnd( ResDWHRSysShowers[1] > 0)) then ResDWHRSysShowers[1] else UNDEFINED endif }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[1]:WaterDWHR05_DWHR_HERS_VerificationRequired"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[1]:WaterDWHR05_DWHR_HERS_VerificationRequired  = {  
-        if (IfValidAnd(NumResDWHRSysDevs == 1)) then "true" else "false" endif  }
+
+;  ;************************************************************************* replace several individual rules for documenting Reduced PV requirement - SAC 03/01/21
+;  RULELIST "CF1RPRF01E_Set_Pv02_PhotoVoltaicExceptionRes"  1 0 0 1
+;       "Set cf1rtblRowPV:Pv02_PhotoVoltaicExceptionRes"    cf1rtblRowPV:Pv02_PhotoVoltaicExceptionRes  = { 
+;  			switch( EnumString( Proj:ReducedPVReqExcept ) )
+;  				case "- select applicable required PV exception -"                            :  "NoExceptionsNA"
+;  				case "(1) Effective solar access < 80 ft2"                                    :  "LimitedSolarAccess"
+;  				case "(2) Smaller of solar access and home area-based size (CZ 15 only)"      :  "CZ15ReducedSize"
+;  				case "(2) NOT VALID IN THIS CZ - Smaller of solar access and home area-based" :  "NoExceptionsNA"
+;  				case "(3) 2 habitable stories - smaller of solar access and home area-based"  :  "HabitableStories2"
+;  				case "(4) 3 habitable stories - smaller of solar access and home area-based"  :  "HabitableStories3"
+;  				case "(5) 80-200 ft2 solar ready zone approved before 1/1/20"                 :  "PlansBefore2020"
+;  				case "(6) Declared emergency area (prior to 1/1/20)"                          :  "DeclaredEmergencyArea"    ; SAC 2/1/20 (tic #1157)  ; SAC 03/01/21
+;  				case "(7) Section 10-109(k) determination"                                    :  "Section10_109k"           ; SAC 03/01/21
+;  				case "(8) Excessive snow load"                                                :  "SnowLoad"                 ; SAC 03/01/21
+;              case "(1) Solar Access Roof Area (SARA) < 80 ft2"                             :  "LimitedSolarAccess"    ; 2022 exceptions (some reused) - SAC 05/23/22 (tic #1292)
+;              case "(2) No PV Req'd when less than 1.8 kWdc"                                :  "MinimumSize"
+;              case "(3) Excessive snow load"                                                :  "SnowLoad"
+;              case "(4) Bldgs approved by local planning dept prior to 1/1/20"              :  "PlansBefore2020"
+;  				default  :  UNDEFINED
+;  			endswitch  }
+;  END
+
+;************************************************************************* SAC 1/29/20 - new rules for documenting 0 Reduced PV requirement (tic #1193)
+RULELIST "CF1RPRF01E_Section_Da_Row1_0ReqPVException"  1 0 0 1
+     "Set cf1rtblRowPV:Pv01_PV_SystemTotalRatedPowerDC"    cf1rtblRowPV:Pv01_PV_SystemTotalRatedPowerDC  = {  0  }
+     "Set cf1rtblRowPV:Pv02_PhotoVoltaicExceptionRes"      cf1rtblRowPV:Action = {  EvalRulelist( "CF1RPRF01E_Set_Pv02_PhotoVoltaicExceptionRes", 1 )  }     ; SAC 03/01/21
+     "Set cf1rtblRowPV:Pv03_ArrayModuleType"    cf1rtblRowPV:Pv03_ArrayModuleType  = { "Standard" }
+     "Set cf1rtblRowPV:Pv04_ArrayType"    cf1rtblRowPV:Pv04_ArrayType  = { "FixedArray" }
+     "Set cf1rtblRowPV:Pv05_PowerElectronics"    cf1rtblRowPV:Pv05_PowerElectronics  = { "NoPowerElectronics" }
+     "Set cf1rtblRowPV:Pv06_CFI_PV"    cf1rtblRowPV:Pv06_CFI_PV  = {  "true"  }
+     "Set cf1rtblRowPV:Pv07_NotApplicableMessage" cf1rtblRowPV:Pv07_NotApplicableMessage  = { "n/a"  }
+     "Set cf1rtblRowPV:Pv08_NotApplicableMessage" cf1rtblRowPV:Pv08_NotApplicableMessage  = { "n/a"  }
+     "Set cf1rtblRowPV:Pv09_NotApplicableMessage" cf1rtblRowPV:Pv09_NotApplicableMessage  = { "n/a"  }
+     "Set cf1rtblRowPV:Pv10_NotApplicableMessage" cf1rtblRowPV:Pv10_NotApplicableMessage  = { "n/a"  }
+     "Set cf1rtblRowPV:Pv11_NotApplicableMessage" cf1rtblRowPV:Pv11_NotApplicableMessage  = { "n/a"  }
+
+     "Set cf1rtblRowPV:Parent" cf1rtblRowPV:Parent  = {  cf1rTablePV:Name  }
+END
+
+
+;************************************************************************* SAC 08/23/22
+RULELIST "CF1RPRF01E_Section_Da_PVArray"  1 0 0 1
+   "Create PVArray:CF1R_PVRow"     PVArray:CF1R_PVRow = {  CreateComp( cf1rtblRowPV, Name + "NRCC PVRow" )  }
+  ; Rules to populate EDR_PV table row from PVArray
+     "Set PVArray:CF1R_PVRow:Pv01_PV_SystemTotalRatedPowerDC"    PVArray:CF1R_PVRow:Pv01_PV_SystemTotalRatedPowerDC  = {
+            int((DCSysSize * 100) + 0.5) / 100  }
+; TO DO - CBECC-22 PV exceptions
+;     "Set PVArray:CF1R_PVRow:Pv02_PhotoVoltaicExceptionRes"      PVArray:CF1R_PVRow:Action = {  EvalRulelist( "CF1RPRF01E_Set_Pv02_PhotoVoltaicExceptionRes", 1 )  }     ; SAC 03/01/21
+     "Set PVArray:CF1R_PVRow:Pv03_ArrayModuleType"    PVArray:CF1R_PVRow:Pv03_ArrayModuleType  = { 
+																									switch( EnumString( ModuleType ) )
+																										case "Standard"  :  "Standard"
+																										case "Premium"   :  "Premium"
+																										case "ThinFilm"  :  "ThinFilm"
+																										case "Thin Film" :  "ThinFilm"
+																										case "Custom"    :  "Custom"
+																										default  :  UNDEFINED
+																									endswitch  }
+     "Set PVArray:CF1R_PVRow:Pv04_ArrayType"    PVArray:CF1R_PVRow:Pv04_ArrayType  = { 
+																					switch( EnumString( ArrayType ) )
+																						case "Fixed (open rack)"   :  "FixedArray"
+																						case "Tracking (one axis)" :  "Tracking1Axis"
+																						case "Tracking (two axis)" :  "Tracking2Axis"
+																						default  :  UNDEFINED
+																					endswitch  }
+     "Set PVArray:CF1R_PVRow:Pv05_PowerElectronics"    PVArray:CF1R_PVRow:Pv05_PowerElectronics  = { 
+																								switch( EnumString( PwrElec ) )
+																									case "Microinverters"      :  "Microinverters"
+																									case "- none -"            :  "NoPowerElectronics"
+																									case "DC Power Optimizers" :  "PowerOptimizer"
+																									default  :  UNDEFINED
+																								endswitch  }
+     "Set PVArray:CF1R_PVRow:Pv06_CFI_PV"    PVArray:CF1R_PVRow:Pv06_CFI_PV  = {  if( CalFlexibleInstallOpt == "n/a" ) then "false" else "true" endif  } 
+;    n/a
+;    CFI1
+;    CFI2
+
+     "Set PVArray:CF1R_PVRow:Pv07_Azimuth"    PVArray:CF1R_PVRow:Pv07_Azimuth  = {  if( CalFlexibleInstallOpt != "n/a" .OR. ArrayType == "Tracking (two axis)" ) then UNDEFINED else Az endif  }
+     "Set PVArray:CF1R_PVRow:Pv07_AzimuthRange"    PVArray:CF1R_PVRow:Pv07_AzimuthRange  = {  if( CalFlexibleInstallOpt == "CFI1" ) then "150To270" 
+	                                                                                      else if( CalFlexibleInstallOpt == "CFI2" ) then "105To300" 
+																						  else UNDEFINED endif endif  } 
+     "Set PVArray:CF1R_PVRow:Pv07_AzimuthRangeString"    PVArray:CF1R_PVRow:Pv07_AzimuthRangeString  =    ; SAC 2/3/20 - string representation of Azimuth, valid ranges for CFI* or entered value (tic #1012)
+         {  if (IfValidAnd( CF1R_PVRow:Pv07_Azimuth > -360 )) then  FltToStr( CF1R_PVRow:Pv07_Azimuth )
+            else if (IfValidAnd( CF1R_PVRow:Pv07_AzimuthRange == "150to270" )) then "150-270" 
+            else if (IfValidAnd( CF1R_PVRow:Pv07_AzimuthRange == "105to300" )) then "105-300"
+            else  UNDEFINED  endif endif endif  }
+     "Set PVArray:CF1R_PVRow:Pv07_NotApplicableMessage" PVArray:CF1R_PVRow:Pv07_NotApplicableMessage  = { if ( (LocalStatus ( CF1R_PVRow:Pv07_Azimuth ) < 1) .AND. (LocalStatus ( CF1R_PVRow:Pv07_AzimuthRange ) < 1) ) then "n/a" else UNDEFINED endif  }
+     "Set PVArray:CF1R_PVRow:Pv08_TiltMeasurementType" PVArray:CF1R_PVRow:Pv08_TiltMeasurementType  = {  if( CalFlexibleInstallOpt != "n/a" .OR. ArrayType == "Tracking (two axis)" ) 
+	                                                                                                   then UNDEFINED 
+																									   else
+																										   switch( EnumString( TiltInp ) )
+																											  case "deg"    :  "TiltDegrees"
+																											  case "pitch"  :  "TiltPitch"
+																											  default       :  UNDEFINED
+																										   endswitch
+																									   endif  }
+     "Set PVArray:CF1R_PVRow:Pv08_NotApplicableMessage" PVArray:CF1R_PVRow:Pv08_NotApplicableMessage  = { if ( LocalStatus ( CF1R_PVRow:Pv08_TiltMeasurementType ) < 1 ) then "n/a" else UNDEFINED endif  }
+     "Set PVArray:CF1R_PVRow:Pv09_Tilt"    PVArray:CF1R_PVRow:Pv09_Tilt  = {  if( CalFlexibleInstallOpt != "n/a" .OR. ArrayType == "Tracking (two axis)" ) then UNDEFINED else atof( Format( "%.2f", TiltAngle ) ) endif }
+     "Set PVArray:CF1R_PVRow:Pv09_NotApplicableMessage" PVArray:CF1R_PVRow:Pv09_NotApplicableMessage  = { if ( LocalStatus ( CF1R_PVRow:Pv09_Tilt ) < 1 ) then "n/a" else UNDEFINED endif  }
+
+     "Set PVArray:CF1R_PVRow:Pv10_RoofRise"    PVArray:CF1R_PVRow:Pv10_RoofRise  = {  if( CalFlexibleInstallOpt != "n/a" .OR. ArrayType == "Tracking (two axis)" ) then UNDEFINED else atof( Format( "%.2f", TiltPitch ) ) endif }
+     "Set PVArray:CF1R_PVRow:Pv10_RoofRiseString"    PVArray:CF1R_PVRow:Pv10_RoofRiseString  = {  if( CalFlexibleInstallOpt != "n/a" ) then "<=7:12" 
+																						      else UNDEFINED endif  } 
+     "Set PVArray:CF1R_PVRow:Pv10_NotApplicableMessage" PVArray:CF1R_PVRow:Pv10_NotApplicableMessage  = { if ( (LocalStatus ( CF1R_PVRow:Pv10_RoofRise ) < 1) .AND. (LocalStatus ( CF1R_PVRow:Pv10_RoofRiseString ) < 1) ) then "n/a" else UNDEFINED endif  }
+
+     "Set PVArray:CF1R_PVRow:Pv11_InverterEfficiencyPercent"    PVArray:CF1R_PVRow:Pv11_InverterEfficiencyPercent  = {  InverterEff  }
+     "Set PVArray:CF1R_PVRow:Pv11_NotApplicableMessage" PVArray:CF1R_PVRow:Pv11_NotApplicableMessage  = { if ( LocalStatus ( CF1R_PVRow:Pv11_InverterEfficiencyPercent ) < 1 ) then "n/a" else UNDEFINED endif  }
+     "Set PVArray:CF1R_PVRow:Pv12_AnnualSolarAccess" PVArray:CF1R_PVRow:Pv12_AnnualSolarAccess  = {  int( ValidOr( SolarAccess, 100 ) + 0.5 )  } 
+     "Set PVArray:CF1R_PVRow:Parent"  PVArray:CF1R_PVRow:Parent  = {  cf1rTablePV:Name  }
+END
+
+
+;*************************************************************************
+
+;  ;************************************************************************* SAC 2/3/20 - rules to ensure PV capacities reflect final PV scaling (tic #1012)
+;  RULELIST "CF1RPRF01E_Section_Da_FinalUpdate"  1 0 0 1
+;       "Set Proj:CF1R_PVRow[1]:Pv01_PV_SystemTotalRatedPowerDC"    Proj:CF1R_PVRow[1]:Pv01_PV_SystemTotalRatedPowerDC  = {
+;              int((Proj:PVWDCSysSize[1] * ValidOr( Proj:PVWDCSizeMultiplier[1], 1 ) * 100) + 0.5) / 100  }
+;       "Set Proj:CF1R_PVRow[2]:Pv01_PV_SystemTotalRatedPowerDC"    Proj:CF1R_PVRow[2]:Pv01_PV_SystemTotalRatedPowerDC  = {
+;              int((Proj:PVWDCSysSize[2] * ValidOr( Proj:PVWDCSizeMultiplier[1], 1 ) * 100) + 0.5) / 100  }
+;       "Set Proj:CF1R_PVRow[3]:Pv01_PV_SystemTotalRatedPowerDC"    Proj:CF1R_PVRow[3]:Pv01_PV_SystemTotalRatedPowerDC  = {
+;              int((Proj:PVWDCSysSize[3] * ValidOr( Proj:PVWDCSizeMultiplier[1], 1 ) * 100) + 0.5) / 100  }
+;       "Set Proj:CF1R_PVRow[4]:Pv01_PV_SystemTotalRatedPowerDC"    Proj:CF1R_PVRow[4]:Pv01_PV_SystemTotalRatedPowerDC  = {
+;              int((Proj:PVWDCSysSize[4] * ValidOr( Proj:PVWDCSizeMultiplier[1], 1 ) * 100) + 0.5) / 100  }
+;       "Set Proj:CF1R_PVRow[5]:Pv01_PV_SystemTotalRatedPowerDC"    Proj:CF1R_PVRow[5]:Pv01_PV_SystemTotalRatedPowerDC  = {
+;              int((Proj:PVWDCSysSize[5] * ValidOr( Proj:PVWDCSizeMultiplier[1], 1 ) * 100) + 0.5) / 100  }
+;  END
+;  ;*************************************************************************
+
+
+
+;*************************************************************************
+RULELIST "CF1RPRF01E_Section_Db_Batt"  1 0 0 1
+   "Create Batt:CF1R_BatRow"     Batt:CF1R_BatRow = {  CreateComp( cf1rtblRowBat, Name + "NRCC BattRow" )  }
+;   "Create & initialize new cf1rTableBat object"
+;      cf1rSection_Bat:Action   = {  CreateChildren( cf1rTableBat, 1, "EDR_Bat" )  }     ; no init needed
+;  ; ----------------------------------------------------------------------
+;  ; Section_Bat rules to create individual EDR_Bat table rows
+;   "Create cf1rtblRowBat for all Battery instances (currently only 1 allowed)"
+;      Batt:CF1R_BatRow   = {  CreateComp( cf1rtblRowBat, Name + "EDR_BatRow" )  }
+
+  ; Rules to populate EDR_Bat table rows for FIRST AND ONLY EDR_Bat instance
+     "Set Batt:CF1R_BatRow:Bat01_BatteryControl"    Batt:CF1R_BatRow:Bat01_BatteryControl  = { 
+																									switch( Ctrl )
+																										case "Basic"                   :  "Basic"
+																										case "Time of Use"             :  "TOU"
+																										case "Advanced DR Control"     :  "AdvancedDR"
+																									;	case "Advanced Control (old)"  :  "AdvancedControlOld"
+																										default       :  UNDEFINED
+																									endswitch  }
+
+     "Set Batt:CF1R_BatRow:Bat02_BatteryCapacity"    Batt:CF1R_BatRow:Bat02_BatteryCapacity  = { atof( Format( "%.2f", MaxCap ) ) }
+
+     "Set Batt:CF1R_BatRow:Bat03_ChargingEfficiency"    Batt:CF1R_BatRow:Bat03_ChargingEfficiency  = { if ( IfValidAnd(RoundTripEff > 0) )
+                                                                                                       then UNDEFINED
+                                                                                                       else atof( Format( "%.2f", ChrgEff ) )
+                                                                                                       endif }
+     "Set Batt:CF1R_BatRow:Bat03_NotApplicableMessage" Batt:CF1R_BatRow:Bat03_NotApplicableMessage  = { if ( LocalStatus ( CF1R_BatRow:Bat03_ChargingEfficiency ) < 1 ) then "NotApplicable" else UNDEFINED endif  }
+
+     "Set Batt:CF1R_BatRow:Bat04_ChargingRate"    Batt:CF1R_BatRow:Bat04_ChargingRate  = {  atof( Format( "%.2f", ValidOr( MaxChrgPwr, 0 ) ) )  }
+     "Set Batt:CF1R_BatRow:Bat04_NotApplicableMessage" Batt:CF1R_BatRow:Bat04_NotApplicableMessage  = { if ( LocalStatus ( CF1R_BatRow:Bat04_ChargingRate ) < 1 ) then "n/a" else UNDEFINED endif  }
+
+     "Set Batt:CF1R_BatRow:Bat05_DischargingEfficiency"    Batt:CF1R_BatRow:Bat05_DischargingEfficiency  = { if ( IfValidAnd(RoundTripEff > 0) )
+                                                                                                             then UNDEFINED
+                                                                                                             else atof( Format( "%.2f", DschrgEff ) )
+                                                                                                             endif }
+     "Set Batt:CF1R_BatRow:Bat05_NotApplicableMessage" Batt:CF1R_BatRow:Bat05_NotApplicableMessage  = { if ( LocalStatus ( CF1R_BatRow:Bat05_DischargingEfficiency ) < 1 ) then "NotApplicable" else UNDEFINED endif  }
+   
+     "Set Batt:CF1R_BatRow:Bat06_DischargingRate"    Batt:CF1R_BatRow:Bat06_DischargingRate  = { if ( IfValidAnd(RoundTripEff > 0) )
+                                                                                                 then atof( Format( "%.2f", ValidOr( MaxDschrgPwr, 0 ) ) )
+                                                                                                 else UNDEFINED
+                                                                                                 endif }
+     "Set Batt:CF1R_BatRow:Bat06_NotApplicableMessage" Batt:CF1R_BatRow:Bat06_NotApplicableMessage  = { if ( LocalStatus ( CF1R_BatRow:Bat06_DischargingRate ) < 1 ) then "n/a" else UNDEFINED endif  }
+
+     "Set Batt:CF1R_BatRow:Bat07_ChargeDischargeEfficiency"    Batt:CF1R_BatRow:Bat07_ChargeDischargeEfficiency  = { if ( AnalysisVersion > 220000 )
+																										                   then atof( Format( "%.2f", ValidOr( RoundTripEff, 0 ) ) ) 
+																										                   else UNDEFINED
+																									                       endif }
+     "Set Batt:CF1R_BatRow:Bat07_NotApplicableMessage" Batt:CF1R_BatRow:Bat07_NotApplicableMessage  = { if ( AnalysisVersion > 220000 )
+                                                                                                              then if ( LocalStatus ( CF1R_BatRow:Bat07_ChargeDischargeEfficiency ) < 1 ) then "n/a" else UNDEFINED endif
+                                                                                                              else UNDEFINED
+                                                                                                              endif }
+
+  ; Rule to add EDR_Bat table rows to the cf1rTableBat
+      "Set Batt:CF1R_BatRow:Parent"
+         Batt:CF1R_BatRow:Parent  = {  cf1rTableBat:Name  }
+
+     "Set PVArray:CF1R_PVRow:Parent"  PVArray:CF1R_PVRow:Parent  = {  cf1rTablePV:Name  }
 END
 ;*************************************************************************
-;*************************************************************************  RJH 11/17/2021
-RULELIST "NRCCPRF_tblRowDWHR_2"  1 0 0 1
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[2]:WaterDWHR01_SpaceName"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[2]:WaterDWHR01_SpaceName  = {  ParentSpcNameRpt  }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[2]:WaterDWHR01a_DwellingUnitType"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[2]:WaterDWHR01a_DwellingUnitType  = { 
-        switch (DwellingUnitBedroomCnt)
-            case 0 : "StudioUnit"
-            case 1 : "OneBedroom"
-            case 2 : "TwoBedroom"
-            case 3 : "ThreeBedroom"
-            case 4 : "FourBedroom"
-            case 5 : "FivePlusBedroom"
-            default :  UNDEFINED
-        endswitch }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[2]:WaterDWHR02_WaterHeatingSystemName"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[2]:WaterDWHR02_WaterHeatingSystemName  = {  ParentResDHWSysRefRpt  }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[2]:WaterDWHR02a_DWHR_Name"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[2]:WaterDWHR02a_DWHR_Name  = {  ResDWHRSysRef[2]  }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[2]:WaterDWHR03_DWHR_Configuration"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[2]:WaterDWHR03_DWHR_Configuration  = {  
-        if ( IfValidAnd( ResDWHRSysTakeCold[2] > 0 )==0 .AND.
-             IfValidAnd( ResDWHRSysFeedHeater[2] > 0 )   )
-        then  "UnequalFlowWaterHeater"
-        else if (IfValidAnd( ResDWHRSysTakeCold[2] > 0 )    .AND.
-                IfValidAnd( ResDWHRSysFeedHeater[2] > 0 )==0)
-        then  "UnequalFlowShower"
-        else if (IfValidAnd( ResDWHRSysTakeCold[2] > 0 )    .AND.
-                IfValidAnd( ResDWHRSysFeedHeater[2] > 0 )   )
-        then  "EqualFlow"
-        else  UNDEFINED  endif endif endif }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[2]:WaterDWHR04_DWHR_DrainCount"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[2]:WaterDWHR04_DWHR_DrainCount  = { if (IfValidAnd( ResDWHRSysShowers[2] > 0)) then ResDWHRSysShowers[2] else UNDEFINED endif }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[2]:WaterDWHR05_DWHR_HERS_VerificationRequired"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[2]:WaterDWHR05_DWHR_HERS_VerificationRequired  = {  
-        if (IfValidAnd(NumResDWHRSysDevs == 1)) then "true" else "false" endif  }
-END
-;*************************************************************************
-;*************************************************************************  RJH 11/17/2021
-RULELIST "NRCCPRF_tblRowDWHR_3"  1 0 0 1
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[3]:WaterDWHR01_SpaceName"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[3]:WaterDWHR01_SpaceName  = {  ParentSpcNameRpt  }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[3]:WaterDWHR01a_DwellingUnitType"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[3]:WaterDWHR01a_DwellingUnitType  = { 
-        switch (DwellingUnitBedroomCnt)
-            case 0 : "StudioUnit"
-            case 1 : "OneBedroom"
-            case 2 : "TwoBedroom"
-            case 3 : "ThreeBedroom"
-            case 4 : "FourBedroom"
-            case 5 : "FivePlusBedroom"
-            default :  UNDEFINED
-        endswitch }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[3]:WaterDWHR02_WaterHeatingSystemName"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[3]:WaterDWHR02_WaterHeatingSystemName  = {  ParentResDHWSysRefRpt  }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[3]:WaterDWHR02a_DWHR_Name"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[3]:WaterDWHR02a_DWHR_Name  = {  ResDWHRSysRef[3]  }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[3]:WaterDWHR03_DWHR_Configuration"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[3]:WaterDWHR03_DWHR_Configuration  = {  
-        if ( IfValidAnd( ResDWHRSysTakeCold[3] > 0 )==0 .AND.
-             IfValidAnd( ResDWHRSysFeedHeater[3] > 0 )   )
-        then  "UnequalFlowWaterHeater"
-        else if (IfValidAnd( ResDWHRSysTakeCold[3] > 0 )    .AND.
-                IfValidAnd( ResDWHRSysFeedHeater[3] > 0 )==0)
-        then  "UnequalFlowShower"
-        else if (IfValidAnd( ResDWHRSysTakeCold[3] > 0 )    .AND.
-                IfValidAnd( ResDWHRSysFeedHeater[3] > 0 )   )
-        then  "EqualFlow"
-        else  UNDEFINED  endif endif endif }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[3]:WaterDWHR04_DWHR_DrainCount"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[3]:WaterDWHR04_DWHR_DrainCount  = { if (IfValidAnd( ResDWHRSysShowers[3] > 0)) then ResDWHRSysShowers[3] else UNDEFINED endif }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[3]:WaterDWHR05_DWHR_HERS_VerificationRequired"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[3]:WaterDWHR05_DWHR_HERS_VerificationRequired  = {  
-        if (IfValidAnd(NumResDWHRSysDevs == 1)) then "true" else "false" endif  }
-END
-;*************************************************************************
-;*************************************************************************  RJH 11/17/2021
-RULELIST "NRCCPRF_tblRowDWHR_4"  1 0 0 1
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[4]:WaterDWHR01_SpaceName"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[4]:WaterDWHR01_SpaceName  = {  ParentSpcNameRpt  }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[4]:WaterDWHR01a_DwellingUnitType"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[4]:WaterDWHR01a_DwellingUnitType  = { 
-        switch (DwellingUnitBedroomCnt)
-            case 0 : "StudioUnit"
-            case 1 : "OneBedroom"
-            case 2 : "TwoBedroom"
-            case 3 : "ThreeBedroom"
-            case 4 : "FourBedroom"
-            case 5 : "FivePlusBedroom"
-            default :  UNDEFINED
-        endswitch }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[4]:WaterDWHR02_WaterHeatingSystemName"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[4]:WaterDWHR02_WaterHeatingSystemName  = {  ParentResDHWSysRefRpt  }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[4]:WaterDWHR02a_DWHR_Name"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[4]:WaterDWHR02a_DWHR_Name  = {  ResDWHRSysRef[4]  }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[4]:WaterDWHR03_DWHR_Configuration"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[4]:WaterDWHR03_DWHR_Configuration  = {  
-        if ( IfValidAnd( ResDWHRSysTakeCold[4] > 0 )==0 .AND.
-             IfValidAnd( ResDWHRSysFeedHeater[4] > 0 )   )
-        then  "UnequalFlowWaterHeater"
-        else if (IfValidAnd( ResDWHRSysTakeCold[4] > 0 )    .AND.
-                IfValidAnd( ResDWHRSysFeedHeater[4] > 0 )==0)
-        then  "UnequalFlowShower"
-        else if (IfValidAnd( ResDWHRSysTakeCold[4] > 0 )    .AND.
-                IfValidAnd( ResDWHRSysFeedHeater[4] > 0 )   )
-        then  "EqualFlow"
-        else  UNDEFINED  endif endif endif }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[4]:WaterDWHR04_DWHR_DrainCount"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[4]:WaterDWHR04_DWHR_DrainCount  = { if (IfValidAnd( ResDWHRSysShowers[4] > 0)) then ResDWHRSysShowers[4] else UNDEFINED endif }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[4]:WaterDWHR05_DWHR_HERS_VerificationRequired"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[4]:WaterDWHR05_DWHR_HERS_VerificationRequired  = {  
-        if (IfValidAnd(NumResDWHRSysDevs == 1)) then "true" else "false" endif  }
-END
-;*************************************************************************
-;*************************************************************************  RJH 11/17/2021
-RULELIST "NRCCPRF_tblRowDWHR_5"  1 0 0 1
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[5]:WaterDWHR01_SpaceName"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[5]:WaterDWHR01_SpaceName  = {  ParentSpcNameRpt  }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[5]:WaterDWHR01a_DwellingUnitType"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[5]:WaterDWHR01a_DwellingUnitType  = { 
-        switch (DwellingUnitBedroomCnt)
-            case 0 : "StudioUnit"
-            case 1 : "OneBedroom"
-            case 2 : "TwoBedroom"
-            case 3 : "ThreeBedroom"
-            case 4 : "FourBedroom"
-            case 5 : "FivePlusBedroom"
-            default :  UNDEFINED
-        endswitch }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[5]:WaterDWHR02_WaterHeatingSystemName"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[5]:WaterDWHR02_WaterHeatingSystemName  = {  ParentResDHWSysRefRpt  }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[5]:WaterDWHR02a_DWHR_Name"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[5]:WaterDWHR02a_DWHR_Name  = {  ResDWHRSysRef[5]  }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[5]:WaterDWHR03_DWHR_Configuration"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[5]:WaterDWHR03_DWHR_Configuration  = {  
-        if ( IfValidAnd( ResDWHRSysTakeCold[5] > 0 )==0 .AND.
-             IfValidAnd( ResDWHRSysFeedHeater[5] > 0 )   )
-        then  "UnequalFlowWaterHeater"
-        else if (IfValidAnd( ResDWHRSysTakeCold[5] > 0 )    .AND.
-                IfValidAnd( ResDWHRSysFeedHeater[5] > 0 )==0)
-        then  "UnequalFlowShower"
-        else if (IfValidAnd( ResDWHRSysTakeCold[5] > 0 )    .AND.
-                IfValidAnd( ResDWHRSysFeedHeater[5] > 0 )   )
-        then  "EqualFlow"
-        else  UNDEFINED  endif endif endif }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[5]:WaterDWHR04_DWHR_DrainCount"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[5]:WaterDWHR04_DWHR_DrainCount  = { if (IfValidAnd( ResDWHRSysShowers[5] > 0)) then ResDWHRSysShowers[5] else UNDEFINED endif }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[5]:WaterDWHR05_DWHR_HERS_VerificationRequired"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[5]:WaterDWHR05_DWHR_HERS_VerificationRequired  = {  
-        if (IfValidAnd(NumResDWHRSysDevs == 1)) then "true" else "false" endif  }
-END
-;*************************************************************************
-;*************************************************************************  RJH 11/17/2021
-RULELIST "NRCCPRF_tblRowDWHR_6"  1 0 0 1
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[6]:WaterDWHR01_SpaceName"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[6]:WaterDWHR01_SpaceName  = {  ParentSpcNameRpt  }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[6]:WaterDWHR01a_DwellingUnitType"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[6]:WaterDWHR01a_DwellingUnitType  = { 
-        switch (DwellingUnitBedroomCnt)
-            case 0 : "StudioUnit"
-            case 1 : "OneBedroom"
-            case 2 : "TwoBedroom"
-            case 3 : "ThreeBedroom"
-            case 4 : "FourBedroom"
-            case 5 : "FivePlusBedroom"
-            default :  UNDEFINED
-        endswitch }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[6]:WaterDWHR02_WaterHeatingSystemName"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[6]:WaterDWHR02_WaterHeatingSystemName  = {  ParentResDHWSysRefRpt  }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[6]:WaterDWHR02a_DWHR_Name"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[6]:WaterDWHR02a_DWHR_Name  = {  ResDWHRSysRef[6]  }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[6]:WaterDWHR03_DWHR_Configuration"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[6]:WaterDWHR03_DWHR_Configuration  = {  
-        if ( IfValidAnd( ResDWHRSysTakeCold[6] > 0 )==0 .AND.
-             IfValidAnd( ResDWHRSysFeedHeater[6] > 0 )   )
-        then  "UnequalFlowWaterHeater"
-        else if (IfValidAnd( ResDWHRSysTakeCold[6] > 0 )    .AND.
-                IfValidAnd( ResDWHRSysFeedHeater[6] > 0 )==0)
-        then  "UnequalFlowShower"
-        else if (IfValidAnd( ResDWHRSysTakeCold[6] > 0 )    .AND.
-                IfValidAnd( ResDWHRSysFeedHeater[6] > 0 )   )
-        then  "EqualFlow"
-        else  UNDEFINED  endif endif endif }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[6]:WaterDWHR04_DWHR_DrainCount"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[6]:WaterDWHR04_DWHR_DrainCount  = { if (IfValidAnd( ResDWHRSysShowers[6] > 0)) then ResDWHRSysShowers[6] else UNDEFINED endif }
-   "Set ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[6]:WaterDWHR05_DWHR_HERS_VerificationRequired"   ResSpcDHWFeatures:NRCCPRF_tblRowDWHR[6]:WaterDWHR05_DWHR_HERS_VerificationRequired  = {  
-        if (IfValidAnd(NumResDWHRSysDevs == 1)) then "true" else "false" endif  }
-END
-;*************************************************************************
+
+;  Batt   User: "Batt 1"  
+;     AllowStandaloneBatt = RVal: 0
+;     SimStandaloneBatt = RDef: 0
+;     MaxCap = RDef: 5
+;     DegradePct = RVal: 100
+;     CapRat = RVal: 0.357143
+;     Ctrl = UVal: "Time of Use"  (10)
+;     AllowDischgStartHr = RVal: 0
+;     StandaloneChgStartHr = RDef: 1
+;     TOUFirstMonth = RVal: 1
+;     TOULastMonth = RVal: 12
+;     ChrgEff = RDef: 0.95
+;     DschrgEff = RDef: 0.95
+;     AllowBattRoundTripEff = RDef: 0
+;     RoundTripEff = RDef: 0.9025
+;     AdvBattTDVPkDayVal = RVal: 34.12
+;     NumRankedDays = RVal: 20
+;     UserMsg2[1] = RVal: "The battery model doesn't currently include extra energy consumption for"
+;     UserMsg2[2] = RVal: "cooling the battery during charging in environments above 77ùF or to keep"
+;     UserMsg2[3] = RVal: "the battery from freezing in winter if outdoors."
+;     UserMsg2[4] = RVal: "WARNING: the battery will NOT be"
+;     UserMsg2[5] = RVal: "simulated if roundtrip efficiency < 0.8."
+;     TDVSummerPkFirstHr = RVal: 19
+;     MaxChrgPwr = RVal: 1.78571
+;     MaxDschrgPwr = RVal: 1.78571
+;     TreeDescrip = RVal: "5 kWh, Time of Use control, charge/discharge efficiency: 0.95/0.95"
+;     ..
 
 
 ;*************************************************************************
