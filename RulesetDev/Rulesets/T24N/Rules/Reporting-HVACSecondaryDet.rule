@@ -156,9 +156,10 @@ RULE NEW CoilClg:SizingRatCalculated
     1
   ANNUAL
     if( IfValidAnd( z:CapTotGrossRtdSim > 0 ) .AND.
-        IfValidAnd( CapTotGrossRtd > 0 ) )
+        IfValidAnd( CapTotGrossRtd > 0 ) .AND. 
+        BaseSysNum > 0 )
     then ( CapTotGrossRtd ) / ( z:CapTotGrossRtdSim / SysCnt + SupFanHtDsgn )
-    else -999
+    else -999 // Not reported for systems not sized by software
     endif
 ENDRULE
 RULE NEW CoilHtg:SizingRatCalculated
@@ -172,9 +173,22 @@ RULE NEW CoilHtg:SizingRatCalculated
     1
   ANNUAL
     if( IfValidAnd( z:CapTotGrossRtdSim > 0 ) .AND.
-        IfValidAnd( CapTotGrossRtd > 0 ) )
-    then CapTotGrossRtd / ( z:CapTotGrossRtdSim / SysCnt )
-    else -999
+        IfValidAnd( CapTotGrossRtd > 0 ) .AND. 
+        BaseSysNum > 0 )
+    then // Is baseline or proposed system that is auto-sized
+      if( CountRefs( CoilHtg:HtPumpSuppCoilHtgRef ) > 0 )
+      then // Is supplemental HP heating coil
+        CapTotGrossRtd / SumRevRef( CoilHtg:HtPumpSuppCoilHtgRef, CoilHtg:HtPumpSizingCapTotGrossRtd )
+      else 
+      if( Type = "HeatPump" .AND. LocalCompAssigned( CoilClgRef ) )
+      then // Is a heat pump, sizing based on cooling coil capacity or
+        CapTotGrossRtd / 
+        Max( ( z:CoilClgRef:CapTotGrossRtdSim / SysCnt ) + SupFanHtDsgn, 
+             ( 0.75 * HtPumpSizingCapTotGrossRtd47 ) - SupFanHtDsgn )
+      else // All other heating coils
+        CapTotGrossRtd / ( z:CapTotGrossRtdSim / SysCnt )
+      endif endif
+    else -999 // Not reported for systems not sized by software
     endif
 ENDRULE
 
@@ -369,7 +383,7 @@ RULE NEW CoilClg:HVACSecRpt
     if( ComponentIndex() = 1 )
     then
       if( Proj:RuleReportType = "ModelRpt_HVACSecondary" )
-      then WriteToFile( "\n\n\nCooling Coils\n,,,,Relationships,,,Capacity,,,,ChilledWater,,,DirectExpansion\nName,Type,Status,Fuel Src,System,System Qty,Zone,Total-Net,Total-Gross,FluidSegIn,FluidSegOut,Design Flow Rate,Condenser Type,Number Stages,SEER,CodeMin SEER,EER,CodeMin EER,IEER,CodeMin IEER,EIR,Sizing Ratio\n,,,,,(#),,(Btu/hr),(Btu/hr),(Btu/hr),(Btu/hr),( gpm)\n" )
+      then WriteToFile( "\n\n\nCooling Coils\n,,,,Relationships,,,Capacity,,,,ChilledWater,,,DirectExpansion\nName,Type,Status,Fuel Src,System,System Qty,Zone,Total-Net,Total-Gross,FluidSegIn,FluidSegOut,Design Flow Rate,Condenser Type,Number Stages,SEER (rounded),CodeMin SEER,EER (rounded),CodeMin EER,IEER (roundded),CodeMin IEER,EIR,Sizing Ratio,SEER2 (rounded),CodeMin SEER2,EER2 (rounded), CodeMin EER2\n,,,,,(#),,(Btu/hr),(Btu/hr),(Btu/hr),(Btu/hr),( gpm)\n" )
       else UNCHANGED  
       endif
     else UNCHANGED
@@ -404,7 +418,7 @@ RULE NEW CoilClg:HVACSecRpt_Part2
     NotInput
   REPORT
     if( Proj:RuleReportType = "ModelRpt_HVACSecondary" )
-    then Format( "%c%s%c,%g,%g,%g,%g,%g,%g,%g,%g,%g", 34,CndsrType,34, NumClgStages, DXSEER, CodeMinSEER, DXEER, CodeMinEER, DXIEER, CodeMinIEER, DXEIR, SizingRatCalculated )
+    then Format( "%c%s%c,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g", 34,CndsrType,34, NumClgStages, DXSEERRnd, CodeMinSEER, DXEERRnd, CodeMinEER, DXIEER, CodeMinIEER, DXEIR, SizingRatCalculated, DXSEER2, CodeMinSEER2, DXEER2, CodeMinEER2 )
     else UNCHANGED
     endif
 ENDRULE
@@ -428,7 +442,7 @@ RULE NEW CoilHtg:HVACSecRpt
     if( ComponentIndex() = 1 )
     then
       if( Proj:RuleReportType = "ModelRpt_HVACSecondary" )
-      then WriteToFile( "\n\n\nHeating Coils\n,,,,Relationships,,,Capacity,,HotWater,,,HeatPump,,,,,,,,,Furnace\nName,Type,Status,Fuel Src,System,System Qty,Zone,Total-Net,Total-Gross,FluidSeg In,FluidSeg Out,Design Flow Rate,Condenser Type,Number Stages,HSPF,CodeMin HSPF,COP,CodeMin COP,EIR,Comp Lockout Temp,Supp Htr Temp,AFUE,CodeMin AFUE,Thrml Eff,CodeMin Thrml Eff,SizingRatio\n,,,,,(#),,(Btu/hr),(Btu/hr),,,(gpm),,,,,,,,(°F),( °F)\n" )
+      then WriteToFile( "\n\n\nHeating Coils\n,,,,Relationships,,,Capacity,,HotWater,,,HeatPump,,,,,,,,,Furnace\nName,Type,Status,Fuel Src,System,System Qty,Zone,Total-Net,Total-Gross,FluidSeg In,FluidSeg Out,Design Flow Rate,Condenser Type,Number Stages,HSPF (rounded),CodeMin HSPF,COP (rounded),CodeMin COP,EIR,Comp Lockout Temp,Supp Htr Temp,AFUE,CodeMin AFUE,Thrml Eff,CodeMin Thrml Eff,SizingRatio,HSPF2 (rounded), CodeMin HSPF2\n,,,,,(#),,(Btu/hr),(Btu/hr),,,(gpm),,,,,,,,(°F),( °F)\n" )
       else UNCHANGED  
       endif
     else UNCHANGED
@@ -463,7 +477,7 @@ RULE NEW CoilHtg:HVACSecRpt_Part2
     NotInput
   REPORT
     if( Proj:RuleReportType = "ModelRpt_HVACSecondary" )
-    then Format( "%c%s%c,%g,%g,%g,%g,%g,%g,%g,%g", 34,CndsrType,34,NumHtgStages, HtPumpHSPF, CodeMinHSPF, HtPumpCOP, CodeMinCOP, HtPumpEIR, HtPumpCprsrLockoutTemp, HtPumpSuppTemp )
+    then Format( "%c%s%c,%g,%g,%g,%g,%g,%g,%g,%g", 34,CndsrType,34,NumHtgStages, HtPumpHSPFRnd, CodeMinHSPF, HtPumpCOPRnd, CodeMinCOP, HtPumpEIR, HtPumpCprsrLockoutTemp, HtPumpSuppTemp )
     else UNCHANGED
     endif
 ENDRULE
@@ -474,7 +488,7 @@ RULE NEW CoilHtg:HVACSecRpt_Part3
     NotInput
   REPORT
     if( Proj:RuleReportType = "ModelRpt_HVACSecondary" )
-    then Format( "%g,%g,%g,%g,%g", FurnAFUE, CodeMinAFUE, FurnThrmlEff, CodeMinThrmlEff,SizingRatCalculated )
+    then Format( "%g,%g,%g,%g,%g,%g,%g", FurnAFUE, CodeMinAFUE, FurnThrmlEff, CodeMinThrmlEff,SizingRatCalculated, HtPumpHSPF2, CodeMinHSPF2 )
     else UNCHANGED
     endif
 ENDRULE
