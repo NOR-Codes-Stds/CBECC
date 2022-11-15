@@ -1,0 +1,1663 @@
+// HVAC - Baseline HVAC System Assignment
+//
+// -------------------------------------------------------------------------
+//  Copyright (c) 2012-2017, California Energy Commission
+//  All rights reserved.
+//  Redistribution and use in source and binary forms, with or without
+//  modification, are permitted provided that the following conditions are
+//  met:
+// 
+//    * Redistributions of source code must retain the above copyright
+//  notice, this list of conditions and the following disclaimer.
+//    * Redistributions in binary form must reproduce the above copyright
+//  notice, this list of conditions and the following disclaimer in
+//  the documentation and/or other materials provided with the
+//  distribution.
+//    * Neither the name of the California Energy Commission nor the names of its
+//  contributors may be used to endorse or promote products
+//  derived from this software without specific prior written
+//  permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+//  IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+//  TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION
+//  BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+//  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+//  SUBSTITUTE GOODS OR SERVICES LOSS OF USE, DATA, OR PROFITS OR
+//  BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+//  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+//  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// -------------------------------------------------------------------------
+//  
+
+
+// Re-eval Proj:HasBaseHVAC here so capture additional AddClgToProp zones when required by rules
+// --------------------------------------------------------------------------------------------------
+RULE NEW Proj:HasBaseHVAC
+  SIZING_PROPOSED
+    if( SumAll( ThrmlZn:HasUnknownHVAC ) > 0 )
+    then 1 // Some zones have unknown HVAC or will add baseline zonal cooling
+    else 0 // The proposed HVAC is user defined in all other cases
+    endif
+ENDRULE
+
+RULE NEW Proj:CreateBaseHVAC
+  DATATYPE
+    Integer
+  LONGFORM
+    CreateBaselineHVAC
+  DESCRIPTION
+    "A global flag that indicates whether an baseline HVAC system will created in the transform."
+  HELP
+    "HVAC systems are created for the for the baseline design for all new construction
+     projects.  For select partial compliance cases, the ruleset creates and 
+     HVAC system for the proposed design.  In these cases, the baseline HVAC systems
+     are not recreated, but rather copied from the proposed, so the flag is set 0
+     for the baseline case.  In some alterations cases, the baseline design is 
+     also a copy of the proposed design.  See the NACM for a full description."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( HasBaseHVAC = 1 )
+    then 1 // Includes creation of baselineHVAC systems
+    else 0 // The proposed HVAC is user defined in all other cases
+    endif
+  SIZING_PROPOSED
+    if( HasBaseHVAC = 1 )
+    then 1 // Includes creation of baselineHVAC systems
+    else 0 // The proposed HVAC is user defined in all other cases
+    endif
+  SIZING_BASELINE
+    if( BaseHVACSameAsPropHVAC )
+    then 0 // No need to recreate baseline systems
+    else 1 // For all other cases, the baseline system is created
+    endif
+  ANNUAL
+    0 // Creation of HVAC only performed in SIZING transform
+ENDRULE
+
+
+// ---------- Section 5.1.2 - Baseline HVAC Systems ----------------------------
+
+// ---------- Determine baseline system for building ---------------------------
+// First calculate floor area used to determine baseline system type by subtracing:
+//   - Heating-only spaces that do not include cooling in the proposed design
+
+//Rules for 
+//Bldg:NonResAreaForBaseSysMap
+//Bldg:AboveGrdStoryCntForBaseSysMap
+// moved to ThermalZone-ScheduleGroups.rule file for rule ordering purposes.
+
+// Nonresidential HVAC System Map (not including covered processes)
+RULE NEW Bldg:BaseNonResSysNum
+  DATATYPE
+    Integer
+  LONGFORM
+    BaselineNonresidentialSystemNumber 
+  INPUTCLASS
+    NotInput
+  DESCRIPTION
+    "The baseline nonresidential system number determined from high-level 
+     building properties."  
+  REFERENCE 
+    NACM Section 5.1.2 
+  SIZING_PROPOSED : T24N_2016
+    if( NonResAreaForBaseSysMap - HlthCareArea -
+        ( ProcAreaNew + ProcAreaExisting + ProcAreaAltered ) > 0 )
+    then
+      if( NonResAreaForBaseSysMap < 10000 )
+      then 
+        if( AboveGrdStoryCntForBaseSysMap = 1 ) 
+        then 3 // SZAC
+        else 5 // PVAV
+        endif 
+      else
+      if ( NonResAreaForBaseSysMap < 150000 )
+      then 5  // PVAV
+      else 
+      if( AboveGrdStoryCntForBaseSysMap = 1 .AND. 
+          NonResAreaForBaseSysMap > 150000 ) 
+      then 7 // SZVAVAC
+      else 6 // VAV
+      endif endif endif
+    else 0 // Baseline design has no nonresidential HVAC systems
+    endif
+  SIZING_PROPOSED : T24N_2019
+    if( NonResAreaForBaseSysMap - HlthCareArea -
+        ( ProcAreaNew + ProcAreaExisting + ProcAreaAltered ) -
+        ( RetailAreaNew + RetailAreaExisting + RetailAreaAltered ) > 0 )
+    then // Process and retail systems determined by separate rules
+      if( NonResAreaForBaseSysMap < 25000 )
+      then 
+        if( AboveGrdStoryCntForBaseSysMap < 4 ) 
+        then 7 // SZVAVAC.  Will be switched to SZAC if required after sizing run
+        else if( AboveGrdStoryCntForBaseSysMap < 6 ) 
+        then 5 // PVAV
+        else 6 // VAV
+        endif endif
+      else
+      if( NonResAreaForBaseSysMap < 150000 )
+      then 
+        if( AboveGrdStoryCntForBaseSysMap < 6 ) 
+        then 5 // PVAV
+        else 6 // VAV
+        endif
+      else 6 // VAV
+      endif endif
+    else 0 // Baseline design has no nonresidential HVAC systems
+    endif
+  SIZING_PROPOSED : T24N
+    if( NonResAreaForBaseSysMap - HlthCareArea -
+        ( ProcAreaNew + ProcAreaExisting + ProcAreaAltered ) > 0 )
+    then // Process and retail systems determined by separate rules
+      if( NonResAreaForBaseSysMap < 25000 )
+      then 
+        if( AboveGrdStoryCntForBaseSysMap < 4 ) 
+        then 7 // SZVAVAC.  Will be switched to SZAC if required after sizing run
+        else if( AboveGrdStoryCntForBaseSysMap < 6 ) 
+        then 5 // PVAV
+        else 6 // VAV
+        endif endif
+      else
+      if( NonResAreaForBaseSysMap < 150000 )
+      then 
+        if( AboveGrdStoryCntForBaseSysMap < 6 ) 
+        then 5 // PVAV
+        else 6 // VAV
+        endif
+      else 6 // VAV
+      endif endif
+    else 0 // Baseline design has no nonresidential HVAC systems
+    endif
+  SIZING_BASELINE
+    zp:BaseNonResSysNum
+ENDRULE
+
+// Residential HVAC System Map
+RULE NEW Bldg:ResAreaForBaseSysMap
+  DATATYPE
+    Float
+  LONGFORM
+    ResidentialAreaForBaselineSystemMap
+  INPUTCLASS
+    NotInput
+  DESCRIPTION
+    "The building area used to determine the residential baseline system type." 
+  REFERENCE 
+    NACM Section 5.1.2 
+  SIZING_PROPOSED
+    if( Proj:IsAddOrAlt = 1 )
+    then // Project is Addition/Alteration analysis
+      if( ( ResFlrArea - ResFlrAreaExisting ) > 0 )
+      then 
+        ResFlrArea - ResFlrAreaExisting
+      else // Default if all area is 'Existing'
+        ResFlrArea
+      endif
+    else
+    if( Proj:IsNoAddMech > 0 )
+    then // Addition w/ no mechanical, baseline system based on new + existing area
+      ( ResFlrAreaNew + ResFlrAreaExisting ) 
+    else // Baseline HVAC systems are based on the entire building attributes
+         // Default if no other criteria is met, such as if all zones are HasUnknownHVAC
+      ResFlrArea
+    endif endif
+  SIZING_BASELINE
+    zp:ResAreaForBaseSysMap
+ENDRULE
+RULE NEW Bldg:BaseResSysNum
+  DATATYPE
+    Integer
+  LONGFORM
+    BaselineResidentialSystemNumber 
+  INPUTCLASS
+    NotInput
+  DESCRIPTION
+    "The baseline residential system number determined from high-level building 
+     properties."  
+  REFERENCE 
+    NACM Section 5.1.2 
+  SIZING_PROPOSED : T24N_2016
+    if( ( ResFlrAreaNew + ResFlrAreaAltered ) > 0 ) 
+    then
+      if( AboveGrdStoryCnt < 4 ) 
+      then 1 // Res SZAC
+      else 2 // FPFC
+      endif
+    else 0 // Baseline design has no residential HVAC systems
+    endif
+  SIZING_PROPOSED
+    if( Bldg:ResAreaForBaseSysMap > 0 ) 
+    then
+      if( AboveGrdStoryCnt < 8 )
+      then 1 // SZAC
+      else if( Proj:ResBaseSysChange > 0 )
+      then 1 // Res system is SZAC, see ticket 3145
+      else 2 // FPFC
+      endif endif
+    else 0 // Baseline design has no residential HVAC systems
+    endif
+  SIZING_BASELINE 
+    zp:BaseResSysNum
+ENDRULE
+
+// Table 6 - Covered Processes
+// Set a flag that indicates whether fluid systems need to be created for 
+// Covered Process systems:
+//  ComputerRoom
+//  Laboratory
+//  CommercialKitchen
+RULE NEW Bldg:CoveredProcHasFluidSys
+  DATATYPE
+    Integer
+  LONGFORM
+    CoveredProcessHasFluidSystem
+  INPUTCLASS
+    NotInput
+  DESCRIPTION
+    "A flag that indicates whether the applicable building 'Covered Process' 
+     systems have fluid systems.
+     1 = // Create ChW/CW system only
+     2 = // Create HW system only
+     3 = // Create HW and ChW/CW systems"
+  SIZING_PROPOSED : T24N_2016
+    if( ( CompRmPwrNew + CompRmPwrAltered ) > 800 )
+    then 1 // Create ChW/CW system only
+    else
+    if( NonResAreaForBaseSysMap >= 10000 .AND.
+        ( ( CommKitAreaNew + CommKitAreaAltered ) > 0 .OR. 
+          ( LabAreaNew + LabAreaAltered ) > 0 ) )
+    then 
+      if( NonResAreaForBaseSysMap >= 150000 )
+      then 3 // Create HW and ChW/CW systems
+      else 2 // Create HW only
+      endif
+    else 0 // Baseline covered process systems do not have fluid systems
+    endif endif
+  SIZING_PROPOSED
+    if( ( CompRmPwrNew + CompRmPwrAltered ) > 800 )
+    then 1 // Create ChW/CW system only
+    else
+    if( ( LabAreaNew + LabAreaAltered ) > 0 )
+    then // has Lab systems
+      if( LabExhFlow < 15000 )
+      then // Lab exhaust is 15000 cfm, use NonRes System map
+        if( AboveGrdStoryCntForBaseSysMap > 3 .OR. 
+            NonResAreaForBaseSysMap >= 25000 )
+        then  // Lab system will need plant
+          if( AboveGrdStoryCntForBaseSysMap > 5 .OR. 
+              NonResAreaForBaseSysMap >= 150000 )
+          then 3 // Lab is VAV, create HW and ChW/CW systems
+          else 2 // Lab is PVAV, create HW system
+          endif
+        else 0 // Lab will be SZVAV
+        endif
+      else // Use special lab system map
+      if( NonResAreaForBaseSysMap < 150000 )
+      then 2 // Lab is PVAV, create HW system
+      else 3 // Lab is VAV, create HW and ChW/CW systems
+      endif endif
+    else 0 // Baseline covered process systems do not have fluid systems
+    endif endif
+  SIZING_BASELINE 
+    zp:CoveredProcHasFluidSys
+ENDRULE
+
+
+
+// -----------------------------------------------------------------------------
+//            Create baseline fluid systems
+// -----------------------------------------------------------------------------
+
+// ---------- Create baseline HW system -------------------------------
+RULE NEW Proj:BaseHWFluidSysRef
+  DATATYPE
+    FluidSystem
+  LONGFORM
+    BaseHotWaterFluidSystemReference    
+  INPUTCLASS
+    NotInput
+  SIZING
+    if( Proj:CreateBaseHVAC > 0 .AND. LocalCompAssigned( BaseHWFluidSysRef ) = 0 )
+    then 
+      if( MaxChild( Bldg:BaseResSysNum ) = 2 .OR. 
+          MaxChild( Bldg:BaseNonResSysNum ) = 5 .OR. 
+          MaxChild( Bldg:BaseNonResSysNum ) = 6 .OR.
+          MaxChild( Bldg:CoveredProcHasFluidSys ) > 1 )
+      then RuleLibrary( FluidSystem, "BaseHWSystem" ) 
+      else UNDEFINED
+      endif
+    else UNCHANGED
+    endif
+  ANNUAL 
+    z:BaseHWFluidSysRef
+ ENDRULE
+// Connect baseline boiler to baseline HW plant FluidSegs and bring in pump
+RULE Blr:FluidSegOutRef
+  SIZING
+    if( FluidSys:IsBaseSys > 0 .AND.
+        LocalCompAssigned( FluidSegOutRef ) = 0 )
+    then 
+      if( Name = Parent( BlrRef ) )
+      then RuleLibrary( FluidSeg, "BaseHWPriSupSeg", 0, "BaseHWSystem" )
+      else UNCHANGED
+      endif
+    else UNCHANGED
+    endif
+ENDRULE
+RULE Blr:FluidSegInRef
+  SIZING
+    if( FluidSys:IsBaseSys > 0 .AND.
+        LocalCompAssigned( FluidSegInRef ) = 0 )
+    then 
+      if( Name = Parent( BlrRef ) )
+      then RuleLibrary( FluidSeg, "BaseHWPriRetSeg", 0, "BaseHWSystem" )
+      else UNCHANGED
+      endif
+    else UNCHANGED
+    endif
+ENDRULE
+
+// ---------- Create baseline CW system -------------------------------
+RULE NEW Proj:BaseCWFluidSysRef
+  DATATYPE
+    FluidSystem
+  LONGFORM
+    BaseCondenserWaterFluidSystemReference    
+  INPUTCLASS
+    NotInput
+  SIZING
+    if( Proj:CreateBaseHVAC > 0 .AND. LocalCompAssigned( BaseCWFluidSysRef ) = 0 )
+    then 
+      if( MaxChild( Bldg:BaseResSysNum ) = 2 .OR.
+          MaxChild( Bldg:BaseNonResSysNum ) = 6 .OR.
+          MaxChild( Bldg:CoveredProcHasFluidSys ) = 1 .OR. 
+          MaxChild( Bldg:CoveredProcHasFluidSys ) = 3 )
+      then RuleLibrary( FluidSystem, "BaseCWSystem" ) 
+      else UNDEFINED
+      endif
+    else UNCHANGED
+    endif
+ ENDRULE
+RULE HtRej:FluidSegOutRef
+  SIZING
+    if( FluidSys:IsBaseSys > 0 .AND.
+        LocalCompAssigned( FluidSegOutRef ) = 0 )
+    then 
+      if( Name = Parent( HtRejRef ) )
+      then RuleLibrary( FluidSeg, "BaseCWPriSupSeg", 0, "BaseCWSystem" )
+      else UNCHANGED
+      endif
+    else UNCHANGED
+    endif
+ENDRULE
+RULE HtRej:FluidSegInRef
+  SIZING
+    if( FluidSys:IsBaseSys > 0 .AND.
+        LocalCompAssigned( FluidSegInRef ) = 0 )
+    then 
+      if( Name = Parent( HtRejRef ) )
+      then RuleLibrary( FluidSeg, "BaseCWPriRetSeg", 0, "BaseCWSystem" )
+      else UNCHANGED
+      endif
+    else UNCHANGED
+    endif
+ENDRULE
+
+// ---------- Create baseline ChW system -------------------------------
+RULE NEW Proj:BaseChWFluidSysRef
+  DATATYPE
+    FluidSystem
+  LONGFORM
+    BaseChilledWaterFluidSystemReference    
+  INPUTCLASS
+    NotInput
+  SIZING
+    if( Proj:CreateBaseHVAC > 0 .AND. LocalCompAssigned( BaseChWFluidSysRef ) = 0 )
+    then 
+      if( LocalCompAssigned( BaseCWFluidSysRef ) )
+      then // CW system has been successfully created
+        RuleLibrary( FluidSystem, "BaseChWSystem" ) 
+      else UNDEFINED
+      endif
+    else UNCHANGED
+    endif
+  ANNUAL
+    z:BaseChWFluidSysRef
+ ENDRULE
+ // Connect baseline chiller to baseline ChW plant FluidSegs and bring in pump
+ RULE NEW FluidSys:CWSysRef
+  DATATYPE
+    FluidSys
+  LONGFORM
+    CondenserWaterSystemReference
+  DESCRIPTION
+    "The CondenserWater system that serves the largest chiller
+     of the ChilledWater system."
+  INPUTCLASS 
+    NotInput
+  ANNUAL
+    if( IsBaseSys > 0 .AND. Type = "ChilledWater" )
+    then "BaseCWSystem"
+    else UNCHANGED
+    endif
+ENDRULE
+RULE Chlr:EvapFluidSegOutRef
+  SIZING
+    if( FluidSys:IsBaseSys > 0 .AND.
+        LocalCompAssigned( EvapFluidSegOutRef ) = 0 )
+    then 
+      if( Name = Parent( ChlrRef ) )
+      then RuleLibrary( FluidSeg, "BaseChWPriSupSeg", 0, "BaseChWSystem" )
+      else UNCHANGED
+      endif
+    else UNCHANGED
+    endif
+ENDRULE
+RULE Chlr:EvapFluidSegInRef
+  SIZING
+    if( FluidSys:IsBaseSys > 0 .AND.
+        LocalCompAssigned( EvapFluidSegInRef ) = 0 )
+    then 
+      if( Name = Parent( ChlrRef ) )
+      then RuleLibrary( FluidSeg, "BaseChWPriRetSeg", 0, "BaseChWSystem" )
+      else UNCHANGED
+      endif
+    else UNCHANGED
+    endif
+ENDRULE
+RULE Chlr:CndsrFluidSegOutRef
+  SIZING
+    if( FluidSys:IsBaseSys > 0 .AND.
+        LocalCompAssigned( CndsrFluidSegOutRef ) = 0 )
+    then 
+      if( Name = Parent( ChlrRef ) )
+      then RuleLibrary( FluidSeg, "BaseCWPriRetSeg", 0, "BaseCWSystem" )
+      else UNCHANGED
+      endif
+    else UNCHANGED
+    endif
+ENDRULE
+RULE Chlr:CndsrFluidSegInRef
+  SIZING
+    if( FluidSys:IsBaseSys > 0 .AND.
+        LocalCompAssigned( CndsrFluidSegInRef ) = 0 )
+    then 
+      if( Name = Parent( ChlrRef ) )
+      then RuleLibrary( FluidSeg, "BaseCWPriSupSeg", 0, "BaseCWSystem" )
+      else UNCHANGED
+      endif
+    else UNCHANGED
+    endif
+ENDRULE
+
+
+
+// -----------------------------------------------------------------------------
+//            Create baseline flr-by-flr multizone HVAC systems
+// -----------------------------------------------------------------------------
+
+
+
+RULE NEW Story:BaseHVACAreaForFlrSys
+  DATATYPE
+    Float
+  LONGFORM
+    BaselineHVACAreaForFloorSystem
+  DESCRIPTION
+    "The area used to determine whether a baseline flr-by-flr HVAC system should
+     be created for the Story."
+  INPUTCLASS
+    NotInput
+  SIZING_PROPOSED
+// Ticket 3411: Update floor area calc to use NonResDirectCondArea
+    if( Proj:IsNoMech > 0 .OR. Proj:IsNoAddMech > 0 )
+    then // Is an envelope only (no mechanical) compliance case
+      SumChildrenIf( Spc:NonResDirectCondArea, Spc:IsNewHVAC = -999 ) -    // NonRes directly conditioned
+      SumChildrenIf( Spc:ProcArea, Spc:IsNewHVAC = -999 ) -                // CompRm + Lab + CommKit space
+      SumChildrenIf( Spc:HtgOnlySysArea, Spc:IsNewHVAC = -999 ) -          // HtgOnly
+      SumChildrenIf( Spc:RetailArea, Spc:IsNewHVAC = -999 ) -              // Retail
+      SumChildrenIf( Spc:SchoolArea, Spc:IsNewHVAC = -999 ) -              // School
+      SumChildrenIf( Spc:OfficeArea, Spc:IsNewHVAC = -999 ) -              // Office
+      SumChildrenIf( Spc:WarehouseOfficeArea, Spc:IsNewHVAC = -999 ) -     // WarehouseOffice
+      SumChildrenIf( Spc:HlthCareArea, Spc:IsNewHVAC = -999 )              // Healthcare
+// Old: Subtract out slave zone area baseline multizone systems tracks proposed
+// control/slave zone relationship
+//      - SumChildrenIf( Spc:CondFlrArea, Spc:IsCtrlZn = -1 )
+    else // Story HasUnknownHVAC area
+      SumChildrenIf( Spc:NonResDirectCondArea, Spc:HasUnknownHVAC = 1 ) -  // NonRes directly conditioned
+      SumChildrenIf( Spc:ProcArea, Spc:HasUnknownHVAC = 1 ) -              // CompRm + Lab + CommKit
+      SumChildrenIf( Spc:HtgOnlySysArea, Spc:HasUnknownHVAC = 1 ) -        // HtgOnly
+      SumChildrenIf( Spc:RetailArea, Spc:HasUnknownHVAC = 1 ) -            // Retail
+      SumChildrenIf( Spc:SchoolArea, Spc:HasUnknownHVAC = 1 ) -            // School
+      SumChildrenIf( Spc:OfficeArea, Spc:HasUnknownHVAC = 1) -             // Office
+      SumChildrenIf( Spc:WarehouseOfficeArea, Spc:HasUnknownHVAC = 1) -    // WarehouseOffice
+      SumChildrenIf( Spc:HlthCareArea, Spc:HasUnknownHVAC = 1 )            // Healthcare
+    endif
+  SIZING_BASELINE
+// Ticket 3411: Update floor area calc to use NonResDirectCondArea
+    if( Proj:IsNoMech > 0 .OR. Proj:IsNoAddMech > 0 )
+    then // Is an envelope only (no mechanical) compliance case, baseline = proposed
+      zp:BaseHVACAreaForFlrSys
+    else
+      ( SumChildrenIf( Spc:NonResDirectCondArea, Spc:IsNewHVAC = 1 ) +
+        SumChildrenIf( Spc:NonResDirectCondArea, Spc:HasUnknownHVAC = 1 ) ) - // NonRes conditioned
+      ( SumChildrenIf( Spc:ProcArea, Spc:IsNewHVAC = 1 ) +
+        SumChildrenIf( Spc:ProcArea, Spc:HasUnknownHVAC = 1 ) ) -          // CompRm + Lab + CommKit
+      ( SumChildrenIf( Spc:HtgOnlySysArea, Spc:IsNewHVAC = 1 ) + 
+        SumChildrenIf( Spc:HtgOnlySysArea, Spc:HasUnknownHVAC = 1 ) ) -    // HtgOnly
+      ( SumChildrenIf( Spc:RetailArea, Spc:IsNewHVAC = 1 ) + 
+        SumChildrenIf( Spc:RetailArea, Spc:HasUnknownHVAC = 1 ) ) -        // Retail
+      ( SumChildrenIf( Spc:SchoolArea, Spc:IsNewHVAC = 1 ) + 
+        SumChildrenIf( Spc:SchoolArea, Spc:HasUnknownHVAC = 1 ) ) -        // School
+      ( SumChildrenIf( Spc:OfficeArea, Spc:IsNewHVAC = 1 ) + 
+        SumChildrenIf( Spc:OfficeArea, Spc:HasUnknownHVAC = 1 ) ) -        // Office
+      ( SumChildrenIf( Spc:WarehouseOfficeArea, Spc:IsNewHVAC = 1 ) + 
+        SumChildrenIf( Spc:WarehouseOfficeArea, Spc:HasUnknownHVAC = 1 ) ) - // WarehouseOffice
+      ( SumChildrenIf( Spc:HlthCareArea, Spc:IsNewHVAC = 1 ) + 
+        SumChildrenIf( Spc:HlthCareArea, Spc:HasUnknownHVAC = 1 ) )        // Healthcare
+    endif
+;   if( Proj:IsNoMech > 0 .OR. Proj:IsNoAddMech > 0 )
+;   then // Is an envelope only (no mechanical) compliance case, proposed = baseline
+;     zp:BaseHVACAreaForFlrSys
+;   else // All other cases
+;     SumChildrenIf( Spc:NonResCondFlrArea, Spc:IsNewHVAC = 1 ) -     // NonRes conditioned
+;     SumChildrenIf( Spc:ProcArea, Spc:IsNewHVAC = 1 ) -              // CompRm + Lab + CommKit
+;     SumChildrenIf( Spc:HtgOnlySysArea, Spc:IsNewHVAC = 1 )          // HtgOnly
+;   endif
+ENDRULE 
+
+// Create baseline floor-by-floor AirSystems for non-Process spaces
+RULE NEW Story:BaseFlrSysRef
+  DATATYPE
+    AirSys
+  LONGFORM
+    BaseFloorSystemReference
+  INPUTCLASS
+    NotInput
+  SIZING
+    if( Proj:CreateBaseHVAC > 0 )
+    then // Create baseline HVAC for given transform
+      if( LocalCompAssigned ( BaseFlrSysRef ) = 0 .AND.
+          BaseHVACAreaForFlrSys > 0 .AND. 
+          NonResCondFlrAreaWithMult > 0 )
+      then // Floor has nonresidential space with new HVAC, so create baseline system
+        switch( Parent( BaseNonResSysNum ) )
+          case 5  : // PVAV w/ Reheat
+            RuleLibrary( AirSys, "BaseAirSys5", 1 ) 
+          case 6  : // VAV w/ reheat 
+            RuleLibrary( AirSys, "BaseAirSys6", 1 ) 
+          default : UNDEFINED
+        endswitch
+      else zp:BaseFlrSysRef
+      endif
+    else UNCHANGED
+    endif
+ ENDRULE
+
+// Create flr-by-flr baseline AirSystems for Process spaces
+// Laboratory
+// See Ticket 3154, which showed this property is needed.
+RULE NEW Story:BaseHVACAreaForLabFlrSys
+  DATATYPE
+    Float
+  LONGFORM
+    BaselineHVACAreaForLaboratoryFloorSystem
+  DESCRIPTION
+    "The area used to determine whether a baseline flr-by-flr HVAC system
+     for laboratory spaces should be created for the Story."
+  INPUTCLASS
+    NotInput
+  SIZING_PROPOSED
+    if( Proj:IsNoMech > 0 .OR. Proj:IsNoAddMech > 0 )
+    then // Is an envelope only (no mechanical) compliance case
+      SumChildrenIf( Spc:LabArea, Spc:IsNewHVAC = -999 ) 
+    else
+      SumChildrenIf( Spc:LabArea, Spc:HasUnknownHVAC = 1 )
+    endif
+  SIZING_BASELINE
+    if( Proj:IsNoMech > 0 .OR. Proj:IsNoAddMech > 0 )
+    then // Is an envelope only (no mechanical) compliance case, baseline = proposed
+      zp:BaseHVACAreaForLabFlrSys
+    else
+      ( SumChildrenIf( Spc:LabArea, Spc:IsNewHVAC = 1 ) +
+        SumChildrenIf( Spc:LabArea, Spc:HasUnknownHVAC = 1 ) ) -
+      SumChildrenIf( Spc:HlthCareArea, Spc:IsNewHVAC = 1 ) // Healthcare, Ticket 3190
+    endif
+ENDRULE 
+
+RULE NEW Story:LabFlrSysRef
+  DATATYPE
+    AirSys
+  LONGFORM
+    LaboratoryFloorSystemReference
+  INPUTCLASS
+    NotInput
+  SIZING : T24N_2016
+    if( Proj:CreateBaseHVAC > 0 .AND.
+        LocalCompAssigned ( LabFlrSysRef ) = 0 .AND. 
+        BaseHVACAreaForLabFlrSys > 0 .AND.  // See Ticket 3154
+        ( Bldg:LabAreaNew + Bldg:LabAreaAltered ) >= 10000 .AND.
+        Max( Story:LabAreaNew, Story:LabAreaAltered ) > 0 )
+    then
+      RuleLibrary( AirSys, "BaseAirSys12a", 1 ) ; LAB (PVAV)
+    else zp:LabFlrSysRef
+    endif
+  SIZING
+    if( Proj:CreateBaseHVAC > 0 .AND.
+        LocalCompAssigned ( LabFlrSysRef ) = 0 .AND.
+        BaseHVACAreaForLabFlrSys > 0 .AND. // See Ticket 3154
+        ( Bldg:LabExhFlow > 15000 .OR. 
+          AboveGrdStoryCntForBaseSysMap > 3 .OR. 
+          NonResAreaForBaseSysMap >= 25000 ) .AND.
+        Max( Story:LabAreaNew, Story:LabAreaAltered ) > 0 )
+    then // Building has lab exh flow > 15000cfm, or NonRes system map would be system 5 (PVAV) or 6 (VAV)
+         // Create separate floor VAV system for lab areas. 
+      RuleLibrary( AirSys, "BaseAirSys12a", 1 )
+    else zp:LabFlrSysRef
+    endif
+ENDRULE
+
+// Set flag to designate that baseline HVAC should be created for zone/space
+RULE NEW ThrmlZn:CreateBaseHVAC
+  DATATYPE
+    Integer
+  LONGFORM
+    CreateBaselineHVAC
+  INPUTCLASS
+    NotInput
+  CHECKCODE
+    if( Proj:CreateBaseHVAC > 0 .AND. IsCond > 0 )
+    then      
+      if( ( Proj:IsNoMech > 0 .OR. Proj:IsNoAddMech > 0 ) .AND. IfValidAnd( IsNewHVAC >= 0 ) )
+      then // Partial compliance w/o mechanical, but user has defined a New system
+        PostWarning("The project's compliance scope does not include mechanical, 
+                     yet a 'New' HVAC system is defined for ThermalZone '%s'. This system
+                     will be ignored and a baseline HVAC system will be modeled.", Name)
+      else
+      if( IfValidAnd( IsNewHVAC = -999 ) .OR. HasUnknownHVAC > 0 )
+      then // Partical compliance w/o mechanical and no system defined, or HasUnknownHVAC checked
+        PostWarning("ThermalZone '%s' has no HVAC, or HasUnknownHVAC is checked.
+                     A baseline system will be modeled for this zone. If a proposed HVAC
+                     system has been specified, it will be ignored.", Name)
+      else UNCHANGED
+      endif endif
+    else UNCHANGED
+    endif
+  SIZING_PROPOSED
+    if( Proj:CreateBaseHVAC > 0 .AND. IsCond > 0 .AND. HlthcareArea = 0 .AND.
+        ( ( Proj:IsNoMech > 0 .OR. ( Proj:IsNoAddMech > 0 .AND. IfValidAnd( IsExistingHVAC <= 0 ) ) ) .OR.
+          HasUnknownHVAC = 1 ) )
+    then 1
+    else 0
+    endif
+  SIZING_BASELINE
+    if( Proj:CreateBaseHVAC > 0 .AND. IsCond > 0 .AND. HlthcareArea = 0 .AND. 
+        ( IsNewHVAC = -999 .OR. IsNewHVAC = 1 .OR. HasUnknownHVAC = 1 ) )
+    then 1
+    else 0
+    endif
+ENDRULE
+RULE NEW Spc:CreateBaseHVAC
+  DATATYPE
+    Integer
+  LONGFORM
+    CreateBaselineHVAC
+  INPUTCLASS
+    NotInput
+  SIZING
+    if( LocalCompAssigned( ThrmlZnRef ) )
+    then ThrmlZnRef:CreateBaseHVAC
+    else 0
+    endif
+ENDRULE
+
+// Set flag to designate that baseline HVAC should be created for ResOtherZn - SAC 05/06/22
+RULE NEW ResOtherZn:CreateBaseHVAC
+  DATATYPE
+    Integer
+  LONGFORM
+    CreateBaselineHVAC
+  INPUTCLASS
+    NotInput
+  SIZING : T24N_2019 T24N_2016
+    UNCHANGED
+  SIZING_PROPOSED
+    0
+  SIZING_BASELINE
+    if( Proj:CreateBaseHVAC > 0 .AND. EnumValue( Type ) < 10 )
+        ; ( IsNewHVAC = -999 .OR. IsNewHVAC = 1 .OR. HasUnknownHVAC = 1 ) )
+    then 1
+    else 0
+    endif
+ENDRULE
+; add SIZING_PROPOSED logic to handle setup of Proposed baseline system for PropEqStd or other/future 
+;  SIZING_PROPOSED
+;    if( Proj:CreateBaseHVAC > 0 .AND. EnumValue( Type ) < 10 )
+;        ; .AND. ( ( Proj:IsNoMech > 0 .OR. ( Proj:IsNoAddMech > 0 .AND. IfValidAnd( IsExistingHVAC <= 0 ) ) ) .OR.
+;        ;       HasUnknownHVAC = 1 ) )
+;    then 1
+;    else 0
+;    endif
+; may be needed above if/when compliance options added for Res...
+;  CHECKCODE
+;    if( Proj:CreateBaseHVAC > 0 .AND. IsCond > 0 )
+;    then      
+;      if( ( Proj:IsNoMech > 0 .OR. Proj:IsNoAddMech > 0 ) .AND. IfValidAnd( IsNewHVAC >= 0 ) )
+;      then // Partial compliance w/o mechanical, but user has defined a New system
+;        PostWarning("The project's compliance scope does not include mechanical, 
+;                     yet a 'New' HVAC system is defined for ThermalZone '%s'. This system
+;                     will be ignored and a baseline HVAC system will be modeled.", Name)
+;      else
+;      if( IfValidAnd( IsNewHVAC = -999 ) .OR. HasUnknownHVAC > 0 )
+;      then // Partical compliance w/o mechanical and no system defined, or HasUnknownHVAC checked
+;        PostWarning("ThermalZone '%s' has no HVAC, or HasUnknownHVAC is checked.
+;                     A baseline system will be modeled for this zone. If a proposed HVAC
+;                     system has been specified, it will be ignored.", Name)
+;      else UNCHANGED
+;      endif endif
+;    else UNCHANGED
+;    endif
+
+
+// -----------------------------------------------------------------------------
+//            Create baseline single-zone HVAC systems
+// -----------------------------------------------------------------------------
+
+// Create single-zone baseline AirSystems
+RULE NEW ThrmlZn:BaseZnAirSysRef
+  DATATYPE
+    AirSys
+  LONGFORM
+    BaselineZoneAirSysReference
+  INPUTCLASS
+    NotInput
+  SIZING : T24N_2016
+  // 2016 system map rule edits for clarity, no changes made
+    if( CreateBaseHVAC > 0 .AND. IsCtrlZn > 0 .AND. LocalCompAssigned( BaseZnAirSysRef ) = 0 )
+    then
+      if( IsRes > 0 .OR. IsHlthCare > 0 )
+      then UNDEFINED // See ThrmlZn:BaseZnZnSysRef rule below for IsRes > 0
+      else
+      if( HtgOnlySysArea > 0 )
+      then // Zone is heated-only warehouse
+        if( Max( HtgOnlySysAreaNew, HtgOnlySysAreaAltered ) > 0 .OR. HasUnknownHVAC > 0 ) 
+        then // HV
+          RuleLibrary( AirSys, "BaseAirSys9", 1 ) 
+        else UNDEFINED
+        endif
+      else
+      if( CompRmArea > 0 )
+      then // Zone is a Computer Room
+        if( Max( Bldg:CompRmPwrNew, Bldg:CompRmPwrAltered ) > 0 .AND.
+               ( Bldg:CompRmPwrNew + Bldg:CompRmPwrAltered ) < 800 )
+        then // Zone is a Computer Room and Bldg < 800 kW computer power, use CRAC
+          RuleLibrary( AirSys, "BaseAirSys11", 1 ) ; CRAC
+        else 
+        if( Max( CompRmAreaNew, CompRmAreaAltered ) > 0 .AND. 
+            ( Bldg:CompRmPwrNew + Bldg:CompRmPwrAltered ) >= 800 )
+        then // Zone is a Computer Room and Bldg >= 800 kW computer power, use CRAH
+          RuleLibrary( AirSys, "BaseAirSys10", 1 ) 
+        else UNDEFINED
+        endif endif
+      else
+      if( LabArea > 0 )
+      then // Zone is lab
+        if( Max( LabAreaNew, LabAreaAltered ) > 0 .AND. 
+            ( Bldg:LabAreaNew + Bldg:LabAreaAltered ) < 10000 ) 
+        then // Use SZAC if NonRes system map is not PVAV/VAV
+          RuleLibrary( AirSys, "BaseAirSys12b", 1 ) ; LAB (SZAC)
+        else UNDEFINED
+        endif
+      else  
+      if( CommKitArea > 0 ) 
+      then 
+        if( Max( CommKitAreaNew, CommKitAreaAltered ) > 0 ) 
+        then // Commercial kitchen system KITCH (SZAC)
+          RuleLibrary( AirSys, "BaseAirSys13", 1 ) 
+        else UNDEFINED
+        endif
+      else
+      if( RetailArea > 0 ) 
+      then // Zone is Retail
+        if( Max( RetailAreaNew, RetailAreaAltered ) > 0 ) 
+        then // Retail SZVAVAC
+             // Will switch to SZAC in HVACSecondary-CoilCooling-Capacity 
+             //ANNUAL rules, after AirSys:ClgCap is calculated.
+          RuleLibrary( AirSys, "BaseAirSys7", 1 ) 
+        else UNDEFINED
+        endif
+      else
+      if( Parent( BaseNonResSysNum ) = 3 )
+      then // SZAC
+        RuleLibrary( AirSys, "BaseAirSys3", 1 ) 
+      else
+      if( Parent( BaseNonResSysNum ) = 7 )
+      then // SZVAVAC
+        RuleLibrary( AirSys, "BaseAirSys7", 1 ) 
+      else UNDEFINED
+      endif endif endif endif endif
+      endif endif endif
+    else UNCHANGED
+    endif
+  SIZING : T24N_2019
+  // 2019 system map
+    if( CreateBaseHVAC > 0 .AND. IsCtrlZn > 0 .AND. LocalCompAssigned( BaseZnAirSysRef ) = 0 )
+    then
+      if( IsRes > 0 .OR. IsHlthCare > 0 )
+      then UNDEFINED // See ThrmlZn:BaseZnZnSysRef rule below for IsRes > 0
+      else
+      if( HtgOnlySysArea > 0 )
+      then // Zone is heated-only warehouse
+        if( Max( HtgOnlySysAreaNew, HtgOnlySysAreaAltered ) > 0 .OR. HasUnknownHVAC > 0 ) 
+        then // HV
+          RuleLibrary( AirSys, "BaseAirSys9", 1 ) 
+        else UNDEFINED
+        endif
+      else
+      if( CompRmArea > 0 )
+      then // Zone is a Computer Room
+        if( Max( Bldg:CompRmPwrNew, Bldg:CompRmPwrAltered ) > 0 .AND.
+               ( Bldg:CompRmPwrNew + Bldg:CompRmPwrAltered ) < 800 )
+        then // Zone is a Computer Room and Bldg < 800 kW computer power, use CRAC
+          RuleLibrary( AirSys, "BaseAirSys11", 1 ) ; CRAC
+        else 
+        if( Max( CompRmAreaNew, CompRmAreaAltered ) > 0 .AND. 
+            ( Bldg:CompRmPwrNew + Bldg:CompRmPwrAltered ) >= 800 )
+        then // Zone is a Computer Room and Bldg >= 800 kW computer power, use CRAH
+          RuleLibrary( AirSys, "BaseAirSys10", 1 ) 
+        else UNDEFINED
+        endif endif
+      else
+      if( LabArea > 0 )
+      then // Zone is lab in building below total exhaust threshold
+        if( Max( LabAreaNew, LabAreaAltered ) > 0 .AND. 
+            Bldg:BaseNonResSysNum != 5 .AND.
+            Bldg:BaseNonResSysNum != 6 .AND.
+            Bldg:LabExhFlow < 15000 )
+        then // Use SZAC if NonRes system map is not PVAV/VAV and 
+             // building lab exhaust is below threshold
+          RuleLibrary( AirSys, "BaseAirSys12b", 1 )
+        else UNDEFINED
+        endif
+      else  
+      if( CommKitArea > 0 ) 
+      then 
+        if( Max( CommKitAreaNew, CommKitAreaAltered ) > 0 ) 
+        then // Commercial kitchen system KITCH (SZAC)
+          RuleLibrary( AirSys, "BaseAirSys13", 1 ) 
+        else UNDEFINED
+        endif
+      else
+      if( RetailArea > 0 ) 
+      then // Zone is Retail
+        if( Max( RetailAreaNew, RetailAreaAltered ) > 0 ) 
+        then // Retail SZVAVAC
+             // Will switch to SZAC in HVACSecondary-CoilCooling-Capacity 
+             //ANNUAL rules, after AirSys:ClgCap is calculated.
+          RuleLibrary( AirSys, "BaseAirSys7", 1 ) 
+        else UNDEFINED
+        endif
+      else
+      if( Parent( BaseNonResSysNum ) = 3 )
+      then // SZAC
+        RuleLibrary( AirSys, "BaseAirSys3", 1 ) 
+      else
+      if( Parent( BaseNonResSysNum ) = 7 )
+      then // SZVAVAC
+        RuleLibrary( AirSys, "BaseAirSys7", 1 ) 
+      else UNDEFINED
+      endif endif endif endif endif
+      endif endif endif
+    else UNCHANGED
+    endif
+  SIZING
+  // 2022 and beyond system map
+    if( CreateBaseHVAC > 0 .AND. IsCtrlZn > 0 .AND. LocalCompAssigned( BaseZnAirSysRef ) = 0 )
+    then
+      if( IsRes > 0 .OR. IsHlthCare > 0 )
+      then UNDEFINED // See ThrmlZn:BaseZnZnSysRef rule below for IsRes > 0
+      else
+      if( HtgOnlySysArea > 0 )
+      then // Zone is heated-only warehouse
+        if( Max( HtgOnlySysAreaNew, HtgOnlySysAreaAltered ) > 0 .OR. HasUnknownHVAC > 0 ) 
+        then // HV
+          RuleLibrary( AirSys, "BaseAirSys9", 1 ) 
+        else UNDEFINED
+        endif
+      else
+      if( CompRmArea > 0 )
+      then // Zone is a Computer Room
+        if( ( Max( Bldg:CompRmPwrNew, Bldg:CompRmPwrAltered ) > 0 .AND.
+              ( Bldg:CompRmPwrNew + Bldg:CompRmPwrAltered ) < 800 ) .OR. HasUnknownHVAC > 0 )
+        then // Zone is a Computer Room and Bldg < 800 kW computer power, use CRAC
+          RuleLibrary( AirSys, "BaseAirSys11", 1 ) ; CRAC
+        else 
+        if( ( Max( CompRmAreaNew, CompRmAreaAltered ) > 0 .AND. 
+              ( Bldg:CompRmPwrNew + Bldg:CompRmPwrAltered ) >= 800 ) .OR. HasUnknownHVAC > 0 )
+        then // Zone is a Computer Room and Bldg >= 800 kW computer power, use CRAH
+          RuleLibrary( AirSys, "BaseAirSys10", 1 ) 
+        else UNDEFINED
+        endif endif
+      else
+      if( LabArea > 0 )
+      then // Zone is lab in building below total exhaust threshold
+        if( ( Max( LabAreaNew, LabAreaAltered ) > 0 .AND. 
+              Bldg:BaseNonResSysNum != 5 .AND.
+              Bldg:BaseNonResSysNum != 6 .AND.
+              Bldg:LabExhFlow < 15000 ) .OR. 
+            ( HasUnknownHVAC > 0 .AND. LocalCompAssigned( StoryRef:LabFlrSysRef ) = 0 ) )
+        then // Use SZAC if NonRes system map is not PVAV/VAV and 
+             // building lab exhaust is below threshold
+          RuleLibrary( AirSys, "BaseAirSys12b", 1 )
+        else UNDEFINED
+        endif
+      else  
+      if( CommKitArea > 0 ) 
+      then 
+        if( Max( CommKitAreaNew, CommKitAreaAltered ) > 0 .OR. HasUnknownHVAC > 0 )
+        then // Commercial kitchen system KITCH (SZAC)
+          RuleLibrary( AirSys, "BaseAirSys13", 1 ) 
+        else UNDEFINED
+        endif
+      else
+      if( RetailArea > 0 ) 
+      then // Qualifies for 'Retail' building system
+        if( Max( RetailAreaNew, RetailAreaAltered ) > 0 .OR. HasUnknownHVAC > 0 )
+        then
+          if( Proj:CliZnNum >= 2 .AND. Proj:CliZnNum <= 15 ) 
+          then // CliZn 2-15, System 7b: SZVAVHP
+            RuleLibrary( AirSys, "BaseAirSys7or3b", 1 ) 
+          else // CliZn 1 and 16, System 7c: SZVAVDFHP
+            RuleLibrary( AirSys, "BaseAirSys7or3c", 1 ) 
+          endif
+        else UNDEFINED
+        endif
+      else
+      if( SchoolArea > 0 )
+      then // Qualifies for 'School' building system
+        if( Max( SchoolAreaNew, SchoolAreaAltered ) > 0 .OR. HasUnknownHVAC > 0 )
+        then
+          if( Proj:CliZnNum >= 2 .AND. Proj:CliZnNum <= 15 ) 
+          then // CliZn 2-15, System 7b: SZVAVHP
+            RuleLibrary( AirSys, "BaseAirSys7or3b", 1 ) 
+          else // CliZn 1 and 16, System 7c: SZVAVDFHP
+            RuleLibrary( AirSys, "BaseAirSys7or3c", 1 ) 
+          endif
+        else UNDEFINED
+        endif
+      else
+      if( OfficeArea > 0 )
+      then // Qualifies for 'Office' building system
+        if( Max( OfficeAreaNew, OfficeAreaAltered ) > 0 .OR. HasUnknownHVAC > 0 )
+        then
+          if( Proj:CliZnNum >= 1 .AND. Proj:CliZnNum <= 15 ) 
+          then // CliZn 1-15, System 7b: SZVAVHP
+            RuleLibrary( AirSys, "BaseAirSys7or3b", 1 ) 
+          else // CliZn 16, System 7c: SZVAVDFHP
+            RuleLibrary( AirSys, "BaseAirSys7or3c", 1 ) 
+          endif
+        else UNDEFINED
+        endif
+      else
+      if( WarehouseOfficeArea > 0 )
+      then // Qualifies for 'Warehouse' building system
+        if( Max( WarehouseOfficeAreaNew, WarehouseOfficeAreaAltered ) > 0 .OR. HasUnknownHVAC > 0 )
+        then // System 7b: SZVAVHP
+          RuleLibrary( AirSys, "BaseAirSys7or3b", 1 ) 
+        else UNDEFINED
+        endif
+      else
+      if( Bldg:BaseNonResSysNum = 7 )
+      then // All other spaces
+        RuleLibrary( AirSys, "BaseAirSys7or3a", 1 ) 
+      else UNDEFINED
+      endif endif endif endif endif
+      endif endif endif endif endif
+    else UNCHANGED
+    endif
+ENDRULE
+
+// Create baseline ZoneSystems
+RULE NEW ThrmlZn:BaseZnZnSysRef
+  DATATYPE
+    ZnSys
+  LONGFORM
+    BaselineZoneZoneSystemReference
+  INPUTCLASS
+    NotInput
+  SIZING
+    if( CreateBaseHVAC > 0 .AND. IsCtrlZn > 0 .AND. 
+        LocalCompAssigned( BaseZnZnSysRef ) = 0 )
+    then
+      if( IsRes > 0 )
+      then // Is residential (HRR dwelling or hotel/motel guestroom)
+        if( Bldg:BaseResSysNum = 1 )
+        then // SZAC
+          RuleLibrary( ZnSys, "BaseZnSys1", 1 ) 
+        else // FPFC
+          RuleLibrary( ZnSys, "BaseZnSys2", 1 ) 
+        endif
+      else // Baseline ZnSys objects only used for Residential spaces
+        UNDEFINED
+      endif
+    else UNCHANGED
+    endif
+ENDRULE
+
+// Create single-zone baseline AirSystems
+RULE NEW ResOtherZn:BaseZnAirSysRef
+  DATATYPE
+    AirSys
+  LONGFORM
+    BaselineZoneAirSystemReference
+  INPUTCLASS
+    NotInput
+  SIZING : T24N_2019 T24N_2016
+    UNCHANGED
+  SIZING
+  // 2022 and beyond system map
+    if( CreateBaseHVAC > 0 .AND. LocalCompAssigned( BaseZnAirSysRef ) = 0 )
+    then
+      if( AboveGrdStoryCntForBaseSysMap <= 3 )
+      then ; <= 3 stories: 
+        if( Proj:CliZnNum <= 15 ) 
+        then // CliZn 2-15, ResSZHP
+          RuleLibrary( AirSys, "ResBaseAirSys_SZHP", 1 ) 
+        else // CliZn 16, ResSZAC
+          RuleLibrary( AirSys, "ResBaseAirSys_SZAC", 1 )
+        endif
+      else // Is >3 stories
+      if( Proj:CliZnNum >= 2 .AND. Proj:CliZnNum <= 15 ) 
+      then // CliZn 2-15, ResSZHP
+        RuleLibrary( AirSys, "ResBaseAirSys_SZHP", 1 ) 
+      else // CliZn 1 and 16, ResSZVDFHP
+        RuleLibrary( AirSys, "ResBaseAirSys_SZDFHP", 1 ) 
+      endif endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+
+// Revise coil types for process systems based building area thresholds
+// See System Description Tables in NACM
+// CoilClg:Type 
+// CoilHtg:Type
+
+// KITCH/LAB heating/cooling coils
+RULE AirSys:AirSeg:CoilClg:Type
+  SIZING : T24N_2016
+    if( AirSys:BaseSysNum > 0 )
+    then
+      if( ( AirSys:BaseSysNum = 12 .OR.
+            AirSys:BaseSysNum = 13 ) .AND. 
+          Bldg:NonResAreaForBaseSysMap >= 150000 )
+      then "ChilledWater"
+      else UNCHANGED
+      endif
+    else UNCHANGED
+    endif
+  SIZING
+    if( AirSys:BaseSysNum > 0 )
+    then
+      if( AirSys:BaseSysNum = 12 .AND. Bldg:CoveredProcHasFluidSys = 3 )
+      then // LAB system is VAV, uses ChW
+        "ChilledWater"
+      else
+      if( AirSys:BaseSysNum = 13 .AND. Bldg:BaseNonResSysNum = 6 )
+      then // Building is VAV, KITCH system uses ChW
+        "ChilledWater"
+      else UNCHANGED
+      endif endif
+    else UNCHANGED
+    endif
+ENDRULE
+RULE AirSys:AirSeg:CoilHtg:Type
+  SIZING : T24N_2016
+    if( AirSys:BaseSysNum > 0 )
+    then
+      if( ( AirSys:BaseSysNum = 12 .OR.
+            AirSys:BaseSysNum = 13 ) .AND. 
+          Bldg:NonResAreaForBaseSysMap >= 10000 )
+      then "HotWater"
+      else UNCHANGED
+      endif
+    else UNCHANGED
+    endif
+  SIZING
+    if (AirSys:BaseSysNum == 210)
+    then
+      if (LocalStatus( UserTypeToRestore ) > 0)
+      then  "Resistance"  // Res autosize as resistance rather than HP
+      else  UNCHANGED
+      endif
+    else if( AirSys:BaseSysNum > 0 )
+    then
+      if( AirSys:BaseSysNum = 12 .AND. Bldg:CoveredProcHasFluidSys > 1 )
+      then // LAB system is VAV, uses HW
+        "HotWater"
+      else
+      if( AirSys:BaseSysNum = 13 .AND. Bldg:BaseNonResSysNum = 6 )
+      then // Building is VAV, KITCH system uses HW
+        "HotWater"
+      else UNCHANGED
+      endif endif
+    else UNCHANGED
+    endif endif
+// In ANNUAL run, change Resistance coils to HeatPump where applicable
+  ANNUAL
+    if (AirSys:BaseSysNum == 210)
+    then  
+      if (LocalStatus( UserTypeToRestore ) > 0)
+      then  UserTypeToRestore
+      else  UNCHANGED
+      endif
+    else if( ( AirSys:BaseSysNum = 7 .OR. AirSys:BaseSysNum > 200 ) .AND.
+             Type = "Resistance" )
+    then "HeatPump"
+    else UNCHANGED
+    endif endif
+ENDRULE
+
+
+
+// -----------------------------------------------------------------------------
+//            Connect baseline water coils to baseline fluid systems
+// -----------------------------------------------------------------------------
+// Assign baseline HW system FluidSegs to baseline CoilHtg objects
+RULE CoilHtg:FluidSegInRef
+  SIZING
+    if( LocalCompAssigned( FluidSegInRef ) = 0 .AND.
+        Type = "HotWater" )
+    then "BaseHWPriSupSeg"
+    else UNCHANGED
+    endif
+ENDRULE
+RULE CoilHtg:FluidSegOutRef
+  SIZING
+    if( LocalCompAssigned( FluidSegOutRef ) = 0 .AND.
+        Type = "HotWater" )
+    then "BaseHWPriRetSeg"
+    else UNCHANGED
+    endif
+ENDRULE
+// Assign Assign baseline ChW system FluidSegs to baseline CoilClg objects
+RULE CoilClg:FluidSegInRef
+  SIZING
+    if( LocalCompAssigned( FluidSegInRef ) = 0 .AND.
+        Type = "ChilledWater" )
+    then "BaseChWPriSupSeg"
+    else UNCHANGED
+    endif
+ENDRULE
+RULE CoilClg:FluidSegOutRef
+  SIZING
+    if( LocalCompAssigned( FluidSegOutRef ) = 0 .AND.
+        Type = "ChilledWater" )
+    then "BaseChWPriRetSeg"
+    else UNCHANGED
+    endif
+ENDRULE
+
+
+// Assign baseline floor system to spaces
+// See ThrmlZn:NumStory rule for check that spaces in a ThrmlZn do not span
+// differnt BuildingStory objects
+// First, set a flag at Spc that indicates whether there is a 
+// Story:XxxFlrSysRef (AirSys)
+RULE NEW Spc:HasBaseFlrSys
+  DATATYPE
+    Integer
+  LONGFORM
+    HasFloorSystemReference
+  INPUTCLASS
+    NotInput
+  SIZING
+    if( ( CreateBaseHVAC > 0 .OR. HasUnknownHVAC > 0 ) .AND. 
+        IsCond > 0 .AND. 
+        OccClass = "Nonresidential" )
+    then
+      if( ParentCompAssigned( BaseFlrSysRef ) .OR.
+          ParentCompAssigned( LabFlrSysRef ) )
+      then 1
+      else 0
+      endif
+    else 0
+    endif    
+ENDRULE
+// If there is a FlrSys, set a reference to that AirSys object at the space
+RULE NEW Spc:BaseFlrSysRefAtSpc
+  DATATYPE
+    AirSys
+  LONGFORM
+    BaselineFloorSystemReferenceAtSpace
+  INPUTCLASS
+    NotInput
+  SIZING
+    if( HasBaseFlrSys > 0 )
+    then
+      if( LabArea > 0 .AND. ParentCompAssigned( LabFlrSysRef ) > 0 )
+      then Parent( LabFlrSysRef )
+      else Parent( BaseFlrSysRef )
+      endif
+    else UNDEFINED
+    endif    
+ENDRULE
+// Set a reference to the Spc at the ThrmlZn if the Spc has a FlrSys
+RULE NEW ThrmlZn:HasBaseFlrSysSpcRef
+  DATATYPE
+    Spc
+  LONGFORM
+    HasBaseFloorSystemSpaceReference
+  INPUTCLASS
+    NotInput
+  SIZING
+    if( IfValidAnd( MaxRevRef( Spc:ThrmlZnRef, Spc:HasBaseFlrSys ) > 0 ) )
+    then MaxRevRefComp( Spc:ThrmlZnRef, Spc:HasBaseFlrSys )
+    else UNDEFINED
+    endif
+ENDRULE
+// Set ThrmlZn:BaseFlrSysRefAtZn to be the same as Spc:FlrSysRefAtSpc 
+RULE NEW ThrmlZn:BaseFlrSysRefAtZn
+  DATATYPE
+    AirSys
+  LONGFORM
+    BaseFloorSystemReference
+  INPUTCLASS
+    NotInput
+  SIZING
+    if( LocalCompAssigned( HasBaseFlrSysSpcRef ) )
+    then HasBaseFlrSysSpcRef:BaseFlrSysRefAtSpc
+    else UNDEFINED
+    endif
+ENDRULE
+
+// ---------- Assign baseline systems to zones ---------------------------------
+// Primary air conditioning system reference
+RULE ThrmlZn:PriAirCondgSysRef[1]
+// Proposed system assignment is defined by user.
+// See ThermalZone-General.rule for DESCRIPTION and HELP     
+  SIZING
+    if( ( CreateBaseHVAC > 0 .OR. HasUnknownHVAC > 0 ) .AND. IsCond > 0 )
+    then     
+      if( LocalCompAssigned( BaseZnAirSysRef ) )
+      then // Zone served by a baseline single-zone AirSys
+        BaseZnAirSysRef
+      else if( LocalCompAssigned( BaseZnZnSysRef ) )
+      then // Zone served by a baseline single-zone ZnSys
+        BaseZnZnSysRef
+      else if( LocalCompAssigned( BaseFlrSysRefAtZn ) )
+      then // Zone served by a baseline floor AirSys
+        BaseFlrSysRefAtZn
+      else UNDEFINED
+      endif endif endif
+    else UNCHANGED
+    endif
+ENDRULE
+
+// Evaluate rule again to assign slave zones of proposed design as slave zones
+// of the baseline design if baseline is a single-zone AirSys, i.e. BaseZnAirSysRef
+// is assigned. 
+RULE ThrmlZn:PriAirCondgSysRef[1]
+// Proposed system assignment is defined by user.
+// See ThermalZone-General.rule for DESCRIPTION and HELP     
+  SIZING
+    if( ( CreateBaseHVAC > 0 .OR. HasUnknownHVAC > 0 ) .AND.
+        IsCond > 0 .AND. 
+        IsCtrlZn = -1 .AND. // This is a slave zone
+        LocalCompAssigned( SlaveCtrlZnRef ) )
+    then 
+      if( LocalCompAssigned( BaseFlrSysRefAtZn ) )
+      then // Baseline system is flr-by-flr, leave slave zones assigned to it
+        UNCHANGED 
+      else // Baseline system is single-zone, assign slave zones to
+           // same baseline system as proposed control zone
+        SlaveCtrlZnRef:PriAirCondgSysRef[1]
+      endif
+    else UNCHANGED
+    endif
+ENDRULE
+
+// Ventilation system reference
+RULE ThrmlZn:VentSysRef
+// Proposed transformation definitions initialized to be the same as user input.  
+  SIZING
+    if( ( CreateBaseHVAC > 0 .OR. HasUnknownHVAC > 0 ) .AND.
+        IsCond > 0 .AND. 
+        LocalCompAssigned( PriAirCondgSysRef[1] ) > 0 .AND.
+        LocalCompAssigned( VentSysRef ) = 0 .AND.
+        VentIsRequired > 0 .AND.
+        VentSrc = "Forced" .AND.
+        // Zone may have CodeVentFlow = 0, but VentFlow > 0 so it can be transferred to others
+        // -or- VentFlow = 0 but HasUnknownHVAC > 0
+        ( VentFlow > 0 .OR. ( CodeVentFlow > 0 .AND. HasUnknownHVAC > 0 ) ) )
+    then
+      if( IsHotelMotelGuestRm > 0 )
+      then // Baseline hotel/motel ventilation system
+        UNCHANGED // Is exhaust, defined by other rules
+      else
+      if( IsHighRiseRes > 0 )
+      then // Baseline HRR ventilation system 
+        if( Proj:HRRVentSysChange > 0 ) 
+        then // 2019.2.0 ACM rule, See ticket 3040
+          if( IfValidAnd( ResVentEquipChkReq > 0 ) .AND. 
+              IfValidAnd( ResVentEquipIsAccessible = 0 ) )
+          then UNCHANGED
+          else
+          if( PropVentSysIsBalanced > 0 .OR. PropVentSysIsSup > 0 ) 
+          then // Baseline is supply only or balanced vent, modeled as AirSys
+            RuleLibrary( AirSys, "BaseVentOnlyAirSys", 1 ) 
+          else // Baseline is exhaust
+            UNCHANGED
+          endif endif
+        else // 2019.1.2/1.3 rule, system is balanced
+          RuleLibrary( AirSys, "BaseVentOnlyAirSys", 1 )  
+        endif
+      else // For baseline design, vent system is same as heating/cooling system
+        PriAirCondgSysRef[1] 
+      endif endif
+    else UNCHANGED
+    endif
+ENDRULE
+
+
+// baseline HVAC system reference for ResOtherZn
+RULE ResOtherZn:ozHVACSystem
+// Proposed system assignment is defined by user.
+  SIZING
+    if( CreateBaseHVAC > 0 .AND. EnumValue( Type ) < 10 )
+    then     
+      if( LocalCompAssigned( BaseZnAirSysRef ) )
+      then // Zone served by a baseline single-zone AirSys
+        BaseZnAirSysRef
+      else UNDEFINED
+      endif
+    else UNCHANGED
+    endif
+ENDRULE
+RULE ResOtherZn:ActiveHVACSystem
+  // maintain consistency between ozHVACSystem & ActiveHVACSystem
+  SIZING
+    if( CreateBaseHVAC > 0 .AND. EnumValue( Type ) < 10 .AND.
+        LocalCompAssigned( ozHVACSystem ) )
+    then ozHVACSystem
+    else UNCHANGED
+    endif
+ENDRULE
+
+
+// Create return fan baseline HRR ventilation if it is balanced
+// First set AirSys:IsBalancedVentSys
+RULE NEW AirSys:IsBalancedVentSys
+  SIZING
+    if( BaseSysNum > 100 )
+    then 
+      if( Proj:HRRVentSysChange > 0 ) 
+      then // 2019.2.0 ACM rule, system is same type as proposed. See ticket 3040
+        MaxRevRef( ThrmlZn:VentSysRef, ThrmlZn:PropVentSysIsBalanced )
+      else // 2019.1.2/1.3 rule. Base HRR ventsyst is always balanced
+        1
+      endif
+    else UNCHANGED
+    endif
+ENDRULE
+// Create return fan if it is balanced
+RULE AirSys:AirSeg:FanRef
+  SIZING
+    if( AirSys:BaseSysNum > 100 .AND. 
+        IfValidAnd( AirSys:IsBalancedVentSys > 0 ) .AND.
+        Type = "Return" .AND.
+        LocalCompAssigned( FanRef) = 0 )
+    then
+      RuleLibrary( Fan, "BaseVentOnlyAirSys RetFan", 1, AirSeg:Name )
+    else UNCHANGED
+    endif
+ENDRULE
+
+
+// ---------- Create baseline terminal units -----------------------------------
+RULE ThrmlZn:TrmlUnitRef  
+// Property defined and proposed rules in ThermalZone-General.rule
+  SIZING
+    if( ( CreateBaseHVAC > 0 .OR. HasUnknownHVAC > 0 ) .AND. IsCond > 0 )
+      then
+      if( LocalCompAssigned( TrmlUnitRef ) = 0 .AND.
+          IsCtrlZn > 0 .AND. 
+          LocalCompAssigned( PriAirCondgSysRef[1] ) = ComponentType ("AirSys") )
+      // Conditioned zones that have zone thermostats
+      then
+        switch( PriAirCondgSysRef[1]:BaseSysNum )
+          case 3  : // SZAC
+            RuleLibrary( TerminalUnit, "BaseUnctrl TrmlUnit", 1, PriAirCondgSysRef[1] ) 
+          case 5  : // PVAV
+            RuleLibrary( TerminalUnit, "BaseVAVBox TrmlUnit", 1, PriAirCondgSysRef[1] )    
+          case 6  : // VAV
+            RuleLibrary( TerminalUnit, "BaseVAVBox TrmlUnit", 1, PriAirCondgSysRef[1] )    
+          case 7  : // SZVAV
+            RuleLibrary( TerminalUnit, "BaseVAVNoReheatTrmlUnit", 1, PriAirCondgSysRef[1] ) 
+          case 9  : // HV
+            RuleLibrary( TerminalUnit, "BaseUnctrl TrmlUnit", 1, PriAirCondgSysRef[1] ) 
+          case 10 : // CRAH
+            RuleLibrary( TerminalUnit, "BaseUnctrl TrmlUnit", 1, PriAirCondgSysRef[1] ) 
+          case 11 : // CRAC
+            RuleLibrary( TerminalUnit, "BaseUnctrl TrmlUnit", 1, PriAirCondgSysRef[1] ) 
+          case 12 :
+            if( PriAirCondgSysRef[1]:Type = "PVAV" )
+            then // LAB (PVAV)
+              RuleLibrary( TerminalUnit, "BaseVAVBox TrmlUnit", 1, PriAirCondgSysRef[1] ) 
+            else // LAB (SZAC)
+              RuleLibrary( TerminalUnit, "BaseUnctrl TrmlUnit", 1, PriAirCondgSysRef[1] ) 
+            endif
+          case 13 : // KITCH
+            RuleLibrary( TerminalUnit, "BaseUnctrl TrmlUnit", 1, PriAirCondgSysRef[1] ) 
+          default : UNDEFINED
+         endswitch
+      else
+      if( LocalCompAssigned( TrmlUnitRef ) = 0 .AND. 
+          LocalCompAssigned( PriAirCondgSysRef[1] ) = ComponentType ("AirSys") )
+      then // Conditioned zones that are not control zones
+        if( PriAirCondgSysRef[1]:Type = "PVAV" .OR. PriAirCondgSysRef[1]:Type = "VAV" )
+        then // Is a multi-zone baseline AirSys, the TrmlUnit is 'VAVReheatBox'
+          RuleLibrary( TerminalUnit, "BaseVAVBox TrmlUnit", 1, PriAirCondgSysRef[1] ) 
+        else // Is a single-zone baseline AirSys,  Conditioned slave zone
+          RuleLibrary( TerminalUnit, "BaseUnctrl TrmlUnit", 1, PriAirCondgSysRef[1] )
+        endif
+      else
+      if( LocalCompAssigned( TrmlUnitRef ) = 0 .AND. 
+          LocalCompAssigned( VentSysRef ) = ComponentType ("AirSys") )
+      then // Conditioned zone ventilated by separate VentSysRef 
+        if( IfValidAnd( VentSysRef:BaseSysNum = 101 ) )
+        then // HRR balanced ventilation
+          RuleLibrary( TerminalUnit, "BaseVentOnlyAirSys TrmlUnit", 1, VentSysRef ) 
+        else UNCHANGED
+        endif
+      else UNCHANGED
+      endif endif endif
+    else UNCHANGED
+    endif         
+ENDRULE
+
+RULE NEW ResOtherZn:TrmlUnitRef
+  DATATYPE
+    TerminalUnit
+  LONGFORM
+    TerminalUnitReference
+  INPUTCLASS
+    NotInput
+  SIZING : T24N_2019 T24N_2016
+    UNDEFINED
+  SIZING
+  // 2022 and beyond system map
+    if( LocalCompAssigned( TrmlUnitRef ) = 0 .AND.
+        LocalCompAssigned( BaseZnAirSysRef ) )
+    then
+      RuleLibrary( TerminalUnit, "ResBaseAirSys TrmlUnit", 1, BaseZnAirSysRef ) 
+    else UNCHANGED
+    endif
+ENDRULE
+
+// Assign terminal unit zone served to the thermal zone
+RULE TrmlUnit:ZnServedRef
+// Proposed transformation definitions initialized to be the same as user input.  
+  SIZING
+    if( AirSys:BaseSysNum > 200 )
+    then MaxRevRefComp( ResOtherZn:TrmlUnitRef, ResOtherZn:Area )
+    else if( AirSys:BaseSysNum > 0 )
+    then MaxRevRefComp( ThrmlZn:TrmlUnitRef, ThrmlZn:FlrArea )
+    else UNCHANGED
+    endif endif
+ENDRULE
+// Assign TerminalUnits to AirSegments
+RULE TrmlUnit:PriAirSegRef
+  SIZING
+    if( AirSys:BaseSysNum > 0 .AND.
+        LocalCompAssigned( ZnServedRef ) )
+    then // Assign terminal unit
+      if (LocalCompAssigned( ZnServedRef ) = ComponentType( "ResOtherZn" ))
+      then 
+        ZnServedRef:ActiveHVACSystem:SupAirSegRef 
+      else if( ZnServedRef:IsHighRiseRes > 0 )
+      then 
+        ZnServedRef:VentSysRef:SupAirSegRef 
+      else
+        ZnServedRef:PriAirCondgSysRef[1]:SupAirSegRef 
+      endif endif
+    else UNCHANGED
+    endif
+ENDRULE
+// Assign Control Zone for single zone systems
+RULE AirSys:CtrlZnRef
+  SIZING
+    if( AirSys:BaseSysNum > 0 )
+    then
+      if( BaseSysNum = 3 .OR.  // SZAC
+          BaseSysNum = 7 .OR.  // SZVAV
+          BaseSysNum = 9 .OR.  // HV
+          BaseSysNum = 10 .OR. // CRAH
+          BaseSysNum = 11 .OR. // CRAC
+          ( BaseSysNum = 12 .AND. ( Type = "SZAC" .OR. Type = "SZVAVAC" ) ) .OR. // LAB (SZAC)
+          BaseSysNum = 13 )    // KITCH
+      then MaxRevRefComp( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:IsCtrlZn )
+      else
+      if( BaseSysNum > 200 )
+      then MaxRevRefComp( ResOtherZn:ActiveHVACSystem, ResOtherZn:Area )
+      else UNDEFINED
+      endif endif
+    else UNCHANGED
+    endif
+ENDRULE
+// Assign HW system to terminal unit coils
+RULE AirSys:TrmlUnit:CoilHtg:FluidSegInRef
+  SIZING
+    if( AirSys:BaseSysNum > 0 .AND.
+        LocalCompAssigned( FluidSegInRef ) = 0 .AND.
+        Type = "HotWater" )
+    then "BaseHWPriSupSeg"
+    else UNCHANGED
+    endif
+ENDRULE
+RULE AirSys:TrmlUnit:CoilHtg:FluidSegOutRef
+  SIZING
+    if( AirSys:BaseSysNum > 0 .AND.
+        LocalCompAssigned( FluidSegOutRef ) = 0 .AND.
+        Type = "HotWater" )
+    then "BaseHWPriRetSeg"
+    else UNCHANGED
+    endif
+ENDRULE
+
+
+// Revise properties for process systems based project/zone thresholds
+// See System Description Tables in NACM
+// AirSys:Type
+// Fan:CtrlMthd
+// TrmlUnit:Type
+
+// CRAC unit SZVAV threshold
+RULE AirSys:Type
+  SIZING
+    if( BaseSysNum = 11 )
+    then
+      if( SumRevRef( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:CompRmPwrNew ) > 17.5 )
+      then "SZVAVAC"
+      else UNCHANGED
+      endif
+    else UNCHANGED
+    endif
+ENDRULE
+
+// LAB system type threshold(s)
+RULE AirSys:Type
+  SIZING : T24N_2016
+    if( BaseSysNum = 12 )
+    then
+      if( Type = "PVAV" .AND. 
+          Bldg:NonResAreaForBaseSysMap >= 150000 )
+      then // Switch to VAV
+        "VAV" 
+      else
+      if( Type = "SZAC" .AND. 
+          SumRevRef(ThrmlZn:VentSysRef, ThrmlZn:ExhFlow) > 2000 )
+      then // Zone exh flow is > 2000, switch to SZVAVAC
+        "SZVAVAC" 
+      else UNCHANGED
+      endif endif
+    else UNCHANGED
+    endif
+  SIZING
+    if( BaseSysNum = 12 )
+    then
+      if( Type = "PVAV" .AND. 
+          ( Bldg:NonResAreaForBaseSysMap >= 150000 .OR. Bldg:BaseNonResSysNum = 6 ) )
+      then // Switch to VAV
+        "VAV" 
+      else UNCHANGED
+      endif
+    else UNCHANGED
+    endif
+ENDRULE
+
+// KITCH system type threshold
+RULE AirSys:Type
+  SIZING : T24N_2016
+    if( BaseSysNum = 13 )
+    then
+      if( Bldg:MaxTotKitExhHoodFlow > 5000 )
+      then // KITCH hood flow is > 5000, switch to SZVAV
+        "SZVAVAC"
+      else UNCHANGED
+      endif
+    else UNCHANGED
+    endif
+  SIZING
+    UNCHANGED
+ENDRULE
+
+// Change Fan/TrmlUnit/ThrmlZn properties if changed to SZVAV
+RULE AirSys:AirSeg:Fan:CtrlMthd
+  SIZING : T24N_2016
+    if( AirSys:BaseSysNum > 0 )
+    then
+      if( ( AirSys:BaseSysNum = 11 .OR. 
+            AirSys:BaseSysNum = 12 .OR. 
+            AirSys:BaseSysNum = 13 ) .AND.
+          AirSys:Type = "SZVAVAC" )
+      then "VariableSpeedDrive"
+      else UNCHANGED
+      endif
+    else UNCHANGED
+    endif
+  SIZING
+    if( AirSys:BaseSysNum > 0 )
+    then
+      if( AirSys:BaseSysNum = 11 .AND.
+          AirSys:Type = "SZVAVAC" )
+      then "VariableSpeedDrive"
+      else UNCHANGED
+      endif
+    else UNCHANGED
+    endif
+ENDRULE
+

@@ -1,0 +1,672 @@
+; -------------------------------------------------------------------------
+; Rules pertaining to:   Defaulting the Proposed Building Model - focusing on Loads (internal gains) properties
+; CEC Title-24 Residential Energy Code
+; -------------------------------------------------------------------------
+; Copyright (c) 2012-2014, California Energy Commission
+; Copyright (c) 2012-2014, Wrightsoft Corporation
+; All rights reserved.
+; Redistribution and use in source and binary forms, with or without modification,
+; are permitted provided that the following conditions are met:
+; - Redistributions of source code must retain the above copyright notice, this
+;   list of conditions and the following disclaimer.
+; - Redistributions in binary form must reproduce the above copyright notice, this
+;   list of conditions, the following disclaimer in the documentation and/or other
+;   materials provided with the distribution.
+; - Neither the name of the California Energy Commission nor the names of its
+;   contributors may be used to endorse or promote products derived from this
+;   software without specific prior written permission.
+; DISCLAIMER: THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+; "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+; THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+; NON-INFRINGEMENT ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION,
+; WRIGHTSOFT CORPORATION, ITRON, INC. OR ANY OTHER AUTHOR OR COPYRIGHT HOLDER OF
+; THIS SOFTWARE (COLLECTIVELY, THE "AUTHORS") BE LIABLE FOR ANY DIRECT, INDIRECT,
+; INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+; LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA,
+; OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+; LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
+; OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+; ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.  EACH LICENSEE AND SUBLICENSEE OF THE
+; SOFTWARE AGREES NOT TO ASSERT ANY CLAIM AGAINST ANY OF THE AUTHORS RELATING TO
+; THIS SOFTWARE, WHETHER DUE TO PERFORMANCE ISSUES, TITLE OR INFRINGEMENT ISSUES,
+;STRICT LIABILITY OR OTHERWISE.
+; -------------------------------------------------------------------------
+
+ENUM_PROPERTIES_VALUE   ; ensures retrieval/logic/us of enum properties assume numeric value (alternative is ENUM_PROPERTIES_STRING)
+
+; SAC 10/24/16 - new rulelist to default cool vent, IAQ & internal gains properties
+;*************************************************************************
+RULELIST "ProposedInput_CoolVent_IAQ_IntGains" 0 0 0 0
+;*************************************************************************
+   ;--------------------------------------------------------------------
+   ; ProposedInput: Dwelling Unit (incl. dwelling unit internal gain) Rules
+   ;--------------------------------------------------------------------
+; no longer needed - no msgs for SFam models and MFam (Com) ResProj dialog excludes IAQ & Appliance tabs - SAC 10/13/21
+;	"Set ResProj:AppliancesMsg"		ResProj:AppliancesMsg	= {	if (IsMultiFamily < 0.5) then  " "
+;																				else  "Appliance fuel & usage and DHW Compact Distribution inputs are entered on Dwelling Unit Type dialog for multifamily models"  endif  }
+;	"Set ResProj:IAQMsg"					ResProj:IAQMsg				= {	if (IsMultiFamily < 0.5) then  " "
+;																				else  "IAQ (indoor air quality) data entered on Dwelling Unit Type dialog for multifamily models"  endif  }
+
+; SAC 8/27/13 - added logic to ensure that we have VENTILATED attic space before allowing Cool Vent
+;	"Set ResProj:EnableClVent"			ResProj:EnableClVent		= {	if (IsMultiFamily < 0.5 .AND. ComponentCount( Zone ) > 0.5 .AND. SumAll( Zone:CondClgBlwAtticArea ) > 0.1) then  1  else  0  endif  }
+;	mjb	4/14/14	only add Cool Vent if floor area > 1000
+; mjb 7/9/14   removed floor area limit since we want users to add a WHF in their design if they want to (just not in Std Design)
+; SAC 7/11/14 - restored logic to ensure that there is at least SOME Zone:CondClgBlwAtticArea before enabling ClVent
+	"Set ResProj:EnableClVent"			ResProj:EnableClVent		= {	if (IsMultiFamily < 0.5 .AND. ComponentCount( Zone ) > 0.5 .AND. ComponentCount( Attic ) > 0 .AND.
+																						SumAll( Zone:CondClgBlwAtticArea ) > 0.1 .AND. SumAll( Attic:ClVentableArea ) > 0.1)
+																				then  1  else  0  endif  }
+;	"Set Zone:NeedStdClVent"		Zone:NeedStdClVent		= {	if (( ResProj:RunScope == 2 .AND. Status = 3) .OR. (ResProj:RunScope == 1 .AND. ResProj:IsAddAlone > 0.5) ) then
+;																							if (AdditionCFA > 1000) then 1 else 0 endif  
+;																						else  0  endif   }
+	"Check NeedStdClVent"			ResProj:EnableClVent		= {	if ( IfValidAnd(MaxChild(Zone:NeedStdClVent) > 0.5)) then 1 else UNCHANGED endif	}
+
+   "Set ResProj:LimitedClVent"      ResProj:LimitedClVent   =     ; SAC 1/16/19 - added to enable ClVent fans to outside as opposed to vented attics (tic #1040)
+      {  if (IsMultiFamily < 0.5 .AND. EnableClVent == 0 .AND. SumAll( Zone:CondVolume ) > 1)
+         then  1
+         else  0  endif  }
+   "Set ResProj:ClVentUI"     ResProj:ClVentUI   =
+      {  if (EnableClVent .OR. LimitedClVent)
+         then  1  else  0  endif  }
+
+   ; SAC 1/16/19 - added rule default for ResProj:UnitClVentOption which may be defaulted via enums before a dependency (tic #1040)
+   "Reset ResProj:UnitClVentOption (set it to 'none') if necessary"  ResProj:Action  =
+      {  if (LocalStatus( UnitClVentOption ) > 4 .AND. EnableClVent == 0 .AND.
+             UnitClVentOption != 0 .AND.
+             ( LimitedClVent == 0 .OR. UnitClVentOption == 1 ))
+         then  EvalRulelist( "Blast_ResProj_UnitClVentOption" )
+         else  UNCHANGED  endif }
+   "Default ResProj:UnitClVentOption"     ResProj:UnitClVentOption  =
+      {  if (EnableClVent)
+         then  1     ; Default Prescriptive Whole House Fan
+         else  0     ; none 
+         endif  }
+
+   "Set ResProj:ClVentFanUI"     ResProj:ClVentFanUI  =        ; SAC 1/19/19 (tic #1040)
+      {  if (ClVentUI > 0 .AND. UnitClVentOption = 2)
+         then  1  else  0  endif  }
+
+   "Set Zone:ClVentCompat"    Zone:ClVentCompat  =       ; SAC 1/19/19 - 0/1 toggle indicating whether zone is compatible with a (SFam) cool vent fan (may not require ClgBlwAttic) (tic #1040)   
+      {  if (ResProj:EnableClVent) then  ValidOr( HasCondClgBlwAttic, 0 )
+         else if (ResProj:ClVentUI > 0 .AND. (ResProj:UnitClVentOption = 2 .OR. ResProj:UnitClVentOption = 5) .AND.
+                  IfValidAnd( CondFloorArea > 0 )) then  1
+         else  0  endif endif  }
+
+;	"debug"		ResProj:Action	= {	PostWarning( "Proposed Input -- WHF:  EnableClVent = %g", EnableClVent )  }
+   "Set ResProj:CoolVentMsg"     ResProj:CoolVentMsg  =
+      {  if (IsMultiFamily > 0.5) then  "Cooling ventilation (whole house fan) is not implemented for multi-family buildings"
+         else if (LimitedClVent == 0) then  "One or more conditioned Zones must be defined to enable Cooling Ventilation"
+         else  " "  endif endif  }     ; SAC 1/16/19 - revised for LimitedClVent (tic #1040)
+																	;			else if (ComponentCount( Zone ) < 0.5 .OR. SumAll( Zone:CondClgBlwAtticArea ) < 0.1)
+																	;			then  "One or more conditioned Zones with ceilings below attic must be defined to enable Cooling Ventilation"
+																	;			else if (SumAll( Attic:ClVentableArea ) < 0.1)
+																	;			then  "One or more ventilated Attics must be present to enable Cooling Ventilation"
+																	;			else  " "  endif endif endif  }
+
+  ; SAC 12/31/15 - new properties added to enable user specification of reduced attic relief free vent area (tic 596) - not used for ClVentOption = CFI (HVACSys)
+	"Default ResProj:UnitClVentLowArea"		ResProj:UnitClVentLowArea	= {	0  }		; Whether or not there is reduced attic relief vent free area
+	"Set ResProj:UnitClVentAreaMult"			ResProj:UnitClVentAreaMult	= {	if (EnableClVent > 0.5 .AND. StdsVersionYr < 2017 .AND. 
+																								 UnitClVentLowArea > 0.5 .AND. (UnitClVentOption == 1 .OR. UnitClVentOption == 2)) then  0.5  else  1  endif  }
+	"Set ResProj:ClVentAirFlowMult"			ResProj:ClVentAirFlowMult	= {	if (UnitClVentAreaMult == 0.5) then  0.93  else  1  endif  }
+
+	; SAC 4/15/16 - added logic to ensure that user-defined Appl_RefrigUsage[1] is not retained when ApplRefrigEffMethod[1] is not set to '- specify -'
+	"Blast user-input Appl_RefrigUsage[1] if needed"	ResProj:Action	= {	if (LocalStatus( Appl_RefrigUsage[1] ) < 7 .OR. ApplRefrigEffMethod[1] == 2) then  UNCHANGED
+																								else	EvalRulelist( "ForceDefault_ResProj_RefrigUsage", 1 )  endif  }
+
+	"Default ResProj:ExtLtg_PwrAdjMult"		ResProj:ExtLtg_PwrAdjMult		= {	if (ResProj:DRtgRefRunID == 2014) then  1.0
+																								else	0.49  endif  }
+
+	"Init Zone:Appl_RefrigGain"		Zone:Appl_RefrigGain		= {    0  }
+	"Init Zone:Appl_DishGain"			Zone:Appl_DishGain		= {    0  }
+	"Init Zone:Appl_CookGain[1]"		Zone:Appl_CookGain[1]	= {    0  }
+	"Init Zone:Appl_CookGain[2]"		Zone:Appl_CookGain[2]	= {    0  }
+	"Init Zone:Appl_CookGain[3]"		Zone:Appl_CookGain[3]	= {    0  }
+	"Init Zone:Appl_WasherGain"		Zone:Appl_WasherGain		= {    0  }
+	"Init Zone:ApplDryerGain[1]"		Zone:Appl_DryerGain[1]	= {    0  }
+	"Init Zone:ApplDryerGain[2]"		Zone:Appl_DryerGain[2]	= {    0  }
+	"Init Zone:ApplDryerGain[3]"		Zone:Appl_DryerGain[3]	= {    0  }
+	"Init Zone:ExtLtg_Gain"				Zone:ExtLtg_Gain			= {    0  }
+	"Init OtherZone:Appl_RefrigGain"		OtherZone:Appl_RefrigGain		= {    0  }    ; SAC 9/20/19 (MFamProto)
+	"Init OtherZone:Appl_DishGain"		OtherZone:Appl_DishGain		= {    0  }
+	"Init OtherZone:Appl_CookGain[1]"	OtherZone:Appl_CookGain[1]	= {    0  }
+	"Init OtherZone:Appl_CookGain[2]"	OtherZone:Appl_CookGain[2]	= {    0  }
+	"Init OtherZone:Appl_CookGain[3]"	OtherZone:Appl_CookGain[3]	= {    0  }
+	"Init OtherZone:Appl_WasherGain"		OtherZone:Appl_WasherGain		= {    0  }
+	"Init OtherZone:ApplDryerGain[1]"	OtherZone:Appl_DryerGain[1]	= {    0  }
+	"Init OtherZone:ApplDryerGain[2]"	OtherZone:Appl_DryerGain[2]	= {    0  }
+	"Init OtherZone:ApplDryerGain[3]"	OtherZone:Appl_DryerGain[3]	= {    0  }
+	"Init OtherZone:ExtLtg_Gain"		   OtherZone:ExtLtg_Gain	= {    0  }    ; SAC 9/10/19 (MFamProto)
+
+	"Set Zone:CondApplArea"				Zone:CondApplArea			= {	if (Local(Type) == 1 .OR. Local(Type) == 2) then  Local(FloorArea)  else  0  endif  }
+	"Set ResProj:ApplRefrigZone[1]"		ResProj:ApplRefrigZone[1]	= {	if (ComponentCount( Zone ) > 0) then  MaxAllComp( Zone:CondApplArea )  else  UNDEFINED  endif }
+	"Set ResProj:ApplDishZone[1]"			ResProj:ApplDishZone[1]		= {	if (ComponentCount( Zone ) > 0) then  MaxAllComp( Zone:CondApplArea )  else  UNDEFINED  endif }
+	"Set ResProj:ApplCookZone[1]"			ResProj:ApplCookZone[1]		= {	if (ComponentCount( Zone ) > 0) then  MaxAllComp( Zone:CondApplArea )  else  UNDEFINED  endif }
+	"Set ResProj:ApplWasherZone[1]"		ResProj:ApplWasherZone[1]	=              ; SAC 9/20/19 - OtherZone (MFamProto)
+      {  if (ResProj:IsMultiFamily > 0 .AND. MaxAll( OtherZone:LaundryArea ) > 0) then  MaxAllComp( OtherZone:LaundryArea )
+         else if (ComponentCount( Zone ) > 0) then  MaxAllComp( Zone:FloorArea )     else  UNDEFINED  endif endif  }
+	"Set ResProj:ApplDryerZone[1]"		ResProj:ApplDryerZone[1]	= {	ApplWasherZone[1] }
+	"Set ResProj:ExtGainZone"				ResProj:ExtGainZone   		=              ; SAC 9/10/19 - added logic to assign OtherZone (MFamProto)
+      {  if (ResProj:IsMultiFamily > 0 .AND. MaxAll( OtherZone:Area ) >= MaxAll( Zone:FloorArea )) then  MaxAllComp( OtherZone:Area )
+         else if (ComponentCount( Zone ) > 0) then  MaxAllComp( Zone:FloorArea )     else  UNDEFINED  endif endif }
+
+	;	1 = electricity, 2 = gas, 3 = other
+	"Set ResProj:ApplCookFuel[1]"			ResProj:ApplCookFuel[1]		= { if (Local(Fuel_HaveNatGas) == 0) then 1 else 2 endif }	; SAC 11/9/15
+	"Set ResProj:ApplDryerFuel[1]"		ResProj:ApplDryerFuel[1]	= { if (Local(Fuel_HaveNatGas) == 0) then 1 else 2 endif }
+	"Set ResProj:Appl_HaveRefrig[1]"		ResProj:Appl_HaveRefrig[1]	= { 1 }
+	"Set ResProj:Appl_HaveDish[1]"		ResProj:Appl_HaveDish[1]	= { 1 }
+	"Set ResProj:Appl_HaveCook[1]"		ResProj:Appl_HaveCook[1]	= { 1 }
+	"Set ResProj:Appl_HaveWasher[1]"		ResProj:Appl_HaveWasher[1]	= { 1 }
+	"Set ResProj:Appl_HaveDryer[1]"		ResProj:Appl_HaveDryer[1]	= { 1 }
+
+	"Default Dwelling Unit Data"		ResProj:Action	= {	if (IsMultiFamily < 0.5)
+																		then  EvalRulelist( "Default_DwellingUnitData_SFam" )
+																		else	EvalRulelist( "Default_DwellingUnitData" )  endif  }
+
+   ; modified to match RESNET - mjb 11/09/15
+	; SAC 4/14/16 - added T24-2016 default
+   ; moved down below call to Default_DwellingUnitData* to ensure SimNumBedrooms defined - SAC 10/18/21 (MFam)
+	"Default ResProj:Appl_RefrigUsage[1]"	ResProj:Appl_RefrigUsage[1]	= {	if (ResProj:DRtgRefRunID == 2014) then  637 + 18 * SimNumBedrooms
+																								else if (ResProj:IntGainsMethod <= 2013) then  669
+																								else	454 + (37 * SimNumBedrooms)  endif endif  }		;	if (Local(ApplRefrigEffMethod[1]) == 1) then  669.  else UNCHANGED endif }
+
+	"Set ResProj:ExtGainZone:ExtLtg_Gain"		ResProj:ExtGainZone:ExtLtg_Gain	= {	if (ResProj:DRtgRefRunID == 2014)
+																										then	((192.5 + (0.05 * ResProj:CondFloorArea)) * ResProj:ExtLtg_PwrAdjMult) / 365
+																										else	((-81. + (0.152 * ResProj:CondFloorArea)) * ResProj:ExtLtg_PwrAdjMult) / 365  endif  }
+
+;	"Set ResProj:AvgDwellingUnitCFA"		ResProj:AvgDwellingUnitCFA		= {	if (IsMultiFamily > 0.5 .AND. NumDwellingUnits > 1.1) then  CondFloorArea / NumDwellingUnits
+;																							else  CondFloorArea  endif  }
+; ; SAC 4/15/13 - IN FUTURE?? perhaps map individual dwelling unit data entered @ Project level to individual Zones - in which case the following dwelling unti area would be customized
+;	"Set Zone:DwellingUnitCFA"			Zone:DwellingUnitCFA			= {	ResProj:AvgDwellingUnitCFA  }
+
+
+   ;--------------------------------------------------------------------
+   ; ProposedInput: Internal Gain Rules
+   ;--------------------------------------------------------------------
+   ; SAC 3/10/16 - apply RESNET mods from MJB
+	"Set ResProj:IntGain_MoMult[1] - Jan"		ResProj:IntGain_MoMult[1]	= {	if (ResProj:DRtgRefRunID == 2014)
+																								then	1.0  * AdditionCFAFrac
+																								else	1.19 * AdditionCFAFrac  endif  }
+	"Set ResProj:IntGain_MoMult[2] - Feb"		ResProj:IntGain_MoMult[2]	= {	if (ResProj:DRtgRefRunID == 2014)
+																								then	1.0  * AdditionCFAFrac
+																								else	1.11 * AdditionCFAFrac  endif  }
+	"Set ResProj:IntGain_MoMult[3] - Mar"		ResProj:IntGain_MoMult[3]	= {	if (ResProj:DRtgRefRunID == 2014)
+																								then	1.0  * AdditionCFAFrac
+																								else	1.02 * AdditionCFAFrac  endif  }
+	"Set ResProj:IntGain_MoMult[4] - Apr"		ResProj:IntGain_MoMult[4]	= {	if (ResProj:DRtgRefRunID == 2014)
+																								then	1.0  * AdditionCFAFrac
+																								else	0.93 * AdditionCFAFrac  endif  }
+	"Set ResProj:IntGain_MoMult[5] - May"		ResProj:IntGain_MoMult[5]	= {	if (ResProj:DRtgRefRunID == 2014)
+																								then	1.0  * AdditionCFAFrac
+																								else	0.84 * AdditionCFAFrac  endif  }
+	"Set ResProj:IntGain_MoMult[6] - Jun"		ResProj:IntGain_MoMult[6]	= {	if (ResProj:DRtgRefRunID == 2014)
+																								then	1.0  * AdditionCFAFrac
+																								else	0.80 * AdditionCFAFrac  endif  }
+	"Set ResProj:IntGain_MoMult[7] - Jul"		ResProj:IntGain_MoMult[7]	= {	if (ResProj:DRtgRefRunID == 2014)
+																								then	1.0  * AdditionCFAFrac
+																								else	0.82 * AdditionCFAFrac  endif  }
+	"Set ResProj:IntGain_MoMult[8] - Aug"		ResProj:IntGain_MoMult[8]	= {	if (ResProj:DRtgRefRunID == 2014)
+																								then	1.0  * AdditionCFAFrac
+																								else	0.88 * AdditionCFAFrac  endif  }
+	"Set ResProj:IntGain_MoMult[9] - Sep"		ResProj:IntGain_MoMult[9]	= {	if (ResProj:DRtgRefRunID == 2014)
+																								then	1.0  * AdditionCFAFrac
+																								else	0.98 * AdditionCFAFrac  endif  }
+	"Set ResProj:IntGain_MoMult[10] - Oct"		ResProj:IntGain_MoMult[10]	= {	if (ResProj:DRtgRefRunID == 2014)
+																								then	1.0  * AdditionCFAFrac
+																								else	1.07 * AdditionCFAFrac  endif  }
+	"Set ResProj:IntGain_MoMult[11] - Nov"		ResProj:IntGain_MoMult[11]	= {	if (ResProj:DRtgRefRunID == 2014)
+																								then	1.0  * AdditionCFAFrac
+																								else	1.16 * AdditionCFAFrac  endif  }
+	"Set ResProj:IntGain_MoMult[12] - Dec"		ResProj:IntGain_MoMult[12]	= {	if (ResProj:DRtgRefRunID == 2014)
+																								then	1.0  * AdditionCFAFrac
+																								else	1.21 * AdditionCFAFrac  endif  } 
+
+	"Default ResProj:Ltg_DefaultDaySch based on library entry (if not already defined)"
+			ResProj:Ltg_DefaultDaySch	= {	if (LocalStatus( Ltg_DefaultDaySch ) > 0) then  UNCHANGED
+													else  RuleLibrary( SchDay, "CARes2013 InsLighting Hrly" )  endif  }
+	"Default ResProj:Ppl_DefaultDaySch based on library entry (if not already defined)"
+				ResProj:Ppl_DefaultDaySch	= {	if (LocalStatus( Ppl_DefaultDaySch ) > 0) then  UNCHANGED
+										else RuleLibrary( SchDay, "CARes2013 Occupancy Hrly" ) endif	}
+	"Default ResProj:Eqp_DefaultDaySch based on library entry (if not already defined)"
+				ResProj:Eqp_DefaultDaySch	= {	if (LocalStatus( Eqp_DefaultDaySch ) > 0) then  UNCHANGED
+										else RuleLibrary( SchDay, "CARes2013 Equipment Hrly" ) endif	}
+	"Default ResProj:ExtLtg_DefaultDaySch based on library entry (if not already defined)"
+			ResProj:ExtLtg_DefaultDaySch	= {	if (LocalStatus( ExtLtg_DefaultDaySch ) > 0) then  UNCHANGED
+													else  RuleLibrary( SchDay, "CARes2013 ExtLighting Hrly" )  endif  }
+
+	"Set Zone:Ltg_Gain"		Zone:Ltg_Gain		= {	if (ResProj:IntGainsMethod <= 2013) then  ResProj:AvgLtgGainPerCFA
+																	else if (IfValidAnd( CondFloorArea > 0 )==0) then  0
+																	else if (ResProj:IsMultiFamily > 0.5) then  SumChildren( DwellUnit:TotalLtgGain ) / CondFloorArea
+																	else  ((100 + (0.1775 * ResProj:LtgCondFloorArea)) * 3412/365) / ResProj:CondFloorArea
+																	endif endif endif  }
+;	"Set Zone:Ltg_Gain"		Zone:Ltg_Gain		= {	if (Global( ResProj:CondFloorArea ) > 0.1) then
+;																		(((214. + 0.601 * DwellingUnitCFA) * 
+;																		(Global( ResProj:Ltg_FracPort ) + ((1-Global( ResProj:Ltg_FracPort )) * Global( ResProj:Ltg_PwrAdjMult ))) / 365) * 
+;																		Global( ResProj:NumDwellingUnits ) / Global( ResProj:CondFloorArea ))
+;																	else  0  endif  }
+
+	"Default lighting profile (Zone:LtgDaySched)"
+				Zone:LtgDaySched	= {	if (GlobalStatus( ResProj:Ltg_DefaultDaySch ) > 0) then  Global( ResProj:Ltg_DefaultDaySch )
+												else  UNCHANGED  endif  }
+	"Default people profile (Zone:PplDaySched)"
+				Zone:PplDaySched	= {	if (GlobalStatus( ResProj:Ppl_DefaultDaySch ) > 0) then  Global( ResProj:Ppl_DefaultDaySch )
+												else  UNCHANGED  endif  }
+	"Default equipment profile (Zone:EqpDaySched)"
+				Zone:EqpDaySched	= {	if (GlobalStatus( ResProj:Eqp_DefaultDaySch ) > 0) then  Global( ResProj:Eqp_DefaultDaySch )
+												else  UNCHANGED  endif  }
+	"Default exterior lighting profile (Zone:ExtLtgDaySched)"
+				Zone:ExtLtgDaySched	= {	if (GlobalStatus( ResProj:ExtLtg_DefaultDaySch ) > 0) then  Global( ResProj:ExtLtg_DefaultDaySch )
+												else  UNCHANGED  endif  }
+
+;	"Set Zone:Ppl_PeoplePerUnit"	Zone:Ppl_PeoplePerUnit	= {	if ( Global( ResProj:NumDwellingUnits) > 0) then
+;																	1.75 + 0.4 * (Global( ResProj:NumBedrooms ) / Global( ResProj:NumDwellingUnits ))
+;																else 0 endif }
+;	"Set Zone:Ppl_GainPerCFA"		Zone:Ppl_GainPerCFA		= {	if (Global( ResProj:CondFloorArea ) > 0.1) then
+;																	((3900/0.573) * Local( Ppl_PeoplePerUnit ) * Global( ResProj:NumDwellingUnits ) / Global( ResProj:CondFloorArea))
+;																else 0 endif }
+	"Set Zone:Ppl_GainPerCFA"		Zone:Ppl_GainPerCFA		= {	ResProj:AvgPplGainPerCFA  }
+
+	"Default people profile (Zone:PplDaySched)"
+				Zone:PplDaySched	= {	if (GlobalStatus( ResProj:Ppl_DefaultDaySch ) > 0) then  Global( ResProj:Ppl_DefaultDaySch )
+												else  UNCHANGED  endif  }
+
+	"Set Zone:Msc_GainPerCFA"		Zone:Msc_GainPerCFA		= { ResProj:AvgMscEGainPerCFA  }
+;	"Set Zone:Msc_GainPerCFA"		Zone:Msc_GainPerCFA		= { if (Global( ResProj:CondFloorArea ) > 0.1) then
+;																	((723. + (0.706 * Local( CondFloorArea )) * Global( ResProj:NumDwellingUnits )) / 365.) / Global( ResProj:CondFloorArea )
+;																else 0 endif }
+
+	"Default equipment profile (Zone:EqpDaySched)"
+				Zone:EqpDaySched	= {	if (GlobalStatus( ResProj:Eqp_DefaultDaySch ) > 0) then  Global( ResProj:Eqp_DefaultDaySch )
+												else  UNCHANGED  endif  }
+
+; SAC 10/4/19 - older Res Zone-based int gains rules replaced by NRes versions (MFamProto)
+;   ; SAC 9/20/19 - OtherZone (MFamProto)
+;	"Set OtherZone:Ltg_Gain"		OtherZone:Ltg_Gain		= {	if (ResProj:IntGainsMethod <= 2013) then  ResProj:AvgLtgGainPerCFA
+;																	else if (IfValidAnd( CondFloorArea > 0 )==0) then  0
+;																	else  ((100 + (0.1775 * ResProj:LtgCondFloorArea)) * 3412/365) / ResProj:CondFloorArea
+;																	endif endif  }
+;	"Default lighting profile (OtherZone:LtgDaySched)"
+;		OtherZone:LtgDaySched	= {	if (GlobalStatus( ResProj:Ltg_DefaultDaySch ) > 0) then  Global( ResProj:Ltg_DefaultDaySch )
+;												else  UNCHANGED  endif  }
+;	"Default people profile (OtherZone:PplDaySched)"
+;		OtherZone:PplDaySched	= {	if (GlobalStatus( ResProj:Ppl_DefaultDaySch ) > 0) then  Global( ResProj:Ppl_DefaultDaySch )
+;												else  UNCHANGED  endif  }
+;	"Default equipment profile (OtherZone:EqpDaySched)"
+;		OtherZone:EqpDaySched	= {	if (GlobalStatus( ResProj:Eqp_DefaultDaySch ) > 0) then  Global( ResProj:Eqp_DefaultDaySch )
+;												else  UNCHANGED  endif  }
+;	"Default exterior lighting profile (OtherZone:ExtLtgDaySched)"
+;		OtherZone:ExtLtgDaySched	= {	if (GlobalStatus( ResProj:ExtLtg_DefaultDaySch ) > 0) then  Global( ResProj:ExtLtg_DefaultDaySch )
+;												else  UNCHANGED  endif  }
+;	"Set OtherZone:Ppl_GainPerCFA"		OtherZone:Ppl_GainPerCFA		= {	ResProj:AvgPplGainPerCFA  }
+;	"Default people profile (OtherZone:PplDaySched)"
+;		OtherZone:PplDaySched	= {	if (GlobalStatus( ResProj:Ppl_DefaultDaySch ) > 0) then  Global( ResProj:Ppl_DefaultDaySch )
+;												else  UNCHANGED  endif  }
+;	"Set OtherZone:Msc_GainPerCFA"		OtherZone:Msc_GainPerCFA		= { ResProj:AvgMscEGainPerCFA  }
+;	"Default equipment profile (OtherZone:EqpDaySched)"
+;		OtherZone:EqpDaySched	= {	if (GlobalStatus( ResProj:Eqp_DefaultDaySch ) > 0) then  Global( ResProj:Eqp_DefaultDaySch )
+;												else  UNCHANGED  endif  }
+END
+;*************************************************************************
+
+; SAC 10/24/16 - new rulelist to default laundry properties
+;*************************************************************************
+RULELIST "ProposedInput_Loads_Laundry" 0 0 0 0
+;*************************************************************************
+   ;--------------------------------------------------------------------
+   ; ProposedInput: Zone, ResProj & DwellUnit Rules pertaining to central multifamily laundry
+   ;--------------------------------------------------------------------
+	"Default ResProj:CentralMFamLaundry"		ResProj:CentralMFamLaundry		= {
+		0  }		; Whether or not there is centralized multi-family laundry equipment
+	"Default ResProj:DfltMFamLaundryZn"			ResProj:DfltMFamLaundryZn		=     ; Default central laundry equipment zone  ; SAC 9/10/19 - revised for OtherZone (MFamProto)
+	{	     if (ResProj:IsMultiFamily > 0 .AND. MaxAll( OtherZone:LaundryArea ) > 0)
+	   then     MaxAllComp( OtherZone:LaundryArea )
+	   else if (MaxAll(     Zone:UncondFloorArea ) > 0)
+		then		MaxAllComp( Zone:UncondFloorArea )
+		else if (MaxAll(     Zone:LvgCondFloorArea ) > 0)
+		then		MaxAllComp( Zone:LvgCondFloorArea )
+		else if (MaxAll(     Zone:CondFloorArea ) > 0)
+		then		MaxAllComp( Zone:CondFloorArea )
+		else if (MaxAll(     Zone:SlpCondFloorArea ) > 0)
+		then		MaxAllComp( Zone:SlpCondFloorArea )
+		else  UNCHANGED  endif endif endif endif endif  }
+
+	"Default DwellUnit:WasherZoneRef"		DwellUnit:WasherZoneRef		=        ; SAC 10/2/19 - revised for DwellUnitType:WasherOption (MFamProto)
+		{  if (IfValidAnd( DwellUnitTypeRef:WasherOption = 2 ) .AND. IfValidAnd( ResProj:CentralMFamLaundry > 0.5 ) .AND.
+   		    GlobalCompAssigned( ResProj:DfltMFamLaundryZn ))
+	   	then	ResProj:DfltMFamLaundryZn
+		   else	Parent( Name )  endif  }
+	"Default DwellUnit:DryerZoneRef"			DwellUnit:DryerZoneRef		=
+	   {  if (HaveWasher > 0.5 .AND. HaveDryer > 0.5 .AND. LocalCompAssigned( WasherZoneRef ))
+   		then	WasherZoneRef
+	   	else if (IfValidAnd( DwellUnitTypeRef:DryerOption = 2 ) .AND. IfValidAnd( ResProj:CentralMFamLaundry > 0.5 ) .AND.
+		            GlobalCompAssigned( ResProj:DfltMFamLaundryZn ))
+   		then	ResProj:DfltMFamLaundryZn
+	   	else	Parent( Name )  endif endif  }
+END
+;*************************************************************************
+
+
+;*************************************************************************
+RULELIST "Default_DwellingUnitData"  0 0 0 0
+;*************************************************************************
+
+	; SAC 7/8/15 - added properties to disable all IAQ ventilation
+	"Default ResProj:DisableIAQ flag"	ResProj:DisableIAQ	= {	0  }		; option to toggle OFF all IAQ ventilation
+	"Set ResProj:IAQDisabled"				ResProj:IAQDisabled	= {	if (BypassRuleLimits > 0 .AND. DisableIAQ > 0) then  1  else  0  endif  }		; Flag indicating that IAQ vent has been toggled OFF
+
+	"Set ResProj:UnitTotCondFlrArea"			ResProj:UnitTotCondFlrArea		= {	SumAll( DwellUnit:TotalCondFlrArea )  }
+	"Set DwellUnit:TotalNumBedrooms"		DwellUnit:TotalNumBedrooms	= {	if (ParentComponentType() == "ResZn") then  ValidOr( DwellUnitTypeRef:NumBedrooms, 0 ) * Count  else  0  endif  }
+	"Set ResProj:NumBedrooms"					ResProj:NumBedrooms				= {	SumAll( DwellUnit:TotalNumBedrooms )  }
+	"Set ResProj:SimNumBedrooms"				ResProj:SimNumBedrooms			= {	NumBedrooms  }
+
+	; SAC 5/10/16 - added default of project-wide cool vent values to 0 for MFam models
+	"Init ResProj:UnitClVentCFMTot"	ResProj:UnitClVentCFMTot	= {	0  }
+	"Init ResProj:UnitClVentCFMpSF"	ResProj:UnitClVentCFMpSF	= {	0  }
+
+  ; Interior Lighting Gains - docu from IntgainAlgorithm6.txt dated 9/4/12:
+  ;			a.   //Lights  Returns Btu/day-CFA - based on ElectricityInteriorLights = (214+ 0.601×CFA)×(FractPortable + (1-FractPortable)×PAMInterior )  //HTM Eqn 11, p. 30
+  ;			 		#define FractPortable .22    //fixed for now, variable later for HERS
+  ;			 		#define Paminterior 0.625    //fixed for now, variable later for HERS
+  ;		 			#Redefine LightsGainperCFA (((214. + 0.601 * CFAperUnit) * (FractPortable + (1-FractPortable) * Paminterior ) * 3413. / 365) * DwellingUnits /CFA)
+	"Set DwellUnit:UnitLtgGain"				DwellUnit:UnitLtgGain	= {	if (ResProj:IntGainsMethod <= 2013)
+																								then	(214 +  0.601  * CondFlrArea ) * (ResProj:Ltg_FracPort + ((1-ResProj:Ltg_FracPort) * ResProj:Ltg_PwrAdjMult)) / 365
+																								else	(100 + (0.1775 * min( 4150, CondFlrArea ))) * 3412 / 365  endif  }
+	"Set DwellUnit:TotalLtgGain"				DwellUnit:TotalLtgGain	= {	if (ParentComponentType() == "ResZn") then  UnitLtgGain * Count  else  0  endif  }
+	"Set ResProj:AvgLtgGainPerCFA (MFam)"		ResProj:AvgLtgGainPerCFA	= {	if (ResProj:IsMultiFamily < 0.5) then  UNCHANGED
+																								else if (UnitTotCondFlrArea < 0.1) then  0
+																								else	SumAll( DwellUnit:TotalLtgGain ) / UnitTotCondFlrArea  endif endif  }
+  ; SAC 4/13/16 - added TV, STB & Comp gains for T24-2016
+	"Set DwellUnit:UnitTVGain"					DwellUnit:UnitTVGain		= {	if (ResProj:IntGainsMethod <= 2013) then  0
+																								else	(265 + (31.8 * ValidOr( DwellUnitTypeRef:NumBedrooms, 0 ))) * 3412 / 365  endif  }
+	"Set DwellUnit:TotalTVGain"				DwellUnit:TotalTVGain	= {	if (ParentComponentType() == "ResZn") then  UnitTVGain * Count  else  0  endif  }
+	"Set DwellUnit:UnitSTBGain"				DwellUnit:UnitSTBGain	= {	if (ResProj:IntGainsMethod <= 2013) then  0
+																								else	(76 + (59.4 * ValidOr( DwellUnitTypeRef:NumBedrooms, 0 ))) * 3412 / 365  endif  }
+	"Set DwellUnit:TotalSTBGain"				DwellUnit:TotalSTBGain	= {	if (ParentComponentType() == "ResZn") then  UnitSTBGain * Count  else  0  endif  }
+	"Set DwellUnit:UnitCompGain"				DwellUnit:UnitCompGain	= {	if (ResProj:IntGainsMethod <= 2013) then  0
+																								else	(79 + (55.4 * ValidOr( DwellUnitTypeRef:NumBedrooms, 0 ))) * 3412 / 365  endif  }
+	"Set DwellUnit:TotalCompGain"				DwellUnit:TotalCompGain	= {	if (ParentComponentType() == "ResZn") then  UnitCompGain * Count  else  0  endif  }
+
+  ; Internal Gains due to Occupants - docu from IntgainAlgorithm6.txt dated 9/4/12:
+  ;		   b.  People    Returns BTU/day-CFA - 100% is internal gain 57.3% sensible, 42.7% latent  Based on HTM and  BA existing bldgs Sensible 220, Latent 164 BTU
+  ;						#redefine PeopleperUnit (1.75 + 0.4 * BRperUnit)           - 0.5 added to formulas below to ensure average # people following integer truncation
+  ;						#Redefine PeopleGainperCFA ((3900/0.573) * PeopleperUnit * DwellingUnits / CFA) 
+	; SAC 5/6/13 - revised to be fractional (not round to nearest person)
+	"Set ResProj:PeoplePerUnit[1]"		ResProj:PeoplePerUnit[1]	= {	if (IfValidAnd( NumDwellingUnits > 0 )) then  ((1.75 * NumDwellingUnits) + (0.4 * SimNumBedrooms)) / NumDwellingUnits   else  0  endif  }
+	"Set ResProj:UnitPeopleGain[1]"		ResProj:UnitPeopleGain[1]	= {	PeoplePerUnit[1]  * (3900/0.573)  }
+	"Set ResProj:AvgPplGainPerCFA"		ResProj:AvgPplGainPerCFA	= {	if (UnitTotCondFlrArea < 0.1) then  0
+																						else	UnitPeopleGain[1] * NumDwellingUnits / UnitTotCondFlrArea  endif  }
+
+  ; Miscellaneous Electric Gains - docu from IntgainAlgorithm6.txt dated 9/4/12:
+  ;			c.  Misc Electricity  Returns BTU/day-CFA - 100% is internal gain
+  ;		 			#Redefine MiscGainperCFA ((723. + (0.706 * CFAperUnit))* DwellingUnits * 3413. / 365.)/CFA  //Rev 6 120831
+	;	"Set ResProj:UnitMscElecGain[1]"		ResProj:UnitMscElecGain[1]		= {	if (IfValidAnd( NumDwellingUnits > 0 )) then  (723. + (0.706 * UnitTotCondFlrArea )) / 365 / NumDwellingUnits  else  0  endif  }
+	;	"Set ResProj:AvgMscEGainPerCFA"		ResProj:AvgMscEGainPerCFA		= {	if (UnitTotCondFlrArea < 0.1) then  0
+	;																							else	UnitMscElecGain[1] * NumDwellingUnits / UnitTotCondFlrArea  endif  }
+	; SAC 4/13/16 - added logic for T24-2016
+	"Set DwellUnit:UnitMscElecGain"	DwellUnit:UnitMscElecGain	= {	if (ResProj:IntGainsMethod <= 2013)
+																							then	(723 + (0.706 * CondFlrArea )) / 365  		; kWh/day-DwlgUnt
+																							else	(570 + (198.9 * ValidOr( DwellUnitTypeRef:NumBedrooms, 0 ))) * 3412 / 365  endif  }
+	"Set DwellUnit:TotalMscElecGain"	DwellUnit:TotalMscElecGain	= {	UnitMscElecGain * Count  }
+	"Set ResProj:AvgMscEGainPerCFA"		ResProj:AvgMscEGainPerCFA		= {	if (UnitTotCondFlrArea < 0.1) then  0
+																							else	SumAll( DwellUnit:TotalMscElecGain ) / UnitTotCondFlrArea  endif  }
+
+  ; Dishwasher Electric Gains - docu from IntgainAlgorithm6.txt dated 9/4/12:
+  ;		b.  Dishwasher.  0 based choose returns BTU/day  // uses Table based in INTEGER bedrooms per dwelling.  
+  ;	 			#Redefine DishwasherGain (choose (BRperUnit,90,90,126,126,126,145,145,174,174,174,default 203) * DwellingUnits * 3413. / 365.) 
+	; already set for DwellUnitType objects
+	;	"Set ResProj:UnitDishElecGain[1]"	ResProj:UnitDishElecGain[1]  = {  if (UnitInputValid[1]  > 0.5) then  switch (UnitNumBedrooms[1] )  case 0: 90	case 1: 90
+	;																								case 2: 126   case 3: 126   case 4: 126   case 5: 145   case 6: 145   case 7: 174
+	;																								case 8: 174   case 9: 174   default: 203  	endswitch  else  0  endif  }
+	; SAC 4/14/16 - revised for T24-2016 gains
+	"Set DwellUnit:TotalDishUsage"		DwellUnit:TotalDishUsage		= {	if (IfValidAnd( DwellUnitTypeRef:HaveDish > 0.5 ))
+																									then	if (ResProj:IntGainsMethod <= 2013)
+																											then	DwellUnitTypeRef:DishElecUsage * Count
+																											else	DwellUnitTypeRef:DishElecUsage * ValidOr( ResProj:UnitTotCondFlrArea, 0 )		; kWh*CFA/gal
+																											endif
+																									else  0  endif  }
+
+  ; Cooking Gains - docu from IntgainAlgorithm6.txt dated 9/4/12:
+  ;	   c.  Stove and Oven   -  Assumes both are gas with electonic igniter  Returns BTU/day - Full Energy Use, 90% is internal Gain
+  ;	 			define CookGain (((31. + (.008 * CFAperUnit))* 0.43* 0.9)* DwellingUnits * 100000. / 365.)  //Added the 0.43 for the electronic ignition  12/4  BAW
+	;	"Set ResProj:UnitCookGain[1]"		ResProj:UnitCookGain[1]		= {	if (UnitInputValid[1]  > 0.5) then  ((31. + (.008 * UnitCondFlrArea[1] )) * 0.43 * 0.9) * 100000. / 365.  else  0  endif  }
+	; SAC 4/14/16 - split into Elec & Gas gain and added logic for T24-2016
+	"Set DwellUnit:UnitCookElecGain"		DwellUnit:UnitCookElecGain		= {	if (ResProj:IntGainsMethod <= 2013 .AND. DwellUnitTypeRef:CookFuel == 1)
+																									then	((31. + (.008 * CondFlrArea )) * 0.43 * 0.9) * 100000. / 365.
+																									else if (ResProj:IntGainsMethod > 2013)
+																									then	if (DwellUnitTypeRef:CookFuel == 1)
+																											then	(213  + (26.3 * ValidOr( DwellUnitTypeRef:NumBedrooms, 0 ))) * 3412 / 365		; elec cooking
+																											else	( 16  + ( 1.9 * ValidOr( DwellUnitTypeRef:NumBedrooms, 0 ))) * 3412 / 365		; elec aux for gas cooking
+																											endif
+																									else	0  endif endif  }
+	"Set DwellUnit:UnitCookGasGain"		DwellUnit:UnitCookGasGain		= {	if (DwellUnitTypeRef:CookFuel == 1) then  0
+																									else if (ResProj:IntGainsMethod <= 2013)
+																									then	((31. + (.008 * CondFlrArea )) * 0.43 * 0.9) * 100000. / 365.
+																									else	(10 + (1.3 * ValidOr( DwellUnitTypeRef:NumBedrooms, 0 ))) * 100000 / 365
+																									endif endif  }
+	"Set DwellUnit:TotalCookGasGain"		DwellUnit:TotalCookGasGain		= {	if (DwellUnitTypeRef:CookFuel == 2) then  UnitCookGasGain  * Count  else  0  endif  }
+	"Set DwellUnit:TotalCookElecGain"	DwellUnit:TotalCookElecGain	= {															UnitCookElecGain * Count						}
+	"Set DwellUnit:TotalCookOthrGain"	DwellUnit:TotalCookOthrGain	= {	if (DwellUnitTypeRef:CookFuel == 3) then  UnitCookGasGain  * Count  else  0  endif  }
+
+  ; Clothes Washer Gains - docu from IntgainAlgorithm6.txt dated 9/4/12:
+  ;		d.  Clothes Washer  -   // Returns BTU/day
+  ;	         #Redefine WasherGain ((-64 + 0.108 * CFAperUnit) * DwellingUnits * 3413. / 365.)
+	;	"Set ResProj:UnitClthWashGain[1]"	ResProj:UnitClthWashGain[1]	= {	if (UnitInputValid[1]  > 0.5) then  (-64 + (0.108 * UnitCondFlrArea[1] )) / 365.  else  0  endif  }
+	; SAC 4/15/16 - revised for T24-2016 gains
+	"Set DwellUnit:UnitClthWashGain"		DwellUnit:UnitClthWashGain		= {	if (ValidOr( HaveWasher, 0 ) > 0.5)
+																									then	if (ResProj:IntGainsMethod <= 2013)
+																											then  (-64 + (0.108 * CondFlrArea )) / 365.
+																											else	0.010067   ; kWh/gal
+																											endif
+																									else  0  endif  }
+	"Set DwellUnit:TotalClthWashGain"	DwellUnit:TotalClthWashGain	= {	UnitClthWashGain * Count  }
+
+  ; Clothes Dryer Gains - docu from IntgainAlgorithm6.txt dated 9/4/12:
+  ;		e.  Clothes Dryer  -  Assumes gas with electonic igniter  Returns BTU/day - Full energy Use, 30% is internal gain
+  ;	 			define DryerGAin (13. + (.01 * CFAperUnit))* DwellingUnits * 100000. / 365.  //Added the 0.43 for the electronic ignition  //120831
+	;	"Set ResProj:UnitClthDryGain[1]"		ResProj:UnitClthDryGain[1]		= {	if (UnitInputValid[1]  > 0.5) then  (13. + (.01 * UnitCondFlrArea[1] )) * 100000. / 365.  else  0  endif  }
+   "Set DwellUnit:DryerFuel (0-none, 1-Elec, 2-Gas)"     DwellUnit:DryerFuel  =     ; SAC 10/2/19 - MFamProto
+      {  if (ValidOr( HaveDryer, 0 ) < 0.5) then  0
+         else if (IfValidAnd( ResProj:EnergyCodeYearNum >= 2019 ) .AND. LocalCompAssigned( DryerZoneRef ) == ComponentType( "ResOtherZn" ))
+         then  DryerZoneRef:DryerFuel
+         else if (IfValidAnd( DwellUnitTypeRef:DryerFuel > 0 )) then  DwellUnitTypeRef:DryerFuel
+         else  0  endif endif endif  }
+	; SAC 4/15/16 - expanded into separate elec/gas gains and revised for T24-2016 gains
+   "Set DwellUnit:UnitClthDryGasGain"     DwellUnit:UnitClthDryGasGain  =
+      {  if (ValidOr( HaveDryer, 0 ) < 0.5 .OR. DryerFuel < 2) then  0
+         else if (ResProj:IntGainsMethod <= 2013)
+         then   (13. + (.01 * CondFlrArea )) * 100000. / 365.
+         else  299.91      ; T24-2016 therm/gal
+         endif endif  }
+   "Set DwellUnit:UnitClthDryElecGain"    DwellUnit:UnitClthDryElecGain =
+      {  if (ValidOr( HaveDryer, 0 ) < 0.5) then  0
+         else if (ResProj:IntGainsMethod <= 2013 .AND. DryerFuel == 1)
+         then   (13. + (.01 * CondFlrArea )) * 100000. / 365.
+         else if (ResProj:IntGainsMethod > 2013)
+         then   if (DryerFuel == 1) then  0.08509  else  0.004252  endif  ; T24-2016 kWh/gal
+         else   0  endif endif endif  }
+
+	"Set DwellUnit:TotalClthDryGasGain"		DwellUnit:TotalClthDryGasGain		= {	if (DwellUnitTypeRef:DryerFuel == 2) then  UnitClthDryGasGain  * Count  else  0  endif  }
+	"Set DwellUnit:TotalClthDryElecGain"	DwellUnit:TotalClthDryElecGain	= {															 UnitClthDryElecGain * Count                  }
+	"Set DwellUnit:TotalClthDryOthrGain"	DwellUnit:TotalClthDryOthrGain	= {	if (DwellUnitTypeRef:DryerFuel == 3) then  UnitClthDryGasGain  * Count  else  0  endif  }
+
+;			"Dflt ResProj:Appl_RefrigUsage[1]" 	ResProj:Appl_RefrigUsage[1] 	= {	669  }		"Dflt ResProj:Appl_RefrigUsage[2]" 	ResProj:Appl_RefrigUsage[2] 	= {	669  }		"Dflt ResProj:Appl_RefrigUsage[3]" 	ResProj:Appl_RefrigUsage[3] 	= {	669  }
+	"Set DwellUnit:TotalRefrigUsage"		DwellUnit:TotalRefrigUsage		= {	if (IfValidAnd( DwellUnitTypeRef:HaveRefrig > 0.5 )) then  DwellUnitTypeRef:RefrigElecUsage * Count  else  0  endif  }
+
+; APPLIANCE INTERNAL GAINS - by assigned zone...
+  ; refigerator gain - handled by assignment of zones
+	"Set Zone:Appl_RefrigGain - unit #1"	Zone:Appl_RefrigGain		= {	SumChildren( DwellUnit:TotalRefrigUsage )  / 365  }
+
+  ; cooking gain-Electric - handled by assignment of zones
+	"Set Zone:Appl_CookGain-Elec - unit #1"		Zone:Appl_CookGain[1]	= {	SumChildren( DwellUnit:TotalCookElecGain )  }
+
+  ; cooking gain-NatGas - handled by assignment of zones
+	"Set Zone:Appl_CookGain-NGas - unit #1"		Zone:Appl_CookGain[2]	= {	SumChildren( DwellUnit:TotalCookGasGain )  }
+
+  ; cooking gain-OtherFuel - handled by assignment of zones
+	"Set Zone:Appl_CookGain-Othr - unit #1"		Zone:Appl_CookGain[3]	= {	SumChildren( DwellUnit:TotalCookOthrGain )  }
+
+  ; dishwasher gain - handled by assignment of zones
+	; SAC 4/14/16 - revised for T24-2016 gains
+	"Set Zone:Appl_DishGain - unit #1"		Zone:Appl_DishGain		= {	if (ResProj:IntGainsMethod <= 2013)
+																								then	SumChildren( DwellUnit:TotalDishUsage )  / 365
+																								else if (IfValidAnd( CondFloorArea > 0 ))
+																								then	SumChildren( DwellUnit:TotalDishUsage )  / CondFloorArea
+																								else	0  endif endif  }
+  ; clothes washer gain - handled by assignment of zones
+	"Set Zone:Appl_WasherGain - unit #1"			Zone:Appl_WasherGain		= {	SumRevRef( DwellUnit:WasherZoneRef, DwellUnit:TotalClthWashGain )  }
+
+  ; clothes dryer gain-Electric - handled by assignment of zones
+	"Set Zone:Appl_DryerGain-Elec - unit #1"		Zone:Appl_DryerGain[1]	= {	SumRevRef( DwellUnit:DryerZoneRef, DwellUnit:TotalClthDryElecGain )  }
+
+  ; clothes dryer gain-NatGas - handled by assignment of zones
+	"Set Zone:Appl_DryerGain-NGas - unit #1"		Zone:Appl_DryerGain[2]	= {	SumRevRef( DwellUnit:DryerZoneRef, DwellUnit:TotalClthDryGasGain )  }
+
+  ; clothes dryer gain-OtherFuel - handled by assignment of zones
+	"Set Zone:Appl_DryerGain-Othr - unit #1"		Zone:Appl_DryerGain[3]	= {	SumRevRef( DwellUnit:DryerZoneRef, DwellUnit:TotalClthDryOthrGain )  }
+
+  ; clothes washer gain - handled by assignment of OtherZones - SAC 9/10/19 (MFamProto)
+	"Set OtherZone:Appl_WasherGain - unit #1"			   OtherZone:Appl_WasherGain		= {	SumRevRef( DwellUnit:WasherZoneRef, DwellUnit:TotalClthWashGain )  }
+  ; clothes dryer gain-Electric - handled by assignment of OtherZones - SAC 9/10/19 (MFamProto)
+	"Set OtherZone:Appl_DryerGain-Elec - unit #1"		OtherZone:Appl_DryerGain[1]	= {	SumRevRef( DwellUnit:DryerZoneRef, DwellUnit:TotalClthDryElecGain )  }
+  ; clothes dryer gain-NatGas - handled by assignment of OtherZones - SAC 9/10/19 (MFamProto)
+	"Set OtherZone:Appl_DryerGain-NGas - unit #1"		OtherZone:Appl_DryerGain[2]	= {	SumRevRef( DwellUnit:DryerZoneRef, DwellUnit:TotalClthDryGasGain )  }
+  ; clothes dryer gain-OtherFuel - handled by assignment of OtherZones - SAC 9/10/19 (MFamProto)
+	"Set OtherZone:Appl_DryerGain-Othr - unit #1"		OtherZone:Appl_DryerGain[3]	= {	SumRevRef( DwellUnit:DryerZoneRef, DwellUnit:TotalClthDryOthrGain )  }
+
+; added testing IAQ inputs from SFam in MFam - SAC 5/13/20
+   ; SAC 9/5/19   ; AllowStdDesignFuel - SAC 04/02/21
+   "blast StdDesignIAQ properties if user defined and no BypassRuleLimits"    ResProj:Action =     ; logic mod to ensure reset of these StdDesignIAQ properties in 2022 software where AllowStdDesignFuel enabled via rules - SAC 07/29/22
+      {  if (IfValidAnd( BypassRuleLimits > 0 ) .OR. (AllowStdDesignFuel .AND. LocalStatus( AllowStdDesignFuel ) > 4)) then  UNCHANGED
+         else if (LocalStatus( StdDesignIAQType[1]       ) > 4 .OR.
+                  LocalStatus( StdIAQHtRec_SRE[1]        ) > 4 .OR.
+                  LocalStatus( StdIAQHtRec_ASRE[1]       ) > 4 .OR.
+                  LocalStatus( StdDesignIAQCFM[1]        ) > 4 .OR.
+                  LocalStatus( StdIAQCFMScaleFactor[1]   ) > 4 .OR.
+                  LocalStatus( ApplyStdIAQCFMLimitToDRtg ) > 4 .OR.
+                  LocalStatus( StdDesignIAQWperCFM       ) > 4 .OR.
+                  LocalStatus( ApplyStdIAQMaxPwrToDRtg   ) > 4)
+         then  EvalRulelist( "ForceReset_StdDesignIAQLimits" )
+         else  UNCHANGED  endif endif  }
+
+;   "Set ResProj:PropIAQCFMScaleFactor[1]"       ResProj:PropIAQCFMScaleFactor[1]  =          ; SAC 4/24/20 (tic #1174)
+;      {  if (IfValidAnd( UnitMinIAQCFM[1] > 0 )==0) then  UNDEFINED
+;         else  ValidOr( UnitIAQCFMTot[1], 0 ) / UnitMinIAQCFM[1]  endif  }
+   "Set ResProj:StdIAQCFMScaleEditable[1]"      ResProj:StdIAQCFMScaleEditable[1]  =         ; SAC 4/24/20 (tic #1174)
+;      {  if (IAQDisabled > 0 .OR. IfValidAnd( BypassRuleLimits > 0 )==0 .OR. LocalStatus( StdDesignIAQCFM[1] ) > 4) then  UNDEFINED
+      {  if (IAQDisabled > 0 .OR. IfValidAnd( BypassRuleLimits > 0 )==0) then  UNDEFINED
+         else  1  endif  }
+   "Set ResProj:StdIAQCFMScaleFactor[1]"        ResProj:StdIAQCFMScaleFactor[1]  =           ; SAC 4/24/20 (tic #1174)
+      {  if (IfValidAnd( StdIAQCFMScaleEditable[1] > 0 )==0) then  UNDEFINED
+         else  1  endif  }
+;      {  if (IfValidAnd( StdIAQCFMScaleEditable[1] > 0 )==0 .OR. IfValidAnd( PropIAQCFMScaleFactor[1] >= 0 )==0) then  UNDEFINED
+;         else  PropIAQCFMScaleFactor[1]  endif  }
+
+   ; SAC 3/20/19 - rule to define IAQCFMScaleFactor to be used in simulation for standard design (tic #1083)
+   ; SAC 5/16/19 - removed logic that prevented setting IAQCFMScaleFactor[1] when BypassRuleLimits is activated (tic #1083)
+   "Set ResProj:IAQCFMScaleFactor[1] if appropriate"     ResProj:IAQCFMScaleFactor[1]  = {
+         UNDEFINED  }
+;         if (IfValidAnd( StdDesignIAQCFM[1] >= 0 )==0 .AND. IfValidAnd( StdIAQCFMScaleFactor[1] >= 0 )==0) then  UNDEFINED
+;         else if (IfValidAnd( IAQDisabled > 0 )) then  UNDEFINED
+;         else if (UnitMinIAQCFM[1] < 0.5 .OR. UnitIAQOption[1] == 3) then  UNDEFINED
+;         else if (IfValidAnd( UnitIAQCFMTot[1] > 0 ) .AND. IfValidAnd( StdIAQCFMScaleEditable[1] > 0 ) .AND.
+;                  IfValidAnd( StdIAQCFMScaleFactor[1] >= 0 ))
+;         then  if (IfValidAnd( StdDesignIAQType[1] > 0 )==0)
+;               then  StdIAQCFMScaleFactor[1] * UnitMinIAQCFM[1]     / UnitIAQCFMTot[1]
+;               else if (StdDesignIAQType[1] = 3)
+;               then  StdIAQCFMScaleFactor[1] * MinBalancedIAQCFM[1] / UnitIAQCFMTot[1]
+;               else  StdIAQCFMScaleFactor[1] * MinUnbalIAQCFM[1]    / UnitIAQCFMTot[1]   endif endif
+;         else if (IfValidAnd( UnitIAQCFMTot[1] > 0 )) then  StdDesignIAQCFM[1] / UnitIAQCFMTot[1]
+;         else  UNDEFINED  endif endif endif endif endif  }
+
+   "Set ResProj:ApplyStdIAQCFMLimitToDRtg - flag indicating whether or not to apply the std design IAQ CFM limits (main dwelling & ADU) to EDR reference run"  ; SAC 9/5/19
+      ResProj:ApplyStdIAQCFMLimitToDRtg   = {  1  }      ; SAC 9/5/19 - new default of 1 here causes difference in EDR ref run IAQ CFM when scaling occurs to the Std design
+   ; SAC 4/24/20 - revised to serve as THE Std design fan power (as opposed to a Max Limit) for analysis version 2019.2.0+ (tic #1174)    ; SAC 7/20/20 (tic #1174)   ; SAC 08/27/20
+   ; revised DefaultIAQFanPwr unbal 0.3->0.35 & bal 0.6->0.7 - SAC 01/19/21 (tic #1243)   ; AllowStdDesignFuel & StdDesignIAQFanPwr - SAC 04/02/21
+   "Set ResProj:StdDesignIAQWperCFM - standard design IAQ power"    ; SAC 9/5/19
+      ResProj:StdDesignIAQWperCFM         =              ; updated w/ data from 2022.1.0 Multifamily IAQ Summary writeup from OB360/DR - SAC 06/07/22
+         {  if (((IfValidAnd( BypassRuleLimits > 0 ) .AND. IfValidAnd( AnalysisVersion >= 190200 )) .OR. AllowStdDesignFuel) .AND.
+                IfValidAnd( StdDesignIAQType[1] > 0 ))
+            then  if (AllowStdDesignFuel .AND. IfValidAnd( StdDesignIAQFanPwr > 0 ))
+                  then  StdDesignIAQFanPwr
+                  else if (Proj:IsComRuleset .AND. IfValidAnd( AnalysisVersion >= 220100 ))
+                  then  if (IfValidAnd( MostDUIAQ_Exhaust > 0 ) .OR. IfValidAnd( MostDUIAQ_Supply > 0 ))
+                        then  0.35
+                        else if (IfValidAnd( Proj:CliZnNum <= 2 ) .OR. (IfValidAnd( Proj:CliZnNum >= 11 ) .AND. IfValidAnd( Proj:CliZnNum <= 16 )))
+                        then  0.6   ; bal w/ HtRecov
+                        else if (IfValidAnd( NumStories < 4 ) .AND. (IfValidAnd( Proj:CliZnNum >= 4 ) .AND. IfValidAnd( Proj:CliZnNum <= 10 )))
+                        then  0.4
+                        else  0.7
+                        endif endif endif
+                  else  if (IfValidAnd( StdDesignIAQType[1] >= 3 ))
+                        then  0.7
+                        else  0.35  endif
+                  endif endif
+            else if (Proj:IsComRuleset .AND. IfValidAnd( AnalysisVersion >= 220100 ))
+            then  if (IfValidAnd( MostDUIAQ_Exhaust > 0 ) .OR. IfValidAnd( MostDUIAQ_Supply > 0 ))
+                  then  0.35
+                  else if (IfValidAnd( Proj:CliZnNum <= 2 ) .OR. (IfValidAnd( Proj:CliZnNum >= 11 ) .AND. IfValidAnd( Proj:CliZnNum <= 16 )))
+                  then  0.6   ; bal w/ HtRecov
+                  else if (IfValidAnd( NumStories < 4 ) .AND. (IfValidAnd( Proj:CliZnNum >= 4 ) .AND. IfValidAnd( Proj:CliZnNum <= 10 )))
+                  then  0.4
+                  else  0.7
+                  endif endif endif
+            else if (IfValidAnd( AnalysisVersion >= 190200 ))
+		      then  if ( (IsMultiFamily >  0 .AND. IfValidAnd( MostDUIAQ_Balanced > 0 )) .OR.
+		                 (IsMultiFamily == 0 .AND. IfValidAnd( UnitIAQCFMBalanced[1] > 0 )) )
+		            then  0.7
+		            else  0.35  endif
+            else  1.2  endif endif endif  }
+   "Set ResProj:ApplyStdIAQMaxPwrToDRtg - flag indicating whether or not to apply the std design IAQ maximum power EDR reference run"  ; SAC 9/5/19
+      ResProj:ApplyStdIAQMaxPwrToDRtg     = {  1  }
+END
+;*************************************************************************
+
+
+;*************************************************************************  SAC 1/16/19 (tic #1040)
+RULELIST "Blast_ResProj_UnitClVentOption"  1 0 0 0
+   "Blast ResProj:UnitClVentOption"    ResProj:UnitClVentOption = {  0  }
+END
+;*************************************************************************
+
+; SAC 4/15/16 - ensure that user-defined Appl_RefrigUsage[1] is not retained when ApplRefrigEffMethod[1] is not set to '- specify -'
+;*************************************************************************
+RULELIST "ForceDefault_ResProj_RefrigUsage" 1 0 0 0
+	"Blast ResProj:Appl_RefrigUsage[1]"		ResProj:Appl_RefrigUsage[1]	= {	UNDEFINED  }
+END
+;*************************************************************************
+
+; SAC 4/15/16 - ensure that user-defined RefrigElecUsage is not retained when RefrigEffMethod is not set to '- specify -'
+;*************************************************************************
+RULELIST "ForceDefault_DUT_RefrigElecUsage" 1 0 0 0
+	"Blast DwellUnitType:RefrigElecUsage"		DwellUnitType:RefrigElecUsage	= {	UNDEFINED  }
+END
+;*************************************************************************
+
+; SAC 4/15/16 - ensure that user-defined DishElecUsage is not retained when DishUsageMethod is not set to '- specify -'
+;*************************************************************************
+RULELIST "ForceDefault_DUT_DishElecUsage" 1 0 0 0
+	"Blast DwellUnitType:DishElecUsage"		DwellUnitType:DishElecUsage	= {	UNDEFINED  }
+END
+;*************************************************************************
+
+;************************************************************************* ; SAC 9/5/19
+RULELIST "ForceReset_StdDesignIAQLimits" 1 0 0 0
+   "Blast ResProj:StdDesignIAQType[1]"          ResProj:StdDesignIAQType[1]         = {  UNDEFINED  }
+   "Blast ResProj:StdDesignIAQType[2]"          ResProj:StdDesignIAQType[2]         = {  UNDEFINED  }
+   "Blast ResProj:StdIAQHtRec_SRE[1]"           ResProj:StdIAQHtRec_SRE[1]          = {  UNDEFINED  }
+   "Blast ResProj:StdIAQHtRec_SRE[2]"           ResProj:StdIAQHtRec_SRE[2]          = {  UNDEFINED  }
+   "Blast ResProj:StdIAQHtRec_ASRE[1]"          ResProj:StdIAQHtRec_ASRE[1]         = {  UNDEFINED  }
+   "Blast ResProj:StdIAQHtRec_ASRE[2]"          ResProj:StdIAQHtRec_ASRE[2]         = {  UNDEFINED  }
+   "Blast ResProj:StdDesignIAQCFM[1]"           ResProj:StdDesignIAQCFM[1]          = {  UNDEFINED  }
+   "Blast ResProj:StdDesignIAQCFM[2]"           ResProj:StdDesignIAQCFM[2]          = {  UNDEFINED  }
+   "Blast ResProj:StdIAQCFMScaleFactor[1]"      ResProj:StdIAQCFMScaleFactor[1]     = {  UNDEFINED  }
+   "Blast ResProj:StdIAQCFMScaleFactor[2]"      ResProj:StdIAQCFMScaleFactor[2]     = {  UNDEFINED  }
+   "Blast ResProj:ApplyStdIAQCFMLimitToDRtg"    ResProj:ApplyStdIAQCFMLimitToDRtg   = {  UNDEFINED  }
+   "Blast ResProj:StdDesignIAQWperCFM"          ResProj:StdDesignIAQWperCFM         = {  UNDEFINED  }
+   "Blast ResProj:ApplyStdIAQMaxPwrToDRtg"      ResProj:ApplyStdIAQMaxPwrToDRtg     = {  UNDEFINED  }
+END
+;*************************************************************************
+
+
+;*************************************************************************
+;*************************************************************************
+ENDFILE
+

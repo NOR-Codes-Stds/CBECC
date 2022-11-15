@@ -1,0 +1,816 @@
+; -------------------------------------------------------------------------
+; Rules pertaining to:   Setup HVAC & AirNet objects for CSE Energy Simulation
+; CEC Title-24 Residential Energy Code
+; -------------------------------------------------------------------------
+; Copyright (c) 2012-2022, California Energy Commission
+; All rights reserved.
+; Redistribution and use in source and binary forms, with or without modification,
+; are permitted provided that the following conditions are met:
+; - Redistributions of source code must retain the above copyright notice, this
+;   list of conditions and the following disclaimer.
+; - Redistributions in binary form must reproduce the above copyright notice, this
+;   list of conditions, the following disclaimer in the documentation and/or other
+;   materials provided with the distribution.
+; - Neither the name of the California Energy Commission nor the names of its
+;   contributors may be used to endorse or promote products derived from this
+;   software without specific prior written permission.
+; DISCLAIMER: THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+; "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+; THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+; NON-INFRINGEMENT ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION,
+; WRIGHTSOFT CORPORATION, ITRON, INC. OR ANY OTHER AUTHOR OR COPYRIGHT HOLDER OF
+; THIS SOFTWARE (COLLECTIVELY, THE "AUTHORS") BE LIABLE FOR ANY DIRECT, INDIRECT,
+; INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+; LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA,
+; OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+; LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
+; OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+; ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.  EACH LICENSEE AND SUBLICENSEE OF THE
+; SOFTWARE AGREES NOT TO ASSERT ANY CLAIM AGAINST ANY OF THE AUTHORS RELATING TO
+; THIS SOFTWARE, WHETHER DUE TO PERFORMANCE ISSUES, TITLE OR INFRINGEMENT ISSUES,
+; STRICT LIABILITY OR OTHERWISE.
+; -------------------------------------------------------------------------
+
+ENUM_PROPERTIES_VALUE   ; ensures retrieval/logic/us of enum properties assume numeric value (alternative is ENUM_PROPERTIES_STRING)
+
+;*************************************************************************
+RULELIST "CSE_SimulationPrep_HVAC_Terminal_AirSys" 1 0 0 1
+;*************************************************************************
+
+   "Create cseAIRHANDLER for each AirSys referenced by a ResOtherZn"    AirSys:CSE_AirHandlerRef =
+      {  if (ServesResZn)
+         then  CreateComp( cseAIRHANDLER, substr( Name, 0, 58 ) + "-ah" )
+         else  UNCHANGED  endif  }
+   "Set cross-reference from cseAIRHANDLER to AirSys"    AirSys:CSE_AirHandlerRef:AirSysRef = {  Name  }
+   "Setup cseAIRHANDLER from AirSys"   AirSys:Action =
+      {  if (LocalCompAssigned( CSE_AirHandlerRef ))
+         then  EvalRulelist( "CSE_SimulationPrep_AirSys_AirHandler", 1 )
+         else  UNCHANGED  endif  }
+
+   "Create cseTERMINAL for each ResOtherZn served by an AirSys"   ResOtherZn:CSE_TerminalRef =
+      {  if (LocalCompAssigned( ActiveHVACSystem ) == ComponentType( "AirSys" ))
+         then  CreateComp( cseTERMINAL, substr( Name, 0, 58 ) + "-tu" )
+         else  UNCHANGED  endif  }
+   "Set cross-reference from cseTERMINAL to ResOtherZn"     ResOtherZn:CSE_TerminalRef:ResOtherZnRef = {  Name  }
+   "Set cseTERMINAL's Parent for ResOtherZn"                ResOtherZn:CSE_TerminalRef:Parent        =
+      {  if (LocalCompAssigned( CSE_ZONE ))
+         then  CSE_ZONE:Name
+         else  UNCHANGED  endif  }
+   "Setup cseTERMINAL from ResOtherZn"    ResOtherZn:Action =
+      {  if (LocalCompAssigned( CSE_TerminalRef ))
+         then  EvalRulelist( "CSE_SimulationPrep_ResOtherZn_Terminal", 1 )
+         else  UNCHANGED  endif  }
+
+END
+;*************************************************************************
+
+
+;*************************************************************************
+RULELIST "CSE_SimulationPrep_AirSys_AirHandler" 1 0 0 1
+;*************************************************************************
+   "Set AirSys:CSE_AirHandlerRef:ahSched_x"     AirSys:CSE_AirHandlerRef:ahSched_x     = {  "ON"   }
+   "Set AirSys:CSE_AirHandlerRef:ahTsSp_x"      AirSys:CSE_AirHandlerRef:ahTsSp_x      = {  "ZN2"  }     ; ZN -> ZN2 for fixed airflow - SAC 05/09/22
+   "Set AirSys:CSE_AirHandlerRef:ahfanCycles_x" AirSys:CSE_AirHandlerRef:ahfanCycles_x = {  "NO"   }     ; YES -> NO for fixed airflow - SAC 05/09/22
+
+; REMOVED per guidance from BigLadder/NK - SAC 05-23-22
+;   "Set AirSys:CSE_AirHandlerRef:ahWzCzns"      AirSys:CSE_AirHandlerRef:ahWzCzns      =     ; SAC 05/17/22
+;      {  if (LocalCompAssigned( CtrlZnRef:CSE_ZONE )) then  CtrlZnRef:CSE_ZONE:Name
+;         else  UNDEFINED  endif  }
+;   "Set AirSys:CSE_AirHandlerRef:ahCzCzns"      AirSys:CSE_AirHandlerRef:ahCzCzns      = 
+;      {  if (LocalCompAssigned( CtrlZnRef:CSE_ZONE )) then  CtrlZnRef:CSE_ZONE:Name
+;         else  UNDEFINED  endif  }
+
+   "Set AirSys:CSE_AirHandlerRef:oaVfDsMn"      AirSys:CSE_AirHandlerRef:oaVfDsMn      =     ; AirSys:SysVentFlow ??
+      {  if (IfValidAnd( SysVentFlow > 0 ))
+         then  SysVentFlow
+         else  0  endif  }
+   "Set AirSys:CSE_AirHandlerRef:oaMnCtrl"      AirSys:CSE_AirHandlerRef:oaMnCtrl      = {  "VOLUME"  }
+
+   "Set AirSys:CSE_AirHandlerRef:sfanType"      AirSys:CSE_AirHandlerRef:sfanType      =
+      {  if (LocalStatus( FanPos ) < 1) then  UNCHANGED
+         else  switch (EnumString( FanPos ))
+                  case "BlowThrough" :  "BlowThru"
+                  default            :  "DrawThru"
+               endswitch  endif  }
+   "Set AirSys:CSE_AirHandlerRef:sfanVfMxF"     AirSys:CSE_AirHandlerRef:sfanVfMxF     = {    1.0  }
+;   "Set AirSys:CSE_AirHandlerRef:sfanPress"     AirSys:CSE_AirHandlerRef:sfanPress     = {     }
+   "Set AirSys:CSE_AirHandlerRef:sfanElecPwr"   AirSys:CSE_AirHandlerRef:sfanElecPwr   = 
+      {  if (IfValidAnd( SupFanPwrIdx > 0 )) then  SupFanPwrIdx
+         else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:sfanMotEff"    AirSys:CSE_AirHandlerRef:sfanMotEff    =     ; SAC 05/17/22
+      {  if (IfValidAnd( CSE_AirHandlerRef:sfanElecPwr > 0 ) .AND.
+             IfValidAnd( SupAirSegRef:FanRef:MtrEff > 0 ) .AND.
+             IfValidAnd( SupAirSegRef:FanRef:MtrEff <= 1 )) then  SupAirSegRef:FanRef:MtrEff
+         else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:sfanMotPos_x"  AirSys:CSE_AirHandlerRef:sfanMotPos_x  =     ; SAC 05/17/22
+      {  if (IfValidAnd( CSE_AirHandlerRef:sfanElecPwr > 0 ))
+         then  switch (EnumString( SupAirSegRef:FanRef:MtrPos ))
+                  case "InAirStream"    :  "IN_FLOW"
+                  case "NotInAirStream" :  "EXTERNAL"
+                  default  :  UNDEFINED
+               endswitch
+         else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:sfanMtr"       AirSys:CSE_AirHandlerRef:sfanMtr       = {  Global( Proj:CSE_ElecMETER )  }
+
+   "Set AirSys:CSE_AirHandlerRef:rfanType"      AirSys:CSE_AirHandlerRef:rfanType      =
+      {  if (LocalCompAssigned( RetAirSegRef:FanRef ) .OR.
+             IfValidAnd( RetFanCap > 0 ) .OR. IfValidAnd( RetFanPwr > 0 ))
+         then  "Return"       else  UNDEFINED  endif  }
+     ; {  if (LocalCompAssigned( RetAirSegRef:FanRef ))
+     ; {  if (IfValidAnd( RetFanCap > 0 ))
+   "Set AirSys:CSE_AirHandlerRef:rfanVfMxF"     AirSys:CSE_AirHandlerRef:rfanVfMxF     =
+      {  if (LocalStatus( CSE_AirHandlerRef:rfanType ) > 0)
+         then  1.0            else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:rfanElecPwr"   AirSys:CSE_AirHandlerRef:rfanElecPwr   = 
+      {  if (LocalStatus( CSE_AirHandlerRef:rfanType ) > 0 .AND. IfValidAnd( RetFanPwr > 0 ))
+         then  RetFanPwr      else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:rfanMotEff"    AirSys:CSE_AirHandlerRef:rfanMotEff    =     ; SAC 05/17/22
+      {  if (LocalStatus( CSE_AirHandlerRef:rfanType ) > 0 .AND.
+             IfValidAnd( RetAirSegRef:FanRef:MtrEff > 0 ) .AND.
+             IfValidAnd( RetAirSegRef:FanRef:MtrEff <= 1 )) then  RetAirSegRef:FanRef:MtrEff
+         else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:rfanMotPos_x"  AirSys:CSE_AirHandlerRef:rfanMotPos_x  =     ; SAC 05/17/22
+      {  if (LocalStatus( CSE_AirHandlerRef:rfanType ) > 0)
+         then  switch (EnumString( RetAirSegRef:FanRef:MtrPos ))
+                  case "InAirStream"    :  "IN_FLOW"
+                  case "NotInAirStream" :  "EXTERNAL"
+                  default  :  UNDEFINED
+               endswitch
+         else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:rfanMtr"       AirSys:CSE_AirHandlerRef:rfanMtr       =
+      {  if (LocalStatus( CSE_AirHandlerRef:rfanType ) > 0)
+         then  Global( Proj:CSE_ElecMETER )     else  UNDEFINED  endif  }
+
+        // rfanType=Return             // For heat recovery need fan at air handler; all return air passes through it.
+        // rfanVfDs=800                // 400 CFM/ton
+        // rfanVfMxF=1.00             //Max volume multiplier
+        // rfanElecPwr=0.2		//W/CFM at max
+
+   "Set AirSys:CSE_AirHandlerRef:ahhcType"      AirSys:CSE_AirHandlerRef:ahhcType      =
+      {  if (LocalStatus( SupAirSegRef:CoilHtgRef:Type ) > 0)
+         then  if (IfValidAnd( Proj:RunAbbrev = "zp") .AND.
+                   IfValidAnd( ResHVACAutoSizing > 0 ) .AND.
+                   EnumString( SupAirSegRef:CoilHtgRef:Type ) == "Resistance") then  "Electric"
+               else if (IfValidAnd( SupAirSegRef:HtPumpCap > 0 )) then  "AHP"
+               else  switch (EnumString( SupAirSegRef:CoilHtgRef:Type ))
+                        case  "Resistance"   :  "Electric"
+                        case  "Furnace"      :  "Gas"
+                        case  "HeatPump"     :  "AHP"
+                        case  "HotWater"     :  "HW"
+         ;               case  "Steam"        :  ""
+         ;               case  "VRF"          :  ""
+                        default  :  "None"
+                     endswitch  endif endif
+         else  "None"  endif  }
+   "Set AirSys:CSE_AirHandlerRef:ahhcEffR"      AirSys:CSE_AirHandlerRef:ahhcEffR      =
+      {  if (CSE_AirHandlerRef:ahhcType == 3)  ; Gas
+         then  if (IfValidAnd( SupAirSegRef:CoilHtgRef:FurnThrmlEff > 0 ))
+               then  SupAirSegRef:CoilHtgRef:FurnThrmlEff
+               else  UNDEFINED  endif
+         else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:ahpCOP47"      AirSys:CSE_AirHandlerRef:ahpCOP47      =     ; SAC 05/13/22
+      {  if (CSE_AirHandlerRef:ahhcType == 4)  ; AHP
+         then  if (IfValidAnd( SupAirSegRef:CoilHtgRef:HtPumpCOPAdj > 0 ))
+               then  SupAirSegRef:CoilHtgRef:HtPumpCOPAdj
+               else  UNDEFINED  endif
+         else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:ahpCOP17"      AirSys:CSE_AirHandlerRef:ahpCOP17      = 
+      {  if (CSE_AirHandlerRef:ahhcType == 4)  ; AHP
+         then  if (IfValidAnd( SupAirSegRef:CoilHtgRef:HtPumpCOP17Adj > 0 ))
+               then  SupAirSegRef:CoilHtgRef:HtPumpCOP17Adj
+               else  UNDEFINED  endif
+         else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:ahpEffSupH"    AirSys:CSE_AirHandlerRef:ahpEffSupH    =     ; SAC 05/13/22
+      {  if (CSE_AirHandlerRef:ahhcType == 4)  ; AHP
+         then  if (IfValidAnd( SupAirSegRef:CoilHtgRef:HtPumpSuppCoilHtgRef:Type == 2 ) .AND.   ; Furnace 
+                   IfValidAnd( SupAirSegRef:CoilHtgRef:HtPumpSuppCoilHtgRef:FurnAFUE > 0 ))
+               then  SupAirSegRef:CoilHtgRef:HtPumpSuppCoilHtgRef:FurnAFUE
+               else  UNDEFINED  endif
+         else  UNDEFINED  endif  }
+
+   "Set AirSys:CSE_AirHandlerRef:ahpTOff"       AirSys:CSE_AirHandlerRef:ahpTOff    =     ; SAC 05/21/22
+      {  if (CSE_AirHandlerRef:ahhcType == 4)  ; AHP
+         then  if (IfValidAnd( SupAirSegRef:CoilHtgRef:HtPumpCprsrLockoutTemp > -99 ))
+               then  SupAirSegRef:CoilHtgRef:HtPumpCprsrLockoutTemp
+               else  UNDEFINED  endif
+         else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:ahpTOn"        AirSys:CSE_AirHandlerRef:ahpTOn     =     ; SAC 05/21/22
+      {  if (CSE_AirHandlerRef:ahhcType == 4)  ; AHP
+         then  if (IfValidAnd( SupAirSegRef:CoilHtgRef:HtPumpCprsrEnableTemp > -99 ))
+               then  SupAirSegRef:CoilHtgRef:HtPumpCprsrEnableTemp
+               else  UNDEFINED  endif
+         else  UNDEFINED  endif  }
+
+   "Set AirSys:CSE_AirHandlerRef:ahhcMtr"       AirSys:CSE_AirHandlerRef:ahhcMtr       = 
+      {  if (CSE_AirHandlerRef:ahhcType == 1 .OR. CSE_AirHandlerRef:ahhcType == 4)  ; Elec or AHP
+         then  Global( Proj:CSE_ElecMETER )
+         else       if (Global( Proj:Fuel_HaveNatGas ) > 0.5) then  Global( Proj:CSE_NatGasMETER )
+               else if (Global( Proj:Fuel_HaveOther  ) > 0.5) then  Global( Proj:CSE_OtherFuelMETER )
+               else  UNDEFINED  endif endif  endif  }
+
+   "Set AirSys:CSE_AirHandlerRef:ahTsMx"        AirSys:CSE_AirHandlerRef:ahTsMx        =     ; {  150  }
+      {  if (IfValidAnd( HtgDsgnSupAirTemp > 0 ))
+         then  HtgDsgnSupAirTemp
+         else  95  endif  }
+
+   "Set AirSys:CSE_AirHandlerRef:ahccType"      AirSys:CSE_AirHandlerRef:ahccType      =
+      {  if (LocalStatus( SupAirSegRef:CoilClgRef:Type ) > 0)
+         then  switch (EnumString( SupAirSegRef:CoilClgRef:Type ))
+                  case  "ChilledWater"       :  "CHW"
+                  case  "DirectExpansion"    :  "DX"
+         ;         case  "WaterEconomizer"    :  ""
+         ;         case  "VRF"                :  ""
+                  default  :  "None"
+               endswitch
+         else  "None"  endif  }
+   "Set AirSys:CSE_AirHandlerRef:ahccMtr"       AirSys:CSE_AirHandlerRef:ahccMtr       = {  Global( Proj:CSE_ElecMETER )  }
+;   "Set AirSys:CSE_AirHandlerRef:ahccAux"       AirSys:CSE_AirHandlerRef:ahccAux       = {  ""  }
+;   "Set AirSys:CSE_AirHandlerRef:ahccAuxMtr"    AirSys:CSE_AirHandlerRef:ahccAuxMtr    = {  ""  }
+   "Set AirSys:CSE_AirHandlerRef:ahccEirR"      AirSys:CSE_AirHandlerRef:ahccEirR      =
+      {  if (IfValidAnd( SupAirSegRef:CoilClgRef:DXEIR > 0 ))
+         then  SupAirSegRef:CoilClgRef:DXEIR
+         else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:ahTsMn"        AirSys:CSE_AirHandlerRef:ahTsMn        =     ; {   58  }    ; 55->58 (else sizing run fails) - SAC 05/09/22
+      {  if (IfValidAnd( ClgDsgnSupAirTemp > 0 ))
+         then  ClgDsgnSupAirTemp
+         else  58  endif  }
+
+
+   ; ECONOMIZER
+   "Set AirSys:CSE_AirHandlerRef:oaEcoType"     AirSys:CSE_AirHandlerRef:oaEcoType      =
+      {  if (LocalStatus( OACtrlRef:EconoCtrlMthd ) < 1) then  "None"
+         else if (EnumString( OACtrlRef:EconoCtrlMthd ) == "NoEconomizer" .OR.
+                  EnumString( OACtrlRef:EconoCtrlMthd ) == "DifferentialDryBulbAndEnthalpy") then  "None"
+         else  if (EnumString( OACtrlRef:EconoIntegration ) == "Integrated")
+               then  "Integrated"
+               else  "Nonintegrated"  endif
+         endif endif  }
+   // FixedDryBulb ->  oaLimT = OACtrl:EconoHiTempLockout and oaLimE = 999
+   // DifferentialDryBulb -> oaLimT = RA and oaLimE = 999
+   // DifferentialEnthalpy -> oaLimT = Not defined and oaLimE = RA
+   // DifferentialDryBulbAndEnthalpy -> oaLimT = RA and oaLimE = RA (if this works??)   - NOT SUPPORTED (for now)
+   "Set AirSys:CSE_AirHandlerRef:oaLimT_x"      AirSys:CSE_AirHandlerRef:oaLimT_x  =
+      {  if (EnumValue( CSE_AirHandlerRef:oaEcoType ) < 1) then  UNDEFINED
+         else  switch (EnumString( OACtrlRef:EconoCtrlMthd ))
+                  case  "FixedDryBulb"                   :  if (IfValidAnd( OACtrlRef:EconoHiTempLockout > 0 ))
+                                                            then  Format( "%g", OACtrlRef:EconoHiTempLockout )
+                                                            else  "RA"  endif    ; ERROR ?
+                  case  "DifferentialDryBulb"            :  "RA"
+                  case  "DifferentialEnthalpy"           :  UNDEFINED
+                  default  :  UNDEFINED
+               endswitch  endif  }
+         //         case  "DifferentialDryBulbAndEnthalpy" :  "RA"
+   "Set AirSys:CSE_AirHandlerRef:oaLimE_x"      AirSys:CSE_AirHandlerRef:oaLimE_x  =
+      {  if (EnumValue( CSE_AirHandlerRef:oaEcoType ) < 1) then  UNDEFINED
+         else  switch (EnumString( OACtrlRef:EconoCtrlMthd ))
+                  case  "FixedDryBulb"                   :  "999"
+                  case  "DifferentialDryBulb"            :  "999"
+                  case  "DifferentialEnthalpy"           :  "RA"   ; why not OACtrlRef:EconoHiEnthLockout ??
+                  default  :  UNDEFINED
+               endswitch  endif  }
+         //         case  "DifferentialDryBulbAndEnthalpy" :  "RA"
+   "Set AirSys:CSE_AirHandlerRef:oaOaLeak"      AirSys:CSE_AirHandlerRef:oaOaLeak  = { 0 }
+     ; {  if (EnumValue( CSE_AirHandlerRef:oaEcoType ) < 1) then  UNDEFINED
+     ;    else  0  endif  }
+   "Set AirSys:CSE_AirHandlerRef:oaRaLeak"      AirSys:CSE_AirHandlerRef:oaRaLeak  = { 0 }
+     ; {  if (EnumValue( CSE_AirHandlerRef:oaEcoType ) < 1) then  UNDEFINED
+     ;    else  0  endif  }
+
+    ; HEAT RECOVERY
+      ; add check to ensure RetFan present in order for HX properties to be set - SAC 05/22/22
+   "Set AirSys:CSE_AirHandlerRef:oaHXVfDs"         AirSys:CSE_AirHandlerRef:oaHXVfDs      =
+      {  if (IfValidAnd( HtRcvryRef:SupFlowRtd > 0 ) .AND.
+             IfValidAnd( CSE_AirHandlerRef:rfanType = 1 )) then  HtRcvryRef:SupFlowRtd
+         else  UNDEFINED  endif  }
+
+   "Set AirSys:CSE_AirHandlerRef:oaHXSenEffHDs"    AirSys:CSE_AirHandlerRef:oaHXSenEffHDs =
+      {  if (IfValidAnd( CSE_AirHandlerRef:oaHXVfDs > 0 ) .AND.
+             IfValidAnd( HtRcvryRef:HtgSensEff100 > 0 )) then  HtRcvryRef:HtgSensEff100
+         else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:oaHXLatEffHDs"    AirSys:CSE_AirHandlerRef:oaHXLatEffHDs =
+      {  if (IfValidAnd( CSE_AirHandlerRef:oaHXVfDs > 0 ) .AND.
+             IfValidAnd( HtRcvryRef:HtgLatEff100  > 0 )) then  HtRcvryRef:HtgLatEff100
+         else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:oaHXSenEffHf2"    AirSys:CSE_AirHandlerRef:oaHXSenEffHf2 =
+      {  if (IfValidAnd( CSE_AirHandlerRef:oaHXVfDs > 0 ) .AND.
+             IfValidAnd( HtRcvryRef:HtgSensEff75  > 0 )) then  HtRcvryRef:HtgSensEff75
+         else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:oaHXLatEffHf2"    AirSys:CSE_AirHandlerRef:oaHXLatEffHf2 =
+      {  if (IfValidAnd( CSE_AirHandlerRef:oaHXVfDs > 0 ) .AND.
+             IfValidAnd( HtRcvryRef:HtgLatEff75   > 0 )) then  HtRcvryRef:HtgLatEff75
+         else  UNDEFINED  endif  }
+
+   "Set AirSys:CSE_AirHandlerRef:oaHXSenEffCDs"    AirSys:CSE_AirHandlerRef:oaHXSenEffCDs =
+      {  if (IfValidAnd( CSE_AirHandlerRef:oaHXVfDs > 0 ) .AND.
+             IfValidAnd( HtRcvryRef:ClgSensEff100 > 0 )) then  HtRcvryRef:ClgSensEff100
+         else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:oaHXLatEffCDs"    AirSys:CSE_AirHandlerRef:oaHXLatEffCDs =
+      {  if (IfValidAnd( CSE_AirHandlerRef:oaHXVfDs > 0 ) .AND.
+             IfValidAnd( HtRcvryRef:ClgLatEff100  > 0 )) then  HtRcvryRef:ClgLatEff100
+         else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:oaHXSenEffCf2"    AirSys:CSE_AirHandlerRef:oaHXSenEffCf2 =
+      {  if (IfValidAnd( CSE_AirHandlerRef:oaHXVfDs > 0 ) .AND.
+             IfValidAnd( HtRcvryRef:ClgSensEff75  > 0 )) then  HtRcvryRef:ClgSensEff75
+         else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:oaHXLatEffCf2"    AirSys:CSE_AirHandlerRef:oaHXLatEffCf2 =
+      {  if (IfValidAnd( CSE_AirHandlerRef:oaHXVfDs > 0 ) .AND.
+             IfValidAnd( HtRcvryRef:ClgLatEff75   > 0 )) then  HtRcvryRef:ClgLatEff75
+         else  UNDEFINED  endif  }
+
+   "Set AirSys:CSE_AirHandlerRef:oaHXBypass"       AirSys:CSE_AirHandlerRef:oaHXBypass    =     ; prevent writing oaHXBypass if no return fan - SAC 05/20/22
+      {  if (IfValidAnd( CSE_AirHandlerRef:oaHXVfDs > 0 ) .AND.
+             LocalStatus( CSE_AirHandlerRef:rfanType ) > 0)
+         then  switch (EnumString( HtRcvryRef:HasHXBypass ))
+                  case "Yes" :  "YES"
+                  default    :  "No"
+               endswitch
+         else  UNCHANGED  endif  }
+
+   "Set AirSys:CSE_AirHandlerRef:ahSOLeak"      AirSys:CSE_AirHandlerRef:ahSOLeak      = {  0  }
+   "Set AirSys:CSE_AirHandlerRef:ahROLeak"      AirSys:CSE_AirHandlerRef:ahROLeak      = {  0  }
+   "Set AirSys:CSE_AirHandlerRef:ahSOLoss"      AirSys:CSE_AirHandlerRef:ahSOLoss      = {  0  }
+   "Set AirSys:CSE_AirHandlerRef:ahROLoss"      AirSys:CSE_AirHandlerRef:ahROLoss      = {  0  }
+
+   "Set caps & flows based on autosizing or fixed sizes based on run being performed"  AirSys:Action =      ; SAC 05/09/22   ; eval only on selected AirSys - SAC 05/23/22
+      {  if (IfValidAnd( Proj:HVACAutoSizing > 0 ) .AND. IfValidAnd( BaseSysNum > 0 ))
+         then  EvalRulelist( "CSE_SimulationPrep_AirSys_AirHandler_Autosize", 1 )
+         else  EvalRulelist( "CSE_SimulationPrep_AirSys_AirHandler_FixedSizes", 1 )  endif  }
+
+   "Set AirSys:CSE_AirHandlerRef:ahpSupHMtr"    AirSys:CSE_AirHandlerRef:ahpSupHMtr    =     ; SAC 05/13/22   ; moved down BELOW size setting rules to handle case where SuppHtgCoil not specified, but capacity IS - SAC 05/23/22
+      {  if (CSE_AirHandlerRef:ahhcType == 4)  ; AHP
+         then  if (IfValidAnd( SupAirSegRef:CoilHtgRef:HtPumpSuppCoilHtgRef:Type == 2 ))        ; Furnace 
+               then       if (Global( Proj:Fuel_HaveNatGas ) > 0.5) then  Global( Proj:CSE_NatGasMETER )
+                     else if (Global( Proj:Fuel_HaveOther  ) > 0.5) then  Global( Proj:CSE_OtherFuelMETER )
+                     else  UNDEFINED  endif endif
+               else if (IfValidAnd( SupAirSegRef:CoilHtgRef:HtPumpSuppCoilHtgRef:Type == 1 ))   ; Resistance
+               then  Global( Proj:CSE_ElecMETER )
+               else if (IfValidAnd( CSE_AirHandlerRef:ahpCapSupH > 0 ))
+               then  if (EnumString( Type ) == "SZDFHP")
+                     then       if (Global( Proj:Fuel_HaveNatGas ) > 0.5) then  Global( Proj:CSE_NatGasMETER )
+                           else if (Global( Proj:Fuel_HaveOther  ) > 0.5) then  Global( Proj:CSE_OtherFuelMETER )
+                           else  UNDEFINED  endif endif
+                     else  Global( Proj:CSE_ElecMETER )
+                     endif
+               else  UNDEFINED  endif endif endif
+         else  UNDEFINED  endif  }
+
+END
+;*************************************************************************
+RULELIST "CSE_SimulationPrep_AirSys_AirHandler_Autosize" 1 0 0 1
+;*************************************************************************
+   "Blast AirSys:CSE_AirHandlerRef:sfanVfDs"       AirSys:CSE_AirHandlerRef:sfanVfDs      = {  UNDEFINED  }
+   "Blast AirSys:CSE_AirHandlerRef:rfanVfDs"       AirSys:CSE_AirHandlerRef:rfanVfDs      = {  UNDEFINED  }
+   "Blast AirSys:CSE_AirHandlerRef:ahhcCapTRat"    AirSys:CSE_AirHandlerRef:ahhcCapTRat   = {  UNDEFINED  }
+   "Blast AirSys:CSE_AirHandlerRef:ahpCap17"       AirSys:CSE_AirHandlerRef:ahpCap17      = {  UNDEFINED  }
+;   "Blast AirSys:CSE_AirHandlerRef:ahpCapRat1747"  AirSys:CSE_AirHandlerRef:ahpCapRat1747 = {  UNDEFINED  }
+   "Blast AirSys:CSE_AirHandlerRef:ahpCapSupH"     AirSys:CSE_AirHandlerRef:ahpCapSupH    = {  UNDEFINED  }
+   "Blast AirSys:CSE_AirHandlerRef:ahccCapTRat"    AirSys:CSE_AirHandlerRef:ahccCapTRat   = {  UNDEFINED  }
+;   "Blast AirSys:CSE_AirHandlerRef:ahccCapSRat"    AirSys:CSE_AirHandlerRef:ahccCapSRat   = {  UNDEFINED  }
+
+   "AirSys:CSE_AirHandlerRef:AUTOSIZE sfanVfDs"       AirSys:CSE_AirHandlerRef:AUTOSIZE_x[1]  = {  "sfanVfDs"  }
+   "AirSys:CSE_AirHandlerRef:AUTOSIZE ahhcCapTRat"    AirSys:CSE_AirHandlerRef:AUTOSIZE_x[2]  = {  "ahhcCapTRat"  }
+   "AirSys:CSE_AirHandlerRef:AUTOSIZE ahccCapTRat"    AirSys:CSE_AirHandlerRef:AUTOSIZE_x[3]  = {  "ahccCapTRat"  }
+   "AirSys:CSE_AirHandlerRef:AUTOSIZE rfanVfDs"       AirSys:CSE_AirHandlerRef:AUTOSIZE_x[4]  =
+      {  if (LocalStatus( CSE_AirHandlerRef:rfanType ) > 0)
+         then  "rfanVfDs"  else  UNDEFINED  endif  }
+
+   "Set AirSys:CSE_AirHandlerRef:ahccVfRperTon" AirSys:CSE_AirHandlerRef:ahccVfRperTon =
+      {  if (IfValidAnd( CSE_AirHandlerRef:ahccType > 0 ))   ; != "None"
+         then  400  else  UNDEFINED  endif  }   ; was 350 - SAC 05/13/22
+
+   "Set AirSys:CSE_AirHandlerRef:ahFxVfFan"     AirSys:CSE_AirHandlerRef:ahFxVfFan  = {  1.0  }    ; SAC 05/25/22
+   "Set AirSys:CSE_AirHandlerRef:ahhcFxCap"     AirSys:CSE_AirHandlerRef:ahhcFxCap  = {  1.0  } 
+   "Set AirSys:CSE_AirHandlerRef:ahccFxCap"     AirSys:CSE_AirHandlerRef:ahccFxCap  = {  1.0  } 
+END
+;*************************************************************************
+RULELIST "CSE_SimulationPrep_AirSys_AirHandler_FixedSizes" 1 0 0 1
+;*************************************************************************
+   "Blast AirSys:CSE_AirHandlerRef:AUTOSIZE sfanVfDs"       AirSys:CSE_AirHandlerRef:AUTOSIZE_x[1]  = {  UNDEFINED  }
+   "Blast AirSys:CSE_AirHandlerRef:AUTOSIZE ahhcCapTRat"    AirSys:CSE_AirHandlerRef:AUTOSIZE_x[2]  = {  UNDEFINED  }
+   "Blast AirSys:CSE_AirHandlerRef:AUTOSIZE ahccCapTRat"    AirSys:CSE_AirHandlerRef:AUTOSIZE_x[3]  = {  UNDEFINED  }
+   "Blast AirSys:CSE_AirHandlerRef:AUTOSIZE rfanVfDs"       AirSys:CSE_AirHandlerRef:AUTOSIZE_x[4]  = {  UNDEFINED  }
+   "Blast AirSys:CSE_AirHandlerRef:ahFxVfFan"      AirSys:CSE_AirHandlerRef:ahFxVfFan  = {  UNDEFINED  }    ; SAC 05/25/22
+   "Blast AirSys:CSE_AirHandlerRef:ahhcFxCap"      AirSys:CSE_AirHandlerRef:ahhcFxCap  = {  UNDEFINED  } 
+   "Blast AirSys:CSE_AirHandlerRef:ahccFxCap"      AirSys:CSE_AirHandlerRef:ahccFxCap  = {  UNDEFINED  } 
+
+   "Set AirSys:CSE_AirHandlerRef:sfanVfDs"      AirSys:CSE_AirHandlerRef:sfanVfDs      =     ; added logic to prevent sfanVfDs from being < oaVfDsMn - SAC 05/14/22
+      {  max( ValidOr( SupFanCap, 0 ), ValidOr( SysVentFlow, 0 ) )  }
+
+   "Set AirSys:CSE_AirHandlerRef:rfanVfDs"      AirSys:CSE_AirHandlerRef:rfanVfDs      =
+      {  if (IfValidAnd( RetFanCap > 0 ))
+         then  RetFanCap  else  UNDEFINED  endif  }
+
+   "Set AirSys:CSE_AirHandlerRef:ahpCap17"      AirSys:CSE_AirHandlerRef:ahpCap17      =        ; SAC 05/21/22
+      {  if (CSE_AirHandlerRef:ahhcType == 4 .AND.    ; AHP
+             IfValidAnd( SupAirSegRef:CoilHtgRef:CapTotGrossRtd17Sim > 0 ))
+         then  SupAirSegRef:CoilHtgRef:CapTotGrossRtd17Sim
+         else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:ahhcCapTRat"   AirSys:CSE_AirHandlerRef:ahhcCapTRat   = 
+      {  if (IfValidAnd( SupAirSegRef:CoilHtgRef:CapTotGrossRtdSim > 0 ))
+         then  SupAirSegRef:CoilHtgRef:CapTotGrossRtdSim
+         else  UNDEFINED  endif  }
+      ;{  if (CSE_AirHandlerRef:ahhcType == 4 .AND.    ; AHP      ; ALWAYS use CapTotGrossRtdSim to include net-to-gross, even for HPs ???
+      ;       IfValidAnd( SupAirSegRef:HtPumpCap > 0 ))
+      ;   then  SupAirSegRef:HtPumpCap
+
+;   "Set AirSys:CSE_AirHandlerRef:ahpCapRat1747"    AirSys:CSE_AirHandlerRef:ahpCapRat1747    =     ; --TO DO-- replace w/ value based on E+ AHP Cap curve
+;      {  if (CSE_AirHandlerRef:ahhcType == 4)  ; AHP
+;         then  if (IfValidAnd( SupAirSegRef:CoilHtgRef:CapTotGrossRtdSim > 0 ))
+;               then  0.6184    ; CSE default
+;               else  UNDEFINED  endif
+;         else  UNDEFINED  endif  }
+
+   "Set AirSys:CSE_AirHandlerRef:ahpCapSupH"    AirSys:CSE_AirHandlerRef:ahpCapSupH    =     ; SAC 05/13/22
+      {  if (CSE_AirHandlerRef:ahhcType == 4)  ; AHP
+         then  if (IfValidAnd( SupAirSegRef:CoilHtgRef:HtPumpSuppCoilHtgRef:CapTotGrossRtdSim > 0 ))
+               then  SupAirSegRef:CoilHtgRef:HtPumpSuppCoilHtgRef:CapTotGrossRtdSim
+               else if ((ValidOr( SupAirSegRef:HtgCap, 0 ) - 
+                         ValidOr( SupAirSegRef:HtPumpCap, 0 )) > 0)
+               then  SupAirSegRef:HtgCap - SupAirSegRef:HtPumpCap
+               else if (IfValidAnd( SupAirSegRef:CoilHtgRef:CapTotGrossRtdSim > 0 ))
+               then  SupAirSegRef:CoilHtgRef:CapTotGrossRtdSim
+               else  UNDEFINED  endif endif endif
+         else  UNDEFINED  endif  }
+
+   ; CRANKCASE HEATER
+   "Set AirSys:CSE_AirHandlerRef:cchCM_x"       AirSys:CSE_AirHandlerRef:cchCM_x   =      ; SAC 05/17/22
+      {  if (CSE_AirHandlerRef:ahhcType == 4 .AND.    ; AHP
+             IfValidAnd( SupAirSegRef:CoilHtgRef:HtPumpCrankcaseHtrCapSim > 0 ))
+         then  "TSTAT"
+         else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:cchPMx"        AirSys:CSE_AirHandlerRef:cchPMx    =
+      {  if (CSE_AirHandlerRef:ahhcType == 4 .AND.    ; AHP
+             IfValidAnd( SupAirSegRef:CoilHtgRef:HtPumpCrankcaseHtrCapSim > 0 ))
+         then  SupAirSegRef:CoilHtgRef:HtPumpCrankcaseHtrCapSim / 3412.0
+         else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:cchTOn"        AirSys:CSE_AirHandlerRef:cchTOn    =
+      {  if (CSE_AirHandlerRef:ahhcType == 4 .AND.    ; AHP
+             IfValidAnd( SupAirSegRef:CoilHtgRef:HtPumpCrankcaseHtrCapSim > 0 ) .AND.
+             IfValidAnd( SupAirSegRef:CoilHtgRef:HtPumpCrankcaseCtrlTemp > 0 ))
+         then  SupAirSegRef:CoilHtgRef:HtPumpCrankcaseCtrlTemp
+         else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:cchMtr"        AirSys:CSE_AirHandlerRef:cchMtr    =      ; SAC 05/23/22
+      {  if (CSE_AirHandlerRef:ahhcType == 4 .AND.    ; AHP
+             IfValidAnd( SupAirSegRef:CoilHtgRef:HtPumpCrankcaseHtrCapSim > 0 ))
+         then  Global( Proj:CSE_ElecMETER )
+         else  UNDEFINED  endif  }
+
+   "Set AirSys:CSE_AirHandlerRef:ahccCapTRat"   AirSys:CSE_AirHandlerRef:ahccCapTRat   =
+      {  if (IfValidAnd( SupAirSegRef:CoilClgRef:CapTotGrossRtdSim > 0 ))
+         then  SupAirSegRef:CoilClgRef:CapTotGrossRtdSim
+         else  UNDEFINED  endif  }
+;   "Set AirSys:CSE_AirHandlerRef:ahccCapSRat"   AirSys:CSE_AirHandlerRef:ahccCapSRat   =     ; later not required??
+;      {  if (IfValidAnd( CSE_AirHandlerRef:ahccCapTRat > 0 ))
+;         then  CSE_AirHandlerRef:ahccCapTRat * 0.7
+;         else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:ahccVfRperTon" AirSys:CSE_AirHandlerRef:ahccVfRperTon =
+      {  if (IfValidAnd( CSE_AirHandlerRef:ahccType > 0 ))   ; != "None"
+         then  400
+         else  UNDEFINED  endif  }   ; was: SupFanCap / (CSE_AirHandlerRef:ahccCapTRat / 12000) - SAC 05/13/22
+
+
+      ;     1,           "pydxCaptT",         BEMP_Flt,  6,  1,  1,  Pres,  "coefs",            0,  0,                          3208, "Coefficients of biquadratic polynomial function of entering air WB and condenser temps, used to adjust ahccCaptRat for the actual entering air temp",  ""   ; SAC 05/21/22
+      ;        Cap_fTempCrvRef = RVal: "CoilClgDXQRatio_fTwbToadbIP"
+      ;     CrvDblQuad     "CoilClgDXQRatio_fTwbToadbIP"                                    Coef1 =  0.8740302  Coef2 =  -0.0011416  Coef3 =  0.0001711  Coef4 = -0.002957  Coef5 =  0.0000102  Coef6 = -0.0000592  
+      ;                                                                                     MaxOut = 1.290   MinOut = 0.770   MaxVar1 = 77.000   MinVar1 = 57.000   MaxVar2 = 115.000   MinVar2 = 75.000   
+   "Set AirSys:CSE_AirHandlerRef:pydxCaptT[1]"  AirSys:CSE_AirHandlerRef:pydxCaptT[1]  =        ; SAC 05/21/22
+      {  if (IfValidAnd( SupAirSegRef:CoilClgRef:Cap_fTempCrvRef:Coef1 > -999 ) .AND.
+             IfValidAnd( SupAirSegRef:CoilClgRef:Cap_fTempCrvRef:Coef2 > -999 ) .AND.
+             IfValidAnd( SupAirSegRef:CoilClgRef:Cap_fTempCrvRef:Coef3 > -999 ) .AND.
+             IfValidAnd( SupAirSegRef:CoilClgRef:Cap_fTempCrvRef:Coef4 > -999 ) .AND.
+             IfValidAnd( SupAirSegRef:CoilClgRef:Cap_fTempCrvRef:Coef5 > -999 ) .AND.
+             IfValidAnd( SupAirSegRef:CoilClgRef:Cap_fTempCrvRef:Coef6 > -999 ))
+         then  SupAirSegRef:CoilClgRef:Cap_fTempCrvRef:Coef1  else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:pydxCaptT[2]"  AirSys:CSE_AirHandlerRef:pydxCaptT[2]  = 
+      {  if (IfValidAnd( CSE_AirHandlerRef:pydxCaptT[1] > -999 ))
+         then  SupAirSegRef:CoilClgRef:Cap_fTempCrvRef:Coef2  else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:pydxCaptT[3]"  AirSys:CSE_AirHandlerRef:pydxCaptT[3]  = 
+      {  if (IfValidAnd( CSE_AirHandlerRef:pydxCaptT[1] > -999 ))
+         then  SupAirSegRef:CoilClgRef:Cap_fTempCrvRef:Coef3  else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:pydxCaptT[4]"  AirSys:CSE_AirHandlerRef:pydxCaptT[4]  = 
+      {  if (IfValidAnd( CSE_AirHandlerRef:pydxCaptT[1] > -999 ))
+         then  SupAirSegRef:CoilClgRef:Cap_fTempCrvRef:Coef4  else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:pydxCaptT[5]"  AirSys:CSE_AirHandlerRef:pydxCaptT[5]  = 
+      {  if (IfValidAnd( CSE_AirHandlerRef:pydxCaptT[1] > -999 ))
+         then  SupAirSegRef:CoilClgRef:Cap_fTempCrvRef:Coef5  else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:pydxCaptT[6]"  AirSys:CSE_AirHandlerRef:pydxCaptT[6]  = 
+      {  if (IfValidAnd( CSE_AirHandlerRef:pydxCaptT[1] > -999 ))
+         then  SupAirSegRef:CoilClgRef:Cap_fTempCrvRef:Coef6  else  UNDEFINED  endif  }
+
+; Not translating - CBECC curve is same as CSE, but different curve types (cubic vs. quad), so CBECC's won't work directly - SAC 05/21/22
+;      ;     1,           "pydxCaptF",         BEMP_Flt,  4,  1,  1,  Pres,  "coefs",            0,  0,                          3208, "Coefficients of cubic polynomial function of relative flow (entering air cfm/ahccVfR), used to adjust ahccCaptRat for the actual flow",  ""    
+;      ;        Cap_fFlowCrvRef = RVal: "CoilClgDXSnglQRatio_fCFMRatio"
+;      ;     CrvCubic       "CoilClgDXDblQRatio_fCFMRatio"                                   Coef1 =  0.472786  Coef2 =  1.243342  Coef3 = -1.038706  Coef4 =  0.322578    MinOut = 0.470   
+;   "Set AirSys:CSE_AirHandlerRef:pydxCaptF[1]"  AirSys:CSE_AirHandlerRef:pydxCaptF[1]  =        ; SAC 05/21/22
+;      {  if (IfValidAnd( SupAirSegRef:CoilClgRef:Cap_fFlowCrvRef:Coef1 > -999 ) .AND.
+;             IfValidAnd( SupAirSegRef:CoilClgRef:Cap_fFlowCrvRef:Coef2 > -999 ) .AND.
+;             IfValidAnd( SupAirSegRef:CoilClgRef:Cap_fFlowCrvRef:Coef3 > -999 ) .AND.
+;             IfValidAnd( SupAirSegRef:CoilClgRef:Cap_fFlowCrvRef:Coef4 > -999 ))
+;         then  SupAirSegRef:CoilClgRef:Cap_fFlowCrvRef:Coef1  else  UNDEFINED  endif  }
+;   "Set AirSys:CSE_AirHandlerRef:pydxCaptF[2]"  AirSys:CSE_AirHandlerRef:pydxCaptF[2]  = 
+;      {  if (IfValidAnd( CSE_AirHandlerRef:pydxCaptF[1] > -999 ))
+;         then  SupAirSegRef:CoilClgRef:Cap_fFlowCrvRef:Coef2  else  UNDEFINED  endif  }
+;   "Set AirSys:CSE_AirHandlerRef:pydxCaptF[3]"  AirSys:CSE_AirHandlerRef:pydxCaptF[3]  = 
+;      {  if (IfValidAnd( CSE_AirHandlerRef:pydxCaptF[1] > -999 ))
+;         then  SupAirSegRef:CoilClgRef:Cap_fFlowCrvRef:Coef3  else  UNDEFINED  endif  }
+;   "Set AirSys:CSE_AirHandlerRef:pydxCaptF[4]"  AirSys:CSE_AirHandlerRef:pydxCaptF[4]  = 
+;      {  if (IfValidAnd( CSE_AirHandlerRef:pydxCaptF[1] > -999 ))
+;         then  SupAirSegRef:CoilClgRef:Cap_fFlowCrvRef:Coef4  else  UNDEFINED  endif  }
+
+      ;     1,           "pydxEirT",          BEMP_Flt,  6,  1,  1,  Pres,  "coefs",            0,  0,                          3208, "Coefficients of biquadratic polynomial function of entering air WB and condenser temps, used to adjust ahccEirR for the actual entering air temp",  ""    
+      ;        DXEIR_fTempCrvRef = RVal: "CoilClgDXEIRRatio_fTwbToadbIP"
+      ;     CrvDblQuad     "CoilClgDXEIRRatio_fTwbToadbIP"                                  Coef1 =  -1.063931  Coef2 =  0.0306584  Coef3 = -0.0001269  Coef4 =  0.0154213  Coef5 =  0.0000497  Coef6 = -0.0002096  
+      ;                                                                                     MaxOut = 1.330   MinOut = 0.770   MaxVar1 = 77.000   MinVar1 = 57.000   MaxVar2 = 115.000   MinVar2 = 75.000   
+   "Set AirSys:CSE_AirHandlerRef:pydxEirT[1]"   AirSys:CSE_AirHandlerRef:pydxEirT[1]  =         ; SAC 05/21/22
+      {  if (IfValidAnd( SupAirSegRef:CoilClgRef:DXEIR_fTempCrvRef:Coef1 > -999 ) .AND.
+             IfValidAnd( SupAirSegRef:CoilClgRef:DXEIR_fTempCrvRef:Coef2 > -999 ) .AND.
+             IfValidAnd( SupAirSegRef:CoilClgRef:DXEIR_fTempCrvRef:Coef3 > -999 ) .AND.
+             IfValidAnd( SupAirSegRef:CoilClgRef:DXEIR_fTempCrvRef:Coef4 > -999 ) .AND.
+             IfValidAnd( SupAirSegRef:CoilClgRef:DXEIR_fTempCrvRef:Coef5 > -999 ) .AND.
+             IfValidAnd( SupAirSegRef:CoilClgRef:DXEIR_fTempCrvRef:Coef6 > -999 ))
+         then  SupAirSegRef:CoilClgRef:DXEIR_fTempCrvRef:Coef1  else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:pydxEirT[2]"   AirSys:CSE_AirHandlerRef:pydxEirT[2]  = 
+      {  if (IfValidAnd( CSE_AirHandlerRef:pydxEirT[1] > -999 ))
+         then  SupAirSegRef:CoilClgRef:DXEIR_fTempCrvRef:Coef2  else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:pydxEirT[3]"   AirSys:CSE_AirHandlerRef:pydxEirT[3]  = 
+      {  if (IfValidAnd( CSE_AirHandlerRef:pydxEirT[1] > -999 ))
+         then  SupAirSegRef:CoilClgRef:DXEIR_fTempCrvRef:Coef3  else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:pydxEirT[4]"   AirSys:CSE_AirHandlerRef:pydxEirT[4]  = 
+      {  if (IfValidAnd( CSE_AirHandlerRef:pydxEirT[1] > -999 ))
+         then  SupAirSegRef:CoilClgRef:DXEIR_fTempCrvRef:Coef4  else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:pydxEirT[5]"   AirSys:CSE_AirHandlerRef:pydxEirT[5]  = 
+      {  if (IfValidAnd( CSE_AirHandlerRef:pydxEirT[1] > -999 ))
+         then  SupAirSegRef:CoilClgRef:DXEIR_fTempCrvRef:Coef5  else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:pydxEirT[6]"   AirSys:CSE_AirHandlerRef:pydxEirT[6]  = 
+      {  if (IfValidAnd( CSE_AirHandlerRef:pydxEirT[1] > -999 ))
+         then  SupAirSegRef:CoilClgRef:DXEIR_fTempCrvRef:Coef6  else  UNDEFINED  endif  }
+
+      ;     1,           "pydxEirUl",         BEMP_Flt,  4,  1,  1,  Pres,  "coefs",            0,  0,                          3208, "Coefficients of cubic polynomial function of part load ratio used to adjust energy input to part load conditions, in the compressor unloading part load region (1 ≥ plr ≥ ahccMinUnldPlr)",  ""    
+      ;        DXEIR_fPLRCrvRef = RVal: "CoilClgDXEIRRatio_fQRatio"
+      ;     CrvCubic       "CoilClgDXEIRRatio_fQRatio"                                      Coef1 =  0.201230  Coef2 = -0.031218  Coef3 =  1.950498  Coef4 = -1.120511     MinOut = 0.200   
+   "Set AirSys:CSE_AirHandlerRef:pydxEirUl[1]"  AirSys:CSE_AirHandlerRef:pydxEirUl[1]  =        ; SAC 05/21/22
+      {  if (IfValidAnd( SupAirSegRef:CoilClgRef:DXEIR_fPLRCrvRef:Coef1 > -999 ) .AND.
+             IfValidAnd( SupAirSegRef:CoilClgRef:DXEIR_fPLRCrvRef:Coef2 > -999 ) .AND.
+             IfValidAnd( SupAirSegRef:CoilClgRef:DXEIR_fPLRCrvRef:Coef3 > -999 ) .AND.
+             IfValidAnd( SupAirSegRef:CoilClgRef:DXEIR_fPLRCrvRef:Coef4 > -999 ))
+         then  SupAirSegRef:CoilClgRef:DXEIR_fPLRCrvRef:Coef1
+         else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:pydxEirUl[2]"  AirSys:CSE_AirHandlerRef:pydxEirUl[2]  = 
+      {  if (IfValidAnd( CSE_AirHandlerRef:pydxEirUl[1] > -999 ))
+         then  SupAirSegRef:CoilClgRef:DXEIR_fPLRCrvRef:Coef2
+         else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:pydxEirUl[3]"  AirSys:CSE_AirHandlerRef:pydxEirUl[3]  = 
+      {  if (IfValidAnd( CSE_AirHandlerRef:pydxEirUl[1] > -999 ))
+         then  SupAirSegRef:CoilClgRef:DXEIR_fPLRCrvRef:Coef3
+         else  UNDEFINED  endif  }
+   "Set AirSys:CSE_AirHandlerRef:pydxEirUl[4]"  AirSys:CSE_AirHandlerRef:pydxEirUl[4]  = 
+      {  if (IfValidAnd( CSE_AirHandlerRef:pydxEirUl[1] > -999 ))
+         then  SupAirSegRef:CoilClgRef:DXEIR_fPLRCrvRef:Coef4
+         else  UNDEFINED  endif  }
+
+END
+;*************************************************************************
+
+
+;*************************************************************************
+RULELIST "CSE_SimulationPrep_ResOtherZn_Terminal" 1 0 0 1
+;*************************************************************************
+   "Set ResOtherZn:CSE_TerminalRef:tuAh"     ResOtherZn:CSE_TerminalRef:tuAh     =
+      {  if (LocalCompAssigned( ActiveHVACSystem ) == ComponentType( "AirSys" ))
+         then  ActiveHVACSystem:CSE_AirHandlerRef:Name
+         else  UNCHANGED  endif  }
+
+  "Set ResOtherZn:CSE_TerminalRef:tuTH"   ResOtherZn:CSE_TerminalRef:tuTH      =  { 68 }   ; based on original rule: ResOtherZn:CSE_ZONE:znTH_x - SAC 04/26/22
+;  "Set ResOtherZn:CSE_TerminalRef:tuTH_x"   ResOtherZn:CSE_TerminalRef:tuTH_x      =     ; based on original rule: ResOtherZn:CSE_ZONE:znTH_x - SAC 04/26/22
+;     {	if (UseTstatIncFile > 0.5) then  UNDEFINED
+;        else if ( ZnModel != 3 .OR. LocalStatus( HtgSetptSchRef ) < 1) then  UNDEFINED
+;        else if (IfValidAnd( HtgSetptSchRef:NumWeeks = 1 )==0 .OR. LocalCompAssigned( HtgSetptSchRef:SchWeekRef[1]:SchDaySunRef ) < 1 .OR. 
+;                          LocalCompAssigned( HtgSetptSchRef:SchWeekRef[1]:SchDaySatRef ) < 1 .OR. 
+;                          LocalCompAssigned( HtgSetptSchRef:SchWeekRef[1]:SchDayHolRef ) < 1 .OR. 
+;                          LocalCompAssigned( HtgSetptSchRef:SchWeekRef[1]:SchDayMonRef ) < 1 )
+;        then  PostError( "Invalid HtgSetptSchRef for OtherZone '%s'.", Name )
+;        else  Format("select( $DOWH==1, hourval(%s), $DOWH==8, hourval(%s), $DOWH==7, hourval(%s), default hourval(%s) )",
+;                        SchDayHoursString( HtgSetptSchRef:SchWeekRef[1]:SchDaySunRef ), SchDayHoursString( HtgSetptSchRef:SchWeekRef[1]:SchDayHolRef ),
+;                        SchDayHoursString( HtgSetptSchRef:SchWeekRef[1]:SchDaySatRef ), SchDayHoursString( HtgSetptSchRef:SchWeekRef[1]:SchDayMonRef ) )
+;        endif endif endif  }
+
+   "Set ResOtherZn:CSE_TerminalRef:tuTC"   ResOtherZn:CSE_TerminalRef:tuTC      =  { 78 }   ; based on original rule: ResOtherZn:CSE_ZONE:znTC_x - SAC 04/26/22
+;   "Set ResOtherZn:CSE_TerminalRef:tuTC_x"   ResOtherZn:CSE_TerminalRef:tuTC_x      =     ; based on original rule: ResOtherZn:CSE_ZONE:znTC_x - SAC 04/26/22
+;     {	if (UseTstatIncFile > 0.5) then  UNDEFINED
+;        else if ( ZnModel != 3 .OR. LocalStatus( ClgSetptSchRef ) < 1) then  UNDEFINED
+;        else if (IfValidAnd( ClgSetptSchRef:NumWeeks = 1 )==0 .OR. LocalCompAssigned( ClgSetptSchRef:SchWeekRef[1]:SchDaySunRef ) < 1 .OR. 
+;                          LocalCompAssigned( ClgSetptSchRef:SchWeekRef[1]:SchDaySatRef ) < 1 .OR. 
+;                          LocalCompAssigned( ClgSetptSchRef:SchWeekRef[1]:SchDayHolRef ) < 1 .OR. 
+;                          LocalCompAssigned( ClgSetptSchRef:SchWeekRef[1]:SchDayMonRef ) < 1 )
+;        then  PostError( "Invalid ClgSetptSchRef for OtherZone '%s'.", Name )
+;        else  Format("select( $DOWH==1, hourval(%s), $DOWH==8, hourval(%s), $DOWH==7, hourval(%s), default hourval(%s) )",
+;                        SchDayHoursString( ClgSetptSchRef:SchWeekRef[1]:SchDaySunRef ), SchDayHoursString( ClgSetptSchRef:SchWeekRef[1]:SchDayHolRef ),
+;                        SchDayHoursString( ClgSetptSchRef:SchWeekRef[1]:SchDaySatRef ), SchDayHoursString( ClgSetptSchRef:SchWeekRef[1]:SchDayMonRef ) )
+;        endif endif endif  }
+
+   "Set ResOtherZn:CSE_TerminalRef:tuSRLeak"    ResOtherZn:CSE_TerminalRef:tuSRLeak    = {    0.0  }  ; no duct leaks
+
+;"dbg"  ResOtherZn:Action = {  PostMessageToLog( "  evaluating 'CSE_SimulationPrep_ResOtherZn_Terminal' - ResOtherZn '%s':  Proj:HVACAutoSizing %g  /  ActiveHVACSystem:BaseSysNum %g", Name, Proj:HVACAutoSizing, ValidOr( ActiveHVACSystem:BaseSysNum, -1 ) )  }
+   "Set flows based on autosizing or fixed sizes based on run being performed"   ResOtherZn:Action =     ; SAC 05/09/22
+      {  if (IfValidAnd( Proj:HVACAutoSizing > 0 ) .AND.
+             IfValidAnd( ActiveHVACSystem:BaseSysNum > 0 ))
+         then  EvalRulelist( "CSE_SimulationPrep_ResOtherZn_Terminal_Autosize", 1 )
+         else  EvalRulelist( "CSE_SimulationPrep_ResOtherZn_Terminal_FixedSizes", 1 )  endif  }
+END
+;*************************************************************************
+RULELIST "CSE_SimulationPrep_ResOtherZn_Terminal_Autosize" 1 0 0 1
+;*************************************************************************
+;"dbg"  ResOtherZn:Action = {  PostMessageToLog( "  evaluating 'CSE_SimulationPrep_ResOtherZn_Terminal_Autosize' rulelist on ResOtherZn '%s'", Name )  }
+   "Blast ResOtherZn:CSE_TerminalRef:tuVfMxC"      ResOtherZn:CSE_TerminalRef:tuVfMxC        = {  UNDEFINED  }
+   "Blast ResOtherZn:CSE_TerminalRef:tuVfMxH"      ResOtherZn:CSE_TerminalRef:tuVfMxH        = {  UNDEFINED  }
+   "Blast ResOtherZn:CSE_TerminalRef:tuVfMn"       ResOtherZn:CSE_TerminalRef:tuVfMn         = {  UNDEFINED  }
+   "Blast ResOtherZn:CSE_TerminalRef:tuVfMxHC_x"   ResOtherZn:CSE_TerminalRef:tuVfMxHC_x     = {  UNDEFINED  }
+
+   "ResOtherZn:CSE_TerminalRef:AUTOSIZE tuVfMxC"   ResOtherZn:CSE_TerminalRef:AUTOSIZE_x[1]  = {  "tuVfMxC"  }
+   "ResOtherZn:CSE_TerminalRef:AUTOSIZE tuVfMxH"   ResOtherZn:CSE_TerminalRef:AUTOSIZE_x[2]  = {  "tuVfMxH"  }
+   "ResOtherZn:CSE_TerminalRef:AUTOSIZE tuVfMn"    ResOtherZn:CSE_TerminalRef:AUTOSIZE_x[3]  = {  "tuVfMn"   }
+
+   "Set ResOtherZn:CSE_TerminalRef:tuVfMxHC_x"     ResOtherZn:CSE_TerminalRef:tuVfMxHC_x     = {  "SAME"  }
+   "Set ResOtherZn:CSE_TerminalRef:tuFxVfHC"       ResOtherZn:CSE_TerminalRef:tuFxVfHC       = {  1.0  }       ; SAC 05/25/22
+;   "Set ResOtherZn:CSE_TerminalRef:tuhcFxCap"      ResOtherZn:CSE_TerminalRef:tuhcFxCap      = {  1.0  }   - throws error is terminal coils not autosized
+END
+;*************************************************************************
+RULELIST "CSE_SimulationPrep_ResOtherZn_Terminal_FixedSizes" 1 0 0 1
+;*************************************************************************
+;"dbg"  ResOtherZn:Action = {  PostMessageToLog( "  evaluating 'CSE_SimulationPrep_ResOtherZn_Terminal_FixedSizes' rulelist on ResOtherZn '%s'", Name )  }
+   "Blast ResOtherZn:CSE_TerminalRef:AUTOSIZE tuVfMxC"   ResOtherZn:CSE_TerminalRef:AUTOSIZE_x[1]  = {  UNDEFINED  }
+   "Blast ResOtherZn:CSE_TerminalRef:AUTOSIZE tuVfMxH"   ResOtherZn:CSE_TerminalRef:AUTOSIZE_x[2]  = {  UNDEFINED  }
+   "Blast ResOtherZn:CSE_TerminalRef:AUTOSIZE tuVfMn"    ResOtherZn:CSE_TerminalRef:AUTOSIZE_x[3]  = {  UNDEFINED  }
+   "Blast ResOtherZn:CSE_TerminalRef:tuVfMxHC_x"         ResOtherZn:CSE_TerminalRef:tuVfMxHC_x     = {  UNDEFINED  }
+   "Blast ResOtherZn:CSE_TerminalRef:tuFxVfHC"           ResOtherZn:CSE_TerminalRef:tuFxVfHC       = {  UNDEFINED  }       ; SAC 05/25/22
+   "Blast ResOtherZn:CSE_TerminalRef:tuhcFxCap"          ResOtherZn:CSE_TerminalRef:tuhcFxCap      = {  UNDEFINED  }
+
+   "Set ResOtherZn:CSE_TerminalRef:tuVfMxC"     ResOtherZn:CSE_TerminalRef:tuVfMxC     =     ; was hirdwired to:  567.5  }
+      {  if (IfValidAnd( TrmlUnitRef:PriAirFlowMax > 0 ))
+         then  TrmlUnitRef:PriAirFlowMax  else  UNDEFINED  endif  }
+   "Set ResOtherZn:CSE_TerminalRef:tuVfMxH"     ResOtherZn:CSE_TerminalRef:tuVfMxH     =     ; was hirdwired to:  567.5  }
+      {  if (IfValidAnd( TrmlUnitRef:PriAirFlowMax > 0 ))
+         then  TrmlUnitRef:PriAirFlowMax  else  UNDEFINED  endif  }
+   "Set ResOtherZn:CSE_TerminalRef:tuVfMn"      ResOtherZn:CSE_TerminalRef:tuVfMn      =     ; omitted for cycling fan
+      {  if (IfValidAnd( ActiveHVACSystem:FanCtrl = 1 ) .AND.   ; continuous
+             IfValidAnd( TrmlUnitRef:PriAirFlowMax > 0 ))
+         then  TrmlUnitRef:PriAirFlowMax
+         else if (IfValidAnd( ActiveHVACSystem:FanCtrl != 1 ) .AND.   ; not continuous (?)
+                  IfValidAnd( TrmlUnitRef:PriAirFlowMin > 0 ))
+         then  TrmlUnitRef:PriAirFlowMin
+         else  UNDEFINED  endif endif  }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "Create_ResOtherZn_AirSys" 1 0 1 0
+;*************************************************************************
+   "Set ResOtherZn:AirSys_NameRoot (if not already set)"    ResOtherZn:AirSys_NameRoot  =
+      {  if (LocalStatus( AirSys_NameRoot ) < 1) then  substr( Name, 0, 16 )
+         else  UNCHANGED  endif  }
+
+   "Create AirSys for ResOtherZn:ASWiz_AirSysRef"     ResOtherZn:ASWiz_AirSysRef =
+      {  CreateComp( AirSys, AirSys_NameRoot + " AirSys" )  }
+   "Set AirSys:Parent"        ResOtherZn:ASWiz_AirSysRef:Parent = {  Global( Bldg:Name )  }
+
+;   "Set AirSys:Type"          ResOtherZn:ASWiz_AirSysRef:Type        = {  "SZAC"  }
+   "Set AirSys:Type"          ResOtherZn:ASWiz_AirSysRef:Type        = {  EnumString( AirSys_Type )  }
+   "Set AirSys:CtrlZnRef"     ResOtherZn:ASWiz_AirSysRef:CtrlZnRef   = {  Name  }
+
+   "Create ResOtherZn:ASWiz_AirSysRef:SupAirSegRef"      ResOtherZn:ASWiz_AirSysRef:SupAirSegRef =
+      {  CreateComp( AirSeg, AirSys_NameRoot + " SupAirSeg" )  }
+   "Set ResOtherZn:ASWiz_AirSysRef:SupAirSegRef:Parent"  ResOtherZn:ASWiz_AirSysRef:SupAirSegRef:Parent = {  ASWiz_AirSysRef:Name  }
+   "Set ResOtherZn:ASWiz_AirSysRef:SupAirSegRef:Type"    ResOtherZn:ASWiz_AirSysRef:SupAirSegRef:Type   = {  "Supply"  }
+
+   "Create ResOtherZn:ASWiz_AirSysRef:SupAirSegRef:CoilClgRef"       ResOtherZn:ASWiz_AirSysRef:SupAirSegRef:CoilClgRef =
+      {  CreateComp( CoilClg, AirSys_NameRoot + " ClgCoil" )  }
+   "Set ResOtherZn:ASWiz_AirSysRef:SupAirSegRef:CoilClgRef:Parent"   ResOtherZn:ASWiz_AirSysRef:SupAirSegRef:CoilClgRef:Parent = {  ASWiz_AirSysRef:SupAirSegRef:Name  }
+   "Set ResOtherZn:ASWiz_AirSysRef:SupAirSegRef:CoilClgRef:Type"     ResOtherZn:ASWiz_AirSysRef:SupAirSegRef:CoilClgRef:Type   = {  "DirectExpansion"  }
+
+   "Create ResOtherZn:ASWiz_AirSysRef:SupAirSegRef:CoilHtgRef"       ResOtherZn:ASWiz_AirSysRef:SupAirSegRef:CoilHtgRef =
+      {  CreateComp( CoilHtg, AirSys_NameRoot + " HtgCoil" )  }
+   "Set ResOtherZn:ASWiz_AirSysRef:SupAirSegRef:CoilHtgRef:Parent"   ResOtherZn:ASWiz_AirSysRef:SupAirSegRef:CoilHtgRef:Parent = {  ASWiz_AirSysRef:SupAirSegRef:Name  }
+   "Set ResOtherZn:ASWiz_AirSysRef:SupAirSegRef:CoilHtgRef:Type"     ResOtherZn:ASWiz_AirSysRef:SupAirSegRef:CoilHtgRef:Type   =
+      {  if (AirSys_Type ==  4 .OR. AirSys_Type == 13 .OR.     ; SZHP, SZDFHP or SPVHP
+             AirSys_Type == 10 )
+         then  "HeatPump"
+         else if (AirSys_HtgType == 1)
+         then  "Resistance"
+         else  "Furnace"  endif endif  }
+
+   "Create ResOtherZn:ASWiz_AirSysRef:SupAirSegRef:CoilHtgRef:HtPumpSuppCoilHtgRef"    ResOtherZn:ASWiz_AirSysRef:SupAirSegRef:CoilHtgRef:HtPumpSuppCoilHtgRef =
+      {  if (AirSys_Type ==  4 .OR. AirSys_Type == 13 .OR.     ; SZHP, SZDFHP or SPVHP
+             AirSys_Type == 10 )
+         then  CreateComp( CoilHtg, AirSys_NameRoot + " HPSuppHtgCoil" )  else  UNDEFINED  endif  }
+   "Set ResOtherZn:ASWiz_AirSysRef:SupAirSegRef:CoilHtgRef:HtPumpSuppCoilHtgRef:Parent"   ResOtherZn:ASWiz_AirSysRef:SupAirSegRef:CoilHtgRef:HtPumpSuppCoilHtgRef:Parent = {  ASWiz_AirSysRef:SupAirSegRef:Name  }
+   "Set ResOtherZn:ASWiz_AirSysRef:SupAirSegRef:CoilHtgRef:HtPumpSuppCoilHtgRef:Type"     ResOtherZn:ASWiz_AirSysRef:SupAirSegRef:CoilHtgRef:HtPumpSuppCoilHtgRef:Type   =
+      {  if (AirSys_Type == 13)     ; SZDFHP
+         then  "Furnace"
+         else  "Resistance"  endif  }
+
+   "Create ResOtherZn:ASWiz_AirSysRef:SupAirSegRef:FanRef"       ResOtherZn:ASWiz_AirSysRef:SupAirSegRef:FanRef =
+      {  CreateComp( Fan, AirSys_NameRoot + " SupFan" )  }
+   "Set ResOtherZn:ASWiz_AirSysRef:SupAirSegRef:FanRef:Parent"   ResOtherZn:ASWiz_AirSysRef:SupAirSegRef:FanRef:Parent = {  ASWiz_AirSysRef:SupAirSegRef:Name  }
+
+   "Create ResOtherZn:ASWiz_AirSysRef:RetAirSegRef"      ResOtherZn:ASWiz_AirSysRef:RetAirSegRef =
+      {  CreateComp( AirSeg, AirSys_NameRoot + " RetAirSeg" )  }
+   "Set ResOtherZn:ASWiz_AirSysRef:RetAirSegRef:Parent"  ResOtherZn:ASWiz_AirSysRef:RetAirSegRef:Parent = {  ASWiz_AirSysRef:Name  }
+   "Set ResOtherZn:ASWiz_AirSysRef:RetAirSegRef:Type"    ResOtherZn:ASWiz_AirSysRef:RetAirSegRef:Type   = {  "Return"  }
+
+   "Create ResOtherZn:ASWiz_AirSysRef:RetAirSegRef:FanRef"       ResOtherZn:ASWiz_AirSysRef:RetAirSegRef:FanRef =
+      {  if (AirSys_HtRecovType > 0)  ; has HtRecov
+         then  CreateComp( Fan, AirSys_NameRoot + " RetFan" )  else  UNDEFINED  endif  }
+   "Set ResOtherZn:ASWiz_AirSysRef:RetAirSegRef:FanRef:Parent"   ResOtherZn:ASWiz_AirSysRef:RetAirSegRef:FanRef:Parent = {  ASWiz_AirSysRef:RetAirSegRef:Name  }
+
+   "Create ResOtherZn:ASWiz_TrmlUnitRef"           ResOtherZn:ASWiz_TrmlUnitRef =
+      {  CreateComp( TrmlUnit, AirSys_NameRoot + " TrmlUnit" )  }
+   "Set ResOtherZn:ASWiz_TrmlUnitRef:Parent"       ResOtherZn:ASWiz_TrmlUnitRef:Parent       = {  ASWiz_AirSysRef:Name  }
+   "Set ResOtherZn:ASWiz_TrmlUnitRef:Type"         ResOtherZn:ASWiz_TrmlUnitRef:Type         = {  "Uncontrolled"  }
+   "Set ResOtherZn:ASWiz_TrmlUnitRef:ZnServedRef"  ResOtherZn:ASWiz_TrmlUnitRef:ZnServedRef  = {  Name  }
+
+   "Create ResOtherZn:ASWiz_AirSysRef:OACtrlRef"            ResOtherZn:ASWiz_AirSysRef:OACtrlRef =
+      {  CreateComp( OACtrl, AirSys_NameRoot + " OACtrl" )  }
+   "Set ResOtherZn:ASWiz_AirSysRef:OACtrlRef:Parent"        ResOtherZn:ASWiz_AirSysRef:OACtrlRef:Parent        = {  ASWiz_AirSysRef:Name  }
+   "Set ResOtherZn:ASWiz_AirSysRef:OACtrlRef:AirSegSupRef"  ResOtherZn:ASWiz_AirSysRef:OACtrlRef:AirSegSupRef  = {  ASWiz_AirSysRef:SupAirSegRef:Name  }
+   "Set ResOtherZn:ASWiz_AirSysRef:OACtrlRef:AirSegRetRef"  ResOtherZn:ASWiz_AirSysRef:OACtrlRef:AirSegRetRef  = {  ASWiz_AirSysRef:RetAirSegRef:Name  }
+   "Set ResOtherZn:ASWiz_AirSysRef:OACtrlRef:EconoCtrlMthd" ResOtherZn:ASWiz_AirSysRef:OACtrlRef:EconoCtrlMthd = {  EnumString( AirSys_EconoType )  }
+
+   "Create ResOtherZn:ASWiz_AirSysRef:OACtrlRef:HtRcvryRef"       ResOtherZn:ASWiz_AirSysRef:OACtrlRef:HtRcvryRef =
+      {  if (AirSys_HtRecovType > 0)
+         then  CreateComp( HtRcvry, AirSys_NameRoot + " HtRcvry" )  else  UNCHANGED  endif  }
+   "Set ResOtherZn:ASWiz_AirSysRef:OACtrlRef:HtRcvryRef:Parent"   ResOtherZn:ASWiz_AirSysRef:OACtrlRef:HtRcvryRef:Parent  = {  ASWiz_AirSysRef:Name  }
+   "Set ResOtherZn:ASWiz_AirSysRef:OACtrlRef:HtRcvryRef:Type"     ResOtherZn:ASWiz_AirSysRef:OACtrlRef:HtRcvryRef:Type    = {  EnumString( AirSys_HtRecovType )  }
+
+   "Set ASWiz_AirSysRef to ResOtherZn:ozHVACSystem"     ResOtherZn:ozHVACSystem = {  ASWiz_AirSysRef  }
+
+   "Reset ResOtherZn:ASWiz_AirSysRef:OACtrlRef to avoid open errors (NotInput)"  ResOtherZn:ASWiz_AirSysRef:OACtrlRef = {  UNDEFINED  }
+   "Reset ResOtherZn:ASWiz_AirSysRef"     ResOtherZn:ASWiz_AirSysRef    = {  UNDEFINED  }
+   "Reset ResOtherZn:ASWiz_TrmlUnitRef"   ResOtherZn:ASWiz_TrmlUnitRef  = {  UNDEFINED  }
+
+
+;	  CTRL, "AirSys_NameRoot",    3901, TDCT_Edit,   190,  40,  25, 150,  0, FNT_STD, "AirSys Equip Name Root:",                    TA_LEFT,  -160, 4,     1, TA_LEFT, 4, 4,  None,       None,       0,  0,  "Root of name for each AirSys equipment component"  
+;    CTRL, "AirSys_Type",        3902, TDCT_Combo,  190,  70, 155, 150, 11, FNT_STD, "AirSys Type:",                               TA_LEFT,  -160, 4,     1, TA_LEFT, 4, 4,  None,       None,       0,  0,  "Type of AirSys to create & assign to this ResOtherZn" 
+;    CTRL, "AirSys_HtgType",     3903, TDCT_Combo,  190, 100, 155, 150, 11, FNT_STD, "Heating Coil Type:",                         TA_LEFT,  -160, 4,     1, TA_LEFT, 4, 4,  None,       AirSys_Type = 3 Or AirSys_Type = 9,  -162,  0,  "Type of AirSys heating coil" 
+;    CTRL, "AirSys_EconoType",   3904, TDCT_Combo,  190, 130, 155, 150, 11, FNT_STD, "Economizer Type:",                           TA_LEFT,  -160, 4,     1, TA_LEFT, 4, 4,  None,       None,       0,  0,  "Type of AirSys economizer" 
+;    CTRL, "AirSys_HtRecovType", 3905, TDCT_Combo,  190, 160, 155, 150, 11, FNT_STD, "Heat Recovery Opt:",                         TA_LEFT,  -160, 4,     1, TA_LEFT, 4, 4,  None,       None,       0,  0,  "AirSys heat recovery type" 
+
+;   ; added to facilitate creation of AirSys equipment tree for this ResOtherZn - SAC 05/17/22
+;   0, ResOtherZn:AirSys_Type,  0   ; -> AirSys:Type
+;   2,              0,    "- specify -"
+;   2,              3,    "SZAC"
+;   2,              4,    "SZHP"
+;   2,             13,    "SZDFHP"
+;   2,              9,    "SPVAC"
+;   2,             10,    "SPVHP"
+;   
+;   0, ResOtherZn:AirSys_HtgType,  2   ; -> CoilHtg:Type
+;   2,              1,    "Resistance"
+;   2,              2,    "Furnace"
+;   
+;   0, ResOtherZn:AirSys_EconoType,  1   ; -> OACtrl:EconoCtrlMthd
+;   2,              1,    "NoEconomizer"
+;   2,              2,    "FixedDryBulb"
+;   2,              3,    "DifferentialDryBulb"
+;   2,              4,    "DifferentialEnthalpy"
+;   
+;   0, ResOtherZn:AirSys_HtRecovType,  0   ; -> HtRcvry:Type
+;   2,              0,    "- none -"
+;   2,              1,    "Plate"
+;   2,              2,    "Wheel"
+
+END
+;*************************************************************************
+
+
+
+;  ;------------------------------------------------------------------------------------------------ SAC 04/18/22
+;  ;                    LName            Template                    MD  MR  AC   Parent1   P2  P3  P4  P5  P6  P7  P8  P9  P10 P11 P12 P13 P14 P15 P16 P17 P18 P19 P20  MC  MS  bP  CF  SR  IN     HI 
+;  ;                   -------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+;  0,  "cseTERMINAL",  "cseTERMINAL",   "CSE Terminal <pi>-<i>",      0,  0,  0, "cseZONE", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",  -1,  1,  0,  0,  0,  0,   3000
+;  ;
+;  ;                                 VType     NV  WA  SP    US    UL                 UT  NO  OC            CV  CP              HI    LName                  
+;  ;                                -------------------------------------------------------------------------------------------------
+;  1,           "tuAh",              BEMP_Obj,  1,  0,  1,  Pres,  "",                 0,  1, "cseAIRHANDLER",  0, "",  3208, "AirHandler serving this Terminal (and parent Zone)",  "" 
+;  
+;  1,           "tuTH",              BEMP_Flt,  1,  0,  1,  Pres,  "°F",               0,  0,                           3208, "Air heating thermostat setpoint",  ""    
+;  1,           "tuTH_x",            BEMP_Str,  1,  0,  1,  Pres,  "°F",               0,  0,                           3208, "Air heating thermostat setpoint (expression)",  ""    
+;  1,           "tuTC",              BEMP_Flt,  1,  0,  1,  Pres,  "°F",               0,  0,                           3208, "Air cooling thermostat setpoint",  ""    
+;  1,           "tuTC_x",            BEMP_Str,  1,  0,  1,  Pres,  "°F",               0,  0,                           3208, "Air cooling thermostat setpoint (expression)",  ""    
+;  
+;  1,           "tuVfMxH",           BEMP_Flt,  1,  0,  1,  Pres,  "cfm",              0,  0,                           3208, "Maximum heating air flow rate, before air handler limitations",  ""    
+;  1,           "tuVfMxH_x",         BEMP_Str,  1,  0,  1,  Pres,  "cfm",              0,  0,                           3208, "Maximum heating air flow rate, before air handler limitations (expression)",  ""    
+;  1,           "tuVfMxC",           BEMP_Flt,  1,  0,  1,  Pres,  "cfm",              0,  0,                           3208, "Maximum cooling air flow rate, before air handler limitations",  ""    
+;  1,           "tuVfMxC_x",         BEMP_Str,  1,  0,  1,  Pres,  "cfm",              0,  0,                           3208, "Maximum cooling air flow rate, before air handler limitations (expression)",  ""    
+;  
+;  1,           "tuVfMn",            BEMP_Flt,  1,  0,  1,  Pres,  "cfm",              0,  0,                           3208, "Minimum terminal air flow rate (omit for cycling fan)",  ""    
+;  1,           "tuVfMn_x",          BEMP_Str,  1,  0,  1,  Pres,  "cfm",              0,  0,                           3208, "Minimum terminal air flow rate (omit for cycling fan) (expression)",  ""    
+;  
+;  1,           "tuSRLeak",          BEMP_Flt,  1,  0,  1,  Pres,  "frac",             0,  0,                           3208, "Leakage of supply air to return, increasing supply volume and return temp.",  ""    
+;  
+
+
+
+;*************************************************************************
+;*************************************************************************
+
+ENDFILE

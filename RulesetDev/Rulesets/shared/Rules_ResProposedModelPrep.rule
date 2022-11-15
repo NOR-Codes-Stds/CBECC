@@ -1,0 +1,1274 @@
+; -------------------------------------------------------------------------
+; Rules pertaining to:   Modification of Proposed Model to meet Compliance Analysis Requirements
+; CEC Title-24 Residential Energy Code
+; -------------------------------------------------------------------------
+; Copyright (c) 2012-2014, California Energy Commission
+; Copyright (c) 2012-2014, Wrightsoft Corporation
+; All rights reserved.
+; Redistribution and use in source and binary forms, with or without modification,
+; are permitted provided that the following conditions are met:
+; - Redistributions of source code must retain the above copyright notice, this
+;   list of conditions and the following disclaimer.
+; - Redistributions in binary form must reproduce the above copyright notice, this
+;   list of conditions, the following disclaimer in the documentation and/or other
+;   materials provided with the distribution.
+; - Neither the name of the California Energy Commission nor the names of its
+;   contributors may be used to endorse or promote products derived from this
+;   software without specific prior written permission.
+; DISCLAIMER: THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+; "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+; THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+; NON-INFRINGEMENT ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION,
+; WRIGHTSOFT CORPORATION, ITRON, INC. OR ANY OTHER AUTHOR OR COPYRIGHT HOLDER OF
+; THIS SOFTWARE (COLLECTIVELY, THE "AUTHORS") BE LIABLE FOR ANY DIRECT, INDIRECT,
+; INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+; LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA,
+; OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+; LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
+; OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+; ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.  EACH LICENSEE AND SUBLICENSEE OF THE
+; SOFTWARE AGREES NOT TO ASSERT ANY CLAIM AGAINST ANY OF THE AUTHORS RELATING TO
+; THIS SOFTWARE, WHETHER DUE TO PERFORMANCE ISSUES, TITLE OR INFRINGEMENT ISSUES,
+; STRICT LIABILITY OR OTHERWISE.
+; -------------------------------------------------------------------------
+
+ENUM_PROPERTIES_VALUE   ; ensures retrieval/logic/us of enum properties assume numeric value (alternative is ENUM_PROPERTIES_STRING)
+
+;*************************************************************************
+;*************************************************************************
+;22222
+RULELIST "PostProposedInput" 1 0 0 1
+;
+;   Rules which are executed on the input building description following
+;   the completion of user input but prior to any simulation(s).
+;   These mainly include rules which define conditionally prescribed
+;   values and rules which prepare for the Proposed model simulation.
+;
+;*************************************************************************
+;*************************************************************************
+;"log status"   Proj:Action = {  if (DevMode==0 .OR. LocalStatus(RunAbbrev) < 1 .OR. EnergyCodeYearNum < 2019) then  UNCHANGED  else
+;   PostMessageToLog( "    evaluating 'PostProposedInput' rules on '%s' model...", RunAbbrev )  endif  }
+
+   ;--------------------------------------------------------------------
+	; Old/Invalid CSE object clean-up    - added SAC 10/3/13
+   ;--------------------------------------------------------------------
+	"Blast all cseEXPORT components"		Proj:Action		= {	DeleteAllComps( cseEXPORT )  }
+	"Blast all cseMETER components"		Proj:Action		= {	DeleteAllComps( cseMETER )  }
+	"Blast all cseDHWMETER components"	Proj:Action		= {	DeleteAllComps( cseDHWMETER )  }		; SAC 4/25/16
+
+
+   ;--------------------------------------------------------------------
+	; Remove Attic if it is not going to be simulated.  This ensures that the presence of an attic does
+	;	not impact the final standard model when generation of a new attic is required that model.    - added SAC 10/3/13
+   ;--------------------------------------------------------------------
+	"Delete Attic if not to be simulated"		ResAttic:Action	= {	if (FloorArea <= 0) then  DeleteComp()  else  UNCHANGED  endif  }
+
+
+   ;--------------------------------------------------------------------
+	; Project data
+   ;--------------------------------------------------------------------
+  ; SAC 8/29/13 - added copy of weather file setting rule here to ensure no user over-ride (when performing compliance only)
+  ; SAC 4/22/19 - removed rule since weather file already loaded and checked into analysis routine by the time this rule is evaluated
+;	"Set Proj:WeatherFileName"		Proj:WeatherFileName = {
+;            if (ResAnalysisType == 0) then  UNCHANGED		; Research mode
+;				else	switch (Global( Proj:CliZnNum ))
+;							case   1 :	"CTZ01S13b.CSW"
+;							case   2 :	"CTZ02S13b.CSW"
+;							case   3 :	"CTZ03S13b.CSW"
+;							case   4 :	"CTZ04S13b.CSW"
+;							case   5 :	"CTZ05S13b.CSW"
+;							case   6 :	"CTZ06S13b.CSW"
+;							case   7 :	"CTZ07S13b.CSW"
+;							case   8 :	"CTZ08S13b.CSW"
+;							case   9 :	"CTZ09S13b.CSW"
+;							case  10 :	"CTZ10S13b.CSW"
+;							case  11 :	"CTZ11S13b.CSW"
+;							case  12 :	"CTZ12S13b.CSW"
+;							case  13 :	"CTZ13S13b.CSW"
+;							case  14 :	"CTZ14S13b.CSW"
+;							case  15 :	"CTZ15S13b.CSW"
+;							case  16 :	"CTZ16S13b.CSW"
+;							default :	Format( "<unknown wthr file mapping for Proj:CliZnNum = %.0f>", Proj:CliZnNum )
+;						endswitch  endif  }
+
+; SAC 4/9/14 - comment out during testing - probably restore in release version
+;	"Set Proj:SeasonChangeSetpt when BypassRuleLimits not specified"		Proj:SeasonChangeSetpt	= {	if (BypassRuleLimits < 0.1) then  60  else  UNCHANGED  endif  }		; SAC 4/3/14
+;	"Set Proj:FanVentLockoutTemp when BypassRuleLimits not specified"		Proj:FanVentLockoutTemp	= {	if (BypassRuleLimits < 0.1) then  66  else  UNCHANGED  endif  }		; SAC 4/9/14
+
+; SAC 12/23/15 - MOVED to OneTimeAnalysisPrep to get it done BEFORE it is used to set final people heat gains
+;  ; SAC 8/20/14 - rule to force reset of ResProj:NumBedrooms for MFam models (GC #354 note#1)
+;	"Set ResProj:NumBedrooms"		ResProj:NumBedrooms	= {	if (IfValidAnd( IsMultiFamily > 0.5 )) then  SumAll( DwellUnit:TotalNumBedrooms )
+;																		else  UNCHANGED  endif  }
+
+
+   ; SAC 1/22/17 - reset/default NetEnergyMeteringTDVAdj - Net Energy Metering (NEM) adjustor for TDV calculations
+   ; SAC 4/27/17 - added logic for 2016
+   ; SAC 8/26/19 - adjusted NetEnergyMeteringTDVAdj for difference in TDV units for 2022+ ruleset
+   "Set Proj:NetEnergyMeteringTDVAdj"  Proj:NetEnergyMeteringTDVAdj  =        ; SAC 6/10/20 (CommunitySolar)
+      {  if (IfValidAnd( CommunitySolarProjID > 0 )) then  0
+         else if (EngyCodeYearNum == 2016 .AND. IfValidAnd( NetEnergyMeteringTDVAdj = 0.985 ))
+         then  0.928     ; NEM 2.0 TDV adjustment factor - adjusted down from 2019 value for inflation - SAC 5/23/17
+         else if (EngyCodeYearNum == 2016) then  UNCHANGED   ; BypassRuleLimits > 0 .OR. 
+         else if (IfValidAnd( EngyCodeYearNum < 2019 )) then  0
+         else  0.985 / ValidOr( TDVMult_Elec, 1 )  endif endif endif endif  }  ; NEM 2.0 TDV adjustment factor
+
+   ; SAC 9/21/17 - rules setting names of TDV adder tables used to augment TDV data for GHG emissions calcs
+   "Set ResProj:TDVSecTbl_Elec - Name of secondary electric TDV data table (containing CO2/GHG-based TDV adders)"
+      ResProj:TDVSecTbl_Elec  = {
+         if (EnergyCodeYearNum >= 2019 .AND. IfValidAnd( CALGreen > 0 ) .AND. TDVType > 1)
+         then  switch (TDVType)
+                  case  2 :  "CAGHG19_BaseAPCR_Elec"
+                  case  3 :  "CAGHG19_MidResolve_Elec"
+                  default :  "CAGHG19_HiResolve_Elec"   endswitch
+         else  "none"  endif  }
+   "Set ResProj:TDVSecTbl_NGas - Name of secondary natural gas TDV data table (containing CO2/GHG-based TDV adders)"
+      ResProj:TDVSecTbl_NGas  = {
+         if (EnergyCodeYearNum >= 2019 .AND. IfValidAnd( CALGreen > 0 ) .AND. TDVType > 1)
+         then  switch (TDVType)
+                  case  2 :  "CAGHG19_BaseAPCR_NGas"
+                  case  3 :  "CAGHG19_MidResolve_NGas"
+                  default :  "CAGHG19_HiResolve_NGas"   endswitch
+         else  "none"  endif  }
+   "Set ResProj:TDVSecTbl_Othr - Name of secondary other/propane TDV data table (containing CO2/GHG-based TDV adders)"
+      ResProj:TDVSecTbl_Othr  = {
+         if (EnergyCodeYearNum >= 2019 .AND. IfValidAnd( CALGreen > 0 ) .AND. TDVType > 1)
+         then  switch (TDVType)
+                  case  2 :  "CAGHG19_BaseAPCR_Othr"
+                  case  3 :  "CAGHG19_MidResolve_Othr"
+                  default :  "CAGHG19_HiResolve_Othr"   endswitch
+         else  "none"  endif  }
+
+
+   "Set Proj:NetEnergyMeteringSrcAdj"     Proj:NetEnergyMeteringSrcAdj  =     ; SAC 6/11/19 - 2022
+   ;   {  NetEnergyMeteringTDVAdj  }
+      {  0  }
+   "Set Proj:NetEnergyMeteringNSCSrcAdj"  Proj:NetEnergyMeteringNSCSrcAdj  = 
+   ;   {  NetEnergyMeteringNSCAdj  }
+      {  0  }
+   "Set ResProj:SrcSecTbl_Elec - Name of electric secondary source energy data table (containing CO2/GHG-based source energy adders)"       ResProj:SrcSecTbl_Elec  =      ; SAC 6/11/19 - 2022
+      {  "none"  }
+   "Set ResProj:SrcSecTbl_NGas - Name of natural gas secondary source energy data table (containing CO2/GHG-based source energy adders)"    ResProj:SrcSecTbl_NGas  =
+      {  "none"  }
+   "Set ResProj:SrcSecTbl_Othr - Name of other/propane secondary source energy data table (containing CO2/GHG-based source energy adders)"  ResProj:SrcSecTbl_Othr  =
+      {  "none"  }
+
+
+   ;-------------------------------------------------------------------- SAC 7/16/20
+   ; Community Solar - fixed simulation/analysis results
+   ;--------------------------------------------------------------------
+   "Set Proj:CmntySlr_ElecEnergy"   Proj:CmntySlr_ElecEnergy =
+      {  if (IfValidAnd( CommunitySolarProjID > 0 )==0 .OR. IfValidAnd( CommunitySolarSim > 0 )) then  UNDEFINED
+         else  CommunitySolar:kWh(     "CodeBase", StdDesignBase, "CSProjectID", CommunitySolarProjID )  endif  }
+   "Set Proj:CmntySlr_ElecDemand"   Proj:CmntySlr_ElecDemand =
+      {  if (IfValidAnd( CmntySlr_ElecEnergy < 0 )==0) then  UNDEFINED
+         else  CommunitySolar:kW(      "CodeBase", StdDesignBase, "CSProjectID", CommunitySolarProjID )  endif  }
+   "Set Proj:CmntySlr_TDV"          Proj:CmntySlr_TDV        =
+      {  if (IfValidAnd( CmntySlr_ElecEnergy < 0 )==0) then  UNDEFINED
+         else  CommunitySolar:kTDV(    "CodeBase", StdDesignBase, "CSProjectID", CommunitySolarProjID )  endif  }
+   "Set Proj:CmntySlr_CO2"          Proj:CmntySlr_CO2        =
+      {  if (IfValidAnd( CmntySlr_ElecEnergy < 0 )==0) then  UNDEFINED
+         else  CommunitySolar:CO2kg(   "CodeBase", StdDesignBase, "CSProjectID", CommunitySolarProjID )  endif  }
+   "Set Proj:CmntySlr_Src"          Proj:CmntySlr_Src        =             ; SAC 06/02/22
+      {  if (IfValidAnd( CmntySlr_ElecEnergy < 0 )==0) then  UNDEFINED
+         else  CommunitySolar:SrcKBtu( "CodeBase", StdDesignBase, "CSProjectID", CommunitySolarProjID )  endif  }
+
+
+   ;--------------------------------------------------------------------
+   ; Ensure ResSlabFlr:EdgeInsul* properties are zeroed out if they are toggled off in the interface    - SAC 10/7/13
+   ;--------------------------------------------------------------------
+  ; SAC 1/21/14 - revised rules to include resetting of *EdgeInsulOption to new setting of '- none -' (when insulation not present) and also set EdgeInsul* numeric values to UNDEFINED
+	"Blast ResSlabFlr:EdgeInsulOption"		ResSlabFlr:EdgeInsulOption	= {	if (EdgeInsulation < 0.5) then  0  else  UNCHANGED  endif  }
+	"Blast ResSlabFlr:EdgeInsulDepth"			ResSlabFlr:EdgeInsulDepth	= {	if (EdgeInsulation < 0.5 .OR. EdgeInsulOption < 1 ) then  0  else  UNCHANGED  endif  }
+	"Blast ResSlabFlr:EdgeInsulRValue"		ResSlabFlr:EdgeInsulRValue	= {	if (EdgeInsulation < 0.5 .OR. EdgeInsulDepth < 0.1) then  0  else  UNCHANGED  endif  }
+
+	"Blast ResSlabFlr:exEdgeInsulOption"		ResSlabFlr:exEdgeInsulOption	= {	if (IsAltered .AND. IsVerified .AND. IfValidAnd( exEdgeInsulation > 0.5 )) then  UNCHANGED  else  0  endif  }		; SAC 8/18/14 - switched for IfValidAnd fix
+	"Blast ResSlabFlr:exEdgeInsulDepth"		ResSlabFlr:exEdgeInsulDepth		= {	if (IsAltered .AND. IsVerified .AND. IfValidAnd( exEdgeInsulation > 0.5 ) .AND. IfValidAnd( exEdgeInsulOption > 1  )) then  UNCHANGED  else  0  endif  }
+	"Blast ResSlabFlr:exEdgeInsulRValue"		ResSlabFlr:exEdgeInsulRValue	= {	if (IsAltered .AND. IsVerified .AND. IfValidAnd( exEdgeInsulation > 0.5 ) .AND. IfValidAnd( exEdgeInsulDepth > 0.1 )) then  UNCHANGED  else  0  endif  }
+
+
+   ;--------------------------------------------------------------------
+   ; All PostProposedInput DHW - Demand Response rules
+   ;--------------------------------------------------------------------
+   "Setup DHWSys demand response schedules"           ResDHWSys:Action  =     ; SAC 12/04/20
+      {  if (IfValidAnd( DemRespValid > 0 )==0) then  UNCHANGED
+         else  EvalRulelist( "SetupDemRespSched_DHWSys", 1 )  endif  }
+
+
+   ;--------------------------------------------------------------------
+   ; All PostProposedInput HVAC rules added to separate rulelist
+   ;--------------------------------------------------------------------
+	"Evaluate PostProposedInput HVAC rules"	Proj:Action	= {	EvalRulelist( "PostProposedInput_HVAC" )  }     ; ResProj -> Proj to ensure eval for Htl/Mtl models - SAC 02/27/22
+
+	"Evaluate PostProposedInput OtherZone rules"	ResProj:Action	= {	if (IfValidAnd( EnergyCodeYearNum >= 2019 )) then  EvalRulelist( "PostProposedInput_ResOtherZone" )  else  UNCHANGED  endif  }
+
+   "Setup MFam Central HPWH DHW system(s)"   ResDHWSys:Action  =     ; SAC 1/5/20 (tic #862)   - SAC 2/24/20 - added logic to prevent import of CHPWH heater for SMF, S & DR runs
+      {  if (IfValidAnd( CentralDHWTypeVal == 2 ) .AND.
+             IfValidAnd( FloorAreaServed[1] > 0 ) .AND.
+             ResProj:RunAbbrev != "s" .AND. ResProj:RunAbbrev != "zb" .AND. ResProj:RunAbbrev != "smf" .AND. ResProj:RunAbbrev != "dr")
+         then  EvalRulelist( "PostProposedInput_CentralHPWH", 1 )  else  UNCHANGED  endif  }
+   "Redefault Prop DHW stuff if systems modified for CHPWH"    Proj:Action  =    ; SAC 1/5/20 (tic #862)
+      {  if (SumAcrossIf( ResDHWSys:FloorAreaServed[1], ResDHWSys:CentralDHWTypeVal = 2 ) > 0 .AND.
+             IfValidAnd( ResProj:RunAbbrev = "s" )==0 .AND. Proj:RunAbbrev != "zb" .AND. 
+             IfValidAnd( ResProj:RunAbbrev = "smf" )==0 .AND. IfValidAnd( ResProj:RunAbbrev = "dr" )==0)
+         then  EvalRulelist( "ProposedInput_DHWEquipment" )  else  UNCHANGED  endif  }
+
+   "Default all Sch objects"   ResProj:Action  = {  EvalRulelist( "Default_Schedules" )  }
+
+END
+;*************************************************************************
+
+;************************************************************************* - SAC 5/15/20 (tic #1199)
+RULELIST "OneTimeAnalysisPrep_RemoveADUInputs" 1 0 0 0
+   ; remove any ADu IAQ fan assignments
+   "blast ResProj:UnitIAQFan4[2]"   ResProj:UnitIAQFan4[2]  = {  UNDEFINED  }
+   "blast ResProj:UnitIAQFan3[2]"   ResProj:UnitIAQFan3[2]  = {  UNDEFINED  }
+   "blast ResProj:UnitIAQFan2[2]"   ResProj:UnitIAQFan2[2]  = {  UNDEFINED  }
+   "blast ResProj:UnitIAQFan1[2]"   ResProj:UnitIAQFan1[2]  = {  UNDEFINED  }
+
+   "redefault ResProj:UnitIAQOption[2]"   ResProj:UnitIAQOption[2]   = {  1  }
+
+   "blast ResProj:SFamADUArea"            ResProj:SFamADUArea        = {  UNDEFINED  }
+   "blast ResProj:SFamADUNumBedrooms"     ResProj:SFamADUNumBedrooms = {  UNDEFINED  }
+END
+;*************************************************************************
+
+
+;*************************************************************************
+RULELIST "ProposedModelCodeAdditions" 1 0 0 1
+;
+;   Rules which are executed on the input building description to ensure
+;   that all conditioned zones have both heating and cooling systems defined.
+;   If not defined, then heat, cool or entire HVAC systems will be created
+;   to ensure that each conditioned zone has both heating & cooling equipment.
+;
+;*************************************************************************
+;"log status"   ResProj:Action = {  if (DevMode==0 .OR. LocalStatus(RunAbbrev) < 1 .OR. EnergyCodeYearNum < 2019) then  UNCHANGED  else
+;   PostMessageToLog( "    evaluating 'ProposedModelCodeAdditions' rules on '%s' model...", RunAbbrev )  endif  }
+
+	"Blast ResProj:CompResultsMsg"	ResProj:CompResultsMsg	= {	UNDEFINED  }	; SAC 4/16/15
+
+   ; SAC 5/14/18 - rule to call subordinate rulelist to handle Existing skylts in Altered CathedralCeilings (tic #843)
+   "Call '' rulelist to address Existing skylts in Altered CathedralCeilings"    ResProj:Action  = {
+         if (RunScope == 1 .AND. IsAddAlone == 0) then  UNCHANGED    ; n/a for New Cons runs
+         else if (SumAcrossIf( ResSkylt:Area, ResSkylt:Status = 1 ) > 0.1 .AND.
+                  SumAcrossIf( ResCathedralCeiling:Area, ResCathedralCeiling:Status = 2 ) > 0.1)
+         then  EvalRulelist( "SetupExistingSkyltCathedralCeilings" )
+         else  UNCHANGED  endif endif  }
+
+	; SAC 11/19/14 - mods to create & assign duplicate Cons objects for Attic Roof cons that serve both all uncond & cond in CZs where radiant barrier requirements exist
+	"Delete any existing ResConsAssm:AtcRfOverUncondCons"		ResConsAssm:AtcRfOverUncondCons	= {	if (LocalCompAssigned( AtcRfOverUncondCons ) < 0.5) then  UNCHANGED
+																													else  DeleteComp()  endif  }
+	; mjb 1/12/15 - using new T24RClimateZoneCodeBase lookup table
+	; SAC 9/18/15 - modified rule to take CondAdditionSize into account when determining whether or not an attic roof cons needs to be copied based on radiant barrier differences
+	"Create ResConsAssm:AtcRfOverUncondCons if this Cons is a 'Attic Roofs', is referenced by attic over uncond & cond spaces and in a CZ with radiant barrier requirement"
+;		ResConsAssm:AtcRfOverUncondCons	= {	if (CanAssignTo != 1 .OR. ClimateZoneTable( Proj:CliZnNum, 8 ) < 0.5) then  UNCHANGED
+		ResConsAssm:AtcRfOverUncondCons	= {	if (CanAssignTo != 1 .OR. 
+															(IfValidAnd( ResProj:CondAdditionSize < 0.1 ) .AND. T24RClimateZoneCodeBase:RadiantBarrier( "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr ) < 0.5) .OR.
+															(IfValidAnd( ResProj:CondAdditionSize > 0.1 ) .AND. PrescripAdditions_RadiantBarrier:RadiantBarrier( "CodeBase", Proj:StdDesignBase, "ClimateZone", Proj:CliZnNum, "AdditionSize", ResProj:CondAdditionSize )))
+													then  UNCHANGED
+													else if (SumRevRef( ResAttic:Construction, ResAttic:OnlyOverUncond    ) < 0.5 .OR.
+																SumRevRef( ResAttic:Construction, ResAttic:FloorAreaOverCond ) < 0.5) then  UNCHANGED
+													else  CreateComp( ResConsAssm, Name + "-OvrUncnd", "none", 1, Name )    endif endif  }
+
+	"Assign newly-created AtticRfOverUncond constructions designed to isolate Cons objects that must vary in RadiantBarrier settings for budget design"
+		ResAttic:Construction	= {	if (IfValidAnd( FloorAreaOverCond > 0.5 ) .OR. LocalCompAssigned( Construction:AtcRfOverUncondCons ) < 0.5) then  UNCHANGED
+											else  Construction:AtcRfOverUncondCons  endif  }
+
+
+; SAC 2/23/15 - series of rules similar to above that ensure Attic roof constructions are unique between New, Altered & Existing attics (since budget conversion can result in inconsistent RadiantBarrier settings if these Cons references are shared)
+	"Delete any existing ResConsAssm:AtcRfNewToAltCons"		ResConsAssm:AtcRfNewToAltCons	= {	if (LocalCompAssigned( AtcRfNewToAltCons ) < 0.5) then  UNCHANGED  else  DeleteComp()  endif  }
+	"Delete any existing ResConsAssm:AtcRfNewToExCons"		ResConsAssm:AtcRfNewToExCons	= {	if (LocalCompAssigned( AtcRfNewToExCons  ) < 0.5) then  UNCHANGED  else  DeleteComp()  endif  }
+	"Delete any existing ResConsAssm:AtcRfAltToExCons"		ResConsAssm:AtcRfAltToExCons	= {	if (LocalCompAssigned( AtcRfAltToExCons  ) < 0.5) then  UNCHANGED  else  DeleteComp()  endif  }
+
+	"Create ResConsAssm:AtcRfNewToAltCons if this Cons is a 'Attic Roofs' and is referenced by both New and Altered attics"
+		ResConsAssm:AtcRfNewToAltCons	= {	if (CanAssignTo != 1) then  UNCHANGED
+												else if (SumRevRef( ResAttic:Construction, ResAttic:IsNew      ) < 0.5 .OR.
+															SumRevRef( ResAttic:Construction, ResAttic:IsAltered  ) < 0.5) then  UNCHANGED
+												else  CreateComp( ResConsAssm, Name + "-New2Alt", "none", 1, Name )    endif endif  }
+	"Create ResConsAssm:AtcRfNewToAltCons if this Cons is a 'Attic Roofs' and is referenced by both New and Existing attics"
+		ResConsAssm:AtcRfNewToExCons	= {	if (CanAssignTo != 1) then  UNCHANGED
+												else if (SumRevRef( ResAttic:Construction, ResAttic:IsNew      ) < 0.5 .OR.
+															SumRevRef( ResAttic:Construction, ResAttic:IsExisting ) < 0.5) then  UNCHANGED
+												else  CreateComp( ResConsAssm, Name + "-New2Ex", "none", 1, Name )    endif endif  }
+	"Create ResConsAssm:AtcRfNewToAltCons if this Cons is a 'Attic Roofs' and is referenced by both Altered and Existing attics"
+		ResConsAssm:AtcRfAltToExCons	= {	if (CanAssignTo != 1) then  UNCHANGED
+												else if (SumRevRef( ResAttic:Construction, ResAttic:IsAltered  ) < 0.5 .OR.
+															SumRevRef( ResAttic:Construction, ResAttic:IsExisting ) < 0.5) then  UNCHANGED
+												else  CreateComp( ResConsAssm, Name + "-Alt2Ex", "none", 1, Name )    endif endif  }
+
+	"Assign newly-created AtticRfNewToAltCons constructions designed to isolate Cons objects that might need to vary in RadiantBarrier settings for budget design based on referencing Attics being New/Altered/Existing"
+		ResAttic:Construction	= {	if (IsAltered  < 0.5 .OR. LocalCompAssigned( Construction:AtcRfNewToAltCons ) < 0.5) then  UNCHANGED
+											else  Construction:AtcRfNewToAltCons  endif  }
+	"Assign newly-created AtticRfNewToExCons constructions designed to isolate Cons objects that might need to vary in RadiantBarrier settings for budget design based on referencing Attics being New/Altered/Existing"
+		ResAttic:Construction	= {	if (IsExisting < 0.5 .OR. LocalCompAssigned( Construction:AtcRfNewToExCons  ) < 0.5) then  UNCHANGED
+											else  Construction:AtcRfNewToExCons  endif  }
+	"Assign newly-created AtticRfAltToExCons constructions designed to isolate Cons objects that might need to vary in RadiantBarrier settings for budget design based on referencing Attics being New/Altered/Existing"
+		ResAttic:Construction	= {	if (IsExisting < 0.5 .OR. LocalCompAssigned( Construction:AtcRfAltToExCons  ) < 0.5) then  UNCHANGED
+											else  Construction:AtcRfAltToExCons  endif  }
+
+	; SAC 9/23/15 - rules similar to above but designed to isolate constructions above steep vs. flat attics or cathedral ceilings
+	"Delete any existing ResConsAssm:SteepRoofCons"		ResConsAssm:SteepRoofCons	= {	if (LocalCompAssigned( SteepRoofCons ) < 0.5) then  UNCHANGED  else  DeleteComp()  endif  }
+	"Create ResConsAssm:SteepRoofCons iff this Cons describes an Attic Roof or Cathedral Ceiling -AND- is referenced by both steep and flat attics/cathedral ceilings (and for analysis of code >= 2016)"
+;		ResConsAssm:SteepRoofCons	= {	if ((CanAssignTo != 1 .AND. CanAssignTo != 2) .OR. Proj:StdDesignBase < 2016)
+		ResConsAssm:SteepRoofCons	= {	if (CanAssignTo != 1 .OR. Proj:StdDesignBase < 2016)
+											then  UNCHANGED
+											else if (CanAssignTo == 1)
+											then	if (SumRevRef( ResAttic:Construction, ResAttic:SteepRoofArea ) < 0.5 .OR.
+														 SumRevRef( ResAttic:Construction, ResAttic:FlatRoofArea  ) < 0.5) then  UNCHANGED
+													else  CreateComp( ResConsAssm, Name + "-Steep", "none", 1, Name )    endif
+											else	UNCHANGED  endif endif  }
+;											else if (CanAssignTo == 2)
+;											then	if (SumRevRef( ResCathedralCeiling:Construction, ResCathedralCeiling:SteepRoofArea ) < 0.5 .OR.
+;														 SumRevRef( ResCathedralCeiling:Construction, ResCathedralCeiling:FlatRoofArea  ) < 0.5) then  UNCHANGED
+;													else  CreateComp( ResConsAssm, Name + "-Steep", "none", 1, Name )    endif
+;											else	UNCHANGED  endif endif endif  }
+	"Assign newly-created SteepRoofCons constructions to Attics w/ steep roofs (to isolate Cons objects whose RoofingLayer must vary in the budget design)"
+		ResAttic:Construction				= {	if (IfValidAnd( SteepRoofArea > 0.5 )==0 .OR. LocalCompAssigned( Construction:SteepRoofCons ) < 0.5) then  UNCHANGED
+														else  Construction:SteepRoofCons  endif  }
+; no need to support CathedralCeilings since they are converted to Attics w/ std design constructions during budget conversion
+;	"Assign newly-created SteepRoofCons constructions to CathedralCeilings w/ steep roofs (to isolate Cons objects whose RoofingLayer must vary in the budget design)"
+;		ResCathedralCeiling:Construction	= {	if (IfValidAnd( SteepRoofArea > 0.5 )==0 .OR. LocalCompAssigned( Construction:SteepRoofCons ) < 0.5) then  UNCHANGED
+;														else  Construction:SteepRoofCons  endif  }
+
+
+   ;--------------------------------------------------------------------
+   ; Prescribe ALL Exterior Wall Absorptivity
+   ;--------------------------------------------------------------------
+	"Set ResExtWall:Absorptivity"		ResExtWall:Absorptivity	= {	0.5  }	; SAC 4/7/13 - ensure absorptivity of ALL exterior walls is set to 0.5
+
+   ;--------------------------------------------------------------------
+   ; Delete Garage and all children if agrage not being modeled
+   ;--------------------------------------------------------------------
+	; FIRST check to see if IntAll/Floor:Outside references to the Garage exist
+	   ; SAC 9/18/19 - handle OtherZone same as Zone (MFamProto)
+	"Check for valid ResIntWall:Outside assignment"
+		ResIntWall:Action	= {	if ((ParentComponentType() == "ResZn" .OR. ParentComponentType() == "ResOtherZn") .AND.
+		                         LocalCompAssigned( Outside ) == ComponentType( "ResGarage" ) .AND. ResProj:HasGarage < 0.1)
+									then	PostError( "Interior wall '%s' assigns garage '%s' as being on the outside, but garage modeling is disabled in the Project dialog",
+																Name, Outside:Name )
+									else  UNCHANGED  endif  }
+	"Check for valid ResIntFlr:Outside assignment"
+		ResIntFlr:Action	= {	if ((ParentComponentType() == "ResZn" .OR. ParentComponentType() == "ResOtherZn") .AND.
+		                               LocalCompAssigned( Outside ) == ComponentType( "ResGarage" ) .AND. ResProj:HasGarage < 0.1)
+											then	PostError( "Interior floor '%s' assigns garage '%s' as being on the outside, but garage modeling is disabled in the Project dialog",
+																		Name, Outside:Name )
+											else  UNCHANGED  endif  }
+	"Check for valid ResIntCeiling:Outside assignment"
+		ResIntCeiling:Action	= {	if ((ParentComponentType() == "ResZn" .OR. ParentComponentType() == "ResOtherZn") .AND.
+		                                  LocalCompAssigned( Outside ) == ComponentType( "ResGarage" ) .AND. ResProj:HasGarage < 0.1)
+											   then	PostError( "Interior ceiling '%s' assigns garage '%s' as being on the outside, but garage modeling is disabled in the Project dialog",
+											   							Name, Outside:Name )
+											   else  UNCHANGED  endif  }
+	"Delete Garage if modeling turned off"		ResGarage:Action	= {	if (ResProj:HasGarage < 0.5) then  DeleteComp()
+																						else  UNCHANGED  endif  }
+
+
+   ;--------------------------------------------------------------------
+   ; Prescribe Garage Exterior Wall & Door performance characteristics
+   ;--------------------------------------------------------------------
+	"Set ResExtWall:ParentType"			ResExtWall:ParentType	= {	if (ParentComponentType() == "ResZn")
+																					then	if (Parent( Type ) < 10) then  1  else  0  endif
+																					else if (ParentComponentType() == "ResGarage") then  2
+                                                               else if (ParentComponentType() == "ResOtherZn")
+																					then	if (IfValidAnd( ResOtherZn:AreaParking > 1 )) then  2
+                                                                     else if (Parent( Type ) < 10) then  1  else  0  endif endif
+																					else  0  endif endif endif  }
+	"Set Garage ResExtWall:Construction"		ResExtWall:Construction		= {	if (ParentType != 2) then  UNCHANGED  else  RuleLibrary( Cons, "Garage Ext Wall" )  endif  }
+	"Set Garage ResExtWall:Tilt"					ResExtWall:Tilt				= {	if (ParentType != 2) then  UNCHANGED  else  90   endif  }
+;	"Set Garage ResExtWall:Absorptivity"		ResExtWall:Absorptivity		= {	if (ParentType != 2) then  UNCHANGED  else  0.5  endif  }
+
+; DEBUGGING
+;	"Post messagebox"				ResDr:Action = {	MessageBox( Format( "Door '%s':  ParentComponentType = %s // ResExtWall:ParentType = %g",
+;																							Name, ParentComponentType(), Parent( ResExtWall:ParentType ) ) )  }
+; DEBUGGING
+	"Set Garage ResDr:Ufactor"			ResDr:Ufactor	= {	if (ParentComponentType() == "ResExtWall")
+																			then	if (Parent( ResExtWall:ParentType ) == 2) then  1.0
+																					else  UNCHANGED  endif
+																			else  UNCHANGED  endif  }
+
+
+   ;--------------------------------------------------------------------
+   ; Delete Window children of Garage Exterior Walls
+   ;--------------------------------------------------------------------
+	"Delete garage windows (ResExtWall:Action)"		ResExtWall:Action	= {	if (ParentComponentType() != "ResGarage") then  UNCHANGED
+																							else  DeleteChildren( Window )  endif  }
+
+
+   ;--------------------------------------------------------------------
+   ; Set ResHVACSys:StdHeatingType  (prior to system mods that will effect std design system selection)
+   ;--------------------------------------------------------------------
+; SAC 1/14/14 - moved UP HERE from below - so that addition of proposed model cooling doesn't effect StdHeatingType (GC issue #265)
+   ; revised logic to keep StdHeatingType = input HeatSysType for EXISTING systems that are not PropEqStd - SAC 02/02/22 (tic #1324)
+   "Set ResHVACSys:StdHeatingType"      ResHVACSys:StdHeatingType   =
+      {  if (HaveHeating < 0.5)
+         then  0   ; What if no system exists yet??
+         else if (Type == 2)
+         then  ; Is a HeatPump system
+               if (HtPumpSystem[1]:Type < 1)
+               then  0   ; No Heating case ???
+               else if ((ResProj:RunScope == 2 .OR. ResProj:IsAddAlone > 0) .AND. HtPumpSysType > 0 .AND. Status == 1 .AND.
+                        T24RHeatingEquipment:PropEqStd( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", HtPumpSysTypeAbbrev ) < 1)
+               then  HtPumpSysType
+               else if (HtOrClDucted < 0.5)
+               then  T24RHeatingEquipment:DuctlessStdSys( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", HtPumpSysTypeAbbrev )
+               else  T24RHeatingEquipment:DuctedStdSys(   "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", HtPumpSysTypeAbbrev )
+               endif endif endif
+         else if (HeatSystem[1]:Type < 1)
+         then  0 ; No Heating case ???
+         else if ((ResProj:RunScope == 2 .OR. ResProj:IsAddAlone > 0) .AND. HeatSysType > 0 .AND. Status == 1 .AND.
+                  T24RHeatingEquipment:PropEqStd( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", HeatSysTypeAbbrev ) < 1)
+         then  HeatSysType
+         else if (HtOrClDucted < 0.5)
+         then  T24RHeatingEquipment:DuctlessStdSys( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", HeatSysTypeAbbrev )
+         else  T24RHeatingEquipment:DuctedStdSys(   "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", HeatSysTypeAbbrev )
+         endif endif endif endif endif  }
+;	"store BEMProc details"		ResHVACSys:Action = {  StoreBEMProc( "ProposedModelCodeAdditions - StdHeatingType just set", 0 )  }
+;	"DBG msg" ResHVACSys:Action = { MessageBox( "ProposedModelCodeAdditions -- HVACSys '%s' StdHeatingType = '%s'", Name, EnumString( StdHeatingType ) ) }
+;	"debug ResHVACSys:StdHeatingType"	ResHVACSys:Action	=	{ PostWarning( "ProposedModelCodeAdditions -- ResHVACSys:StdHeatingType -> Type = %g  HtOrClDucted = %g  HtPumpSysTypeAbbrev = '%s'  StdHeatingType = %g ", Type, HtOrClDucted, HtPumpSysTypeAbbrev, StdHeatingType )  }
+
+   ;--------------------------------------------------------------------
+   ; Add Split A/C to any HVACSys that has heating but no cooling
+   ;--------------------------------------------------------------------
+  ; SAC 5/6/14 - BEFORE messing w/ cool eqp creation and duct flags, reset ResDistSys:Type to default if currently assigned, set to No Ducts and there are ducts required (probably 
+  ; SAC 8/3/14 - added logic to ensure fan & ducts added when EITHER no cool system is assigned OR the cool system assigned is "NoCooling"
+  	"Create Fan for HVACSys if in the following rule we will be toggling ON ducts"
+			ResHVACSys:Fan	= {	if (LocalCompAssigned( Fan ) > 0.5 .OR. LocalCompAssigned( DistribSystem ) == 0 .OR. FloorAreaServed[1] < 0.1) then  UNCHANGED
+									else if (Type != 2 .AND. IfValidAnd( DistribSystem:Type == 8 ) .AND. IfValidAnd( HeatSystem[1]:Type > 0 ) .AND. IfValidAnd( HeatDucted < 0.5 ))
+									then	if (LocalCompAssigned( CoolSystem[1] ) == 0)
+											then	 CreateComp( ResFanSys, Local( Name ) + "-fan", "Setup_HVACDistFan" )
+											else if (IfValidAnd( CoolSystem[1]:Type < 2 ))
+											then	 CreateComp( ResFanSys, Local( Name ) + "-fan", "Setup_HVACDistFan" )
+											else	UNCHANGED  endif endif
+									else	UNCHANGED  endif endif  }
+
+;	"store BEMProc details"		ResProj:Action = {  StoreBEMProc( "ProposedModelCodeAdditions - b4 Reset dist sys type", 0 )  }
+
+; SAC 4/15/15 - adjust for MFam duplex/townhomes options (based on ResProj:IsMFamDupOrTownhm)
+  	"Revise ResHVACSys:DistribSystem:Type if necessary"
+			ResHVACSys:DistribSystem:Type	= {	if (Type == 2 .OR. LocalCompAssigned( DistribSystem ) == 0 .OR. IfValidAnd( DistribSystem:Type != 8 ) .OR. FloorAreaServed[1] < 0.1) then  UNCHANGED
+														else if (IfValidAnd( HeatSystem[1]:Type > 0 ) .AND. IfValidAnd( HeatDucted < 0.5 ))
+														then	if (LocalCompAssigned( CoolSystem[1] ) == 0)
+																then	     if (ResProj:IsMultiFamily > 0 .AND.
+																					ResProj:IsMFamDupOrTownhm < 0.5)	 		then  7		; "Ducts located entirely in conditioned space"
+																		else if (MaxAll( ResAttic:ClVentableArea ) > 1)	then  1		; "Ducts located in unconditioned attic"
+																		else if (MaxAll( ResCrawlSpc:Area ) > 1) 		then  2		; "Ducts located in a crawl space"
+													;					else if (MaxAll(    ResIntWall:Area ) > 1) 		then  5
+																															 		else  7		; "Ducts located entirely in conditioned space"
+																		endif endif endif 
+																else if (IfValidAnd( CoolSystem[1]:Type < 2 ))
+																then	     if (ResProj:IsMultiFamily > 0 .AND.
+																					ResProj:IsMFamDupOrTownhm < 0.5)			then  7		; "Ducts located entirely in conditioned space"
+																		else if (MaxAll( ResAttic:ClVentableArea ) > 1)	then  1		; "Ducts located in unconditioned attic"
+																		else if (MaxAll( ResCrawlSpc:Area ) > 1) 		then  2		; "Ducts located in a crawl space"
+													;					else if (MaxAll(    ResIntWall:Area ) > 1) 		then  5
+																															 		else  7		; "Ducts located entirely in conditioned space"
+																		endif endif endif 
+																else	UNCHANGED  endif endif
+														else	UNCHANGED  endif endif  }
+
+	"Setup proposed model cooling (for things like No Cooling)"
+			ResProj:Action		= {	EvalRulelist( "SetupProposedHVAC" )  }
+
+	; DHW use #define values - SAC 3/15/16
+	"Override DHW use define if not BRLs Proj:ShwrFLOWF"				Proj:ShwrFLOWF					= {	if (IfValidAnd( ResProj:BypassRuleLimits > 0 )) then  UNCHANGED  else  1.0  endif  }
+      ; SAC 2/16/18 - removed BypassRuleLimits reference when determining if reset of ShwrDRAINHREFF needed (tic #978)
+;	"Override DHW use define if not BRLs Proj:ShwrDRAINHREFF"		Proj:ShwrDRAINHREFF			= {	if (IfValidAnd( EnergyCodeYearNum < 2019 )==0)  then  UNCHANGED  else  0    endif  }   ; SAC 10/18/17 - added 2019 logic   ; removed rule - SAC 11/17/21
+	"Override DHW use define if not BRLs Proj:CwshHOTF"				Proj:CwshHOTF					= {	if (IfValidAnd( ResProj:BypassRuleLimits > 0 )) then  UNCHANGED  else  0.22 endif  }
+	"Override DHW use define if not BRLs Proj:CwshUSEF"				Proj:CwshUSEF					= {	if (IfValidAnd( ResProj:BypassRuleLimits > 0 )) then  UNCHANGED  else  2.03 endif  }
+	"Override DHW use define if not BRLs Proj:FaucHOTF"				Proj:FaucHOTF					= {	if (IfValidAnd( ResProj:BypassRuleLimits > 0 )) then  UNCHANGED  else  0.5  endif  }
+	"Override DHW use define if not BRLs Proj:FaucFlowF"				Proj:FaucFlowF					= {	if (IfValidAnd( ResProj:BypassRuleLimits > 0 )) then  UNCHANGED  else  1    endif  }
+	"Override DHW use define if not BRLs Proj:BathFLOWF"				Proj:BathFLOWF					= {	if (IfValidAnd( ResProj:BypassRuleLimits > 0 )) then  UNCHANGED  else  1    endif  }
+	"Override DHW use define if not BRLs Proj:BathDRAINHREFF"		Proj:BathDRAINHREFF			= {	if (IfValidAnd( ResProj:BypassRuleLimits > 0 )) then  UNCHANGED  else  0    endif  }
+	"Override DHW use define if not BRLs Proj:DwshFLOWF"				Proj:DwshFLOWF					= {	if (IfValidAnd( ResProj:BypassRuleLimits > 0 )) then  UNCHANGED  else  1    endif  }
+   ; SAC 12/6/18 - updated DHW draw profile include file to latest combined SFam/MFam (tic #?? no explicit ticket)
+   ; SAC 2/28/19 - restored use of DHWDUSF & DHWDUMF for PRE-2019 analysis (to ensure equivalent results)
+   ; revised to DHWDU2.txt for 2019.2.0 and later releases - SAC 03/16/21
+	"Override DHW use define if not BRLs Proj:CSE_DHWUseIncFile"	Proj:CSE_DHWUseIncFile		= {	if (IfValidAnd( ResProj:BypassRuleLimits > 0 ) .OR. IfValidAnd( ResProj:CSEDHWUseMethod == 1 )) then  UNCHANGED
+																																	else if (AnalysisVersion >= 190200) then "DHWDU2.txt"
+																																	else if (IfValidAnd( ResProj:EnergyCodeYearNum >= 2019 )) then "DHWDU.txt"
+																																	else if (IfValidAnd( ResProj:IsMultiFamily < 0.5 )) then  "DHWDUSF.txt"  else  "DHWDUMF.txt"  endif endif endif endif  }
+	"Override DHW use define if not BRLs Proj:CSE_DHWUseIncFileHashID"	Proj:CSE_DHWUseIncFileHashID	= {	if (IfValidAnd( ResProj:BypassRuleLimits > 0 ) .OR. IfValidAnd( ResProj:CSEDHWUseMethod = 1 )) then  UNCHANGED
+																																				else  17  endif  }
+END
+;*************************************************************************
+
+; SAC 5/14/18 - rulelist to handle Existing skylts in Altered CathedralCeilings (tic #843)
+;*************************************************************************
+RULELIST "SetupExistingSkyltCathedralCeilings" 1 0 0 1
+; before getting here we have checked that this is a EAA or AA model w/ 1 or more Altered CathedralCeilings and 1 or more Existing Skylts
+
+   "Set ResCathedralCeiling:AltClgExSkyltArea"     ResCathedralCeiling:AltClgExSkyltArea  = {
+         if (Status != 2) then  0
+         else  SumChildrenIf( ResSkylt:TotAreaInclMult, ResSkylt:Status = 1 )  endif  }
+   "Create ResCathedralCeiling:ExSkyltCathClgRef when needed to ensure Existing Skylt(s) persist in budget design"
+      ResCathedralCeiling:ExSkyltCathClgRef  = {
+         if (AltClgExSkyltArea < 0.1) then  UNDEFINED
+         else  CreateComp( ResCathedralCeiling, Name + "-ExSkylt" )  endif  }
+   ; setup new CathedralCeiling
+   "Set ExSkyltCathClgRef:Parent"      ResCathedralCeiling:ExSkyltCathClgRef:Parent      = {  Parent( Name )  }
+   "Set ExSkyltCathClgRef:Status"      ResCathedralCeiling:ExSkyltCathClgRef:Status      = {  "Existing"      }
+   "Set ExSkyltCathClgRef:IsVerified"  ResCathedralCeiling:ExSkyltCathClgRef:IsVerified  = {  0  }
+   "Set ExSkyltCathClgRef:Area"        ResCathedralCeiling:ExSkyltCathClgRef:Area        = {  AltClgExSkyltArea + 0.1  }
+   "Adjust ResCathedralCeiling:Area for AltClgExSkyltArea"     ResCathedralCeiling:Area     = {
+         if (Status != 2 .OR. IfValidAnd( AltClgExSkyltArea > 0 )==0) then  UNCHANGED
+         else  max( 0.1, Area - AltClgExSkyltArea )  endif  }
+   "Set ExSkyltCathClgRef:Construction"      ResCathedralCeiling:ExSkyltCathClgRef:Construction     = {  RuleLibrary( Cons, "ExistingSkylt Cathedral Ceiling" )  }
+   "Set ExSkyltCathClgRef:RoofRise"          ResCathedralCeiling:ExSkyltCathClgRef:RoofRise         = {  RoofRise  }
+   "Set ExSkyltCathClgRef:Orientation"       ResCathedralCeiling:ExSkyltCathClgRef:Orientation      = {  Orientation  }
+   "Set ExSkyltCathClgRef:OrientationValue"  ResCathedralCeiling:ExSkyltCathClgRef:OrientationValue = {  OrientationValue  }
+   "Set ExSkyltCathClgRef:RoofSolReflect"    ResCathedralCeiling:ExSkyltCathClgRef:RoofSolReflect   = {  RoofSolReflect  }
+   "Set ExSkyltCathClgRef:RoofEmiss"         ResCathedralCeiling:ExSkyltCathClgRef:RoofEmiss        = {  RoofEmiss  }
+
+   "switch Parent of each Existing Skylt (whose parent is Altered CathedralCeiling) to that object's ExSkyltCathClgRef"
+      ResSkylt:Parent  = {
+         if (Status != 1 .OR.
+             ParentComponentType() != "ResCathedralCeiling") then  UNCHANGED
+         else if (Parent( Status ) != 2 .OR.
+                  ParentCompAssigned( ExSkyltCathClgRef ) < 1) then  UNCHANGED
+         else  ExSkyltCathClgRef:Name
+         endif endif  }
+END
+;*************************************************************************
+
+
+;*************************************************************************
+RULELIST "SetupBudgetHVAC" 1 0 0 1
+;*************************************************************************
+	"Reset ResHVACSys:PreventCoolingSim"		ResHVACSys:PreventCoolingSim	= {	0  }
+	"Reset ResHVACSys:NoPropCoolingSim"			ResHVACSys:NoPropCoolingSim	= {	0  }
+
+	"Setup budget model cooling (in cases where cooling not simulated in proposed model for No Cooling systems)"
+			ResProj:Action		= {	EvalRulelist( "SetupProposedHVAC" )  }
+END
+
+; SAC 7/30/15 - split out proposed HVAC creation rules to enable their being called during BudgetConversion in cases where No Cooling systems NOT simulated w/ cooling in the proposed design
+;*************************************************************************
+RULELIST "SetupProposedHVAC" 1 0 0 1
+;*************************************************************************
+
+; SAC 5/6/14 - BEFORE creating CoolSystem[1] (when none present), manually reset autosize & duct flags to ensure proper simulation (WITH ducts) - GC #314
+; SAC 7/29/15 - changes to prevent creation of cooling equipment for proposed model (based on NoPropCoolingSim)
+	"Reset ResHVACSys:AutoSizeCoolInp if cooling equip needs to be added"
+			ResHVACSys:AutoSizeCoolInp	= {	if ((Type == 1 .OR. Type == 3) .AND. FloorAreaServed[1] > 0.1 .AND. IfValidAnd( NoPropCoolingSim > 0 )==0)
+													then	if (LocalCompAssigned( CoolSystem[1] ) == 0)
+															then	UNDEFINED		; will be re-defaulted later
+															else if (CoolSystem[1]:Type < 2 .AND. LocalCompAssigned( HeatSystem[1] ) > 0)
+															then	if (HeatSystem[1]:Type > 0)
+																	then	UNDEFINED		; will be re-defaulted later
+																	else	UNCHANGED  endif		else	UNCHANGED  endif endif		else  UNCHANGED  endif  }
+	"Reset ResHVACSys:CoolDucted if cooling equip needs to be added"
+			ResHVACSys:CoolDucted		= {	if ((Type == 1 .OR. Type == 3) .AND. FloorAreaServed[1] > 0.1 .AND. IfValidAnd( NoPropCoolingSim > 0 )==0)
+													then	if (LocalCompAssigned( CoolSystem[1] ) == 0)
+															then	UNDEFINED		; will be re-defaulted later
+															else if (CoolSystem[1]:Type < 2 .AND. LocalCompAssigned( HeatSystem[1] ) > 0)
+															then	if (HeatSystem[1]:Type > 0)
+																	then	UNDEFINED		; will be re-defaulted later
+																	else	UNCHANGED  endif		else	UNCHANGED  endif endif		else  UNCHANGED  endif  }
+
+; LDH 8/3/2016 - flag to maintain user HVACDist for newly created cooling systems (tic 689)
+  "Set Flag to keep user HVACDist assingment for newly created cooling systems"  ResHVACSys:MaintainHVACDist = {
+    if ( LocalCompAssigned( HeatSystem[1] ) > 0 )
+    then if ( IfValidAnd(HeatSystem[1]:Type > 0 ) .AND.
+              IfValidAnd( HtOrClDucted > 0 ) )
+      then 1
+      else 0
+      endif
+    else 0
+    endif }
+
+; SAC 5/14/13 - moved here from below to always create split AC in this situation (GC issue #95)
+; SAC 5/27/14 - revised process of creating cool equipment when no cooling equipment is specified to facilitate proper reporting of no-cooling models in CF1R
+; SAC 7/29/15 - changes to prevent creation of cooling equipment for proposed model (based on NoPropCoolingSim)
+  "Set ResHVACSys:CoolSysPropCr8 - flag indicating when cooling equipment is created for proposed simulation"
+    ResHVACSys:CoolSysPropCr8	= {	
+    if( ( Type == 1 .OR. Type == 3 ) .AND. FloorAreaServed[1] > 0.1 .AND. IfValidAnd( NoPropCoolingSim > 0 ) == 0 )
+    then if (LocalCompAssigned( CoolSystem[1] ) == 0)
+      then 1
+      else if (CoolSystem[1]:Type < 2 .AND. LocalCompAssigned( HeatSystem[1] ) > 0)
+	    then
+	      if (HeatSystem[1]:Type > 0)
+        then 2
+        else 0  
+        endif
+      else 0  
+      endif endif
+    else 0  
+    endif  }
+    
+	"Add CoolSystem to any systems requiring it"
+	ResHVACSys:CoolSystem[1]	= {	
+		if (CoolSysPropCr8 < 0.1) 
+		then  UNCHANGED
+		else CreateComp( ResClgSys, Local( Name ) + "-cool", "Setup_HVACCool_SplitAirCond"  )
+		endif  }
+
+; SAC 9/3/13 - integrated into above rule - now creates new Cool object rather than editing existing, since cool objects can be assigned to multiple 
+;	"Add DistribSystem to any systems requiring it"
+;			ResHVACSys:CoolSystem:Cr8ProposedCool		= {	if (CoolSystem:Type == 1 .AND. LocalCompAssigned( HeatSystem ) > 0)
+;																		then	if (HeatSystem:Type > 0) then  2   ; SplitAirCond
+;																				else  0  endif
+;																		else  0  endif  }
+;	"toggle on certain cooling systems flagged by above rule"
+;		ResClgSys:Action = {	if (Cr8ProposedCool > 0) then  EvalRulelist( "SetupProposed_HVACCool", 1 )  else  UNCHANGED  endif  }
+
+; SAC 9/3/13 - RE-Default HVACHeat/Cool assignment & summarization properties
+	"RE-Default HVACSys Heat/Cool properties - round 1"	ResHVACSys:Action		= {	if ((Type == 1 .OR. Type == 3) .AND. LocalCompAssigned( CoolSystem[1] ))
+																											then  EvalRulelist( "SetupHVACSys_Round1_HeatCool", 1 )
+																											else	UNCHANGED  endif  }
+  ; More HVACSys heating equipment summarization
+	"RE-Default HVACSys Heat/Cool properties - round 2"	ResHVACSys:Action		= {	if ((Type == 1 .OR. Type == 3) .AND. LocalCompAssigned( CoolSystem[1] ))
+																											then  EvalRulelist( "SetupHVACSys_Round2_HeatCool", 1 )
+																											else	UNCHANGED  endif  }
+
+
+   ;--------------------------------------------------------------------
+   ; Check for gas heating errors and set project-level gas heating flag
+   ;--------------------------------------------------------------------
+
+	"Set ResHVACSys:GasHeatAreaServed"		ResHVACSys:GasHeatAreaServed	= {	if (Type == 2 .OR. HaveHeating < 0.5) then  0
+																								else if(Type == 1 .OR. Type == 3)
+																								then  if (T24RHeatingEquipment:UseGas( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", HeatSysTypeAbbrev ) > 0.5)
+																								      then	FloorAreaServed[1]
+																								      else 0 endif
+																								else  if ( HVACCentralRef:Type = 4 )
+																								      then 0 
+																								      else FloorAreaServed[1]
+																								endif endif endif }
+	"Set ResHVACSys:ElecHeatAreaServed"		ResHVACSys:ElecHeatAreaServed	= {	if (HaveHeating < 0.5) then  0
+																								else if (Type == 2)
+																								then	if (T24RHeatingEquipment:UseElec( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", HtPumpSysTypeAbbrev ) > 0.5)
+																										then	FloorAreaServed[1]  else  0  endif
+																								else if (Type == 1 .OR. Type == 3) 
+																								then  if (T24RHeatingEquipment:UseElec( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", HeatSysTypeAbbrev ) > 0.5)
+																										then	FloorAreaServed[1]  else  0  endif
+																								else if (HVACCentralRef:Type == 4)
+																								    then  FloorAreaServed[1]  else  0  endif
+																								endif endif endif }
+
+	; SAC 1/9/13 - revised logic to allow for std design gas heat even if NatGasAvailable = 0
+;	"Set ResProj:StdDesignGasHeat"		ResProj:StdDesignGasHeat	= {	if (NatGasAvailable > 0.5 && (SumAll( ResHVACSys:GasHeatAreaServed  ) > 1 .OR. SumAll( ResHVACSys:ElecHeatAreaServed ) < 1)) then  1
+	"Set ResProj:StdDesignGasHeat"		ResProj:StdDesignGasHeat	= {	if (SumAll( ResHVACSys:GasHeatAreaServed  ) > 1 .OR. SumAll( ResHVACSys:ElecHeatAreaServed ) < 1) then  1
+																						else  0  endif  }
+
+
+   ;--------------------------------------------------------------------
+   ; Add DistribSystem to 'Central Heating and Cooling System's that require ducts but have no dist system
+   ;--------------------------------------------------------------------
+; DEBUGGING
+;	"store BEMProc details"		ResProj:Action = {  StoreBEMProc( "ProposedModelCodeAdditions - b4 DuctsReqd chk", 0 )  }
+;	"MsgBox"		ResHVACSys:Action	= {	PostWarning( "ProposedModelCodeAdditions -- HVACSys %s - HaveHeating=%g, HaveCooling=%g, Type=%g, HeatSysTypeAbbrev=%s, CoolSysTypeAbbrev=%s", Name, HaveHeating, HaveCooling, Type, HeatSysTypeAbbrev, CoolSysTypeAbbrev )  }
+
+	"Set ResHVACSys:DuctsRequired - 1 (heating)"		ResHVACSys:DuctsRequired	= {	if (HaveHeating < 0.5) then  0
+																										else if (Type == 2)
+																										then	if (T24RHeatingEquipment:DuctFlag( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", HtPumpSysTypeAbbrev ) == 1)
+																												then	1  else  0  endif
+																										else  if(Type == 1 .OR. Type = 3 )
+																										then if (T24RHeatingEquipment:DuctFlag( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", HeatSysTypeAbbrev ) == 1)
+																												then	1  else  0  endif
+																										else 0 ; central system
+																										endif endif endif }
+	"Set ResHVACSys:DuctsRequired - 2 (cooling)"		ResHVACSys:DuctsRequired	= {	if (HaveCooling < 0.5) then  UNCHANGED
+																										else if (Type == 2)
+																										then	if (T24RCoolingEquipment:DuctFlag( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", HtPumpSysTypeAbbrev ) == 1)
+																												then	1  else  UNCHANGED  endif
+																										else  if (Type == 1 .OR. Type = 3 )
+																										then if (T24RCoolingEquipment:DuctFlag( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", CoolSysTypeAbbrev ) == 1)
+																												then	1  else  UNCHANGED  endif
+																										else 0 ; central system
+																										endif endif endif }
+
+; DEBUGGING
+;	"store BEMProc details"		ResProj:Action = {  StoreBEMProc( "ProposedModelCodeAdditions - before DistSys cr8", 0 )  }
+;	"MsgBox"		ResHVACSys:Action	= {	MessageBox( "ProposedModelCodeAdditions -- HVACSys %s - Type=%g, DuctsRequired=%g, DistribSystem:Type=%g", Name, Type, DuctsRequired, DistribSystem:Type )  }
+
+
+; SAC 2/21/15 - revised following 2 rules to cause creation of new HVACDist & HVACFan if/when creating a new HVACCool for the proposed simulation (GC issue 473)
+; LDH 8/04/16 - revised the following two rules to maintain user HVACDist and HVACFan when creating a new HVACCool but user defined heating system is ducted.
+	"Add DistribSystem to any systems requiring it" ResHVACSys:DistribSystem	= {	
+    if(	Type == 1 .AND. 
+      ( LocalCompAssigned( DistribSystem ) == 0 .OR. CoolSysPropCr8 > 0.1 ) .AND.		; Type = "Central Heating and Cooling System"
+        FloorAreaServed[1] > 0.1 .AND. 
+        IfValidAnd( DuctsRequired > 0.5) .AND.
+        MaintainHVACDist = 0 )   ; LDH - Added to maintain ducts from heating system, if present (tic 689)
+    then	CreateComp( ResDistSys, Local( Name ) + "-dist", "Default_HVACDist_ForceTypeDefault" )
+    else  UNCHANGED  endif  }
+
+
+; SAC 9/3/12 - GC issue 159 - Add Fan to systems that have had distribution systems added (due to addition of cooling system...)
+	"Add Fan for ducted HVAC systems when needed"  ResHVACSys:Fan		= {	
+    if( FloorAreaServed[1] < 0.1 .OR. LocalCompAssigned( DistribSystem ) == 0) then  UNCHANGED
+    else if( IfValidAnd(DistribSystem:DuctsPresent < 0.5 ) ) then  UNCHANGED
+    else if( ( LocalCompAssigned( Fan ) == 0 .OR. CoolSysPropCr8 > 0.1 ) .AND.
+               MaintainHVACDist = 0 )   ; LDH - Added to maintain ducts from heating system, if present (tic 689)
+    then	CreateComp( ResFanSys, Local( Name ) + "-fan", "Setup_HVACDistFan" )
+    else	UNCHANGED  endif endif endif  }
+
+; DEBUGGING
+;	"store BEMProc details"		ResProj:Action = {  StoreBEMProc( "ProposedModelCodeAdditions - aft DuctsReqd chk", 0 )  }
+;	"MsgBox"		ResHVACSys:Action	= {	MessageBox( "ProposedModelCodeAdditions -- HVACSys %s - HaveHeating=%g, HaveCooling=%g, Type=%g, HeatSysTypeAbbrev=%s, CoolSysTypeAbbrev=%s", Name, HaveHeating, HaveCooling, Type, HeatSysTypeAbbrev, CoolSysTypeAbbrev )  }
+
+
+   ;--------------------------------------------------------------------
+   ; Add Heating to 'Central Heating and Cooling System's that have none
+   ;--------------------------------------------------------------------
+
+	"Add HeatSystem to any systems requiring it"
+	ResHVACSys:HeatSystem	= {	
+		if ( Type == 1 .AND. LocalCompAssigned( HeatSystem ) == 0 .AND. FloorAreaServed[1] > 0.1 )
+		then ; Type = "Central Heating and Cooling System"
+			switch (StdHeatingType)
+				case  1 :	CreateComp( ResHtgSys, Local( Name ) + "-heat", "Setup_HVACHeat_CntrlFurnace"  )	; "CntrlFurnace"
+				case  2 :	CreateComp( ResHtgSys, Local( Name ) + "-heat", "Setup_HVACHeat_WallFurnaceFan" )	; "WallFurnaceFan"
+				case  3 :	CreateComp( ResHtgSys, Local( Name ) + "-heat", "Setup_HVACHeat_Boiler"        )	; "Boiler"
+				case 14 :	CreateComp( ResHtgSys, Local( Name ) + "-heat", "Setup_HVACHeat_WallFurnaceGravity" )	; "WallFurnaceGravity"		; SAC 11/25/14 - value 4->14
+				case 15 :	CreateComp( ResHtgSys, Local( Name ) + "-heat", "Setup_HVACHeat_FloorFurnace" )	; "FloorFurnace"						; SAC 11/25/14 - value 5->15
+				case 16 :	CreateComp( ResHtgSys, Local( Name ) + "-heat", "Setup_HVACHeat_RoomHeater"  )	; "RoomHeater"								; SAC 11/25/14 - value 6->16
+				case  8 :	CreateComp( ResHtgSys, Local( Name ) + "-heat", "Setup_HVACHeat_Electric"      )	; "Electric"
+				case  9 :	CreateComp( ResHtgSys, Local( Name ) + "-heat", "Setup_HVACHeat_CombHydro"     )	; "CombHydro"
+				default :	PostError( "Unexpected standard design heating system type (%g) encountered", StdHeatingType )
+			endswitch
+		else UNCHANGED
+	  endif  }
+	"Set ResHVACSys:HeatSystem:StdType"		ResHVACSys:HeatSystem:StdType	= {	StdHeatingType }
+
+	"Add HtPumpSystem to any systems requiring it"    ; fix bug (?) where logic was executed for NON-HP systems, rather than for HP (Type=2) systems - SAC 02/02/22
+	ResHVACSys:HtPumpSystem	= {	
+		if ( Type == 2 .AND. LocalCompAssigned( HtPumpSystem ) == 0 .AND. FloorAreaServed[1] > 0.1 )
+		then; Type = "Central Heating and Cooling System"
+			switch (StdHeatingType)
+				case  1 :	UNDEFINED  ; CreateComp( ResHtgSys, Local( Name ) + "-heat", "Setup_HVACHeat_CntrlFurnace"  )	; "CntrlFurnace"
+				case  2 :	UNDEFINED  ; CreateComp( ResHtgSys, Local( Name ) + "-heat", "Setup_HVACHeat_Heater"        )	; "Heater"
+				case  3 :	UNDEFINED  ; CreateComp( ResHtgSys, Local( Name ) + "-heat", "Setup_HVACHeat_Boiler"        )	; "Boiler"
+			  case  4 :	CreateComp( ResHtPumpSys, Local( Name ) + "-htpmp", "Setup_HVACHtPump_SplitHeatPump" )		   ; "SplitHeatPump"
+				case 19 :	CreateComp( ResHtPumpSys, Local( Name ) + "-htpmp", "Setup_HVACHtPump_SDHVSplitHeatPump" )		; "SDHVSplitHeatPump"
+				case 10 :	CreateComp( ResHtPumpSys, Local( Name ) + "-htpmp", "Setup_HVACHtPump_DuctlessMiniSplitHeatPump" )	   ; "DuctlessHeatPump"
+				case  7 :	CreateComp( ResHtPumpSys, Local( Name ) + "-htpmp", "Setup_HVACHtPump_RoomHeatPump"  )		   ; "RoomHeatPump"
+				case  8 :	UNDEFINED  ; CreateComp( ResHtgSys, Local( Name ) + "-heat", "Setup_HVACHeat_Electric"      )	; "Electric"
+				case  9 :	UNDEFINED  ; CreateComp( ResHtgSys, Local( Name ) + "-heat", "Setup_HVACHeat_CombHydro"     )	; "CombHydro"
+				default :	PostError( "Unexpected standard design heating system type (%g) encountered", StdHeatingType )
+			endswitch
+		else UNCHANGED
+	  endif  }
+	"Set ResHVACSys:HtPumpSystem[1]:StdType"		ResHVACSys:HtPumpSystem[1]:StdType	= {	StdHeatingType }
+
+
+   ;--------------------------------------------------------------------
+   ; Add Cooling to 'Central Heating and Cooling System's that have none
+   ;--------------------------------------------------------------------
+  ; SAC 5/21/13 - revised logic to map to SplitHP if StdHtgSys is a HP (GC issue #110)
+	"Set ResHVACSys:StdCoolingType"
+	ResHVACSys:StdCoolingType	= {
+		if (HaveCooling < 0.5) then  0					; What if no system exists or No Cooling case ???
+		else if (Type == 1 .OR. Type == 3)
+		then	T24RCoolingEquipment:StdSystem( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", CoolSysTypeAbbrev )
+		else if ( Type == 2 )
+		then 	T24RCoolingEquipment:StdSystem( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", HtPumpSysTypeAbbrev )
+		else  6 ; place holder for central system
+		endif endif  endif}
+	"Set ResHVACSys:CoolSystem:StdType"		ResHVACSys:CoolSystem:StdType	= {	StdCoolingType  }
+
+   ;--------------------------------------------------------------------
+	"Set ResHVACSys:HtClFlrAreaServed"	ResHVACSys:HtClFlrAreaServed	= {	if (HaveHeating .OR. HaveCooling) then  FloorAreaServed[1]  else  0  endif  }
+
+
+
+END
+;*************************************************************************
+
+
+
+;*************************************************************************
+;*************************************************************************
+;
+RULELIST "ProposedCompliance" 1 0 1 0
+;
+;   Rules which are executed on the input building description following
+;   the completion of user input but prior to any simulation(s).
+;   These mainly include rules which define conditionally prescribed
+;   values and rules which prepare for the Proposed model simulation.
+;
+;*************************************************************************
+;*************************************************************************
+;"log status"   ResProj:Action = {  if (DevMode==0 .OR. LocalStatus(RunAbbrev) < 1 .OR. EnergyCodeYearNum < 2019) then  UNCHANGED  else
+;   PostMessageToLog( "    evaluating 'ProposedCompliance' rules on '%s' model...", RunAbbrev )  endif  }
+
+   ;--------------------------------------------------------------------
+   ; ProposedCompliance: Analysis and Site Rules
+   ;--------------------------------------------------------------------
+
+;   "Set ResProj:RunNumber"               ResProj:RunNumber            = {   RunNumber + 1  }      - SAC 4/21/15 - now set in source code
+   "Set ResProj:RunID"     ResProj:RunID  = {
+         if (ResAnalysisType == 0) then            "User"
+         else if (LocalStatus( RunAbbrev ) > 0)
+         then  switch (RunAbbrev)
+                  case  "pp"   :  "PrelimProp"  
+                  case  "pp-N" :  "PrelimProp-N"  
+                  case  "pp-E" :  "PrelimProp-E"
+                  case  "pp-S" :  "PrelimProp-S"
+                  case  "pp-W" :  "PrelimProp-W"
+                  case  "p"    :  "Proposed"  
+                  case  "p-N"  :  "Proposed"      ; SAC 7/9/13 - removed trailing '-N' to fix report generation issue
+                  case  "p-E"  :  "Proposed-E"
+                  case  "p-S"  :  "Proposed-S"
+                  case  "p-W"  :  "Proposed-W"
+                  default      :  "Proposed-x"
+               endswitch
+         else if (AllOrientations < 0.5) then   "Proposed"
+         else   switch (RunNumber)
+                  case  1 :   "Proposed"      ; SAC 7/9/13 - removed trailing '-N' to fix report generation issue
+                  case  2 :   "Proposed-E"
+                  case  3 :   "Proposed-S"
+                  case  4 :   "Proposed-W"
+                  default :   "Proposed-x"
+               endswitch  endif endif endif  }
+   "Set ResProj:RunIDProcFile"   ResProj:RunIDProcFile  = {
+         if (ResAnalysisType == 0) then            " - User"
+         else if (LocalStatus( RunAbbrev ) > 0)
+         then  switch (RunAbbrev)
+                  case  "pp"   :  " - PreProp"  
+                  case  "pp-N" :  " - PreProp-N"  
+                  case  "pp-E" :  " - PreProp-E"
+                  case  "pp-S" :  " - PreProp-S"
+                  case  "pp-W" :  " - PreProp-W"
+                  case  "p"    :  " - Prop"  
+                  case  "p-N"  :  " - Prop-N"
+                  case  "p-E"  :  " - Prop-E"
+                  case  "p-S"  :  " - Prop-S"
+                  case  "p-W"  :  " - Prop-W"
+                  default      :  " - Prop-x"
+               endswitch
+         else if (AllOrientations < 0.5) then   " - Prop"
+         else   switch (RunNumber)
+                  case  1 :   " - Prop-N"
+                  case  2 :   " - Prop-E"
+                  case  3 :   " - Prop-S"
+                  case  4 :   " - Prop-W"
+                  default :   " - Prop-x"
+               endswitch  endif endif endif  }
+;   "Set ResProj:RunAbbrev"               ResProj:RunAbbrev            = {   if (ResAnalysisType == 0) then            "u"   - now set in compliance engine source - SAC 8/4/17
+;                                                                  else if (AllOrientations < 0.5) then   "p"
+;                                                                  else   switch (RunNumber)
+;                                                                           case  1 :   "p-N"
+;                                                                           case  2 :   "p-E"
+;                                                                           case  3 :   "p-S"
+;                                                                           case  4 :   "p-W"
+;                                                                           default :   "p-x"
+;                                                                        endswitch  endif endif  }
+
+   "Set ResProj:FrontOrientation"   ResProj:FrontOrientation  = {
+         if (ResAnalysisType == 0 .OR. AllOrientations < 0.5) then   UNCHANGED
+         else if (LocalStatus( RunAbbrev ) > 0)
+         then  switch (RunAbbrev)
+                  case  "pp"   :  UNCHANGED  
+                  case  "pp-N" :     0  
+                  case  "pp-E" :    90
+                  case  "pp-S" :   180
+                  case  "pp-W" :   270
+                  case  "p"    :  UNCHANGED  
+                  case  "p-N"  :     0
+                  case  "p-E"  :    90
+                  case  "p-S"  :   180
+                  case  "p-W"  :   270
+                  default      :  UNCHANGED
+               endswitch
+         else   switch (RunNumber)
+                  case  1 :     0
+                  case  2 :    90
+                  case  3 :   180
+                  case  4 :   270
+                  default :   UNCHANGED
+               endswitch  endif endif  }
+   "Set ResProj:OrientAbbrev"    ResProj:OrientAbbrev  = {
+         if (ResAnalysisType == 0 .OR. AllOrientations < 0.5) then   UNDEFINED
+         else if (LocalStatus( RunAbbrev ) > 0)
+         then  switch (RunAbbrev)
+                  case  "pp"   :  UNDEFINED  
+                  case  "pp-N" :  "N"  
+                  case  "pp-E" :  "E"
+                  case  "pp-S" :  "S"
+                  case  "pp-W" :  "W"
+                  case  "p"    :  UNDEFINED  
+                  case  "p-N"  :  "N"
+                  case  "p-E"  :  "E"
+                  case  "p-S"  :  "S"
+                  case  "p-W"  :  "W"
+                  default      :  UNDEFINED
+               endswitch
+         else   switch (RunNumber)
+                  case  1 :   "N"
+                  case  2 :   "E"
+                  case  3 :   "S"
+                  case  4 :   "W"
+                  default :   UNDEFINED
+               endswitch  endif endif  }
+   "Set ResProj:OrientName"      ResProj:OrientName  = {
+         if (ResAnalysisType == 0 .OR. AllOrientations < 0.5) then   UNDEFINED
+         else if (LocalStatus( RunAbbrev ) > 0)
+         then  switch (RunAbbrev)
+                  case  "pp"   :  UNDEFINED  
+                  case  "pp-N" :  "North"   
+                  case  "pp-E" :  "East"  
+                  case  "pp-S" :  "South" 
+                  case  "pp-W" :  "West"  
+                  case  "p"    :  UNDEFINED  
+                  case  "p-N"  :  "North" 
+                  case  "p-E"  :  "East"  
+                  case  "p-S"  :  "South" 
+                  case  "p-W"  :  "West"  
+                  default      :  UNDEFINED
+               endswitch
+         else   switch (RunNumber)
+                  case  1 :   "North"
+                  case  2 :   "East"
+                  case  3 :   "South"
+                  case  4 :   "West"
+                  default :   UNDEFINED
+               endswitch  endif endif  }
+
+   ; rules to initialte PV system scaling (tic #923) - SAC 1/2/18
+   "Initiate PV system scaling"     ResProj:Action  =                ; add logic to prevent PV scaling in MFam models (for now) - SAC 11/29/21
+      {  if (LocalStatus( RunAbbrev ) < 1 .OR. IfValidAnd( IsComRuleset > 0 ) .OR.
+             IfValidAnd( AllowPVSizeOption > 0 )==0 .OR. PVSizeOption < 1)
+         then  UNCHANGED
+         else if (RunAbbrev = "p"   .OR. RunAbbrev = "p-N" .OR. RunAbbrev = "p-E" .OR.
+                  RunAbbrev = "p-S" .OR. RunAbbrev = "p-W")
+         then  EvalRulelist( "ApplyPVSystemScaling_SFam" )
+         else  UNCHANGED
+         endif endif  }
+
+;"debug" ResProj:Action = { MessageBox( "Checking for need to limit PV size to Reduced PV Req for run '%s':\nUseReducedPVReqVal %g  PVWDCSysTotal %g  PVWDCSizeMultiplier[1] %g", RunAbbrev, UseReducedPVReqVal, PVWDCSysTotal, PVWDCSizeMultiplier[1] )  }
+   ; rules to override Proposed PV system size w/ Reduced PV Requirement value (tic #974) - SAC 2/6/18
+   "Limit Proposed PV system size to Reduced PV Requirement"     ResProj:Action  =     ; add logic to prevent PV size adjustments in MFam models (for now) - SAC 11/29/21
+      {  if (IfValidAnd( IsComRuleset > 0 )) then  UNCHANGED
+         else if (IfValidAnd( UseReducedPVReqVal >= 0 ))
+         then  if ((PVSizeOption == 1 .OR. PVSizeOption == 1) .AND. IfValidAnd( UseReducedPVReqVal >= 0 ) .AND.
+                   ValidOr( UseReducedPVReqVal, 999 ) == (SumAll(  PVArray:DCSysSize ) * ValidOr( Proj:DCSizeMultiplier, 1 )))
+               then  UNCHANGED   ; don't re-scale alredy scaled value
+               else if (ValidOr( UseReducedPVReqVal, 999 ) <= (SumAll(  PVArray:DCSysSize ) * ValidOr(  Proj:DCSizeMultiplier, 1 )))
+               then       if (RunAbbrev = "p"  )
+                     then  EvalRulelist( "LimitPVSize_SFam_ReducedPVReq" )
+                     else if (RunAbbrev = "p-N")
+                     then  EvalRulelist( "LimitPVSize_SFam_ReducedPVReq_N" )
+                     else if (RunAbbrev = "p-E")
+                     then  EvalRulelist( "LimitPVSize_SFam_ReducedPVReq_E" )
+                     else if (RunAbbrev = "p-S")
+                     then  EvalRulelist( "LimitPVSize_SFam_ReducedPVReq_S" )
+                     else if (RunAbbrev = "p-W")
+                     then  EvalRulelist( "LimitPVSize_SFam_ReducedPVReq_W" )
+                     else  UNCHANGED  endif endif endif endif endif
+               else  UNCHANGED  endif endif
+         else  UNCHANGED  endif endif  }
+
+	; separate out appliance data reset rules and call iff BypassRuleLimits NOT activated - SAC 7/27/15
+	;"Re-default any/all appliance data"		ResProj:Action	= {	if (IfValidAnd( BypassRuleLimits > 0 ))
+	;																			then  EvalRulelist( "EnsureValidCookingFuel" )		; SAC 1/18/16 - new rules
+	;																			else  EvalRulelist( "OverrideApplianceData" )  endif  }
+	; SAC 5/20/16 - split above rule into 2 - calling 'EnsureValidCookingFuel' for all runs and 'OverrideApplianceData' only for no BypassRuleLimits (tic #669)
+	; SAC 2/28/18 - fixed bug where *Fuel=3 assumed to be Propane, whereas now (>=2016) =2 => NGas OR Propane (tic #991) 
+	"Ensure valid cooking fuel"				ResProj:Action	= {	if (IfValidAnd( EnergyCodeYearNum = 2013 ))
+	                                                         then  EvalRulelist( "EnsureValidCookingFuel_2013" )
+	                                                         else  UNCHANGED  endif  }
+	"Re-default any/all appliance data"		ResProj:Action	= {	if (IfValidAnd( BypassRuleLimits > 0 )) then  UNCHANGED
+																				else  EvalRulelist( "OverrideApplianceData" )  endif  }
+
+
+   "Switch ResExtWall:Construction from user input to standard design when Exception > 0"     ; SAC 5/18/18 - tic #798
+      ResExtWall:Construction  = {
+         if (IfValidAnd( ShowException > 0 )==0 .OR. Exception < 1 .OR.
+             IfValidAnd( Construction:WinterDesUValue   > 0 )==0 .OR.
+             IfValidAnd( Construction:CodeMaximumUValue > 0 )==0) then  UNCHANGED
+         else if (Construction:WinterDesUValue > Construction:CodeMaximumUValue)
+         then  RuleLibrary( Cons, T24RClimateZoneCodeBase:StdFrameExtWallCons( "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr ) )
+         else  UNCHANGED  endif endif  }
+
+
+  ; SAC 10/17/13 - added rule to delete ALL Mat objects (in order to prevent any user-defined Mats) - GC issue #213
+	"Delete ALL Mat objects (no user-defined Mats allowed"	ResProj:Action	= {	DeleteAllComps( ResMat )  }
+
+	"Evaluate rules to re-default orientation properties"		ResProj:Action	= {	if (ResAnalysisType == 0 .OR. AllOrientations < 0.5) then	UNCHANGED
+																										else	EvalRulelist( "ProposedInput" )  endif  }
+
+;	"Evaluate rules to summarize building model for reporting purposes"		ResProj:Action	= {	EvalRulelist( "Reporting_SummarizeModel" )  }
+
+   ; SAC 4/8/17 - logic to setup Max PV Generation scaling ratio
+   ; SAC 4/27/17 - added logic for 2016 EDR mods
+   ; SAC 5/10/17 - revised logic to require battery present AND set to Best Case control in order for 2019 to use MaxPropPVRatioInp (tic #839) - THEN reverted this mod based on input from the CEC
+   "Set ResProj:MaxPropPVRatio - Max ratio of Proposed PV Generation over Proposed model electric use (to be applied to results)"
+      ResProj:MaxPropPVRatio  = {
+         if (IfValidAnd( EnergyCodeYearNum = 2016 ) .AND. IfValidAnd( AllowExcessPVEDR = 0 ) .AND.
+             IfValidAnd( MaxPropPVRatioInp > 0 ))             then  MaxPropPVRatioInp
+         else if (IfValidAnd( ScalePropPVResults > 0.5 )==0)  then  -1
+         else if (IfValidAnd( BattMaxCap >= 0.1 )==0)         then  1.0
+         else if (IfValidAnd( MaxPropPVRatioInp > 0 ))        then  MaxPropPVRatioInp
+         else  -1  endif endif endif endif  }
+
+; SAC 9/15/15 - testing of HE Score writing functionality
+;	"Set ResProj:HEScoreFileIndex"		ResProj:HEScoreFileIndex	= {	OpenExportFile( ModelPath + ModelFile + " - HEScore.csv", "wt" )  }
+;	"Write HE Score File #1"			ResProj:Action					= {	if (IfValidAnd( HEScoreFileIndex >= 0 )==0) then  UNCHANGED
+;																						else	WriteToExportFile( HEScoreFileIndex, "%c%s%c,%c%s%c,%c%s%c,CA,%g,", 34, RunTitle, 34, 34, Address, 34, 34, City, 34, ZipCode )  endif  }
+;	"Write HE Score File #2"			ResProj:Action					= {	if (IfValidAnd( HEScoreFileIndex >= 0 )==0) then  UNCHANGED
+;																						else	WriteToExportFile( HEScoreFileIndex, "%c%s%c,Test,Test,", 34, RunDateFmt, 34 )  endif  }
+;	"Close HE Score File"				ResProj:Action					= {	if (IfValidAnd( HEScoreFileIndex >= 0 )==0) then  UNCHANGED
+;																						else	CloseExportFile( HEScoreFileIndex )  endif  }
+END
+;*************************************************************************
+
+; SAC 1/18/16 - add rule to ensure Nat Gas not selected for cooking fuel when Nat Gas not available on site - in which case we switch to Elec, which is the T24 compliance method.
+; SAC 2/28/18 - renamed rulelist adding '_2013' to distinguish it as something not to be done in 2016+ due to appliance fuel settings now generic Elec/Gas (tic #991) 
+;*************************************************************************
+RULELIST "EnsureValidCookingFuel_2013"  1 0 1 0
+	"Reset invalid ResProj:ApplCookFuel[1]"		ResProj:ApplCookFuel[1]		= {	if (Fuel_HaveNatGas == 0 .AND. ApplCookFuel[1] == 2) then  1
+																									else  UNCHANGED  endif  }
+   "Reset invalid DwellUnitType:CookFuel"		DwellUnitType:CookFuel	= {	if (ResProj:IsMultiFamily < 0.5 .OR. ResProj:Fuel_HaveNatGas > 0.5) then  UNCHANGED
+																									else if (CookFuel == 2) then  1
+																									else  UNCHANGED  endif endif  }
+END
+
+; these rules are evaluated during proposed model prep AND toward the beginning of each BudgetConversion process
+;*************************************************************************
+RULELIST "OverrideApplianceData"  1 0 1 0
+;*************************************************************************
+; modified to match RESNET - mjb 11/09/15
+	; SAC 11/14/13 - added resetting of lighting properties here to ensure standard-defined values are in place for compliance analysis
+	"Set ResProj:Ltg_FracPort"				ResProj:Ltg_FracPort				= {	if (ResProj:DRtgRefRunID == 2014) then  1.0    ; RESNET
+																							else	0.22  endif   }
+	"Set ResProj:Ltg_PwrAdjMult"			ResProj:Ltg_PwrAdjMult			= {	0.625  }
+	"Set ResProj:ExtLtg_PwrAdjMult"		ResProj:ExtLtg_PwrAdjMult		= {	if (ResProj:DRtgRefRunID == 2014) then  1.0    ; RESNET
+																							else	0.49  endif   }
+
+	"Set ResProj:Appl_HaveRefrig[1]"			ResProj:Appl_HaveRefrig[1]			= {	1  }
+	"Set ResProj:Appl_HaveDish[1]"			ResProj:Appl_HaveDish[1]			= {	1  }
+;	"Set ResProj:Appl_HaveWasher[1]"			ResProj:Appl_HaveWasher[1]			= { 1 }   - allow toggle off of washer & dryer
+;	"Set ResProj:Appl_HaveDryer[1]"			ResProj:Appl_HaveDryer[1]			= { 1 }
+	"Set ResProj:Appl_HaveCook[1]"			ResProj:Appl_HaveCook[1]			= {	1  }
+	"Set ResProj:ApplRefrigEffMethod[1]"	ResProj:ApplRefrigEffMethod[1]	= {	1  }
+	; SAC 4/14/16 - added T24-2016 default
+	"Set ResProj:Appl_RefrigUsage[1]"		ResProj:Appl_RefrigUsage[1]		= {	if (ResProj:DRtgRefRunID == 2014) then  637 + 18 * SimNumBedrooms    ; RESNET
+																									else if (ResProj:IntGainsMethod <= 2013) then  669
+																									else	454 + (37 * SimNumBedrooms)  endif endif  }		;	if (Local(ApplRefrigEffMethod[1]) == 1) then  669.  else UNCHANGED endif }
+
+;"debugging reset of cooking fuel"   ResProj:Action = {  PostMessageToLog( "   Overriding cooking fuel if StdsVersionYr (%g) < 2016, w/ DRtgRefRunID = %g", StdsVersionYr, DRtgRefRunID )  }
+	"Set ResProj:ApplDishUsageMethod[1]"	ResProj:ApplDishUsageMethod[1]	= {	"from # bedrooms/unit"  }
+;	"Set ResProj:ApplDryerFuel[1]"			ResProj:ApplDryerFuel[1]			= { if (Local(NatGasAvailable) == 0) then 1 else 2 endif }
+	; SAC 5/20/16 - disable override of ApplCookFuel for 2016 models (tic #669)
+	; SAC 4/30/17 - added similar logic to prevent override of ApplCookFuel for DRtg runs (tic #837)
+	"Set ResProj:ApplCookFuel[1]"				ResProj:ApplCookFuel[1]				= {	if (ResProj:StdsVersionYr >= 2016 .OR. ResProj:DRtgRefRunID == 2014) then  UNCHANGED
+																									else if (Local(Fuel_HaveNatGas) == 0) then  1  else  2  endif endif  }
+
+	"BLAST any prescribed Dwelling Unit appliance data prior to re-defaulting"		ResProj:Action	= {	if (IsMultiFamily < 0.5) then  UNCHANGED
+																																	else	EvalRulelist( "Remove_PrescribedDwellingUnitApplianceData" )  endif  }
+	"Default Dwelling Unit Data"			ResProj:Action	= {	if (IsMultiFamily < 0.5)
+																			then  EvalRulelist( "Default_DwellingUnitData_SFam" )
+																			else	EvalRulelist( "Default_DwellingUnitData" )  endif  }
+
+; RESNET = 78 + 31*NumBedrooms
+;  case 0: 78		case 1: 109		case 2: 140		case 3: 171		case 4: 202
+;	case 5: 233		case 6: 264		case 7: 295		case 8: 326		case 9: 357
+	"Set ResProj:Appl_DishUsage[1]"			ResProj:Appl_DishUsage[1]			= {	if (IsMultiFamily > 0.5 .OR. Appl_HaveDish[1] < 0.5) then  0
+																									else if (ApplDishUsageMethod[1] == 1 .AND. NumDwellingUnits[1] > 0)
+																									then	if (ResProj:DRtgRefRunID == 2014)    ; RESNET
+																											then	switch (SimNumBedrooms / NumDwellingUnits[1])
+			                                                                                 case 0: 78		case 1: 109		case 2: 140		case 3: 171		case 4: 202
+         			                                                                     	case 5: 233		case 6: 264		case 7: 295		case 8: 326		case 9: 357
+																														default: 109	endswitch
+																											else if (ResProj:IntGainsMethod <= 2013)
+																											then	switch (SimNumBedrooms / NumDwellingUnits[1])
+																														case 0: 90		case 1: 90		case 2: 126		case 3: 126		case 4: 126
+																														case 5: 145		case 6: 145		case 7: 174		case 8: 174		case 9: 174
+																														default: 203	endswitch
+																											else	0.14507		; kWh/gal (for T24-2016 gains)
+																											endif endif
+																									else  UNCHANGED  endif endif  }
+END
+;*************************************************************************
+
+
+;*************************************************************************
+RULELIST "Remove_PrescribedDwellingUnitApplianceData"  1 0 0 0
+;*************************************************************************
+; SAC 6/24/14 - revisions to enable new DwellUnit objects
+   "Blst DwellUnitType:HaveRefrig"       DwellUnitType:HaveRefrig			= { UNDEFINED }
+   "Blst DwellUnitType:RefrigEffMethod"  DwellUnitType:RefrigEffMethod	= { UNDEFINED }
+   "Blst DwellUnitType:RefrigElecUsage"  DwellUnitType:RefrigElecUsage	= { UNDEFINED }
+                                                                         
+   "Blst DwellUnitType:HaveDish"         DwellUnitType:HaveDish			= { UNDEFINED }
+   "Blst DwellUnitType:DishUsageMethod"  DwellUnitType:DishUsageMethod	= { UNDEFINED }
+   "Blst DwellUnitType:DishElecUsage"    DwellUnitType:DishElecUsage		= { UNDEFINED }
+                                                                         
+   "Blst DwellUnitType:HaveCook"         DwellUnitType:HaveCook			= { UNDEFINED }
+      ; SAC 5/20/16 - prevent reset of CookFuel for >= 2016 analysis (tic #669)
+      ; SAC 4/4/19 - added logic preventing reset of DwellUnitType:CookFuel for DRtg run (tic #1000)
+   "Blst DwellUnitType:CookFuel"         DwellUnitType:CookFuel			= { if (ResProj:StdsVersionYr >= 2016 .OR. ResProj:DRtgRefRunID == 2014) then  UNCHANGED
+																									else  UNDEFINED  endif  }
+
+;			"Blst ResProj:ApplCookFuel[1]" 		ResProj:ApplCookFuel[1] 	= { UNDEFINED }		"Blst ResProj:ApplCookFuel[2]" 		ResProj:ApplCookFuel[2] 	= { UNDEFINED }
+;			"Blst ResProj:ApplCookFuel[3]" 		ResProj:ApplCookFuel[3] 	= { UNDEFINED }		"Blst ResProj:ApplCookFuel[4]" 		ResProj:ApplCookFuel[4] 	= { UNDEFINED }
+;			"Blst ResProj:ApplCookFuel[5]" 		ResProj:ApplCookFuel[5] 	= { UNDEFINED }		"Blst ResProj:ApplCookFuel[6]" 		ResProj:ApplCookFuel[6] 	= { UNDEFINED }
+;			"Blst ResProj:ApplCookFuel[7]" 		ResProj:ApplCookFuel[7] 	= { UNDEFINED }		"Blst ResProj:ApplCookFuel[8]" 		ResProj:ApplCookFuel[8] 	= { UNDEFINED }
+;			"Blst ResProj:ApplCookFuel[9]" 		ResProj:ApplCookFuel[9] 	= { UNDEFINED }		"Blst ResProj:ApplCookFuel[10]"		ResProj:ApplCookFuel[10]	= { UNDEFINED }
+;			"Blst ResProj:ApplCookFuel[11]"		ResProj:ApplCookFuel[11]	= { UNDEFINED }		"Blst ResProj:ApplCookFuel[12]"		ResProj:ApplCookFuel[12]	= { UNDEFINED }
+;			"Blst ResProj:ApplCookFuel[13]"		ResProj:ApplCookFuel[13]	= { UNDEFINED }		"Blst ResProj:ApplCookFuel[14]"		ResProj:ApplCookFuel[14]	= { UNDEFINED }
+;			"Blst ResProj:ApplCookFuel[15]"		ResProj:ApplCookFuel[15]	= { UNDEFINED }		"Blst ResProj:ApplCookFuel[16]"		ResProj:ApplCookFuel[16]	= { UNDEFINED }
+;		
+;			"Blst ResProj:Appl_HaveRefrig[1]" 	ResProj:Appl_HaveRefrig[1]  ={ UNDEFINED }		"Blst ResProj:Appl_HaveRefrig[2]" 	ResProj:Appl_HaveRefrig[2]  ={ UNDEFINED }		"Blst ResProj:Appl_HaveRefrig[3]" 	ResProj:Appl_HaveRefrig[3]  ={ UNDEFINED }
+;			"Blst ResProj:Appl_HaveRefrig[4]" 	ResProj:Appl_HaveRefrig[4]  ={ UNDEFINED }		"Blst ResProj:Appl_HaveRefrig[5]" 	ResProj:Appl_HaveRefrig[5]  ={ UNDEFINED }		"Blst ResProj:Appl_HaveRefrig[6]" 	ResProj:Appl_HaveRefrig[6]  ={ UNDEFINED }
+;			"Blst ResProj:Appl_HaveRefrig[7]" 	ResProj:Appl_HaveRefrig[7]  ={ UNDEFINED }		"Blst ResProj:Appl_HaveRefrig[8]" 	ResProj:Appl_HaveRefrig[8]  ={ UNDEFINED }		"Blst ResProj:Appl_HaveRefrig[9]" 	ResProj:Appl_HaveRefrig[9]  ={ UNDEFINED }
+;			"Blst ResProj:Appl_HaveRefrig[10]"	ResProj:Appl_HaveRefrig[10] ={ UNDEFINED }		"Blst ResProj:Appl_HaveRefrig[11]"	ResProj:Appl_HaveRefrig[11] ={ UNDEFINED }		"Blst ResProj:Appl_HaveRefrig[12]"	ResProj:Appl_HaveRefrig[12] ={ UNDEFINED }
+;			"Blst ResProj:Appl_HaveRefrig[13]"	ResProj:Appl_HaveRefrig[13] ={ UNDEFINED }		"Blst ResProj:Appl_HaveRefrig[14]"	ResProj:Appl_HaveRefrig[14] ={ UNDEFINED }		"Blst ResProj:Appl_HaveRefrig[15]"	ResProj:Appl_HaveRefrig[15] ={ UNDEFINED }
+;			"Blst ResProj:Appl_HaveRefrig[16]"	ResProj:Appl_HaveRefrig[16] ={ UNDEFINED }
+;		
+;			"Blst ResProj:Appl_HaveDish[1]" 		ResProj:Appl_HaveDish[1] 	= { UNDEFINED }		"Blst ResProj:Appl_HaveDish[2]" 		ResProj:Appl_HaveDish[2] 	= { UNDEFINED }		"Blst ResProj:Appl_HaveDish[3]" 		ResProj:Appl_HaveDish[3] 	= { UNDEFINED }
+;			"Blst ResProj:Appl_HaveDish[4]" 		ResProj:Appl_HaveDish[4] 	= { UNDEFINED }		"Blst ResProj:Appl_HaveDish[5]" 		ResProj:Appl_HaveDish[5] 	= { UNDEFINED }		"Blst ResProj:Appl_HaveDish[6]" 		ResProj:Appl_HaveDish[6] 	= { UNDEFINED }
+;			"Blst ResProj:Appl_HaveDish[7]" 		ResProj:Appl_HaveDish[7] 	= { UNDEFINED }		"Blst ResProj:Appl_HaveDish[8]" 		ResProj:Appl_HaveDish[8] 	= { UNDEFINED }		"Blst ResProj:Appl_HaveDish[9]" 		ResProj:Appl_HaveDish[9] 	= { UNDEFINED }
+;			"Blst ResProj:Appl_HaveDish[10]"		ResProj:Appl_HaveDish[10]	= { UNDEFINED }		"Blst ResProj:Appl_HaveDish[11]"		ResProj:Appl_HaveDish[11]	= { UNDEFINED }		"Blst ResProj:Appl_HaveDish[12]"		ResProj:Appl_HaveDish[12]	= { UNDEFINED }
+;			"Blst ResProj:Appl_HaveDish[13]"		ResProj:Appl_HaveDish[13]	= { UNDEFINED }		"Blst ResProj:Appl_HaveDish[14]"		ResProj:Appl_HaveDish[14]	= { UNDEFINED }		"Blst ResProj:Appl_HaveDish[15]"		ResProj:Appl_HaveDish[15]	= { UNDEFINED }
+;			"Blst ResProj:Appl_HaveDish[16]"		ResProj:Appl_HaveDish[16]	= { UNDEFINED }
+;		
+;			"Blst ResProj:Appl_HaveCook[1]" 		ResProj:Appl_HaveCook[1] 	= { UNDEFINED }		"Blst ResProj:Appl_HaveCook[2]" 		ResProj:Appl_HaveCook[2] 	= { UNDEFINED }		"Blst ResProj:Appl_HaveCook[3]" 		ResProj:Appl_HaveCook[3] 	= { UNDEFINED }
+;			"Blst ResProj:Appl_HaveCook[4]" 		ResProj:Appl_HaveCook[4] 	= { UNDEFINED }		"Blst ResProj:Appl_HaveCook[5]" 		ResProj:Appl_HaveCook[5] 	= { UNDEFINED }		"Blst ResProj:Appl_HaveCook[6]" 		ResProj:Appl_HaveCook[6] 	= { UNDEFINED }
+;			"Blst ResProj:Appl_HaveCook[7]" 		ResProj:Appl_HaveCook[7] 	= { UNDEFINED }		"Blst ResProj:Appl_HaveCook[8]" 		ResProj:Appl_HaveCook[8] 	= { UNDEFINED }		"Blst ResProj:Appl_HaveCook[9]" 		ResProj:Appl_HaveCook[9] 	= { UNDEFINED }
+;			"Blst ResProj:Appl_HaveCook[10]"		ResProj:Appl_HaveCook[10]	= { UNDEFINED }		"Blst ResProj:Appl_HaveCook[11]"		ResProj:Appl_HaveCook[11]	= { UNDEFINED }		"Blst ResProj:Appl_HaveCook[12]"		ResProj:Appl_HaveCook[12]	= { UNDEFINED }
+;			"Blst ResProj:Appl_HaveCook[13]"		ResProj:Appl_HaveCook[13]	= { UNDEFINED }		"Blst ResProj:Appl_HaveCook[14]"		ResProj:Appl_HaveCook[14]	= { UNDEFINED }		"Blst ResProj:Appl_HaveCook[15]"		ResProj:Appl_HaveCook[15]	= { UNDEFINED }
+;			"Blst ResProj:Appl_HaveCook[16]"		ResProj:Appl_HaveCook[16]	= { UNDEFINED }
+;		
+;			"Blst ResProj:Appl_RefrigUsage[1]" 	ResProj:Appl_RefrigUsage[1] 	= { UNDEFINED }	"Blst ResProj:Appl_RefrigUsage[2]" 	ResProj:Appl_RefrigUsage[2] 	= { UNDEFINED }	"Blst ResProj:Appl_RefrigUsage[3]" 	ResProj:Appl_RefrigUsage[3] 	= { UNDEFINED }
+;			"Blst ResProj:Appl_RefrigUsage[4]" 	ResProj:Appl_RefrigUsage[4] 	= { UNDEFINED }	"Blst ResProj:Appl_RefrigUsage[5]" 	ResProj:Appl_RefrigUsage[5] 	= { UNDEFINED }	"Blst ResProj:Appl_RefrigUsage[6]" 	ResProj:Appl_RefrigUsage[6] 	= { UNDEFINED }
+;			"Blst ResProj:Appl_RefrigUsage[7]" 	ResProj:Appl_RefrigUsage[7] 	= { UNDEFINED }	"Blst ResProj:Appl_RefrigUsage[8]" 	ResProj:Appl_RefrigUsage[8] 	= { UNDEFINED }	"Blst ResProj:Appl_RefrigUsage[9]" 	ResProj:Appl_RefrigUsage[9] 	= { UNDEFINED }
+;			"Blst ResProj:Appl_RefrigUsage[10]"	ResProj:Appl_RefrigUsage[10]	= { UNDEFINED }	"Blst ResProj:Appl_RefrigUsage[11]"	ResProj:Appl_RefrigUsage[11]	= { UNDEFINED }	"Blst ResProj:Appl_RefrigUsage[12]"	ResProj:Appl_RefrigUsage[12]	= { UNDEFINED }
+;			"Blst ResProj:Appl_RefrigUsage[13]"	ResProj:Appl_RefrigUsage[13]	= { UNDEFINED }	"Blst ResProj:Appl_RefrigUsage[14]"	ResProj:Appl_RefrigUsage[14]	= { UNDEFINED }	"Blst ResProj:Appl_RefrigUsage[15]"	ResProj:Appl_RefrigUsage[15]	= { UNDEFINED }
+;			"Blst ResProj:Appl_RefrigUsage[16]"	ResProj:Appl_RefrigUsage[16]	= { UNDEFINED }
+;		
+;			"Blst ResProj:UnitDishElecGain[1]" 	ResProj:UnitDishElecGain[1] 	= { UNDEFINED }	"Blst ResProj:UnitDishElecGain[2]" 	ResProj:UnitDishElecGain[2] 	= { UNDEFINED }	"Blst ResProj:UnitDishElecGain[3]" 	ResProj:UnitDishElecGain[3] 	= { UNDEFINED }
+;			"Blst ResProj:UnitDishElecGain[4]" 	ResProj:UnitDishElecGain[4] 	= { UNDEFINED }	"Blst ResProj:UnitDishElecGain[5]" 	ResProj:UnitDishElecGain[5] 	= { UNDEFINED }	"Blst ResProj:UnitDishElecGain[6]" 	ResProj:UnitDishElecGain[6] 	= { UNDEFINED }
+;			"Blst ResProj:UnitDishElecGain[7]" 	ResProj:UnitDishElecGain[7] 	= { UNDEFINED }	"Blst ResProj:UnitDishElecGain[8]" 	ResProj:UnitDishElecGain[8] 	= { UNDEFINED }	"Blst ResProj:UnitDishElecGain[9]" 	ResProj:UnitDishElecGain[9] 	= { UNDEFINED }
+;			"Blst ResProj:UnitDishElecGain[10]"	ResProj:UnitDishElecGain[10]	= { UNDEFINED }	"Blst ResProj:UnitDishElecGain[11]"	ResProj:UnitDishElecGain[11]	= { UNDEFINED }	"Blst ResProj:UnitDishElecGain[12]"	ResProj:UnitDishElecGain[12]	= { UNDEFINED }
+;			"Blst ResProj:UnitDishElecGain[13]"	ResProj:UnitDishElecGain[13]	= { UNDEFINED }	"Blst ResProj:UnitDishElecGain[14]"	ResProj:UnitDishElecGain[14]	= { UNDEFINED }	"Blst ResProj:UnitDishElecGain[15]"	ResProj:UnitDishElecGain[15]	= { UNDEFINED }
+;			"Blst ResProj:UnitDishElecGain[16]"	ResProj:UnitDishElecGain[16]	= { UNDEFINED }
+END
+;*************************************************************************
+
+;*************************************************************************  - PV system scaling based on Reduced PV Requirement (tic #3352) - APB 05/18/22
+RULELIST  "LimitPVSize_SFam_ReducedPVReq" 1 0 0 1
+   "Set Proj:DCSizeMultiplier to equal Reduced PV Requirement"
+      Proj:DCSizeMultiplier  = {
+         if (IfValidAnd( SumAll(  PVArray:DCSysSize ) > 0 )==0) then  0
+         else  ReducedPVReqVal / SumAll(  PVArray:DCSysSize )  endif  }
+;   "Set EUseSummary:PropInputPVMult"
+;      Proj:ResultSummary[1]:PropInputPVMult  = {  PVWDCSizeMultiplier[1]  }
+;   "Set ResultSummary[1]:RedPVRqPVScalingMsg to document PV scaling"
+;      Proj:ResultSummary[1]:RedPVRqPVScalingMsg  = {
+;         if (UseReducedPVReqVal < 0.0001)
+;         then          "PV System(s) removed due to Reduced PV Requirement of 0 kWdc"
+;         else  Format( "PV System(s) scaled by a factor of %.3f to equal Reduced PV Requirement of %g kWdc", PVWDCSizeMultiplier[1], UseReducedPVReqVal )  endif  }
+;   "Blast ResultSummary[1]:UserPVScalingMsg"    Proj:ResultSummary[1]:UserPVScalingMsg  = {  UNDEFINED  }
+END
+;*************************************************************************  - PV system scaling based on Reduced PV Requirement (tic #974) - SAC 2/6/18
+RULELIST  "LimitPVSize_SFam_ReducedPVReq_N" 1 0 0 1
+   "Set Proj:DCSizeMultiplier to equal Reduced PV Requirement"    ; repeat check for PVWDCSysTotal > 0 from above rulelist - SAC 10/06/21
+      Proj:DCSizeMultiplier  = {
+         if (IfValidAnd( SumAll(  PVArray:DCSysSize ) > 0 )==0) then  0
+         else  ReducedPVReqVal / SumAll(  PVArray:DCSysSize )  endif  }
+;   "Set EUseSummary:PropInputPVMult"
+;      Proj:ResultSummary[2]:PropInputPVMult  = {  PVWDCSizeMultiplier[1]  }
+;   "Set ResultSummary[2]:RedPVRqPVScalingMsg to document PV scaling"
+;      Proj:ResultSummary[2]:RedPVRqPVScalingMsg  = {
+;         if (UseReducedPVReqVal < 0.0001)
+;         then          "PV System(s) removed due to Reduced PV Requirement of 0 kWdc"
+;         else  Format( "PV System(s) scaled by a factor of %.3f to equal Reduced PV Requirement of %g kWdc", PVWDCSizeMultiplier[1], UseReducedPVReqVal )  endif  }
+;   "Blast ResultSummary[2]:UserPVScalingMsg"    Proj:ResultSummary[2]:UserPVScalingMsg  = {  UNDEFINED  }
+END
+;*************************************************************************  - PV system scaling based on Reduced PV Requirement (tic #974) - SAC 2/6/18
+RULELIST  "LimitPVSize_SFam_ReducedPVReq_E" 1 0 0 1
+   "Set Proj:DCSizeMultiplier to equal Reduced PV Requirement"
+      Proj:DCSizeMultiplier  = {
+         if (IfValidAnd( SumAll(  PVArray:DCSysSize ) > 0 )==0) then  0
+         else  ReducedPVReqVal / SumAll(  PVArray:DCSysSize )  endif  }
+;   "Set EUseSummary:PropInputPVMult"
+;      Proj:ResultSummary[3]:PropInputPVMult  = {  PVWDCSizeMultiplier[1]  }
+;   "Set ResultSummary[3]:RedPVRqPVScalingMsg to document PV scaling"
+;      Proj:ResultSummary[3]:RedPVRqPVScalingMsg  = {
+;         if (UseReducedPVReqVal < 0.0001)
+;         then          "PV System(s) removed due to Reduced PV Requirement of 0 kWdc"
+;         else  Format( "PV System(s) scaled by a factor of %.3f to equal Reduced PV Requirement of %g kWdc", PVWDCSizeMultiplier[1], UseReducedPVReqVal )  endif  }
+;   "Blast ResultSummary[3]:UserPVScalingMsg"    Proj:ResultSummary[3]:UserPVScalingMsg  = {  UNDEFINED  }
+END
+;*************************************************************************  - PV system scaling based on Reduced PV Requirement (tic #974) - SAC 2/6/18
+RULELIST  "LimitPVSize_SFam_ReducedPVReq_S" 1 0 0 1
+   "Set Proj:DCSizeMultiplier to equal Reduced PV Requirement"
+      Proj:DCSizeMultiplier  = {
+         if (IfValidAnd( SumAll(  PVArray:DCSysSize ) > 0 )==0) then  0
+         else  ReducedPVReqVal / SumAll(  PVArray:DCSysSize )  endif  }
+;   "Set EUseSummary:PropInputPVMult"
+;      Proj:ResultSummary[4]:PropInputPVMult  = {  PVWDCSizeMultiplier[1]  }
+;   "Set ResultSummary[4]:RedPVRqPVScalingMsg to document PV scaling"
+;      Proj:ResultSummary[4]:RedPVRqPVScalingMsg  = {
+;         if (UseReducedPVReqVal < 0.0001)
+;         then          "PV System(s) removed due to Reduced PV Requirement of 0 kWdc"
+;         else  Format( "PV System(s) scaled by a factor of %.3f to equal Reduced PV Requirement of %g kWdc", PVWDCSizeMultiplier[1], UseReducedPVReqVal )  endif  }
+;   "Blast ResultSummary[4]:UserPVScalingMsg"    Proj:ResultSummary[4]:UserPVScalingMsg  = {  UNDEFINED  }
+END
+;*************************************************************************  - PV system scaling based on Reduced PV Requirement (tic #974) - SAC 2/6/18
+RULELIST  "LimitPVSize_SFam_ReducedPVReq_W" 1 0 0 1
+   "Set Proj:DCSizeMultiplier to equal Reduced PV Requirement"
+      Proj:DCSizeMultiplier  = {
+         if (IfValidAnd( SumAll(  PVArray:DCSysSize ) > 0 )==0) then  0
+         else  ReducedPVReqVal / SumAll(  PVArray:DCSysSize )  endif  }
+;   "Set EUseSummary:PropInputPVMult"
+;      Proj:ResultSummary[5]:PropInputPVMult  = {  PVWDCSizeMultiplier[1]  }
+;   "Set ResultSummary[5]:RedPVRqPVScalingMsg to document PV scaling"
+;      Proj:ResultSummary[5]:RedPVRqPVScalingMsg  = {
+;         if (UseReducedPVReqVal < 0.0001)
+;         then          "PV System(s) removed due to Reduced PV Requirement of 0 kWdc"
+;         else  Format( "PV System(s) scaled by a factor of %.3f to equal Reduced PV Requirement of %g kWdc", PVWDCSizeMultiplier[1], UseReducedPVReqVal )  endif  }
+;   "Blast ResultSummary[5]:UserPVScalingMsg"    Proj:ResultSummary[5]:UserPVScalingMsg  = {  UNDEFINED  }
+END
+;*************************************************************************
+
+
+;*************************************************************************
+;*************************************************************************
+;33333
+RULELIST  "ProposedHVACSizing" 1 0 0 1
+;
+;   Rules applied to the proposed building following a design day run.
+;   These rules can utilize design day run results to perform any of these
+;   tasks:
+;      1) Resize HVAC systems and cause re-execution of design day run.
+;      2) Resize HVAC systems for final run.
+;      3) Set any other building parameters based on design day run results.
+;
+;*************************************************************************
+;*************************************************************************
+
+   ;--------------------------------------------------------------------
+   ; ... Rules
+   ;--------------------------------------------------------------------
+
+END
+;*************************************************************************
+		    
+
+;*************************************************************************
+;*************************************************************************
+;44444
+RULELIST  "ProposedFinal" 1 0 0 1
+;
+;   Rules applied to the proposed building design just prior to executing
+;   the final annual simulation.  These rules may define final HVAC system
+;   sizes and/or other simulation data such as energy rate assignments, etc.
+;
+;*************************************************************************
+;*************************************************************************
+
+   ;--------------------------------------------------------------------
+   ; ... Rules
+   ;--------------------------------------------------------------------
+
+END
+;*************************************************************************
+
+
+;*************************************************************************
+;*************************************************************************
+
+ENDFILE

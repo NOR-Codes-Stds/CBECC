@@ -1,0 +1,172 @@
+; -------------------------------------------------------------------------
+; Rules pertaining to:   Prep For and Clean-up After each CSE Energy Simulation
+; CEC Title-24 Nonresidential Energy Code  (ported from Res - SAC 7/12/18)
+; -------------------------------------------------------------------------
+; Copyright (c) 2012-2016, California Energy Commission
+; Copyright (c) 2012-2016, Wrightsoft Corporation
+; All rights reserved.
+; Redistribution and use in source and binary forms, with or without modification,
+; are permitted provided that the following conditions are met:
+; - Redistributions of source code must retain the above copyright notice, this
+;   list of conditions and the following disclaimer.
+; - Redistributions in binary form must reproduce the above copyright notice, this
+;   list of conditions, the following disclaimer in the documentation and/or other
+;   materials provided with the distribution.
+; - Neither the name of the California Energy Commission nor the names of its
+;   contributors may be used to endorse or promote products derived from this
+;   software without specific prior written permission.
+; DISCLAIMER: THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+; "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+; THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+; NON-INFRINGEMENT ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION,
+; WRIGHTSOFT CORPORATION, ITRON, INC. OR ANY OTHER AUTHOR OR COPYRIGHT HOLDER OF
+; THIS SOFTWARE (COLLECTIVELY, THE "AUTHORS") BE LIABLE FOR ANY DIRECT, INDIRECT,
+; INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+; LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA,
+; OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+; LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
+; OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+; ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.  EACH LICENSEE AND SUBLICENSEE OF THE
+; SOFTWARE AGREES NOT TO ASSERT ANY CLAIM AGAINST ANY OF THE AUTHORS RELATING TO
+; THIS SOFTWARE, WHETHER DUE TO PERFORMANCE ISSUES, TITLE OR INFRINGEMENT ISSUES,
+; STRICT LIABILITY OR OTHERWISE.
+; -------------------------------------------------------------------------
+
+
+;*************************************************************************
+RULELIST "CSE_SimulationPrep_PV" 1 0 0 1
+;   Rules which are executed immediately prior to performing a CSE simulation - covering PVARRAY objects only
+;*************************************************************************
+;"dbg - store BEMProc details" Proj:Action = {  StoreBEMProc( Format( "Before run %s CSE PV SimPrep", RunAbbrev ), 0 )  }
+
+  ; SAC 3/4/17 - add call to rulelist that creates a PVArray PolyLp based on user inputs
+   "Create PolyLp representing PVArray"   PVArray:Action = {
+         if (IfValidAnd( DCSysSize > 0 ) .AND. GeomSpecMthd == "azimuth and tilt" .AND.
+             IfValidAnd( LctnSpecified > 0 ))
+         then  EvalRulelist( "Create_PVArrayPolyLp", 1 )
+         else  UNCHANGED  endif  }
+   "Default PolyLp data"   ; for those created above...
+      PolyLp:Area  = {  if (LocalStatus(Area) > 0) then  UNCHANGED
+                        else  InitializePolyLoop()  endif  }
+
+   ; APB 05/10/22 - setup cseCFIPVSizeDiv, a divisor on CSE's PVARRAY:pvDCSysSize due to CFI selection (tic #3352)
+   "Set cseCFIPVSizeDiv (CFI-related pvDCSysSize divisor)"     PVArray:cseCFIPVSizeDiv  =
+      {  if (IfValidAnd( DCSysSize > 0 ) == 0 .OR. IfValidAnd( Proj:DCSizeMultiplier = 0 ) .OR.
+             IfValidAnd( Az >= 0 )==0 .OR. IfValidAnd( Az <= 360 )==0 .OR.
+             IfValidAnd( TiltAngle >= 0 )==0 .OR. IfValidAnd( TiltAngle <= 90 )==0) then  UNDEFINED
+         else if (IfValidAnd( CalFlexibleInstallOpt = "CFI2" )) then  1.1
+         else  1.0  endif endif  }
+
+   ; SAC 2/7/18 - revised to prevent output of PVArrays when PV scaled to 0 (possibly due to reduced PV requirement of 0kW) (tic #974)
+   "Create csePVARRAY (when called for)"      PVArray:csePVARRAYRef  = {
+         if (IfValidAnd( DCSysSize > 0 ) == 0 .OR. IfValidAnd( Proj:DCSizeMultiplier = 0 ) .OR.
+             IfValidAnd( Az >= 0 )==0 .OR. IfValidAnd( Az <= 360 )==0 .OR.
+             IfValidAnd( TiltAngle >= 0 )==0 .OR. IfValidAnd( TiltAngle <= 90 )==0) then  UNDEFINED
+         else   CreateComp( csePVARRAY, substr( Name, 0, 48 ) + "-sim" )  endif  }
+
+   ; APB 05/10/22 - revised PV size to account for CFI divisor (tic #3352)
+   "Set csePVARRAY:pvDCSysSize"     PVArray:csePVARRAYRef:pvDCSysSize     = {
+         DCSysSize / ValidOr( PVArray:cseCFIPVSizeDiv, 1 ) * ValidOr( Proj:DCSizeMultiplier, 1 )  }         ; already checked before PVARRAY created
+   "Set csePVARRAY:pvModuleType"    PVArray:csePVARRAYRef:pvModuleType    = {
+         switch (ModuleType)
+            case  "Standard"   : "Standard"
+            case  "Premium"    : "Premium" 
+            case  "Thin Film"  : "ThinFilm"
+            case  "Custom"     : "Custom"      ; not yet a Com option
+            default  : UNDEFINED
+         endswitch  }
+   "Set csePVARRAY:pvArrayType"     PVArray:csePVARRAYRef:pvArrayType     = {
+         switch (ArrayType)
+            case  "Fixed (open rack)"   : "FixedOpenRack" 
+            case  "Fixed (roof mount)"  : "FixedRoofMount" ; APB 05/11/2022 - removed from OPTION list in PV.rule (tic #3352)
+            case  "Tracking (one axis)" : "OneAxisTracking" 
+            ;      "OneAxisBacktracking"
+            case  "Tracking (two axis)" : "TwoAxisTracking" 
+            default  : UNDEFINED
+         endswitch  }
+
+  ; SAC 2/24/17 - rules to specify PVARRAY geometry via PolyLp objects (in place of Azm/Tilt)
+  ; APB 05/11/22 - mods preventing output of pvVertices for any tracking arrays and also pvTilt/pvAzm for two-axis tracking arrays (tic# 3352)
+   "Set csePVARRAY:pvVertices"      PVArray:csePVARRAYRef:pvVertices      = {
+         if (LocalCompAssigned( PolyLpRef ) .AND. IfValidAnd(ArrayType = "Fixed (open rack)"))
+         then  PolyLpRef
+         else  UNDEFINED  endif  }
+      ;   if ((GeomSpecMthd = "reference PVArrayGeom object" .OR. IfValidAnd( Proj:PVWLocSpecified[1] > 0 )) .AND.
+      ;       GlobalCompAssigned( Proj:PVWGeomPolyLpRef[1] ))
+  ; APB 05/11/22 - mods to prevent pvTilt/pvAzm for two-axis tracking arrays (tic# 3352)
+   "Set csePVARRAY:pvTilt"          PVArray:csePVARRAYRef:pvTilt          = { 
+         if (IfValidAnd(ArrayType = "Tracking (two axis)") .OR.
+            ( (LocalCompAssigned( PolyLpRef ) .OR. LocalStatus( TiltAngle ) < 1) .AND. IfValidAnd(ArrayType = "Fixed (open rack)") ))
+         then  UNDEFINED
+         else  TiltAngle  endif  }
+   "Set csePVARRAY:pvAzm"           PVArray:csePVARRAYRef:pvAzm           = { 
+         if (IfValidAnd(ArrayType = "Tracking (two axis)") .OR.
+            ( (LocalCompAssigned( PolyLpRef ) .OR. LocalStatus( Az ) < 1) .AND. IfValidAnd(ArrayType = "Fixed (open rack)") ))
+         then  UNDEFINED
+         else  Az  endif  }
+
+;   "Set csePVARRAY:pvGrndRefl"      csePVARRAY:pvGrndRefl      = {   
+;   "Set csePVARRAY:pvGCR"           PVArray:csePVARRAYRef:pvGCR           = {
+;         if (IfValidAnd( Proj:PVWGCR[1]         >= 0 )) then  Proj:PVWGCR[1]
+;         else  UNDEFINED  endif  }
+;   "Set csePVARRAY:pvDCtoACRatio"   PVArray:csePVARRAYRef:pvDCtoACRatio   = {
+;         if (IfValidAnd( Proj:PVWDCtoACRatio[1] >  0 )) then  Proj:PVWDCtoACRatio[1]
+;         else  UNDEFINED  endif  }
+; APB 04/15/22 - include power electronics efficinecy adjustment (tic #3352)
+   "Set csePVARRAY:pvInverterEff"   PVArray:csePVARRAYRef:pvInverterEff   = {
+         if (IfValidAnd( InverterEff >  0 )) then  InverterEff * ValidOr(PwrElecEffAdj, 1) / 100
+         else  UNDEFINED  endif  }
+; APB 04/15/22 - Port CBECC-Res PV inputs (tic #3352)
+   "Set csePVARRAY:pvSysLosses"     PVArray:csePVARRAYRef:pvSysLosses     = {
+         if (IfValidAnd( SysLosses > 0 )) then  SysLosses / 100
+         else  UNDEFINED  endif  }
+; APB 04/15/22 - Port CBECC-Res PV inputs (tic #3352)
+   "Set csePVARRAY:pvSIF"     PVArray:csePVARRAYRef:pvSIF     = {
+         if (IfValidAnd( ShdgImpactFac > 0 )) then  ShdgImpactFac
+         else  UNDEFINED  endif  }
+;   "Set csePVARRAY:pvCoverRefrInd"  PVArray:csePVARRAYRef:pvCoverRefrInd  = {
+;         if (IfValidAnd( Proj:PVWCoverRefrInd[1] >= 1 ) .AND. IfValidAnd( ModuleType = 4 ))
+;         then  Proj:PVWCoverRefrInd[1]   else  UNDEFINED  endif  }
+;   "Set csePVARRAY:pvTempCoeff"     PVArray:csePVARRAYRef:pvTempCoeff     = {
+;         if (IfValidAnd( Proj:PVWTempCoeff[1]  > -100 ) .AND. IfValidAnd( ModuleType = 4 ))
+;         then  Proj:PVWTempCoeff[1]      else  UNDEFINED  endif  }
+;   "Set csePVARRAY:pvUsePVWatts"    PVArray:csePVARRAYRef:pvUsePVWatts    = {
+;         if (IfValidAnd( Proj:UsePVWattsDLL     >  0 )) then  "Yes"  else  UNDEFINED  endif  }
+
+   "Set csePVARRAY:pvElecMtr"       PVArray:csePVARRAYRef:pvElecMtr       = {
+         if (GlobalCompAssigned( Proj:CSE_ElecMETER ))
+         then  Proj:CSE_ElecMETER  else  UNDEFINED  endif  }
+;   "Set csePVARRAY:pvEndUse"        PVArray:csePVARRAYRef:pvEndUse        = {   
+END
+;*************************************************************************
+
+
+; SAC 3/1/17 - rulelist to create PV array PolyLp
+;*************************************************************************
+RULELIST "Create_PVArrayPolyLp"  1 0 0 1
+;*************************************************************************
+   "Delete any/all PolyLp children of PVArray"  PVArray:Action = {  DeleteChildren( PolyLp )  }
+
+   "Create PolyLp (and set PVArray:PolyLpIdx)"  PVArray:PolyLpIdx  = {
+         CreatePolyLoopChild( (Hgt * Wd), Az, TiltAngle, RefZ, 5, Hgt, 0, RefX, RefY )  }
+		// CreatePolyLoopChild( Area, Azimuth, Tilt, Z, PolyType (4=Shade), Height, Shape (0-Rect/1-Oct), Lower-Left X,Y )
+
+   "Set PVArray:PolyLpRef"   PVArray:PolyLpRef  = {
+         if (IfValidAnd( PolyLpIdx >= 0 )==0) then  UNDEFINED
+         else  CompName( PolyLp, PolyLpIdx+1 )  endif  }
+END
+;*************************************************************************
+RULELIST "Init_PolyLp"  1 0 0 1
+;*************************************************************************
+   "Default PolyLp data"   ; for any not yet initialized
+      PolyLp:Area  = {  if (LocalStatus(Area) > 0) then  UNCHANGED
+                        else  InitializePolyLoop()  endif  }
+END
+;*************************************************************************
+
+
+
+;*************************************************************************
+;*************************************************************************
+
+ENDFILE

@@ -1,0 +1,236 @@
+// TerminalUnit - Active (Chilled) Beams
+//
+// -------------------------------------------------------------------------
+//  Copyright (c) 2016-2017, California Energy Commission
+//  All rights reserved.
+//  Redistribution and use in source and binary forms, with or without
+//  modification, are permitted provided that the following conditions are
+//  met:
+// 
+//    * Redistributions of source code must retain the above copyright
+//  notice, this list of conditions and the following disclaimer.
+//    * Redistributions in binary form must reproduce the above copyright
+//  notice, this list of conditions and the following disclaimer in
+//  the documentation and/or other materials provided with the
+//  distribution.
+//    * Neither the name of the California Energy Commission nor the names of its
+//  contributors may be used to endorse or promote products
+//  derived from this software without specific prior written
+//  permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+//  IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+//  TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION
+//  BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+//  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+//  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+//  BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+//  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+//  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// -------------------------------------------------------------------------
+//  
+
+
+// ********** Chilled Beam Air Induced Air Flow ******************************
+RULE NEW CoilClg:ChBeamInducedFlow
+  DATATYPE
+    Float
+  LONGFORM
+    ChilledBeamInducedFlow
+  DESCRIPTION
+    "Default calculation of chilled beam induced air flow."
+  INPUTCLASS
+    NotInput
+  UNITS
+    cfm
+  DEFAULT
+    if( ParentComp = "TrmlUnit" .AND. SysType = "ActiveBeam" .AND. 
+        LocalCompAssigned( FluidSegInRef ) ) 
+    then
+      if( ParentStatus( TrmlUnit:TotAirFlow ) < 5  )
+      then // Estimate induced air flow based on a 2F approach to entering water temp
+           // and a room air temp of 75F
+        ValidOr( CapTotGrossRtd, 0 ) / 1.09 /
+        ( 75 - Max( ( ValidOr( FluidSegInRef:ParentFluidSysRef:DsgnSupWtrDelT, 0 ) + 2 ), 58 ) )
+      else ValidOr( TrmlUnit:TotAirFlow, 0 ) - TrmlUnit:PriAirFlowMax
+      endif
+    else
+    if( ParentComp = "ZnSys" .AND. SysType = "PassiveBeam" .AND.
+        LocalCompAssigned( FluidSegInRef ) ) 
+    then
+      ValidOr( CapTotGrossRtd, 0 ) / 1.09 /
+      ( 75 - Max( ( ValidOr( FluidSegInRef:ParentFluidSysRef:DsgnSupWtrDelT, 0 ) + 2 ), 58 ) )
+    else UNDEFINED
+    endif endif
+  SIZING_PROPOSED
+    if( ParentComp = "ZnSys" )
+    then 
+      if( ParentCompAssigned( ActiveBeamTrmlUnitRef ) )
+      then // Is ActiveBeam
+        ZnSys:ActiveBeamTrmlUnitRef:TotAirFlow - ZnSys:ActiveBeamTrmlUnitRef:PriAirFlowMax
+      else // Is PassiveBeam
+        zp:ChBeamInducedFlow
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+// ********** Total Zone Air Flow **********************************************
+RULE TrmlUnit:TotAirFlow
+  INPUTCLASS
+    Default
+  DESCRIPTION
+    "The total air flow delivered to the zone by the terminal, including any
+     airflow induced by fans or nozzles."
+  HELP
+    "For 'ActiveBeam' terminals, this is the sum of the primary air flow 
+     and the air induced through the beam coil, at the design condition. By default,
+     the induced air flow is calculated from the coil capacity, a 75F room air temperature
+     and a leaving coil temperature of 2°F greater than the coil entering water temperature."
+  UNITS
+    cfm/ft2
+  DEFAULT
+    if( IfValidAnd( IsActiveBeam > 0 ) .AND. IfValidAnd( PriAirFlowMax > 0 ) )
+    then PriAirFlowMax + SumChildren( CoilClg:ChBeamInducedFlow )
+    else UNDEFINED
+    endif    
+ENDRULE
+RULE NEW TrmlUnit:TotAirFlowPerArea
+  DATATYPE
+    FLoat
+  LONGFORM
+    TotalZoneAirFlowPerArea
+  INPUTCLASS
+    NotInput
+  UNITS
+    cfm/ft2
+  DESCRIPTION
+    "The total air flow delivered to the zone by the terminal, including any
+     airflow induced by fans or nozzles, divided by the zone floor area."
+  DEFAULT
+    if( IfValidAnd( IsActiveBeam > 0 ) .AND. 
+        IfValidAnd( TotAirFlow > 0 ) .AND. 
+        IfValidAnd( FlrAreaServed > 0 ) )
+    then TotAirFlow / FlrAreaServed
+    else UNDEFINED
+    endif    
+ENDRULE
+RULE NEW TrmlUnit:TotAirFlowACH
+  DATATYPE
+    FLoat
+  LONGFORM
+    TotalZoneAirFlowAirChangesPerHour
+  INPUTCLASS
+    NotInput
+  UNITS
+    ACH
+  DESCRIPTION
+    "The total air flow delivered to the zone by the terminal, including any
+     airflow induced by fans or nozzles, converted to ACH."
+  DEFAULT
+    if( IfValidAnd( IsActiveBeam > 0 ) .AND. 
+        IfValidAnd( TotAirFlow > 0 ) .AND.
+        IfValidAnd( VolServed > 0 ) )
+    then TotAirFlow * 60 / VolServed
+    else UNDEFINED
+    endif    
+ENDRULE
+
+
+// ********** Transfer Efficiency ********************************************
+RULE NEW TrmlUnit:TransferEff
+  DATATYPE
+    Float
+  LONGFORM
+    TransferEfficiency
+  DESCRIPTION
+    "The ratio of chilled beam cooling capacity to primary air flow."
+  INPUTCLASS
+    NotInput
+  UNITS
+    Btu/hr-cfm
+  COMMONMINIMUM
+    40
+  COMMONMAXIMUM
+    200
+  DEFAULT
+    if( IfValidAnd( IsActiveBeam > 0 ) .AND. IfValidAnd( PriAirFlowMax > 0 ) )
+    then SumChildren( CoilClg:CapTotGrossRtd ) / PriAirFlowMax
+    else UNDEFINED
+    endif 
+ENDRULE
+
+// Calculate supply fan capacity for ZoneSystems used to represent
+// Active and Passive beams
+RULE ZnSys:SupFanCap
+  SIZING_PROPOSED
+    if( IfValidAnd( IsActiveBeam > 0 ) ) 
+    then
+      ActiveBeamTrmlUnitRef:TotAirFlow - 
+      ActiveBeamTrmlUnitRef:PriAirFlowMax 
+    else
+    if( ZnSys:Type = "PassiveBeam" )  
+    then
+      SumChildren( CoilClg:ChBeamInducedFlow )
+    else UNCHANGED
+    endif endif
+ENDRULE
+RULE ZnSys:ClgCap
+  SIZING_PROPOSED
+    if( IfValidAnd( IsActiveBeam > 0 ) ) 
+    then
+      SumChildren( CoilClg:CapTotNetRtd ) 
+    else UNCHANGED
+    endif
+ENDRULE
+RULE ZnSys:ClgDsgnSupAirTemp
+  SIZING_PROPOSED
+    if( IfValidAnd( IsActiveBeam > 0 ) .OR. Type = "PassiveBeam" ) 
+    then // Calculate for clg cap and induced air flow, assuming 75F room temp
+      Max( 75 - ( ValidOr( ClgCap, 0 ) / 1.09 / ValidOr( SupFanCap, 1 ) ), 58 )
+    else UNCHANGED
+    endif
+ENDRULE
+// Set fan capacity
+RULE ZnSys:Fan:FlowCap
+  SIZING_PROPOSED
+    if( IfValidAnd( ZnSys:IsActiveBeam > 0 ) .OR. ZnSys:Type = "PassiveBeam" )
+    then ZnSys:SupFanCap 
+    else UNCHANGED
+    endif
+ENDRULE
+//  Set FanCtrl for Active beams
+RULE ZnSys:FanCtrl
+  SIZING_PROPOSED
+    if( IfValidAnd( IsActiveBeam > 0 ) )
+    then "Continuous"
+    else if( Type = "PassiveBeam" )
+    then "Cycling"
+    else UNCHANGED
+    endif endif
+ENDRULE
+// Set TrmlUnit PriAriFlowMin for ActiveBeam terminals
+RULE TrmlUnit:PriAirFlowMin
+  SIZING_PROPOSED
+    if( IfValidAnd( IsActiveBeam > 0 ) )
+    then
+      if( AirSys:Type = "DOASVAV" )
+      then PriAirFlowMin
+      else PriAirFlowMax
+      endif
+    else UNCHANGED
+    endif
+ENDRULE
+
+RULE AirSys:TrmlUnit:CoilClg:Type
+// Check that ActiveBeam cooling coil type is acceptable
+  CHECKSIM
+    if( Parent( Type ) = "ActiveBeam" .AND. Type != "ChilledWater" )
+    then
+      PostError("TerminalUnit '%s' is an 'ActiveBeam' and its cooling coil '%s' is Type = '%s'.
+                 This not currently supported.", Parent( Name ), Name, Type)
+    else UNCHANGED
+    endif
+ENDRULE

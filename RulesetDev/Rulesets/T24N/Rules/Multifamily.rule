@@ -1,0 +1,243 @@
+// Multifamily
+//
+// -------------------------------------------------------------------------
+//  Copyright (c) 2012-2017, California Energy Commission
+//  All rights reserved.
+//  Redistribution and use in source and binary forms, with or without
+//  modification, are permitted provided that the following conditions are
+//  met:
+//
+//    * Redistributions of source code must retain the above copyright
+//  notice, this list of conditions and the following disclaimer.
+//    * Redistributions in binary form must reproduce the above copyright
+//  notice, this list of conditions and the following disclaimer in
+//  the documentation and/or other materials provided with the
+//  distribution.
+//    * Neither the name of the California Energy Commission nor the names of its
+//  contributors may be used to endorse or promote products
+//  derived from this software without specific prior written
+//  permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+//  IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+//  TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION
+//  BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+//  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+//  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+//  BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+//  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+//  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// -------------------------------------------------------------------------
+//
+
+// No direct correlation of ACM topics - just miscellaneous rules pertaining to
+// MFam Residential objects/properties
+//
+// The main objects in the SDD are:
+//     Proj / Project
+//
+
+
+RULE Proj:Action
+  DEFAULT
+    EvalRulelist( "ProposedInput_MFam" )
+  SIZING_BASELINE
+    EvalRulelist( "BudgetConversion" )
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+
+RULE NEW ResProj:ErrorCode
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  DEFAULT
+         if (IfValidAnd( Proj:ResDwellUnits > 0 )==0) then  0   ; not an MFam model
+    else if (ComponentCount( ResZnGrp ) < 1)          then  1   ; missing ResZnGrp(s)
+    else if (ComponentCount( ResZn    ) < 1)          then  2   ; missing ResZn(s)
+    else if (IfValidAnd( UnitTotCondFlrArea > 0 )==0) then  3   ; missing conditioned ResZn:FloorArea
+    else  -1
+    endif endif endif endif
+ENDRULE
+
+RULE NEW ResProj:ErrorMsg
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    switch (ErrorCode)
+      case   1 : "Error: missing residential zone group(s) (ResZnGrp)"
+      case   2 : "Error: missing residential zone (s) (ResZn)"
+      case   3 : "Error: missing residential dwelling unit(s) (DwellUnit:CondFlrArea)"
+      default  : UNDEFINED
+    endswitch
+ENDRULE
+
+RULE NEW ResProj:TreeDescrip
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (ErrorCode > 0)
+    then  ErrorMsg
+    else if (IfValidAnd( UnitTotCondFlrArea != CondFloorArea ))
+    then  Format( "res only: %s cond ft2 / %s dwelling ft2 / %s dwelling units / %s bedrooms", FltToStr( CondFloorArea ), FltToStr( UnitTotCondFlrArea ), FltToStr( NumDwellingUnits ), FltToStr( NumBedrooms ) )
+    else  Format( "res only: %s cond ft2 / %s dwelling units / %s bedrooms", FltToStr( CondFloorArea ), FltToStr( NumDwellingUnits ), FltToStr( NumBedrooms ) )
+    endif endif
+ENDRULE
+
+
+; prevent runs that will fail in current MFam CBECC - SAC 11/05/21 (MFam)
+; remove logic preventing analysis of Hotel/Motel models served by ResDHW systems - SAC 02/27/22
+RULE Proj:Action
+  CHECKCODE
+    if (IfValidAnd( ResDwellUnits > 0 ) .AND. ComponentCount( ResProj ) < 1)
+    then  PostError( "Project data indicates that residential dwelling units are included, but the model does not include a required ResProj object." )  ; shouldn't ever happen
+    else if (IfValidAnd( ResDwellUnits > 0 ) .AND. IfValidAnd( ResProj:ErrorCode < 1 )==0)
+    then  if (GlobalStatus( ResProj:ErrorMsg ))
+          then  PostError( "Residential dwelling unit model %s", ResProj:ErrorMsg )
+          else  PostError( "An error has occurred analyzing this residential dwelling unit model." )
+          endif
+    else if (IfValidAnd( ResDwellUnits > 0 ))
+    then  UNCHANGED   ; should be good MFam model
+    else if (SumAll( ResDHWSys:TotShowersServed ) > 0)
+    then  if (SumAcrossIf( Spc:Area, Spc:SpcFunc = "High-Rise Residential Living Spaces" ) > 0)
+          then  PostError( "This model includes residential dwelling units described via spaces where SpcFunc = 'High-Rise Residential Living Spaces'. This and
+                            future versions of CBECC require the user to specify that residential dwelling units are present in the model (on the Project dialog)
+                            and then to describe those dwelling units via new residential zone group(s) and zone(s) (ResZnGrp & ResZn)." )
+          else if (SumAcrossIf( Spc:Area, Spc:SpcFunc = "Hotel/Motel Guest Room" ) > 0)
+          then  UNCHANGED  ; PostError( "This version of CBECC cannot analyze residential DHW systems (ResDHWSys) that serve spaces other than residential dwelling units (such as hotel/motel guest rooms)." )
+          else  PostError( "This version of CBECC cannot analyze residential DHW systems (ResDHWSys) that serve spaces other than residential dwelling units and hotel/motel guest rooms." )
+          endif endif
+    else  UNCHANGED
+    endif endif endif endif
+ENDRULE
+; removed restriction on PropOnly for MFam models - SAC 11/13/21
+;    else if (IfValidAnd( ResDwellUnits > 0 ) .AND. IfValidAnd( AnalysisType = "Title24Compliance" ))
+;    then  PostError( "The Analysis Type (on Project / Analysis Options dialog) option must be set to 'Title24ProposedOnly' in order to simulation models with residential dwelling units using this version of CBECC." )
+
+
+RULE NEW Proj:SimMFamUnits
+  DESCRIPTION
+    "flag indicating MFam dwelling units are present and to be simulated"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (IfValidAnd( Proj:ResDwellUnits > 0 ) .AND.
+        IfValidAnd( ResProj:ErrorCode = -1 ))
+    then  ResProj:NumDwellingUnits  else  0  endif
+ENDRULE
+
+
+RULE NEW Spc:CSE_ZONE
+  DESCRIPTION
+    "Reference to CSE ZONE object used to simulate this space"
+  DATATYPE
+    cseZONE
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    UNDEFINED
+ENDRULE
+
+
+// ----------------------------------------------------------------------------- SAC 02/28/22
+RULE NEW Proj:AvgFlrHgt
+  LONGFORM
+    AverageFloorHeight
+  DATATYPE
+    Float
+  DESCRIPTION
+    ""
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (IfValidAnd( Bldg:TotStoryCnt > 0 )==0) then  9
+    else  if (ComponentCount( Spc ) > 0 .AND. ComponentCount( ResZn ) > 0 .AND. ComponentCount( ResOtherZn ) > 0)
+          then  ( max(  max(  MaxAll( Spc:MaxZ ),  MaxAll( ResZn:Top    )  ),  MaxAll( ResOtherZn:Top    )  ) -
+                  min(  min(  MinAll( Spc:FlrZ ),  MinAll( ResZn:Bottom )  ),  MinAll( ResOtherZn:Bottom )  ) ) / Bldg:TotStoryCnt
+          else if (ComponentCount( Spc ) > 0 .AND. ComponentCount( ResZn ) > 0 )
+          then  ( max(  MaxAll( Spc:MaxZ ),  MaxAll( ResZn:Top    )  ) -
+                  min(  MinAll( Spc:FlrZ ),  MinAll( ResZn:Bottom )  ) ) / Bldg:TotStoryCnt
+          else if (ComponentCount( Spc ) > 0 .AND. ComponentCount( ResOtherZn ) > 0)
+          then  ( max(  MaxAll( Spc:MaxZ ),  MaxAll( ResOtherZn:Top    )  ) -
+                  min(  MinAll( Spc:FlrZ ),  MinAll( ResOtherZn:Bottom )  ) ) / Bldg:TotStoryCnt
+          else if (ComponentCount( ResZn ) > 0 .AND. ComponentCount( ResOtherZn ) > 0)
+          then  ( max(  MaxAll( ResZn:Top    ),  MaxAll( ResOtherZn:Top    )  ) -
+                  min(  MinAll( ResZn:Bottom ),  MinAll( ResOtherZn:Bottom )  ) ) / Bldg:TotStoryCnt
+          else if (ComponentCount( Spc ) > 0)
+          then        ( MaxAll( Spc:MaxZ ) - MinAll( Spc:FlrZ ) ) / Bldg:TotStoryCnt
+          else if (ComponentCount( ResZn ) > 0)
+          then        ( MaxAll( ResZn:Top ) - MinAll( ResZn:Bottom ) ) / Bldg:TotStoryCnt
+          else if (ComponentCount( ResOtherZn ) > 0)
+          then        ( MaxAll( ResOtherZn:Top ) - MinAll( ResOtherZn:Bottom ) ) / Bldg:TotStoryCnt
+          else  9
+          endif endif endif endif endif endif endif
+    endif
+ENDRULE
+
+
+// ----------------------------------------------------------------------------- SAC 03-01-22
+RULE NEW cseDHWSYS:SourceSpc
+  LONGFORM
+    SourceSpace
+  DATATYPE
+    Spc
+  DESCRIPTION
+    ""
+  INPUTCLASS
+    NotInput
+ENDRULE
+
+
+// ----------------------------------------------------------------------------- SAC 12/07/21
+RULE NEW ResConsAssm:MatchingConsAssmRef
+  LONGFORM
+    MatchingConstructAssemblyReference
+  DATATYPE
+    ConsAssm
+  HELP
+    "ConsAssm that matches the characteristics of this ResConsAssm"
+  DESCRIPTION
+    "ConsAssm that matches the characteristics of this ResConsAssm"
+  INPUTCLASS
+    NotInput
+ENDRULE
+
+RULE NEW ResConsAssm:MatchingCavFrmMatRef
+  LONGFORM
+    MatchingCavityFrameMaterialReference
+  DATATYPE
+    Mat
+  HELP
+    "Mat that matches the characteristics of the Cavity/Frame layer of this ResConsAssm"
+  DESCRIPTION
+    "Mat that matches the characteristics of the Cavity/Frame layer of this ResConsAssm"
+  INPUTCLASS
+    NotInput
+ENDRULE
+
+RULE NEW ResMat:MatchingMatRef
+  LONGFORM
+    MatchingMaterialReference
+  DATATYPE
+    Mat
+  HELP
+    "Mat that matches the characteristics of this ResMat"
+  DESCRIPTION
+    "Mat that matches the characteristics of this ResMat"
+  INPUTCLASS
+    NotInput
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+

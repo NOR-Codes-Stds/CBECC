@@ -1,0 +1,1108 @@
+// HVAC Primary - Plant Scaling
+//
+// ----------------------------------------------------------------------
+//  Copyright (c) 2015-2017, California Energy Commission
+//  All rights reserved.
+//  Redistribution and use in source and binary forms, with or without
+//  modification, are permitted provided that the following conditions are
+//  met:
+// 
+//    * Redistributions of source code must retain the above copyright
+//  notice, this list of conditions and the following disclaimer.
+//    * Redistributions in binary form must reproduce the above copyright
+//  notice, this list of conditions and the following disclaimer in
+//  the documentation and/or other materials provided with the
+//  distribution.
+//    * Neither the name of the California Energy Commission nor the names of its
+//  contributors may be used to endorse or promote products
+//  derived from this software without specific prior written
+//  permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+//  IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+//  TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL CALifORNIA ENERGY COMMISSION
+//  BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+//  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+//  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+//  BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+//  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN if
+//  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// -----------------------------------------------------------------------------
+
+
+
+// -----------------------------------------------------------------------------
+// Define tolerances for scaling
+RULE NEW Proj:ClgScalingTol
+  DATATYPE
+    FLoat
+  LONGFORM
+    CoolingScalingTolerance
+  DESCRIPTION
+    "The tolerance on plant cooling capacity before scaling is applied."
+  INPUTCLASS 
+    NotInput
+  DEFAULT 
+    0.9
+ENDRULE
+
+RULE NEW Proj:HtgScalingTol
+  DATATYPE
+    FLoat
+  LONGFORM
+    HeatingScalingTolerance
+  DESCRIPTION
+    "The tolerance on plant heating capacity before scaling is applied."
+  INPUTCLASS 
+    NotInput
+  DEFAULT 
+    0.9
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// Set a flag if scaling is required and calculate scalars
+RULE NEW FluidSys:ScalingReq
+  DATATYPE
+    Integer
+  LONGFORM
+    ScalingRequired
+  INPUTCLASS
+    NotInput
+  DESCRIPTION
+    "A flag that indicates FluidSys equipment capacities are scaled (down) in the compliance 
+     analysis."
+  HELP
+    "Scaling is supported for two scenarios:
+     
+     1) An Addition, Alteration, or AdditionOrAlteration model where the whole building
+     is not modeled and the proposed plant is Existing. The model may or may not 
+     include Healthcare systems.
+
+     2) A CoreAndShell model where the proposed plant is sized to serve the New 
+     core systems as well has capacity to serve future systems. The model may or 
+     may not include Healthcare systems.
+
+     Currently, only down-scaling is supported, i.e. it is assumed that the proposed
+     plant capacity is greater than what is needed to serve the systems that are
+     included in the model."
+  DEFAULT
+    if( ( IsAddOrAlt > 0 .AND.
+          IfValidAnd( Bldg:WholeBldgModeled = 0 ) .AND. 
+          IfValidAnd( Bldg:WholePlantModeled > 0 ) ) .OR.
+        CoilClgCapHydronicHlthCare > 0 .OR.
+        CoilHtgCapHydronicHlthCare > 0 .OR.
+        CoilClgCapWSHPHlthCare > 0 .OR.
+        CoilHtgCapWSHPHlthCare > 0 ) 
+    then // Is an Add/Alt model where the whole building is not modeled but
+         // the whole plant is -or- has Healthcare
+      if( IsNew > 0 )
+      then // Is a New plant
+        if( Type = "ChilledWater" .AND.
+            ( CoilClgCapHydronicNew + CoilClgCapHydronicHlthCare ) < 
+            ValidOr( ClgCap, 0 ) * Proj:ClgScalingTol )
+        then 1
+        else
+        if( Type = "HotWater" .AND.
+            ( CoilHtgCapHydronicNew + CoilHtgCapHydronicHlthCare ) < 
+            ValidOr( HtgCap, 0 ) * Proj:HtgScalingTol )
+        then 1
+        else
+        if( IsWSHPSys > 0 .AND.
+            ( ( ( CoilClgCapWSHPNew + CoilClgCapWSHPHlthCare ) <
+              ValidOr( ClgCap, 0 ) * Proj:ClgSizingRat ) .OR.
+              ( CoilHtgCapWSHPNew + CoilHtgCapWSHPHlthCare ) < 
+              ValidOr( HtgCap, 0 ) * Proj:HtgScalingTol ) )
+        then 1
+        else 
+        if( Type = "CondenserWater" .AND. 
+            SumRevRef( FluidSys:CWSysRef, FluidSys:ScalingReq ) > 0 )
+        then MaxRevRef( FluidSys:CWSysRef, FluidSys:ScalingReq )
+        else 0
+        endif endif endif endif
+      else // Is an Existing plant
+      if( Type = "ChilledWater" .AND.
+          ( CoilClgCapHydronicExisting + CoilClgCapHydronicHlthCare ) < 
+          ValidOr( ClgCap, 0 ) * Proj:ClgScalingTol )
+      then 1
+      else
+      if( Type = "HotWater" .AND.
+          ( CoilHtgCapHydronicExisting + CoilHtgCapHydronicHlthCare ) < 
+          ValidOr( HtgCap, 0 ) * Proj:HtgScalingTol )
+      then 1
+      else
+      if( IsWSHPSys > 0 .AND.
+          ( ( ( CoilClgCapWSHPExisting + CoilClgCapWSHPHlthCare ) <
+            ValidOr( ClgCap, 0 ) * Proj:ClgSizingRat ) .OR.
+            ( CoilHtgCapWSHPExisting + CoilHtgCapWSHPHlthCare ) < 
+            ValidOr( HtgCap, 0 ) * Proj:HtgScalingTol ) )
+      then 1
+      else 
+      if( Type = "CondenserWater" .AND. 
+          SumRevRef( FluidSys:CWSysRef, FluidSys:ScalingReq ) > 0 )
+      then MaxRevRef( FluidSys:CWSysRef, FluidSys:ScalingReq )
+      else 0
+      endif endif endif endif endif
+    else
+    if( Proj:IsPartMech > 0 .AND. Proj:PropHasUnknownHVACZns > 0 )
+    then // Is a Core and Shell model
+      if( Type = "ChilledWater" .AND.
+          ( CoilClgCapHydronicNew + CoilClgCapHydronicHlthCare ) < 
+          ValidOr( ClgCap, 0 ) * Proj:ClgScalingTol )
+      then 2
+      else
+      if( Type = "HotWater" .AND.
+          ( CoilHtgCapHydronicNew + CoilHtgCapHydronicHlthCare ) < 
+          ValidOr( HtgCap, 0 ) * Proj:HtgScalingTol )
+      then 2
+      else
+      if( IsWSHPSys > 0 .AND.
+          ( ( ( CoilClgCapWSHPNew + CoilClgCapWSHPHlthCare ) < 
+            ValidOr( ClgCap, 0 ) * Proj:ClgSizingRat ) .OR.
+            ( CoilHtgCapWSHPNew + CoilHtgCapWSHPHlthCare ) <
+            ValidOr( HtgCap, 0 ) * Proj:HtgScalingTol ) )
+      then 2
+      else 
+      if( Type = "CondenserWater" .AND. 
+          SumRevRef( FluidSys:CWSysRef, FluidSys:ScalingReq ) > 0 )
+      then MaxRevRef( FluidSys:CWSysRef, FluidSys:ScalingReq )
+      else 0
+      endif endif endif endif
+    else 0
+    endif endif
+  SIZING_PROPOSED
+    if( IsBaseSys > 0 )
+    then 0
+    else ScalingReq
+    endif
+  SIZING_BASELINE
+    if( IsBaseSys > 0 )
+    then 0
+    else ScalingReq
+    endif
+; PREANALYSISCHECK
+;   if( ScalingReq > 0 )
+;   then
+;     PostWarning("FluidSystem '%s' serves coils in both new and existing
+;                  system(s). Existing systems will be passed through to the baseline
+;                  along with this FluidSystem, however, the proposed primary equipment
+;                  will not be scaled down to the capacity needed to only serve the
+;                  existing system(s). This may result in incorrect compliance 
+;                  analysis results.", Name)
+;   else UNCHANGED
+;   endif
+ENDRULE
+
+RULE NEW FluidSys:ClgScalar
+  DATATYPE
+    Float
+  LONGFORM
+    CoolingScalar
+  DESCRIPTION
+    "The scalar by which FluidSys cooling equipment is scaled."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( ScalingReq > 1 )
+    then // Scaling is required for Core and Shell
+      if( Type = "ChilledWater" .AND. IfValidAnd( ClgCap > 0 ) ) 
+      then
+        Min( ( CoilClgCapHydronicNew + CoilClgCapHydronicHlthCare ) / 
+             ClgCap, 1 )
+      else
+      if( IsWSHPSys > 0 .AND. IfValidAnd( ClgCap > 0 ) )
+      then // Calculate scalar for WSHP cooling (heat rejection)
+        Min( ( CoilClgCapWSHPNew + CoilClgCapWSHPHlthCare ) /
+             ClgCap, 1 )
+      else
+      if( Type = "CondenserWater" .AND. IfValidAnd( ClgCap > 0 ) )
+      then // Set CW system scalar to the same as the ChW system it serves
+        MaxRevRef( FluidSys:CWSysRef, FluidSys:ClgScalar )
+      else 1 // No scaling
+      endif endif endif
+    else
+    if( ScalingReq > 0 )
+    then // Scaling required for Add/Alt
+      if( IsNew > 0 )
+      then // Is a New plant
+        if( Type = "ChilledWater" .AND. IfValidAnd( ClgCap > 0 ) ) 
+        then
+          Min( ( CoilClgCapHydronicNew + CoilClgCapHydronicHlthCare ) / 
+               ValidOr( Bldg:CoilClgCapHydronic, ClgCap ), 1 )
+        else
+        if( IsWSHPSys > 0 .AND. IfValidAnd( ClgCap > 0 ) )
+        then // Calculate scalar for WSHP cooling (heat rejection)
+          Min( ( CoilClgCapWSHPNew + CoilClgCapWSHPHlthCare ) /
+               ClgCap, 1 )
+        else
+        if( Type = "CondenserWater" .AND. IfValidAnd( ClgCap > 0 ) )
+        then // Set CW system scalar to the same as the ChW system it serves
+          MaxRevRef( FluidSys:CWSysRef, FluidSys:ClgScalar )
+        else 1 // No scaling
+        endif endif endif
+      else // Is an Existing plant
+      if( Type = "ChilledWater" .AND. IfValidAnd( ClgCap > 0 ) ) 
+      then
+        Min( ( CoilClgCapHydronicExisting + CoilClgCapHydronicHlthCare ) / 
+             ValidOr( Bldg:CoilClgCapHydronic, ClgCap ), 1 )
+      else
+      if( IsWSHPSys > 0 .AND. IfValidAnd( ClgCap > 0 ) )
+      then // Calculate scalar for WSHP cooling (heat rejection)
+        Min( ( CoilClgCapWSHPExisting + CoilClgCapWSHPHlthCare ) /
+             ClgCap, 1 )
+      else
+      if( Type = "CondenserWater" .AND. IfValidAnd( ClgCap > 0 ) )
+      then // Set CW system scalar to the same as the ChW system it serves
+        MaxRevRef( FluidSys:CWSysRef, FluidSys:ClgScalar )
+      else 1 // No scaling
+      endif endif endif endif
+    else 1
+    endif endif
+;  CHECKSIM
+;    if( ScalingReq > 0 .AND. ClgScalar > 1.0 )
+;    then
+;      PostError("Plant scaling is required for FluidSystem '%s', but the 
+;                 cooling scalar calculated is greater than 1. This indicates
+;                 the secondary (air-side) equipment capacity is much greater
+;                 than the primary (water-side) equipment capacity. 
+;                 Check inputs for consistency.",Name)
+;   else UNCHANGED
+;   endif
+ENDRULE
+
+RULE NEW FluidSys:HtgScalar
+  DATATYPE
+    Float
+  LONGFORM
+    HeatingScalar
+  DESCRIPTION
+    "The scalar by which FluidSys heating equipment is scaled."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( ScalingReq > 1 ) )
+    then // Scaling is required for Core and Shell
+      if( Type = "HotWater" .AND. IfValidAnd( HtgCap > 0 ) )
+      then
+        Min( ( CoilHtgCapHydronicNew + CoilHtgCapHydronicHlthCare ) / 
+             HtgCap, 1 )
+      else
+      if( IsWSHPSys > 0 .AND. IfValidAnd( HtgCap > 0 ) )
+      then // Calculate scalar for WSHP cooling (heat rejection)
+        Min( ( CoilHtgCapWSHPNew + CoilHtgCapWSHPHlthCare ) /
+             HtgCap, 1 )
+      else 1 // No scaling
+      endif endif
+    else
+    if( IfValidAnd( ScalingReq > 0 ) )
+    then // Scaling required for Add/Alt
+      if( IsNew > 0 )
+      then
+        if( Type = "HotWater" .AND. IfValidAnd( HtgCap > 0 ) )
+        then
+          Min( ( CoilHtgCapHydronicNew + CoilHtgCapHydronicHlthCare ) / 
+               ValidOr( Bldg:CoilHtgCapHydronic, HtgCap ), 1 )
+        else
+        if( IsWSHPSys > 0 .AND. IfValidAnd( HtgCap > 0 ) )
+        then // Calculate scalar for WSHP cooling (heat rejection)
+          Min( ( CoilHtgCapWSHPNew + CoilHtgCapWSHPHlthCare ) /
+               HtgCap, 1 )
+        else 1 // No scaling
+        endif endif
+      else
+      if( Type = "HotWater" .AND. IfValidAnd( HtgCap > 0 ) )
+      then
+        Min( ( CoilHtgCapHydronicExisting + CoilHtgCapHydronicHlthCare ) / 
+             ValidOr( Bldg:CoilHtgCapHydronic, HtgCap ), 1 )
+      else
+      if( IsWSHPSys > 0 .AND. IfValidAnd( HtgCap > 0 ) )
+      then // Calculate scalar for WSHP cooling (heat rejection)
+        Min( ( CoilHtgCapWSHPExisting + CoilHtgCapWSHPHlthCare ) /
+             HtgCap, 1 )
+      else 1 // No scaling
+      endif endif endif
+    else 1
+    endif endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+// Set simulation capacityies and if needed, scale proposed equipment
+// With the exception of CapRtdSim and a few ThrmlEngyStor properties, 
+// simulation values are currently only set here
+// -----------------------------------------------------------------------------
+//  Boilers
+RULE Blr:CapRtdSim
+// Initially defined in another rule
+  SIZING_PROPOSED
+    if( IfValidAnd( CapRtd > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      CapRtd * FluidSys:HtgScalar
+    else CapRtd
+    endif
+  ANNUAL
+    if( IfValidAnd( CapRtd > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      CapRtd * FluidSys:HtgScalar
+    else UNCHANGED // Set in another rule
+    endif
+ENDRULE
+
+RULE Blr:WtrFlowCapSim
+  SIZING_PROPOSED
+    if( IfValidAnd( WtrFlowCap > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      WtrFlowCap * FluidSys:HtgScalar
+    else WtrFlowCap
+    endif
+  ANNUAL
+    if( IfValidAnd( WtrFlowCap > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      WtrFlowCap * FluidSys:HtgScalar
+    else WtrFlowCap
+    endif
+ENDRULE
+
+RULE Blr:ParasiticLdSim
+  SIZING_PROPOSED
+    if( IfValidAnd( ParasiticLd > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      ParasiticLd * FluidSys:HtgScalar
+    else ParasiticLd 
+    endif
+  ANNUAL
+    if( IfValidAnd( ParasiticLd > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      ParasiticLd * FluidSys:HtgScalar
+    else ParasiticLd 
+    endif
+ENDRULE
+
+
+//  Water Heaters (used as boilers) 
+RULE WtrHtr:CapRtdSim
+  SIZING_PROPOSED
+    if( IfValidAnd( CapRtd > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      CapRtdSim * FluidSys:HtgScalar
+    else CapRtdSim
+    endif
+  ANNUAL
+    if( IfValidAnd( CapRtd > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      CapRtdSim * FluidSys:HtgScalar
+    else UNCHANGED // Set in another rule
+    endif
+ENDRULE
+
+RULE WtrHtr:WtrFlowCapSim
+  SIZING_PROPOSED
+    if( IfValidAnd( WtrFlowCap > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      WtrFlowCapSim * FluidSys:HtgScalar
+    else WtrFlowCapSim
+    endif
+  ANNUAL
+    if( IfValidAnd( WtrFlowCap > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      WtrFlowCapSim * FluidSys:HtgScalar
+    else WtrFlowCapSim
+    endif
+ENDRULE
+
+
+RULE WtrHtr:CndsrPumpPwrSim
+  SIZING_PROPOSED
+    if( FluidSysHtg = 1 .AND. IfValidAnd( CndsrPumpPwr > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      CndsrPumpPwrSim * FluidSys:HtgScalar
+    else CndsrPumpPwrSim
+    endif
+  ANNUAL
+    if(  FluidSysHtg = 1 .AND. IfValidAnd( CndsrPumpPwr > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      CndsrPumpPwrSim * FluidSys:HtgScalar
+    else UNCHANGED // Set in another rule
+    endif
+ENDRULE
+
+
+RULE WtrHtr:FanFlowCapSim
+  SIZING_PROPOSED
+    if( FluidSysHtg = 1 .AND. IfValidAnd( FanFlowCap > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      FanFlowCapSim * FluidSys:HtgScalar
+    else FanFlowCapSim
+    endif
+  ANNUAL
+    if(  FluidSysHtg = 1 .AND. IfValidAnd( FanFlowCap > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      FanFlowCapSim * FluidSys:HtgScalar
+    else UNCHANGED // Set in another rule
+    endif
+ENDRULE
+
+RULE WtrHtr:FanTotStaticPressSim
+  SIZING_PROPOSED
+    if( FluidSysHtg = 1 .AND. IfValidAnd( FanTotStaticPressSim > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      FanTotStaticPressSim * FluidSys:HtgScalar
+    else FanTotStaticPressSim
+    endif
+  ANNUAL
+    if(  FluidSysHtg = 1 .AND. IfValidAnd( FanTotStaticPressSim > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      FanTotStaticPressSim * FluidSys:HtgScalar
+    else UNCHANGED // Set in another rule
+    endif
+ENDRULE
+
+
+
+
+// -----------------------------------------------------------------------------
+// Chillers
+RULE Chlr:CapRtdSim
+// Initially defined in another rule
+  SIZING_PROPOSED
+    if( IfValidAnd( CapRtd > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      CapRtd * FluidSys:ClgScalar
+    else CapRtd
+    endif
+  ANNUAL
+    if( IfValidAnd( CapRtd > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      CapRtd * FluidSys:ClgScalar
+    else UNCHANGED // Set in another rule
+    endif
+ENDRULE
+
+RULE Chlr:WtrFlowCapSim
+  SIZING_PROPOSED
+    if( IfValidAnd( WtrFlowCap > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      WtrFlowCap * FluidSys:ClgScalar
+    else UNCHANGED
+    endif
+  ANNUAL
+    if( IfValidAnd( WtrFlowCap > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      WtrFlowCap * FluidSys:ClgScalar
+    else WtrFlowCap
+    endif
+ENDRULE
+
+RULE Chlr:CndsrFlowCapSim
+  SIZING_PROPOSED
+    if( IfValidAnd( CndsrFlowCap > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      CndsrFlowCap * FluidSys:ClgScalar
+    else CndsrFlowCap
+    endif
+  ANNUAL
+    if( IfValidAnd( CndsrFlowCap > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      CndsrFlowCap * FluidSys:ClgScalar
+    else CndsrFlowCap
+    endif
+ENDRULE
+
+RULE Chlr:GenFluidFlowCapSim
+  SIZING_PROPOSED
+    if( IfValidAnd( GenFluidFlowCap > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      GenFluidFlowCap * FluidSys:ClgScalar
+    else UNCHANGED
+    endif
+  ANNUAL
+    if( IfValidAnd( GenFluidFlowCap > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      GenFluidFlowCap * FluidSys:ClgScalar
+    else GenFluidFlowCap
+    endif
+ENDRULE
+
+RULE Chlr:AuxPwrSim
+  SIZING_PROPOSED
+    if( IfValidAnd( AuxPwr > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      AuxPwr * FluidSys:ClgScalar
+    else UNCHANGED
+    endif
+  ANNUAL
+    if( IfValidAnd( AuxPwr > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      AuxPwr * FluidSys:ClgScalar
+    else AuxPwr
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+// Scale HtRej capacity
+RULE HtRej:CapRtdSim
+// Initially defined in another rule
+  SIZING_PROPOSED
+    if( IfValidAnd( CapRtd > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      CapRtd * FluidSys:ClgScalar
+    else UNCHANGED
+    endif
+  ANNUAL
+    if( IfValidAnd( CapRtd > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      CapRtd * FluidSys:ClgScalar
+    else UNCHANGED // Set in another rule
+    endif
+ENDRULE
+
+RULE HtRej:UAFactorSim
+  SIZING_PROPOSED
+    if( IfValidAnd( UAFactor > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      UAFactor * FluidSys:ClgScalar
+    else UNCHANGED
+    endif
+  ANNUAL
+    if( IfValidAnd( UAFactor > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      UAFactor * FluidSys:ClgScalar
+    else UAFactor
+    endif
+ENDRULE
+
+RULE HtRej:AirFlowCapSim
+  SIZING_PROPOSED
+    if( IfValidAnd( AirFlowCap > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      AirFlowCap * FluidSys:ClgScalar
+    else UNCHANGED
+    endif
+  ANNUAL
+    if( IfValidAnd( AirFlowCap > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      AirFlowCap * FluidSys:ClgScalar
+    else AirFlowCap
+    endif
+ENDRULE
+
+RULE HtRej:WtrFlowCapSim
+  SIZING_PROPOSED
+    if( IfValidAnd( WtrFlowCap > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      WtrFlowCap * FluidSys:ClgScalar
+    else UNCHANGED
+    endif
+  ANNUAL
+    if( IfValidAnd( WtrFlowCap > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      WtrFlowCap * FluidSys:ClgScalar
+    else WtrFlowCap
+    endif
+ENDRULE
+
+RULE HtRej:TotFanHPSim
+  SIZING_PROPOSED
+    if( IfValidAnd( TotFanHP > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      TotFanHP * FluidSys:ClgScalar
+    else UNCHANGED
+    endif
+  ANNUAL
+    if( IfValidAnd( TotFanHP > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      TotFanHP * FluidSys:ClgScalar
+    else TotFanHP
+    endif
+ENDRULE
+
+RULE HtRej:SprayWtrFlowCapSim
+  SIZING_PROPOSED
+    if( IfValidAnd( SprayWtrFlowCap > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      SprayWtrFlowCap * FluidSys:ClgScalar
+    else UNCHANGED
+    endif
+  ANNUAL
+    if( IfValidAnd( SprayWtrFlowCap > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      SprayWtrFlowCap * FluidSys:ClgScalar
+    else SprayWtrFlowCap
+    endif
+ENDRULE
+
+RULE HtRej:LowSpdAirFlowCapSim
+  SIZING_PROPOSED
+    if( IfValidAnd( AirFlowCap > 0 ) .AND.
+        IfValidAnd( LowSpdAirFlowRat > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      LowSpdAirFlowCap * FluidSys:ClgScalar
+    else UNCHANGED
+    endif
+  ANNUAL
+    if( IfValidAnd( LowSpdAirFlowCap > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      LowSpdAirFlowCap * FluidSys:ClgScalar
+    else LowSpdAirFlowCap
+    endif
+ENDRULE
+
+RULE HtRej:LowSpdCapRtdSim
+  SIZING_PROPOSED
+    if( IfValidAnd( LowSpdCapRtd > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      LowSpdCapRtd * FluidSys:ClgScalar
+    else UNCHANGED
+    endif
+  ANNUAL
+    if( IfValidAnd( LowSpdCapRtd > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      LowSpdCapRtd * FluidSys:ClgScalar
+    else LowSpdCapRtd
+    endif
+ENDRULE
+
+RULE HtRej:LowSpdUAFactorSim
+  SIZING_PROPOSED
+    if( IfValidAnd( LowSpdUAFactor > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      LowSpdUAFactor * FluidSys:ClgScalar
+    else UNCHANGED
+    endif
+  ANNUAL
+    if( IfValidAnd( LowSpdUAFactor > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      LowSpdUAFactor * FluidSys:ClgScalar
+    else LowSpdUAFactor
+    endif
+ENDRULE
+
+RULE HtRej:LowSpdPwrRatSim
+  SIZING
+    LowSpdPwrRat
+  ANNUAL
+    LowSpdPwrRat
+ENDRULE
+
+RULE HtRej:LowSpdAirFlowRatSim
+  SIZING
+    LowSpdAirFlowRat
+  ANNUAL
+    LowSpdAirFlowRat
+ENDRULE
+
+
+//RULE HtRej:PwrSim
+//  SIZING_BASELINE
+//    if( IfValidAnd( Pwr > 0 ) .AND.
+//        FluidSys:IsBaseSys = 0 .AND.
+//        IfValidAnd( ParentValid( CoilClgCapHydronicExistingRat ) < 1 ) )
+//    then
+//      Pwr * FluidSys:CoilClgCapHydronicExistingRat
+//    else UNCHANGED
+//    endif
+//  ANNUAL_PROPOSED
+//    if( IfValidAnd( Pwr >= 0 ) )
+//    then
+//      Pwr * FluidSys:ClgScalar
+//    else UNDEFINED
+//    endif
+//  ANNUAL_BASELINE
+//    Pwr
+//ENDRULE
+//
+
+// -----------------------------------------------------------------------------
+// Scale Pump capacity/power
+RULE Pump:FlowCapSim
+  SIZING_PROPOSED
+    if( IfValidAnd( FlowCap > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      if( FluidSys:Type = "ChilledWater" )
+      then FlowCap * FluidSys:ClgScalar
+      else 
+      if( FluidSys:Type = "HotWater" )
+      then FlowCap * FluidSys:HtgScalar
+      else
+      if( IsWSHPSys > 0 )
+      then FlowCap * Max( FluidSys:ClgScalar, FluidSys:HtgScalar )
+      else
+      if( FluidSys:Type = "CondenserWater" )
+      then FlowCap * FluidSys:ClgScalar
+      else UNCHANGED
+      endif endif endif endif
+    else UNCHANGED
+    endif
+  ANNUAL
+    if( IfValidAnd( FlowCap > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      if( FluidSys:Type = "ChilledWater" )
+      then FlowCap * FluidSys:ClgScalar
+      else 
+      if( FluidSys:Type = "HotWater" )
+      then FlowCap * FluidSys:HtgScalar
+      else
+      if( IsWSHPSys > 0 )
+      then FlowCap * Max( FluidSys:ClgScalar, FluidSys:HtgScalar )
+      else
+      if( FluidSys:Type = "CondenserWater" )
+      then FlowCap * FluidSys:ClgScalar
+      else UNCHANGED
+      endif endif endif endif
+    else FlowCap
+    endif
+ENDRULE
+
+RULE Pump:FlowMinSim
+  SIZING_PROPOSED
+    if( IfValidAnd( FlowMin > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 .AND.
+        SpdCtrl = "VariableSpeed" )
+    then
+      if( FluidSys:Type = "ChilledWater" )
+      then 0 ;FlowMin * FluidSys:ClgScalar // Set to 0 as before as workaround for 2022.0.8 Beta
+      else 
+      if( FluidSys:Type = "HotWater" )
+      then 0 ;FlowMin * FluidSys:HtgScalar // Set to 0 as before as workaround for 2022.0.8 Beta
+      else
+      if( IfValidAnd( IsWSHPSys > 0 ) )
+      then FlowMin * Max( FluidSys:ClgScalar, FluidSys:HtgScalar )
+      else
+      if( FluidSys:Type = "CondenserWater" )
+      then 0 ;FlowCap * FluidSys:ClgScalar // Set to 0 as before as workaround for 2022.0.8 Beta
+      else 0 ;UNCHANGED
+      endif endif endif endif
+    else
+    if( IfValidAnd( IsWSHPSys > 0 ) )
+    then FlowMin
+    else 0 ;FlowMin // Set to 0 as before as workaround for 2022.0.8 Beta
+    endif endif
+  ANNUAL
+    if( IfValidAnd( FlowMinSim > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      if( FluidSys:Type = "ChilledWater" )
+      then 0 ;FlowMin * FluidSys:ClgScalar // Set to 0 as before as workaround for 2022.0.8 Beta
+      else 
+      if( FluidSys:Type = "HotWater" )
+      then 0 ;FlowMin * FluidSys:HtgScalar // Set to 0 as before as workaround for 2022.0.8 Beta
+      else
+      if( IfValidAnd( IsWSHPSys > 0 ) )
+      then FlowMin * Max( FluidSys:ClgScalar, FluidSys:HtgScalar )
+      else
+      if( FluidSys:Type = "CondenserWater" )
+      then 0 ;FlowCap * FluidSys:ClgScalar // Set to 0 as before as workaround for 2022.0.8 Beta
+      else UNCHANGED
+      endif endif endif endif
+    else 
+    if( IfValidAnd( IsWSHPSys > 0 ) )
+    then FlowMin
+    else 0 ;FlowMin // Set to 0 as before as workaround for 2022.0.8 Beta
+    endif endif
+ENDRULE
+
+RULE Pump:PwrSim
+  SIZING_PROPOSED
+    if( IfValidAnd( Pwr > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      if( FluidSys:Type = "ChilledWater" )
+      then Pwr * FluidSys:ClgScalar
+      else 
+      if( FluidSys:Type = "HotWater" )
+      then Pwr * FluidSys:HtgScalar
+      else
+      if( IsWSHPSys > 0 )
+      then Pwr * Max( FluidSys:ClgScalar, FluidSys:HtgScalar )
+      else UNCHANGED
+      endif endif endif
+    else UNCHANGED
+    endif
+  ANNUAL
+    if( IfValidAnd( PwrSim > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      if( FluidSys:Type = "ChilledWater" )
+      then Pwr * FluidSys:ClgScalar
+      else 
+      if( FluidSys:Type = "HotWater" )
+      then Pwr * FluidSys:HtgScalar
+      else
+      if( IsWSHPSys > 0 )
+      then Pwr * Max( FluidSys:ClgScalar, FluidSys:HtgScalar )
+      else UNCHANGED
+      endif endif endif
+    else Pwr
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// Scale HeatExchanger capacity
+RULE HX:CapRtdSim
+  SIZING_PROPOSED
+    if( IfValidAnd( CapRtd > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      CapRtd * FluidSys:ClgScalar
+    else UNCHANGED
+    endif
+  ANNUAL
+    if( IfValidAnd( CapRtd > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      CapRtd * FluidSys:ClgScalar
+    else CapRtd
+    endif
+ENDRULE
+
+RULE HX:CHWFluidFlowCapSim
+  SIZING_PROPOSED
+    if( IfValidAnd( CHWFluidFlowCap > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      CHWFluidFlowCap * FluidSys:ClgScalar
+    else UNCHANGED
+    endif
+  ANNUAL
+    if( IfValidAnd( CHWFluidFlowCap > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      CHWFluidFlowCap * FluidSys:ClgScalar
+    else CHWFluidFlowCap
+    endif
+ENDRULE
+
+RULE HX:CWFluidFlowCapSim
+  SIZING_PROPOSED
+    if( IfValidAnd( CWFluidFlowCap > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      CWFluidFlowCap * FluidSys:ClgScalar
+    else UNCHANGED
+    endif
+  ANNUAL
+    if( IfValidAnd( CWFluidFlowCap > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      CWFluidFlowCap * FluidSys:ClgScalar
+    else CWFluidFlowCap
+    endif
+ENDRULE
+
+RULE HX:UASim
+  SIZING_PROPOSED
+    if( IfValidAnd( UA > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      UA * FluidSys:ClgScalar
+    else UNCHANGED
+    endif
+  ANNUAL
+    if( IfValidAnd( UA > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      UA * FluidSys:ClgScalar
+    else UA
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// Scale thermal energy storage system capacity
+RULE ThrmlEngyStor:CapRtdSim
+  SIZING_PROPOSED
+    if( IfValidAnd( CapRtd > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      CapRtd * FluidSys:ClgScalar
+    else UNCHANGED
+    endif
+  ANNUAL
+    if( IfValidAnd( CapRtd > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      CapRtd * FluidSys:ClgScalar
+    else CapRtd
+    endif
+ENDRULE
+
+RULE ThrmlEngyStor:WtrFlowCapSim
+  SIZING_PROPOSED
+    if( IfValidAnd( WtrFlowCap > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      WtrFlowCap * FluidSys:ClgScalar
+    else UNCHANGED
+    endif
+  ANNUAL
+    if( IfValidAnd( WtrFlowCap > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      WtrFlowCap * FluidSys:ClgScalar
+    else WtrFlowCap
+    endif
+ENDRULE
+
+RULE ThrmlEngyStor:StorCapSim
+  SIZING_PROPOSED
+    if( IfValidAnd( StorCap > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      StorCap * FluidSys:ClgScalar
+    else UNCHANGED
+    endif
+  ANNUAL
+    if( IfValidAnd( StorCap > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then
+      StorCap * FluidSys:ClgScalar
+    else StorCap
+    endif
+ENDRULE
+
+RULE ThrmlEngyStor:TankHgtSim
+// Initially defined in another rule
+  SIZING_PROPOSED
+    if( IfValidAnd( TankHgt > 0 ) )
+    then
+      TankHgt * SQRT( FluidSys:ClgScalar )
+    else UNCHANGED
+    endif
+  ANNUAL
+    if( IfValidAnd( TankHgtSim > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      z:TankHgtSim
+    else TankHgt
+    endif
+ENDRULE
+
+RULE ThrmlEngyStor:TankPerimSim
+  SIZING_PROPOSED
+    if( IfValidAnd( TankPerim > 0 ) )
+    then
+      TankPerim * SQRT( FluidSys:ClgScalar )
+    else UNCHANGED
+    endif
+  ANNUAL
+    if( IfValidAnd( TankPerimSim > 0 ) .AND.
+        FluidSys:IsBaseSys = 0 .AND.
+        FluidSys:ScalingReq > 0 )
+    then // Use scaled value
+      z:TankPerimSim
+    else TankPerim
+    endif
+ENDRULE
+

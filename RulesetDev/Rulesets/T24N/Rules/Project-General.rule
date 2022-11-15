@@ -1,0 +1,5210 @@
+// Project - General Information
+//
+// -------------------------------------------------------------------------
+//  Copyright (c) 2014-2017, California Energy Commission
+//  All rights reserved.
+//  Redistribution and use in source and binary forms, with or without
+//  modification, are permitted provided that the following conditions are
+//  met:
+// 
+//    * Redistributions of source code must retain the above copyright
+//  notice, this list of conditions and the following disclaimer.
+//    * Redistributions in binary form must reproduce the above copyright
+//  notice, this list of conditions and the following disclaimer in
+//  the documentation and/or other materials provided with the
+//  distribution.
+//    * Neither the name of the California Energy Commission nor the names of its
+//  contributors may be used to endorse or promote products
+//  derived from this software without specific prior written
+//  permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+//  IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+//  TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL CALifORNIA ENERGY COMMISSION
+//  BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+//  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+//  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+//  BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+//  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN if
+//  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// -------------------------------------------------------------------------
+
+
+// -----------------------------------------------------------------------------
+// ** debugging rule evaluation duration **
+RULE NEW Proj:RuleEvalDuration
+  DATATYPE
+    Float
+  DEFAULT 
+    LogDuration( "            time to initiate DEFAULT rule evaluation:  %.3f seconds" )
+  SIZING_PROPOSED
+    LogDuration( "            time to initiate SIZING_PROPOSED rule evaluation:  %.3f seconds" )
+  SIZING_BASELINE
+    LogDuration( "            time to initiate SIZING_BASELINE rule evaluation:  %.3f seconds" )
+  ANNUAL_PROPOSED 
+    LogDuration( "            time to initiate ANNUAL_PROPOSED rule evaluation:  %.3f seconds" )
+  ANNUAL_BASELINE
+    LogDuration( "            time to initiate ANNUAL_BASELINE rule evaluation:  %.3f seconds" )
+ENDRULE
+
+
+
+//------------------------------------------------------------------------------ SAC 1/13/20
+RULE NEW Proj:RunAbbrev
+  DATATYPE
+    String
+  DESCRIPTION
+    "Run name abbreviation."
+  INPUTCLASS
+    NotInput
+  DEFAULT 
+    "u"
+  SIZING_PROPOSED
+    "zp"
+  SIZING_BASELINE
+    "zb"
+  ANNUAL_PROPOSED 
+    "ap"
+  ANNUAL_BASELINE
+    "ab"
+ENDRULE
+
+
+// flag used to alter rule behavior (prevent MessageBoxes) when batch processing - SAC 03/19/21  ; revised to set only when undefined - SAC 03/25/21
+RULE NEW Proj:IsBatchProcessing
+  DATATYPE
+    Integer
+  LONGFORM
+    IsBatchProcessing
+  DESCRIPTION
+    "whether batch processing being performed"
+  INPUTCLASS
+    Prescribed
+  DEFAULT 
+    if (LocalStatus( IsBatchProcessing ) > 0) then  UNCHANGED
+    else  0  endif
+ENDRULE
+
+// moved from ResProj to enable access for Htl/Mtl (Res) DHW - SAC 02/26/22
+RULE Proj:EnableResearchMode
+  DESCRIPTION
+    "Boolean (0/1), when =1 indicates 'research mode'"
+  INPUTCLASS 
+    Prescribed
+  DEFAULT
+    if (LocalStatus( EnableResearchMode ) < 1)
+    then  0  
+    else  UNCHANGED  endif 
+ENDRULE
+
+
+// ********** CONSTANTS ********************************************************
+// Coefficienct used in calculating fan heat at AHRI rating conditions
+RULE NEW Proj:FanHtCoeff
+  DATATYPE
+    Float
+  LONGFORM
+    FanHeatCoefficient
+  DESCRIPTION
+    "An intermediate calculation of a coefficient for calculating fan heat at AHRI
+     conditions"
+  INPUTCLASS
+    NotInput
+  DEFAULT 
+    // Q_fan = FanHtCoeff * Q_gross
+    //                 1 ton      400cfm   0.365W    3.412Btu/hr
+    // FanHtCoeff = ----------- x ------ x ------- x -----------
+    //              12000Btu/hr    1ton     1cfm         1W
+    (1/12000)*400*0.365*3.412
+  SIZING
+    u:FanHtCoeff
+  ANNUAL
+    u:FanHtCoeff
+ENDRULE
+
+// ********** Detailed vs. Simplified Geometry *********************************
+RULE Proj:GeometryInpType
+  DESCRIPTION
+    "Whether building geometry inputs are in full 3D (detailed) vs. just areas/azimuths (simplified)."
+  INPUTCLASS
+    Optional    
+  OPTION
+    Detailed
+    Simplified
+  DEFAULT 
+    "Detailed"
+  SIZING
+    u:GeometryInpType
+  ANNUAL
+    u:GeometryInpType
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE NEW Proj:IsDetailedGeometry
+  DATATYPE
+    Integer
+  DESCRIPTION
+    "Boolean (0,1) indicating whether or not detailed geometry is selected."
+  INPUTCLASS
+    NotInput
+  DEFAULT 
+    if( GeometryInpType = "Detailed" )
+    then 1
+    else 0
+    endif
+  SIZING
+    u:IsDetailedGeometry
+  ANNUAL
+    u:IsDetailedGeometry
+ENDRULE
+
+
+
+// ********** Disable Daylighting Controls ************************************
+RULE Proj:DisableDayltgCtrls
+  HELP
+    "A project level boolean (0/1) flag that specifies whether daylighting controls, where
+     present, will be included in the simulation.
+     Value 0:  Daylighting controls, where specified, will be included in the simulation.
+     Value 1: Daylighting controls, where specified, will NOT be included in the simulation."
+
+  INPUTCLASS
+    Optional
+  DEFAULT
+    0
+  SIZING
+    UNDEFINED
+  ANNUAL
+    UNDEFINED
+ENDRULE
+
+
+// ********** Default Daylighting Controls ************************************
+RULE Proj:DefaultDayltgCtrls
+  HELP
+    "A project level boolean (0/1) flag that specifies the status of DefaultDayltgCtrls.
+     Value 0:  Daylighting controls, if present, must be specified by the user
+     Value 1:  Mandatory Daylighting Controls will be installed in the user model by default
+               If this value is set to 1, the analysis cannot be used for compliance."
+  INPUTCLASS
+    Optional
+  DEFAULT
+    0
+  SIZING
+    UNDEFINED
+  ANNUAL
+    UNDEFINED
+ENDRULE
+
+// ********** Disable Daylighting Controls ************************************
+RULE Proj:DisableMandUFacChecks
+  HELP
+    "A project level boolean (0/1) flag that specifies the status of DisableMandUFacChecks.
+     Value 0:  Mandatory UFactor checks will be not be bypassed
+     Value 1:  Mandatory UFactor checks will be bypassed in the user model by default
+               If this value is set to 1, the analysis cannot be used for compliance."
+  INPUTCLASS
+    Prescribed
+  DEFAULT
+    0
+  SIZING
+    UNDEFINED
+  ANNUAL
+    UNDEFINED
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+//         Compliance Scope Options - New
+RULE Proj:CompOptNew
+  DESCRIPTION
+    "Flag that indicates that the analysis is for new construction."
+  RESETS
+    ResetTheFollowingWhenThisIsModified
+      Proj:CompType
+      Proj:CompOptExist
+      Proj:CompOptAdd
+      Proj:CompOptAlt
+  DEFAULT
+    if( CompOptExist = 1 )
+    then 0
+    else 1
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+//         Compliance Scope Options - New
+RULE Proj:ResCompOptNew
+  DESCRIPTION
+    "Flag that indicates that the analysis is for new construction."
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N_2022 T24N_2025
+    if( IfValidAnd( Proj:ResDwellUnits > 0 ) )
+    then
+      1
+    else
+      0
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+//         Compliance Scope Options - Existing
+RULE Proj:CompOptExist
+  DESCRIPTION
+    "Flag that indicates that the analysis is for an existing building."
+  RESETS
+    ResetTheFollowingWhenThisIsModified
+      Proj:CompType
+      Proj:CompOptNew
+  DEFAULT
+    if( CompOptNew = 1 )
+    then 0
+    else 1
+    endif
+  CHECKCODE
+    if( CompOptNew = 1 .AND. CompOptExist = 1 )
+    then
+      PostError("Analysis scope has both New and Existing 
+                 checked, which is not allowed.  Only one of these options 
+                 may be checked.")
+    else if( CompOptNew = 0 .AND. CompOptExist = 0 )
+    then
+      PostError("Analysis scope has both New and Existing 
+                 unchecked, which is not allowed.  One of these options 
+                 must be checked.")
+    else if( CompOptExist = 1 .AND. CompOptAdd = 0 .AND. CompOptAlt = 0)
+    then
+      PostError("Analysis scope has Existing checked but both Addition and Alterations 
+                 unchecked, which is not allowed.  One of these options 
+                 must be checked.")
+    else UNCHANGED
+    endif endif endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+//         Compliance Scope Options - Addition
+RULE Proj:CompOptAdd
+  DESCRIPTION
+    "Flag that indicates that the analysis is for an addition to an existing 
+     building."
+  RESETS
+    ResetTheFollowingWhenThisIsModified
+      Proj:CompType
+  DEFAULT
+    0
+  SIZING
+    if( CompOptNew = 1 ) 
+    then
+      0
+    else
+      UNCHANGED
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+//         Compliance Scope Options - Alterations
+RULE Proj:CompOptAlt
+  DESCRIPTION
+    "Flag that indicates that the analysis is for alterations of an existing 
+     building."
+  RESETS
+    ResetTheFollowingWhenThisIsModified
+      Proj:CompType
+  DEFAULT
+    0
+  SIZING
+    if( CompOptNew = 1 ) 
+    then
+      0
+    else
+      UNCHANGED
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+//         Compliance Scope Options - Envelope
+RULE Proj:CompOptEnve
+  DESCRIPTION
+    "Flag that indicates that the analysis includes the envelope."
+  RESETS
+    ResetTheFollowingWhenThisIsModified
+      Proj:CompType
+  DEFAULT
+    1
+  SIZING
+    if( CompOptExist = 1 .AND. CompOptAlt = 1 )
+    then
+      1
+    else
+      UNCHANGED
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+//         Compliance Scope Options - Envelope
+RULE Proj:ResCompOptEnve
+  DESCRIPTION
+    "Flag that indicates that the analysis includes the envelope."
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N_2022 T24N_2025
+    if( IfValidAnd( Proj:ResDwellUnits > 0 ) )
+    then
+      1
+    else
+      0
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+//         Compliance Scope Options - Lighting
+RULE Proj:ResCompOptLtg
+  DESCRIPTION
+    "Flag that indicates that the analysis includes lighting."
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N_2022 T24N_2025
+    if( IfValidAnd( Proj:ResDwellUnits > 0 ) )
+    then
+      1
+    else
+      0
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+//         Compliance Scope Options - Lighting
+RULE Proj:CompOptLtg
+  DESCRIPTION
+    "Flag that indicates that the analysis includes lighting."
+  DEFAULT
+    if( CompOptPartLtg = 1 )
+    then 0
+    else 1
+    endif
+  SIZING
+    if( CompOptExist = 1 .AND. CompOptAlt = 1 )
+    then
+      1
+    else
+      UNCHANGED
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+//         Compliance Scope Options - Partial Lighting
+RULE Proj:CompOptPartLtg
+  DESCRIPTION
+    "Flag that indicates that the analysis includes partial lighting."
+  RESETS
+    ResetTheFollowingWhenThisIsModified
+      Proj:CompType
+      Proj:CompOptLtg
+  DEFAULT
+    0
+  CHECKCODE
+    if( CompOptLtg = 1 .AND. CompOptPartLtg = 1 )
+    then
+      PostError("Analysis scope has both Lighting and Partial Lighting 
+                 checked, which is not allowed.  Only one of these options 
+                 may be checked.")
+    else if( CompOptEnve = 1 .AND. CompOptPartLtg = 1 .AND. CompOptMech = 1 )
+    then
+      PostError("Analysis scope has both Envelope and Mechanical 
+                 checked along with Partial Lighting, which is not allowed.  
+                 Partial Lighting must be unchecked.  Lighting may be checked, 
+                 if desired.")
+    else UNCHANGED
+    endif endif
+  SIZING
+    if( CompOptExist = 1 .AND. CompOptAlt = 1 )
+    then
+      0
+    else
+      UNCHANGED
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+//         Compliance Scope Options - Mechanical
+RULE Proj:CompOptMech
+  DESCRIPTION
+    "Flag that indicates that the analysis includes mechanical."
+  RESETS
+    ResetTheFollowingWhenThisIsModified
+      Proj:CompType
+      Proj:CompOptPartMech
+  DEFAULT
+    if( CompOptPartMech = 1 )
+    then 0
+    else 1
+    endif
+  SIZING
+    if( CompOptExist = 1 .AND. CompOptAlt = 1 )
+    then
+      1
+    else
+      UNCHANGED
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+//         Compliance Scope Options - Mechanical
+RULE Proj:ResCompOptMech
+  DESCRIPTION
+    "Flag that indicates that the analysis includes mechanical."
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N_2022 T24N_2025
+    if( IfValidAnd( Proj:ResDwellUnits > 0 ) )
+    then
+      1
+    else
+      0
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+//         Compliance Scope Options - Partial Mechanical
+RULE Proj:CompOptPartMech
+  DESCRIPTION
+    "Flag that indicates that the analysis includes partial mechanical."
+  RESETS
+    ResetTheFollowingWhenThisIsModified
+      Proj:CompType
+      Proj:CompOptMech
+  DEFAULT
+    0
+  CHECKCODE
+    if( CompOptMech = 1 .AND. CompOptPartMech = 1 )
+    then
+      PostError("Analysis scope has both Mechanical and Partial Mechanical 
+                 checked, which is not allowed.  Only one of these options 
+                 may be checked.")
+    else UNCHANGED
+    endif
+  SIZING
+    if( CompOptExist = 1 .AND. CompOptAlt = 1 )
+    then
+      0
+    else
+      UNCHANGED
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+//         Compliance Scope Options - DHW
+RULE Proj:CompOptDHW
+  DESCRIPTION
+    "Flag that indicates that the analysis includes DHW."
+//  RESETS
+//    ResetTheFollowingWhenThisIsModified
+//      Proj:CompType
+//  RESETS
+//    ResetTheFollowingWhenThisIsModified
+//      Proj:ExcptCondWtrHtrPrscrp
+//      Proj:AnnualSolFrac
+  DEFAULT
+    switch ( CompType )
+      case "NewComplete"                     : 1 
+      case "NewEnvelope"                     : 0
+      case "NewEnvelopeAndLighting"          : 0
+      case "NewEnvelopeAndLightingAndPartialMechanical" : 1      
+      case "NewEnvelopeAndPartialLighting"   : 0 
+      case "NewEnvelopeAndPartialLightingAndPartialMechanical"   : 1 
+      case "NewEnvelopeAndMechanical"        : 1
+      case "NewMechanical"                   : 1
+      case "NewMechanicalAndLighting"        : 1 
+      case "NewMechanicalAndPartialLighting" : 1
+      case "ExistingAlteration"              : 1 
+      case "ExistingAdditionAndAlteration"   : 1
+      case "AdditionComplete"                     : 1
+      case "AdditionEnvelope"                     : 0
+      case "AdditionEnvelopeAndLighting"          : 0
+      case "AdditionEnvelopeAndLightingAndPartialMechanical" : 1      
+      case "AdditionEnvelopeAndPartialLighting"   : 0
+      case "AdditionEnvelopeAndPartialLightingAndPartialMechanical" : 1      
+      case "AdditionEnvelopeAndMechanical"        : 1
+      case "AdditionMechanical"                   : 1
+      case "AdditionMechanicalAndLighting"        : 1
+      case "AdditionMechanicalAndPartialLighting"        : 1
+      default : 1
+    endswitch
+ENDRULE
+
+// -----------------------------------------------------------------------------
+//         Compliance Scope Options - DHW
+RULE Proj:ResCompOptDHW
+  DESCRIPTION
+    "Flag that indicates that the analysis includes DHW."
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N_2022 T24N_2025
+    if( IfValidAnd( Proj:ResDwellUnits > 0 ) )
+    then
+      1
+    else
+      0
+    endif
+ENDRULE
+
+
+
+RULE Proj:AnnualSolFrac
+  DESCRIPTION
+    "This is the Annual Solar Fraction required when project is excluding water heating
+     to comply prescriptively and installing solar thermal for their central water heating."
+  INPUTCLASS
+    NotInput
+  MINIMUM
+    0 
+  MAXIMUM
+    0.99
+  REPORTPRECISION
+    2
+  DEFAULT
+    0
+ENDRULE   
+
+
+// ********** Compliance Type **************************************************
+RULE Proj:CompType
+  DESCRIPTION
+    "Type of analysis to be performed."
+  INPUTCLASS
+    Default    
+  DEFAULT
+    if( CompOptNew = 1 .AND. CompOptEnve = 1 .AND. CompOptLtg = 1 .AND. CompOptMech = 1 )
+    then "NewComplete"
+    else if( CompOptNew = 1 .AND. CompOptEnve = 1 .AND. CompOptLtg = 0 .AND. CompOptPartLtg = 0 .AND. CompOptMech = 0 )
+    then "NewEnvelope"
+    else if( CompOptNew = 1 .AND. CompOptEnve = 1 .AND. CompOptLtg = 1 .AND. CompOptPartMech = 1 )
+    then "NewEnvelopeAndLightingAndPartialMechanical"
+    else if( CompOptNew = 1 .AND. CompOptEnve = 1 .AND. CompOptPartLtg = 1 .AND. CompOptPartMech = 1 )
+    then "NewEnvelopeAndPartialLightingAndPartialMechanical"
+    else if( CompOptNew = 1 .AND. CompOptEnve = 1 .AND. CompOptLtg = 1 .AND. CompOptMech = 0 .AND. CompOptPartMech = 0 )
+    then "NewEnvelopeAndLighting"
+    else if( CompOptNew = 1 .AND. CompOptEnve = 1 .AND. CompOptPartLtg = 1 .AND. CompOptMech = 0 )
+    then "NewEnvelopeAndPartialLighting"
+    else if( CompOptNew = 1 .AND. CompOptEnve = 1 .AND. CompOptLtg = 0 .AND. CompOptMech = 1 )
+    then "NewEnvelopeAndMechanical"
+    else if( CompOptNew = 1 .AND. CompOptEnve = 0 .AND. CompOptLtg = 0 .AND. CompOptPartLtg = 0 .AND. CompOptMech = 1 )
+    then "NewMechanical"
+    else if( CompOptNew = 1 .AND. CompOptEnve = 0 .AND. CompOptLtg = 1 .AND. CompOptMech = 1 )
+    then "NewMechanicalAndLighting"
+    else if( CompOptNew = 1 .AND. CompOptEnve = 0 .AND. CompOptPartLtg = 1 .AND. CompOptMech = 1 )
+    then "NewMechanicalAndPartialLighting"
+    else if( CompOptExist = 1 .AND. CompOptAdd = 0 .AND. CompOptAlt = 1 )
+    then "ExistingAlteration"
+    else if( CompOptExist = 1 .AND. CompOptAdd = 1 .AND. CompOptAlt = 1 )
+    then "ExistingAdditionAndAlteration"
+    else if( CompOptExist = 1 .AND. CompOptAdd = 1 .AND. CompOptAlt = 0 .AND.
+             CompOptEnve = 1 .AND. CompOptLtg = 1 .AND. CompOptMech = 1 )
+    then "AdditionComplete"
+    else if( CompOptExist = 1 .AND. CompOptAdd = 1 .AND. CompOptAlt = 0 .AND.
+             CompOptEnve = 1 .AND. CompOptLtg = 0 .AND. CompOptPartLtg = 0 .AND. CompOptMech = 0 )
+    then "AdditionEnvelope"
+    else if( CompOptExist = 1 .AND. CompOptAdd = 1 .AND. CompOptAlt = 0 .AND.
+             CompOptEnve = 1 .AND. CompOptLtg = 1 .AND. CompOptMech = 0 .AND. CompOptPartMech = 1 )
+    then "AdditionEnvelopeAndLightingAndPartialMechanical"
+    else if( CompOptExist = 1 .AND. CompOptAdd = 1 .AND. CompOptAlt = 0 .AND.
+             CompOptEnve = 1 .AND. CompOptPartLtg = 1 .AND. CompOptPartMech = 1 )
+    then "AdditionEnvelopeAndPartialLightingAndPartialMechanical"
+    else if( CompOptExist = 1 .AND. CompOptAdd = 1 .AND. CompOptAlt = 0 .AND.
+             CompOptEnve = 1 .AND. CompOptLtg = 1 .AND. CompOptMech = 0 )
+    then "AdditionEnvelopeAndLighting"
+    else if( CompOptExist = 1 .AND. CompOptAdd = 1 .AND. CompOptAlt = 0 .AND.
+             CompOptEnve = 1 .AND. CompOptPartLtg = 1 .AND. CompOptMech = 0 )
+    then "AdditionEnvelopeAndPartialLighting"
+    else if( CompOptExist = 1 .AND. CompOptAdd = 1 .AND. CompOptAlt = 0 .AND.
+             CompOptEnve = 1 .AND. CompOptLtg = 0 .AND. CompOptMech = 1 )
+    then "AdditionEnvelopeAndMechanical"
+    else if( CompOptExist = 1 .AND. CompOptAdd = 1 .AND. CompOptAlt = 0 .AND.
+             CompOptEnve = 0 .AND. CompOptLtg = 0 .AND. CompOptPartLtg = 0 .AND. CompOptMech = 1 )
+    then "AdditionMechanical"
+    else if( CompOptExist = 1 .AND. CompOptAdd = 1 .AND. CompOptAlt = 0 .AND.
+             CompOptEnve = 0 .AND. CompOptLtg = 1 .AND. CompOptMech = 1 )
+    then "AdditionMechanicalAndLighting"
+    else if( CompOptExist = 1 .AND. CompOptAdd = 1 .AND. CompOptAlt = 0 .AND.
+             CompOptEnve = 0 .AND. CompOptPartLtg = 1 .AND. CompOptMech = 1 )
+    then "AdditionMechanicalAndPartialLighting"
+    else "NA"
+    endif endif endif endif endif endif
+    endif endif endif endif endif endif
+    endif endif endif endif endif endif
+    endif endif endif endif
+  CHECKCODE
+    if( CompOptExist = 1 .AND. CompOptAlt = 1 )
+    then
+      UNCHANGED
+    else if( CompOptEnve = 0 .AND. CompOptMech = 0 .AND. Bldg:NonResFlrArea > 0 )
+    then
+      PostError("Analysis scope does not include envelope or mechanical, which is
+                 not allowed.  One of these options must be checked.")
+    else UNCHANGED
+    endif endif
+ENDRULE
+
+
+// ********** Compliance Type **************************************************
+RULE Proj:ResCompType
+  DESCRIPTION
+    "Type of analysis to be performed."
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N_2022 T24N_2025
+    if( ResCompOptNew = 1 .AND. ResCompOptEnve = 1 .AND. ResCompOptLtg = 1 .AND. ResCompOptMech = 1 .AND. ResCompOptDHW = 1 )
+    then
+     "NewComplete"
+    else
+      "NA"
+    endif
+ENDRULE
+
+
+
+// -----------------------------------------------------------------------------
+//   Messages for incorrect CompOpt checkbox selections
+
+RULE NEW Proj:CompTypeMsg
+  DATATYPE
+    String
+  LONGFORM
+    ComplianceTypeMessage
+  DESCRIPTION
+    "A message to indicate that an illegal combination of compliance option 
+     checkboxes have been selected."
+  INPUTCLASS
+    NotInput    
+  DEFAULT
+    if ( IfValidAnd(Bldg:NonResFlrArea > 0 ) )
+    then
+	    if( CompOptNew = 0 .AND. CompOptExist = 0 .AND. Bldg:NonResFlrArea > 0 ) then
+	      "Either New or Existing must be checked."
+	    else if( CompOptNew = 1 .AND. CompOptExist = 1 .AND. Bldg:NonResFlrArea > 0 ) then
+	      "New and Existing are both checked - Uncheck one of them."
+	    else if( CompOptExist = 1 .AND. CompOptAdd = 0 .AND. CompOptAlt = 0 .AND. Bldg:NonResFlrArea > 0 ) then
+	      "Either Addition or Alterations or both must be checked." 
+	    else if( CompOptLtg = 1 .AND. CompOptPartLtg = 1 .AND. Bldg:NonResFlrArea > 0 ) then
+	      "Lighting and Partial Lighting are both checked - Uncheck one of them."
+	    else if( CompOptEnve = 1 .AND. CompOptPartLtg = 1 .AND. CompOptMech = 1 .AND. Bldg:NonResFlrArea > 0 ) then
+	      "Partial Lighting is not allowed with both Envelope and Mechanical."
+	    else if( CompOptEnve = 1 .AND. CompOptPartMech = 1 .AND.
+	             CompOptLtg = 0 .AND. CompOptPartLtg = 0 .AND. Bldg:NonResFlrArea > 0 ) then
+	      "Partial Mechanical is not allowed with only Envelope."
+	    else if( CompOptMech = 1 .AND. CompOptPartMech = 1 .AND. Bldg:NonResFlrArea > 0 ) then
+	      "Mechanical and Partial Mechanical are both checked - Uncheck one of them."
+	    else if( CompOptEnve = 0 .AND. CompOptMech = 0 .AND. 
+	           ( CompOptExist = 0 .OR. CompOptAlt = 0 ) .AND. Bldg:NonResFlrArea > 0 ) then
+	      "Envelope and Mechanical are both unchecked - Check one of them."
+	//    else if( CompOptDHW = 1 .AND. CompOptPartDHW = 1 ) then
+	//      "DHW and Partial DHW are both checked - Uncheck one of them."
+	    else
+	      "                                                                         "
+	    endif endif endif endif
+	    endif endif endif endif
+	  else
+	      "                                                                         "	  
+	  endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+//   Flags for CompOpt checkbox editability
+
+RULE NEW Proj:CompTypeFlagNew
+  DATATYPE
+    Integer
+  LONGFORM
+    ComplianceTypeFlagNew
+  DESCRIPTION
+    "A flag set to one when New is selected."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( CompOptNew = 1 ) then
+      1
+    else
+      0
+    endif
+ENDRULE
+
+RULE NEW Proj:CompTypeFlagAlt
+  DATATYPE
+    Integer
+  LONGFORM
+    ComplianceTypeFlagAlteration
+  DESCRIPTION
+    "A flag set to one when Alteration is selected."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( CompOptExist = 1 .AND. CompOptAlt = 1 ) then
+      1
+    else
+      0
+    endif
+ENDRULE
+
+
+
+// ---------- Table to manage and set Status Category Flags - as well as organize the information visually -------------------------------------------------------------
+
+TABLE ProjCompStatusCat                                                                                                                           
+  ComplianceType                                         IsNewEnv  IsAddEnv  IsExistingEnv  IsNewLtg  IsExistingLtg  IsFutureLtg  IsPartLtg  IsNewMech IsAddMech  IsNoMech  IsNoAddMech  IsPartMech  IsAdd   IsAddOrAlt  IsAlt  IsAltOnly
+  NewComplete                                            1         0         0              1         0              0            0          1         0          0         0            0           0       0           0      0        
+  NewEnvelope                                            1         0         0              0         0              1            0          0         0          1         0            0           0       0           0      0        
+  NewEnvelopeAndLighting                                 1         0         0              1         0              0            0          0         0          1         0            0           0       0           0      0        
+  NewEnvelopeAndLightingAndPartialMechanical             1         0         0              1         0              0            0          0         0          0         0            1           0       0           0      0
+  NewEnvelopeAndPartialLighting                          1         0         0              0         0              0            1          0         0          1         0            0           0       0           0      0        
+  NewEnvelopeAndPartialLightingAndPartialMechanical      1         0         0              0         0              0            1          0         0          0         0            1           0       0           0      0        
+  NewEnvelopeAndMechanical                               1         0         0              0         0              1            0          1         0          0         0            0           0       0           0      0        
+  NewMechanical                                          0         0         1              0         1              0            0          1         0          0         0            0           0       0           0      0        
+  NewMechanicalAndLighting                               0         0         1              1         0              0            0          1         0          0         0            0           0       0           0      0        
+  NewMechanicalAndPartialLighting                        0         0         1              0         0              0            1          1         0          0         0            0           0       0           0      0        
+  ExistingAlteration                                     0         0         0              0         0              0            0          0         0          0         0            0           0       1           1      1        
+  ExistingAdditionAndAlteration                          0         0         0              0         0              0            0          0         0          0         0            0           0       1           1      0        
+  AdditionComplete                                       0         1         0              0         0              0            0          0         1          0         0            0           1       1           0      0        
+  AdditionEnvelope                                       0         1         0              0         0              0            0          0         0          0         1            0           1       1           0      0        
+  AdditionEnvelopeAndLighting                            0         1         0              0         0              0            0          0         0          0         1            0           1       1           0      0        
+  AdditionEnvelopeAndLightingAndPartialMechanical        0         1         0              0         0              0            0          0         0          0         0            1           1       1           0      0 
+  AdditionEnvelopeAndPartialLighting                     0         1         0              0         0              0            1          0         0          0         1            0           1       1           0      0        
+  AdditionEnvelopeAndPartialLightingAndPartialMechanical 0         1         0              0         0              0            1          0         0          0         0            1           1       1           0      0        
+  AdditionEnvelopeAndMechanical                          0         1         0              0         0              0            0          0         1          0         0            0           1       1           0      0        
+  AdditionMechanical                                     0         0         1              0         1              0            0          0         1          0         0            0           1       1           0      0        
+  AdditionMechanicalAndLighting                          0         0         1              0         0              0            0          0         1          0         0            0           1       1           0      0        
+  AdditionMechanicalAndPartialLighting                   0         0         1              0         0              0            0          0         1          0         0            0           1       1           0      0        
+  NA                                                     0         0         0              0         0              0            0          0         0          0         0            0           0       0           0      0        
+ENDTABLE
+
+// ---------- Table to identify valid component statuses (New, Altered Existing, etc) for building components -----------------------------------------------------------
+TABLE ValidCompStatus                                                                                                           
+  ComplianceType                                         Env_New  Env_Altered  Env_Existing  Ltg_New  Ltg_Altered  Ltg_Existing  Ltg_Future  HVAC_New   HVAC_Existing  HVAC_Unknown  Spc_New  Spc_Altered  Spc_Existing
+  NewComplete                                            1        0            0             1        0            0             0           1          0              0             1        0            0           
+  NewEnvelope                                            1        0            0             0        0            0             1           0          0              1             1        0            0          
+  NewEnvelopeAndLighting                                 1        0            0             1        0            0             0           0          0              1             1        0            0          
+  NewEnvelopeAndLightingAndPartialMechanical             1        0            0             1        0            0             0           1          1              1             1        0            0          
+  NewEnvelopeAndPartialLighting                          1        0            0             1        0            0             1           0          0              1             1        0            0          
+  NewEnvelopeAndPartialLightingAndPartialMechanical      1        0            0             1        0            0             1           1          1              1             1        0            0          
+  NewEnvelopeAndMechanical                               1        0            0             0        0            0             1           1          0              0             1        0            0          
+  NewMechanical                                          0        0            1             0        0            1             0           1          0              0             0        1            1          
+  NewMechanicalAndLighting                               0        0            1             1        0            0             0           1          0              0             0        1            1          
+  NewMechanicalAndPartialLighting                        0        0            1             1        0            1             0           1          0              0             0        1            1          
+  ExistingAlteration                                     1        1            1             1        1            1             0           1          1              1             1        1            1          
+  ExistingAdditionAndAlteration                          1        1            1             1        1            1             0           1          1              1             1        1            1          
+  AdditionComplete                                       1        0            1             1        0            1             0           1          1              1             1        0            1          
+  AdditionEnvelope                                       1        0            1             0        0            1             1           0          1              1             1        0            1          
+  AdditionEnvelopeAndLighting                            1        0            1             1        0            1             0           0          1              1             1        0            1          
+  AdditionEnvelopeAndLightingAndPartialMechanical        1        0            0             1        0            0             0           1          1              1             1        0            1             
+  AdditionEnvelopeAndPartialLighting                     1        0            1             1        0            1             1           0          1              1             1        0            1          
+  AdditionEnvelopeAndPartialLightingAndPartialMechanical 1        0            1             1        0            1             1           1          1              1             1        0            1          
+  AdditionEnvelopeAndMechanical                          1        0            1             0        0            1             1           1          1              1             1        0            1          
+  AdditionMechanical                                     0        0            1             0        0            1             0           1          1              1             1        0            1          
+  AdditionMechanicalAndLighting                          0        0            1             1        0            1             0           1          1              1             1        0            1          
+  AdditionMechanicalAndPartialLighting                   0        0            1             1        0            0             1           1          1              1             1        0            1          
+  NA                                                     0        0            0             0        0            0             0           0          0              0             0        0            0
+ENDTABLE
+
+
+
+// ---------- Envelope Compliance Status Flags --------------------------------
+RULE NEW Proj:IsNewEnv
+  DATATYPE
+    Integer
+  LONGFORM
+    IsNewEnvelope
+  DESCRIPTION
+    "A flag that indicates if CompType is 'NewComplete' or any of the four
+     'NewEnvelope' options."
+  INPUTCLASS
+    NotInput    
+  DEFAULT
+    ProjCompStatusCat:IsNewEnv( "ComplianceType", Proj:CompType ) 
+   // LH - Moved to table lookup approach
+   ;if( Proj:CompType = "NewComplete" .OR.
+   ;    Proj:CompType = "NewEnvelope" .OR.
+   ;    Proj:CompType = "NewEnvelopeAndLighting" .OR.
+   ;    Proj:CompType = "NewEnvelopeAndPartialLighting" .OR.
+   ;    Proj:CompType = "NewEnvelopeAndMechanical" .OR. 
+   ;    Proj:CompType = "AdditionComplete" .OR.
+   ;    Proj:CompType = "AdditionEnvelope" .OR.
+   ;    Proj:CompType = "AdditionEnvelopeAndLighting" .OR.
+   ;    Proj:CompType = "AdditionEnvelopeAndPartialLighting" .OR.
+   ;    Proj:CompType = "AdditionEnvelopeAndMechanical" ) 
+   ;then 1 
+   ;else 0
+   ;endif
+  SIZING
+    u:IsNewEnv
+  ANNUAL
+    z:IsNewEnv
+ENDRULE
+
+
+//  LH - This property is not referenced elsewhere in the rules - do we need it?
+RULE NEW Proj:IsAddEnv
+  DATATYPE
+    Integer
+  LONGFORM
+    IsAdditionEnvelope
+  DESCRIPTION
+    "A flag that indicates if CompType is 'AdditionComplete' or any of the four
+     'AdditionEnvelope' options."
+  INPUTCLASS
+    NotInput    
+  DEFAULT
+    ProjCompStatusCat:IsAddEnv( "ComplianceType", Proj:CompType ) 
+    // DR - Moved to table lookup approach
+    ;if( Proj:CompType = "AdditionComplete" .OR.
+    ;    Proj:CompType = "AdditionEnvelope" .OR.
+    ;    Proj:CompType = "AdditionEnvelopeAndLighting" .OR.
+    ;    Proj:CompType = "AdditionEnvelopeAndPartialLighting" .OR.
+    ;    Proj:CompType = "AdditionEnvelopeAndMechanical" ) 
+    ;then 1 
+    ;else 0
+    ;endif
+  SIZING
+    u:IsAddEnv
+  ANNUAL
+    z:IsAddEnv
+ENDRULE
+
+RULE NEW Proj:IsExistingEnv
+  DATATYPE
+    Integer
+  LONGFORM
+    IsExistingEnvelope
+  DESCRIPTION
+    "A flag that indicates if CompType is any of the three
+     'NewMechanical' options, except NewEnvelopeAndMechanical."
+  INPUTCLASS
+    NotInput    
+  DEFAULT
+    ProjCompStatusCat:IsExistingEnv( "ComplianceType", Proj:CompType ) 
+   // LH - Moved to table lookup approach
+   ;if( Proj:CompType = "NewMechanical" .OR.
+   ;    Proj:CompType = "NewMechanicalAndLighting" .OR.
+   ;    Proj:CompType = "NewMechanicalAndPartialLighting" .OR.
+   ;    Proj:CompType = "AdditionMechanical" .OR.
+   ;    Proj:CompType = "AdditionMechanicalAndLighting" .OR.
+   ;    Proj:CompType = "AdditionMechanicalAndPartialLighting" ) 
+   ;then 1 
+   ;else 0
+   ;endif
+  SIZING
+    u:IsExistingEnv
+  ANNUAL
+    z:IsExistingEnv
+ENDRULE
+
+// ---------- Lighting Compliance Status Flags --------------------------------
+RULE NEW Proj:IsNewLtg
+  DATATYPE
+    Integer
+  LONGFORM
+    IsNewLighting
+  DESCRIPTION
+    "A flag that indicates if CompType is 'NewComplete' or any other option
+     where compliance is being performed for ALL project lighting options."
+  INPUTCLASS
+    NotInput    
+  DEFAULT
+    ProjCompStatusCat:IsNewLtg( "ComplianceType", Proj:CompType ) 
+  SIZING
+    u:IsNewLtg
+  ANNUAL
+    z:IsNewLtg
+ENDRULE
+
+RULE NEW Proj:IsExistingLtg
+  DATATYPE
+    Integer
+  LONGFORM
+    IsExistingLighting
+  DESCRIPTION
+    "A flag that indicates if CompType is 'NewMechanical' or any other option 
+     where lighting compliance is assumed to have not yet been performed."
+  INPUTCLASS
+    NotInput    
+  DEFAULT
+    ProjCompStatusCat:IsExistingLtg( "ComplianceType", Proj:CompType ) 
+  SIZING
+    u:IsExistingLtg
+  ANNUAL
+    z:IsExistingLtg
+ENDRULE
+
+RULE NEW Proj:IsFutureLtg
+  DATATYPE
+    Integer
+  LONGFORM
+    IsFutureLighting
+  DESCRIPTION
+    "A flag that indicates if CompType is 'NewEnvelope' or 
+    'NewEnvelopeAndMechanical', or any other option where lighting compliance
+     is assumed to have not yet been performed."
+  INPUTCLASS
+    NotInput    
+  DEFAULT
+    ProjCompStatusCat:IsFutureLtg( "ComplianceType", Proj:CompType ) 
+  SIZING
+    u:IsFutureLtg
+  ANNUAL
+    z:IsFutureLtg
+ENDRULE
+
+RULE NEW Proj:IsPartLtg
+  DATATYPE
+    Integer
+  LONGFORM
+    IsPartialLighting
+  DESCRIPTION
+    "A flag that indicates if CompType is 'NewEnvelopeAndPartialLighting', 
+    'NewMechanicalAndPartialLighting', or any other option where compliance is
+     being performed only for SOME project lighting."
+  INPUTCLASS
+    NotInput    
+  DEFAULT
+    ProjCompStatusCat:IsPartLtg( "ComplianceType", Proj:CompType )
+  SIZING
+    u:IsPartLtg
+  ANNUAL
+    z:IsPartLtg
+ENDRULE
+
+// ---------- Mechanical Compliance Status Flags ------------------------------
+RULE NEW Proj:IsNewMech
+  DATATYPE
+    Integer
+  LONGFORM
+    IsNewMechanical
+  DESCRIPTION
+    "A flag that indicates if CompType is 'NewComplete' or any of the four 
+     'NewMechanical' options."
+  INPUTCLASS
+    NotInput    
+  DEFAULT
+    ProjCompStatusCat:IsNewMech( "ComplianceType", Proj:CompType ) 
+    // DR - Moved to table lookup approach
+    ;if( Proj:CompType = "NewComplete" .OR.
+    ;    Proj:CompType = "NewEnvelopeAndMechanical" .OR.
+    ;    Proj:CompType = "NewMechanical" .OR.
+    ;    Proj:CompType = "NewMechanicalAndLighting" .OR.
+    ;    Proj:CompType = "NewMechanicalAndPartialLighting" )
+    ;then 1 
+    ;else 0
+    ;endif
+  SIZING
+    u:IsNewMech
+  ANNUAL
+    z:IsNewMech
+ENDRULE
+
+RULE NEW Proj:IsAddMech
+  DATATYPE
+    Integer
+  LONGFORM
+    IsAdditionMechanical
+  DESCRIPTION
+    "A flag that indicates if CompType is 'AdditionComplete' or any of the four 
+     'AdditionMechanical' options."
+  INPUTCLASS
+    NotInput    
+  DEFAULT
+    // DR - Moved to table lookup approach
+    ProjCompStatusCat:IsAddMech( "ComplianceType", Proj:CompType ) 
+    ;if( Proj:CompType = "AdditionComplete" .OR.
+    ;    Proj:CompType = "AdditionEnvelopeAndMechanical" .OR.
+    ;    Proj:CompType = "AdditionMechanical" .OR.
+    ;    Proj:CompType = "AdditionMechanicalAndLighting" .OR.
+    ;    Proj:CompType = "AdditionMechanicalAndPartialLighting" )
+    ;then 1 
+    ;else 0
+    ;endif
+  SIZING
+    u:IsAddMech
+  ANNUAL
+    z:IsAddMech
+ENDRULE
+
+RULE NEW Proj:IsNoMech
+  DATATYPE
+    Integer
+  LONGFORM
+    IsNoMechanical
+  DESCRIPTION
+    "A flag that indicates if CompType is 'NewEnvelope', 'NewEnvelopeAndLighting'
+     or 'NewEnvelopeAndPartialLighting', and in no circumstances, should there
+     be user-defined mechanical systems passed into the analysis. All mechanical
+     systems will be created by the ruleset."
+  INPUTCLASS
+    NotInput    
+  DEFAULT
+    // DR - Moved to table lookup approach
+    ProjCompStatusCat:IsNoMech( "ComplianceType", Proj:CompType ) 
+    ;if( Proj:CompType = "NewEnvelope" .OR.
+    ;    Proj:CompType = "NewEnvelopeAndLighting" .OR.
+    ;    Proj:CompType = "NewEnvelopeAndPartialLighting" ) 
+    ;then 1 
+    ;else 0
+    ;endif
+  SIZING
+    u:IsNoMech
+  ANNUAL
+    z:IsNoMech
+ENDRULE
+
+RULE NEW Proj:IsNoAddMech
+  DATATYPE
+    Integer
+  LONGFORM
+    IsNoAdditionMechanical
+  DESCRIPTION
+    "A flag that indicates if CompType is 'AdditionEnvelope', 'AdditionEnvelopeAndLighting'
+     or 'AdditionaEnvelopeAndPartialLighting', and only if the proposed system
+     is existing should user-defined mechanical systems be passed into the analysis.
+     For all new (addition) spaces, mechanical systems will be created by the ruleset."
+  INPUTCLASS
+    NotInput    
+  DEFAULT
+    ProjCompStatusCat:IsNoAddMech( "ComplianceType", Proj:CompType ) 
+  SIZING
+    u:IsNoAddMech
+  ANNUAL
+    z:IsNoAddMech
+ENDRULE
+
+RULE NEW Proj:IsPartMech
+  DATATYPE
+    Integer
+  LONGFORM
+    IsPartialMechanical
+  DESCRIPTION
+    "A flag that indicates if CompType is 'NewEnvelopeAndLightingAndPartialMechanical',  
+    'NewEnvelopeAndPartialLightingAndPartialMechanical', 'AdditionEnvelopeAndLightingAndPartialMechanical' or
+    'AdditionEnvelopeAndPartialLightingAndPartialMechanical', and proposed systems serve only core areas"
+  INPUTCLASS
+    NotInput    
+  DEFAULT
+    ProjCompStatusCat:IsPartMech( "ComplianceType", Proj:CompType ) 
+  SIZING
+    u:IsPartMech
+  ANNUAL
+    z:IsPartMech
+ENDRULE
+
+
+
+
+// ---------- Additions/Alterations Compliance Status Flags -------------------
+RULE NEW Proj:IsAddOrAlt
+  DATATYPE
+    Integer
+  LONGFORM
+    IsAdditionAlteration
+  DESCRIPTION
+    "A flag that indicates if CompType is any of the three 'Existing' options."
+  INPUTCLASS
+    NotInput    
+  DEFAULT
+    // DR - Moved to table lookup approach
+    ProjCompStatusCat:IsAddOrAlt( "ComplianceType", Proj:CompType ) 
+    ;if( Proj:CompType = "AdditionComplete" .OR. 
+    ;    Proj:CompType = "AdditionEnvelope" .OR. 
+    ;    Proj:CompType = "AdditionEnvelopeAndLighting" .OR. 
+    ;    Proj:CompType = "AdditionEnvelopeAndPartialLighting" .OR. 
+    ;    Proj:CompType = "AdditionEnvelopeAndMechanical" .OR. 
+    ;    Proj:CompType = "AdditionMechanical" .OR. 
+    ;    Proj:CompType = "AdditionMechanicalAndLighting" .OR. 
+    ;    Proj:CompType = "AdditionMechanicalAndPartialLighting" .OR. 
+    ;    Proj:CompType = "ExistingAlteration" .OR.
+    ;    Proj:CompType = "ExistingAdditionAndAlteration" ) 
+    ;then 1 
+    ;else 0
+    ;endif
+  SIZING
+    u:IsAddOrAlt
+  ANNUAL
+    z:IsAddOrAlt
+ENDRULE
+
+RULE NEW Proj:IsAlt
+  DATATYPE
+    Integer
+  DESCRIPTION
+    "A flag that indicates if the default for components is Status = 'Existing'."
+  INPUTCLASS
+    NotInput    
+  DEFAULT
+    // DR - Moved to table lookup approach
+    ProjCompStatusCat:IsAlt( "ComplianceType", Proj:CompType ) 
+    ;if( Proj:CompType = "ExistingAlteration" .OR.
+    ;    Proj:CompType = "ExistingAdditionAndAlteration" ) 
+    ;then 1 
+    ;else 0
+    ;endif
+  SIZING
+    u:IsAlt
+  ANNUAL
+    z:IsAlt
+ENDRULE
+
+RULE NEW Proj:IsAltOnly
+  DATATYPE
+    Integer
+  DESCRIPTION
+    "A flag that indicates if the default for components is Status = 'Existing'."
+  INPUTCLASS
+    NotInput    
+  DEFAULT
+    // DR - Moved to table lookup approach
+    ProjCompStatusCat:IsAltOnly( "ComplianceType", Proj:CompType ) 
+    ;if( Proj:CompType = "ExistingAlteration" ) 
+    ;then 1 
+    ;else 0
+    ;endif
+  SIZING
+    u:IsAltOnly
+  ANNUAL
+    z:IsAltOnly
+ENDRULE
+
+RULE NEW Proj:IsAdd
+  DATATYPE
+    Integer
+  DESCRIPTION
+    "A flag that indicates if the default for components is Status = 'New'."
+  INPUTCLASS
+    NotInput    
+  DEFAULT
+    // LH - Moved to table lookup approach
+    ProjCompStatusCat:IsAdd( "ComplianceType", Proj:CompType ) 
+   ;if( Proj:CompType = "AdditionComplete" .OR. 
+   ;    Proj:CompType = "AdditionEnvelope" .OR. 
+   ;    Proj:CompType = "AdditionEnvelopeAndLighting" .OR. 
+   ;    Proj:CompType = "AdditionEnvelopeAndPartialLighting" .OR. 
+   ;    Proj:CompType = "AdditionEnvelopeAndMechanical" .OR. 
+   ;    Proj:CompType = "AdditionMechanical" .OR. 
+   ;    Proj:CompType = "AdditionMechanicalAndLighting" .OR. 
+   ;    Proj:CompType = "AdditionMechanicalAndPartialLighting" ) 
+   ;then 1 
+   ;else 0
+   ;endif
+  SIZING
+    u:IsAdd
+  ANNUAL
+    z:IsAdd
+ENDRULE
+
+
+// ********** Analysis Type ****************************************************
+RULE Proj:AnalysisType
+  DESCRIPTION
+    "Type of analysis to be performed."
+  INPUTCLASS
+    Required
+  OPTION : T24N
+    Title24Compliance
+    Title24ProposedOnly
+;    Research    - SAC 8/12/14 - commented out prior to v3 release (GC #646)
+  OPTION : S901G ECBC
+    PerformanceRating
+    ProposedOnly
+  DEFAULT : T24N
+    "Title24Compliance"
+  DEFAULT : S901G ECBC
+    "PerformanceRating"
+  CHECKSIM
+    if( AnalysisType = "Research" ) then
+      PostWarning("AnalysisType is set to Research, meaning no Compliance rules 
+                   will be applied prior to translation to EnergyPlus. Review the
+                   EnergyPlus .err file for further information if simulation fails.")   
+    else UNCHANGED
+    endif      
+  SIZING
+    u:AnalysisType
+  ANNUAL
+    u:AnalysisType
+ENDRULE
+
+
+// ********** Ventilation Standard *********************************************
+RULE Proj:VentStd
+  DESCRIPTION
+    "Type ventilation standard for the project."
+  HELP
+    "Used to default the specification for ThermalZones."
+  INPUTCLASS : T24N
+    NotInput  IgnoreUserInput  "ExcptCondWtrHtr removed prior to release of 2016.3.0"
+  INPUTCLASS : S901G
+    Default
+  OPTION : T24N_2013 
+    T24-2013
+  OPTION : T24N_2016
+    T24-2016
+  OPTION : T24N_2019
+    T24-2019
+  OPTION : T24N_2022 T24N_2025
+    T24-2022
+   OPTION : S901G ECBC
+    T24-2013
+    T24-2016
+    62.1-2010
+    IMC-2012
+    Other
+  DEFAULT : T24N_2013
+    "T24-2013"
+  DEFAULT : T24N_2016
+    "T24-2016"
+  DEFAULT : T24N_2019
+    "T24-2019"
+  DEFAULT : T24N_2022 T24N_2025
+    "T24-2022"
+  DEFAULT : S901G ECBC
+   "62.1-2010"
+; CHECKCODE
+// TO DO: Add check to ensure it Proj:VentStd = 'Other', there are not a mix of 
+// different standards defined at the ThrmlZn.  Utilize sum of ThrmlZn:VentStdIdx
+// and number of zones in project to check that the mod of this quotient is 0
+ENDRULE
+
+RULE Proj:VentStdDesc
+  DESCRIPTION
+    "A short description of the 'Other' Ventilation Standard used for the project."
+  HELP
+    "This input is used to default all of the Ventilation Standard descriptions
+     defined in the ThermalZones." 
+  INPUTCLASS
+    Optional
+ENDRULE
+
+
+// ********** Ventilation Multiplier *******************************************
+RULE Proj:VentMult
+  DESCRIPTION
+    "A multiplier applied to ventilation inputs to uniformly increase ventilation
+     rates for the project."
+  HELP
+    "Used to default the specification for Spaces. Does not apply to zones/spaces
+     specified with VentilationStandard = 'Other'."
+  INPUTCLASS
+    Default
+  COMMONMINIMUM
+    1.0
+  COMMONMAXIMUM
+    1.5
+  DEFAULT
+    1.0 
+ENDRULE
+
+
+
+// ********** Air Barrier *********************************************
+RULE Proj:AirBarrier
+  DESCRIPTION
+    "Air barrier option for the project."
+  HELP
+    "Used to default the air barrier specification for BuildingStory and ResZnGroups."
+  INPUTCLASS : T24N
+    Required
+  INPUTCLASS : S901G
+    Default
+  OPTION : T24N_2013 
+		No air barrier
+  OPTION : T24N_2016
+		No air barrier
+  OPTION : T24N_2019
+		No air barrier
+  OPTION : T24N_2022 T24N_2025
+		No air barrier
+		Air barrier - not verified
+		Air barrier - verified by visual inspection
+		Air barrier - verfied by air leakage testing
+  DEFAULT : T24N_2013
+    "No air barrier"
+  DEFAULT : T24N_2016
+    "No air barrier"
+  DEFAULT : T24N_2019
+    "No air barrier"
+  DEFAULT : T24N_2022 T24N_2025
+    if ( Proj:CompPathEnv = "Performance" )
+    then "No air barrier"
+    else "Air barrier - not verified"
+    endif
+  DEFAULT : S901G ECBC
+   "No air barrier"
+ENDRULE
+
+
+RULE Story:AirBarrier
+  DESCRIPTION
+    "Air barrier option for the Building Story."
+  HELP
+    "Used to default the air barrier/infiltration specification for Spaces within a Building Story"
+  INPUTCLASS : T24N
+    Required
+  INPUTCLASS : S901G
+    Default
+  OPTION : T24N_2013 
+		No air barrier
+  OPTION : T24N_2016
+		No air barrier
+  OPTION : T24N_2019
+		No air barrier
+  OPTION : T24N_2022 T24N_2025
+		No air barrier
+		Air barrier - not verified
+		Air barrier - verified by visual inspection
+		Air barrier - verfied by air leakage testing
+  DEFAULT : T24N_2013
+    "No air barrier"
+  DEFAULT : T24N_2016
+    "No air barrier"
+  DEFAULT : T24N_2019
+    "No air barrier"
+  DEFAULT : T24N_2022 T24N_2025
+    Proj:AirBarrier
+  DEFAULT : S901G ECBC
+   "No air barrier"
+ENDRULE
+
+
+
+// -----------------------------------------------------------------------------
+//     GasType
+RULE Proj:GasType
+  RULESETS
+    T24N_2013
+  DESCRIPTION
+    "Selection of fuel used on site (other than electricity)"
+  HELP
+    ""  
+  INPUTCLASS
+    Required
+  OPTION
+    NaturalGas
+    Propane
+    None
+  DEFAULT	; default to EnergyCostOtherFuel if already specified, otherwise NaturalGas
+    if( LocalStatus( EnergyCostOtherFuel ) > 4 .AND. 
+        ( EnergyCostOtherFuel == "NaturalGas" .OR. EnergyCostOtherFuel == "Propane" ) )
+    then EnergyCostOtherFuel
+    else "NaturalGas"
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+//     GasType
+RULE Proj:GasType
+  RULESETS
+    T24N_2016
+  DESCRIPTION
+    "Selection of fuel used on site (other than electricity)"
+  HELP
+    ""  
+  INPUTCLASS
+    Required
+  OPTION
+    NaturalGas
+    Propane
+  DEFAULT	; default to EnergyCostOtherFuel if already specified, otherwise NaturalGas
+    if( LocalStatus( EnergyCostOtherFuel ) > 4 .AND. 
+        ( EnergyCostOtherFuel == "NaturalGas" .OR. EnergyCostOtherFuel == "Propane" ) )
+    then EnergyCostOtherFuel
+    else "NaturalGas"
+    endif
+ENDRULE
+
+RULE Proj:GasType
+  RULESETS
+    T24N
+  DESCRIPTION
+    "Selection of fuel used on site (other than electricity)"
+  HELP
+    ""  
+  INPUTCLASS
+    Required
+  OPTION
+    NaturalGas
+    Propane
+    None
+  DEFAULT	; default to EnergyCostOtherFuel if already specified, otherwise NaturalGas
+    if( LocalStatus( EnergyCostOtherFuel ) > 4 .AND. 
+        ( EnergyCostOtherFuel == "NaturalGas" .OR. EnergyCostOtherFuel == "Propane" ) )
+    then EnergyCostOtherFuel
+    else "NaturalGas"
+    endif
+ENDRULE
+
+RULE Proj:NatGasAvail
+  DESCRIPTION
+    "Whether or not natural gas is available onsite"
+  HELP
+    ""  
+  INPUTCLASS
+    Required
+  DEFAULT
+    1
+  SIZING
+    if( GasType = "NaturalGas" .AND. NatGasAvail == 0 )  
+    then 1
+    else UNCHANGED
+    endif
+  ANNUAL
+    if( GasType = "NaturalGas" .AND. NatGasAvail == 0 )  
+    then 1
+    else UNCHANGED
+    endif
+ENDRULE
+
+// SAC 10/28/15 - property that controls what fuel type all simulated fuel use is reported as
+RULE NEW Proj:RptFuelUseAs
+  DATATYPE
+    Integer
+  LONGFORM
+    ReportFuelUseAs
+  DESCRIPTION
+    "What fuel type to report ALL fuel use as: -1_as simulated,
+     1_Natural Gas, 2_Propane"
+  HELP
+    ""  
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    -1
+  ANNUAL_PROPOSED : T24N
+    if (GasType = "Propane")
+    then  2
+    else  1
+    endif
+  ANNUAL_PROPOSED
+    -1
+  ANNUAL_BASELINE : T24N
+    if (NatGasAvail < 0.5)
+    then  2
+    else  1
+    endif
+  ANNUAL_BASELINE
+    -1
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+//     Occupancy Fraction
+RULE Proj:OccFrac
+  DESCRIPTION
+    "The expected fraction of the exiting density of people in a Space, based 
+     on SpaceFunction, which will determine the design occupancy."  
+  INPUTCLASS
+    Default
+  MINIMUM
+    0.5
+  MAXIMUM
+    5.0
+  UNITS 
+    people/1000ft2
+  DEFAULT 
+    0.5
+ENDRULE
+
+// -----------------------------------------------------------------------------
+//     Heathcare Facility
+RULE Proj:HlthCareFacility
+  DESCRIPTION
+    "A flag that indicates that the entire project meets the definition of a
+     'Healthcare Facility' per Title 24 Part 6, and therefore is eligible for
+     many Exceptions in the code."
+  HELP
+    "Selecting this option defaults the 'IsHealthCare' property for all Spaces,
+     and therefore triggers the compliance analysis exceptions for this option.
+     An error will be posted if this option is checked and 'IsHealthCare' is not
+     selected for all Spaces."
+  INPUTCLASS
+    Default
+  DEFAULT 
+    0
+ENDRULE
+
+
+// ********** Exceptional Design Model IDF *************************************
+RULE Proj:UseExcptDsgnModel
+  DESCRIPTION
+    "Whether or not to use a user-specified 'exceptional design' IDF file
+     to simulate the proposed energy use."
+  INPUTCLASS
+    Optional
+  DEFAULT
+    UNDEFINED
+ENDRULE
+
+RULE Proj:ExcptDsgnModelFile
+  DESCRIPTION
+    "Path and filename of a user-specified 'exceptional design' IDF file
+     to be used to simulate the proposed energy use."
+  INPUTCLASS
+    Optional
+  DEFAULT
+    UNDEFINED
+ENDRULE
+
+RULE NEW Proj:ExcptDsgnModelFileMsg
+  DESCRIPTION
+    "Message documenting the use of a user-specified 'exceptional design' IDF
+     file used to simulate the proposed model energy use."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    UNDEFINED
+ENDRULE
+
+
+// ********** Simulation Timesteps *********************************************
+RULE Proj:NumTimeStepsPerHr
+  DESCRIPTION
+    "Specifies the number of EnergyPlus simulation timesteps."
+  HELP
+    "This is used in the Zone Heat Balance Model calculation as the driving 
+     timestep for heat transfer and load calculations. The value entered is the 
+     number of timesteps to use within an hour; longer length timesteps have lower
+     values. For example a value of 6 entered here directs the program to use a 
+     zone timestep of 10 minutes and a value of 60 means a 1 minute timestep.
+     This input must be evenly divisible into 60; the allowable choices are 
+     1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30, and 60."
+  INPUTCLASS 
+    Optional
+  MINIMUM
+    1
+  MAXIMUM
+    60
+  DEFAULT
+    4
+  CHECKSIM
+    if( mod(60,NumTimeStepsPerHr) != 0 ) then
+      PostError("The number of time steps per hour must be evenly divisible into
+                 60; the allowable choices are 1, 2, 3, 4, 5, 6, 10, 12, 15, 20,
+                 30, and 60.")
+    else if( AnalysisType != "Research" .AND. NumTimeStepsPerHr != 4 ) then
+      PostWarning("The number of time steps per hour will be reset to 4 for
+                   compliance analysis.")  
+    else UNCHANGED 
+    endif endif
+  SIZING
+    if( AnalysisType = "Research" )  
+      then u:NumTimeStepsPerHr
+    else 4
+    endif
+  ANNUAL
+    4
+ENDRULE
+
+// ********** Run Period *******************************************************
+RULE Proj:RunPeriodBeginMonth
+  DESCRIPTION
+    "Beginning month of simulation run period (0 for no run period)."
+  INPUTCLASS 
+    Optional
+  MINIMUM
+    0
+  MAXIMUM
+    12
+  DEFAULT
+    1
+  SIZING
+    0
+  ANNUAL
+    1
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE Proj:RunPeriodBeginDay
+  DESCRIPTION
+    "Beginning day of simulation run period (0 for no run period)."
+  INPUTCLASS 
+    Optional
+  MINIMUM
+    0
+  MAXIMUM
+    31
+  DEFAULT
+    1
+//  DEFAULT  - duplicate 
+//    1
+  SIZING
+    0
+  ANNUAL
+    1
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE Proj:RunPeriodEndMonth
+  DESCRIPTION
+    "End month of simulation run period (0 for no run period)."
+  INPUTCLASS 
+    Optional
+  MINIMUM
+    0
+  MAXIMUM
+    12
+  DEFAULT
+    12
+  SIZING
+    0
+  ANNUAL
+    12
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE Proj:RunPeriodEndDay
+  DESCRIPTION
+    "End day of simulation run period (0 for no run period)."
+  INPUTCLASS 
+    Optional
+  MINIMUM
+    0
+  MAXIMUM
+    31
+  DEFAULT
+    switch( RunPeriodEndMonth )
+      case  0 :   0
+      case  2 :  28
+      case  4 :  30
+      case  6 :  30
+      case  9 :  30
+      case 11 :  30
+      default :  31
+    endswitch
+  SIZING
+    0
+  ANNUAL
+    switch( RunPeriodEndMonth )
+      case  0 :   0
+      case  2 :  28
+      case  4 :  30
+      case  6 :  30
+      case  9 :  30
+      case 11 :  30
+      default :  31
+    endswitch
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE Proj:RunPeriodYear
+  DESCRIPTION
+    "Year of simulation run period (0 for no run period)."
+  INPUTCLASS 
+    Optional
+  MINIMUM
+    0
+  MAXIMUM
+    2100
+  DEFAULT
+    2009
+  SIZING
+    0
+  ANNUAL
+    2009
+ENDRULE
+
+
+// ------------ Standards Version ----------------------------------------------
+RULE Proj:StdsVersion
+  DESCRIPTION
+    "Identifies which appliance efficiency requirements for cooling & heating
+     equipment apply to this project"
+  OPTION : T24N_2013
+    Compliance2014
+    Compliance2015
+  OPTION : T24N_2016
+    Compliance2015
+    Compliance2016
+  OPTION : T24N_2019
+    Compliance2016    
+    Compliance2019
+  OPTION : T24N_2022
+    Compliance2019
+    Compliance2022
+  OPTION : T24N
+    Compliance2022
+    Compliance2025
+  INPUTCLASS  : T24N_2022 T24N_2025
+    Prescribed
+  INPUTCLASS 
+    Default
+  DEFAULT : T24N_2013
+    "Compliance2015"
+  DEFAULT : T24N_2016
+    "Compliance2016"
+  DEFAULT : T24N_2019
+    "Compliance2019"
+  DEFAULT : T24N_2022
+    "Compliance2022"
+  DEFAULT : T24N
+    "Compliance2025"   
+  CHECKCODE : T24N_2022
+    if( IfValidAnd( StdsVersion = "Compliance2019" ) )
+    then
+      PostError( "This is a 2022 standard project, but StandardsVersion has been set 
+                  to 'Compliance2019'. Change to 'Compliance2022' or remove this input
+                  so it is automatically defaulted. The option 'Compliance2019' will be
+                  removed in a future 2022 software version." )
+    else UNCHANGED
+    endif    
+  CHECKSIM : T24N_2016
+    if( ComponentCount( VRFSys ) > 0 )
+    then
+      PostError( "This project includes a VRFSystem, which is not yet supported for
+                  compliance. Remove all VRFSystem objects from the model before running
+                  the analysis.")
+    else UNCHANGED
+    endif
+  SIZING_PROPOSED
+    u:StdsVersion
+  SIZING_BASELINE : T24N_2013
+    "Compliance2015"
+  SIZING_BASELINE : T24N_2016
+    "Compliance2016"    
+  SIZING_BASELINE : T24N_2022
+    "Compliance2022"    
+  SIZING_BASELINE : T24N_2025
+    "Compliance2025"    
+  SIZING_BASELINE : T24N
+    "Compliance2019"    
+  ANNUAL
+    z:StdsVersion
+ENDRULE
+
+RULE NEW Proj:StdsVersionYr
+  DATATYPE
+    Integer
+  LONGFORM
+    StandardsVersionYear
+  DESCRIPTION
+    "The year corresponding to the StdsVersion. Used for rule criteria."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    switch( StdsVersion )
+      case "Compliance2014" : 2014
+      case "Compliance2015" : 2015
+      case "Compliance2016" : 2016
+      case "Compliance2019" : 2019
+      case "Compliance2022" : 2022
+      case "Compliance2025" : 2025
+      default : 2013
+    endswitch
+  SIZING
+    switch( StdsVersion )
+      case "Compliance2014" : 2014
+      case "Compliance2015" : 2015
+      case "Compliance2016" : 2016
+      case "Compliance2019" : 2019
+      case "Compliance2022" : 2022
+      case "Compliance2025" : 2025
+      default : 2013
+    endswitch
+ENDRULE
+
+
+; Permit Date properties not used, see Proj:StdsVersion
+// ------------ Permit Date ----------------------------------------------------
+RULE Proj:PermitYear
+  DESCRIPTION
+    "Year of permit submittal."
+  INPUTCLASS 
+    NotInput
+  MINIMUM
+    0
+  MAXIMUM
+    2100
+  DEFAULT
+    2014
+  SIZING
+    u:PermitYear
+  ANNUAL
+    u:PermitYear
+ENDRULE
+
+RULE Proj:PermitMonth
+  DESCRIPTION
+    "Month of permit submittal."
+  INPUTCLASS 
+    NotInput
+  MINIMUM
+    1
+  MAXIMUM
+    12
+  DEFAULT
+    7 // July
+  SIZING
+    u:PermitMonth
+  ANNUAL
+    u:PermitMonth
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE Proj:PermitDay
+  DESCRIPTION
+    "Day of permit submittal."
+  INPUTCLASS 
+    NotInput
+  MINIMUM
+    1
+  MAXIMUM
+    31
+  DEFAULT
+    1
+  SIZING
+    u:PermitDay
+  ANNUAL
+    u:PermitDay
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE NEW Proj:PermitDate
+  DATATYPE
+    Integer               
+  LONGFORM
+    PermitDate  
+  DESCRIPTION
+    "A value that represents the permit date"
+  HELP
+    "Used in rules to test whether date sensitive efficiency requirements are 
+     effective." 
+  INPUTCLASS 
+    NotInput  
+  DEFAULT 
+    Date( PermitYear, PermitMonth, PermitDay )
+  SIZING
+    u:PermitDate
+  ANNUAL
+    u:PermitDate 
+ENDRULE
+
+
+// ********** Holidays *********************************************************
+RULE Hol:SpecMthd
+  DESCRIPTION
+    "Specification method for defining holiday day."
+  INPUTCLASS
+    Required
+  OPTION
+    Date
+    First
+    Second
+    Third
+    Fourth
+    Last
+// Property for model specified by library objects, imported by rules below
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE Hol:DayOfWeek
+  DESCRIPTION
+    "Day of week this holiday is observed."
+  INPUTCLASS
+    Optional
+  OPTION
+    Monday
+    Tuesday
+    Wednesday
+    Thursday
+    Friday
+    Saturday
+    Sunday
+// Property for model specified by library objects, imported by rules below
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE Hol:Month
+  DESCRIPTION
+    "Month this holiday is observed."
+  INPUTCLASS
+    Required
+  OPTION
+    January
+    February
+    March
+    April
+    May
+    June
+    July
+    August
+    September
+    October
+    November
+    December
+// Property for model specified by library objects, imported by rules below
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE Hol:Day
+  DESCRIPTION
+    "Day of month this holiday is observed."
+  INPUTCLASS 
+    Optional
+  MINIMUM
+    1
+  MAXIMUM
+    31
+// Property for model specified by library objects, imported by rules below
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// Reference properties for holidays, used to import relevant Holiday (Hol) 
+// from library into model
+RULE Proj:HolRef[1]
+  DESCRIPTION
+    "First referenced holiday."
+  INPUTCLASS 
+    Optional
+  SIZING
+    UNDEFINED
+  ANNUAL
+    RuleLibrary( Hol, "New Year's Day" )
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE Proj:HolRef[2]
+  DESCRIPTION
+    "Second referenced holiday."
+  INPUTCLASS 
+    Optional
+  SIZING
+    UNDEFINED
+  ANNUAL
+    RuleLibrary( Hol, "Martin Luther King Day" )
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE Proj:HolRef[3]
+  DESCRIPTION
+    "Third referenced holiday."
+  INPUTCLASS 
+    Optional
+  SIZING
+    UNDEFINED
+  ANNUAL
+    RuleLibrary( Hol, "Presidents Day" )
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE Proj:HolRef[4]
+  DESCRIPTION
+    "Fourth referenced holiday."
+  INPUTCLASS 
+    Optional
+  SIZING
+    UNDEFINED
+  ANNUAL
+    RuleLibrary( Hol, "Memorial Day" )
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE Proj:HolRef[5]
+  DESCRIPTION
+    "Fifth referenced holiday."
+  INPUTCLASS 
+    Optional
+  SIZING
+    UNDEFINED
+  ANNUAL
+    RuleLibrary( Hol, "Independence Day" )
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE Proj:HolRef[6]
+  DESCRIPTION
+    "Sixth referenced holiday."
+  INPUTCLASS 
+    Optional
+  SIZING
+    UNDEFINED
+  ANNUAL
+    RuleLibrary( Hol, "Labor Day" )
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE Proj:HolRef[7]
+  DESCRIPTION
+    "Seventh referenced holiday."
+  INPUTCLASS 
+    Optional
+  SIZING
+    UNDEFINED
+  ANNUAL
+    RuleLibrary( Hol, "Columbus Day" )
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE Proj:HolRef[8]
+  DESCRIPTION
+    "Eighth referenced holiday."
+  INPUTCLASS 
+    Optional
+  SIZING
+    UNDEFINED
+  ANNUAL
+    RuleLibrary( Hol, "Veterans Day" )
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE Proj:HolRef[9]
+  DESCRIPTION
+    "Ninth referenced holiday."
+  INPUTCLASS 
+    Optional
+  SIZING
+    UNDEFINED
+  ANNUAL
+    RuleLibrary( Hol, "Thanksgiving Day" )
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE Proj:HolRef[10]
+  DESCRIPTION
+    "Tenth referenced holiday."
+  INPUTCLASS 
+    Optional
+  SIZING
+    UNDEFINED
+  ANNUAL
+    RuleLibrary( Hol, "Christmas Day" )
+ENDRULE
+
+
+// ********** Unmet Load Hours *************************************************
+RULE Proj:MaxClgUnmetLdHrs
+  DESCRIPTION
+    "The maximum number of unmet cooling loads hours (per zone) allowed during 
+     compliance analysis"
+  REFERENCE 
+    NACM 2.4 Unmet Load Hours
+    NACM 2.5 Calculation Procedures
+  INPUTCLASS 
+    NotInput 
+  DEFAULT  
+    150 
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE Proj:MaxHtgUnmetLdHrs
+  DESCRIPTION
+    "The maximum number of unmet heating loads hours (per zone) allowed during 
+     compliance analysis"
+  REFERENCE 
+    NACM 2.4 Unmet Load Hours
+    NACM 2.5 Calculation Procedures
+  INPUTCLASS 
+    NotInput
+  DEFAULT  
+    150 
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE Proj:ClgUnmetLdHrTol
+  DESCRIPTION
+    "The tolerance around the cooling thermostat setpoint for unmet load hour reporting.
+     This value is one half the throttling range."
+  HELP
+    "This property is translated to OutputControl:ReportingTolerances,
+     Field: Tolerance for Time Cooling Setpoint Not Met." 
+  INPUTCLASS 
+    NotInput
+  UNITS
+    °F
+  DEFAULT
+    1 // Half of 2°F throttling range
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE Proj:HtgUnmetLdHrTol
+  DESCRIPTION
+    "The tolerance around the heating thermostat setpoint for unmet load hour reporting.
+     This value is one half the throttling range."
+  HELP
+    "This property is translated to OutputControl:ReportingTolerances,
+     Field: Tolerance for Time Heating Setpoint Not Met." 
+  INPUTCLASS 
+    NotInput
+  UNITS
+    °F
+  DEFAULT
+    1 // Half of 2°F throttling range
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW Proj:NumZnsExceedClgUnmetLdHrs
+  DATATYPE
+    Integer
+  LONGFORM
+    NumberZonesExceedCoolingUnmetLoadHours  
+  DESCRIPTION
+    "The number of zones that exceed the maximum number of unmet cooling load hours"
+  HELP
+    "The number of zones that exceed the maximum number of unmet cooling load hours"
+  INPUTCLASS 
+    NotInput  
+; no transform expressions - set via source code following each annual simulation
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE NEW Proj:NumZnsExceedHtgUnmetLdHrs
+  DATATYPE
+    Integer
+  LONGFORM
+    NumberZonesExceedHeatingUnmetLoadHours  
+  DESCRIPTION
+    "The number of zones that exceed the maximum number of unmet heating load hours"
+  HELP
+    "The number of zones that exceed the maximum number of unmet heating load hours"
+  INPUTCLASS 
+    NotInput  
+; no transform expressions - set via source code following each annual simulation
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE NEW Proj:MaxZnClgUnmetLdHrs
+  DATATYPE
+    Float
+  LONGFORM
+    MaximumZoneCoolingUnmetLoadHours  
+  DESCRIPTION
+    "Number of unmet cooling load hours for the zone with the maximum"
+  HELP
+    "Number of unmet cooling load hours for the zone with the maximum"
+  INPUTCLASS 
+    NotInput  
+; no transform expressions - set via source code following each annual simulation
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE NEW Proj:MaxZnHtgUnmetLdHrs
+  DATATYPE
+    Float
+  LONGFORM
+    MaximumZoneHeatingUnmetLoadHours  
+  DESCRIPTION
+    "Number of unmet heating load hours for the zone with the maximum"
+  HELP
+    "Number of unmet heating load hours for the zone with the maximum"
+  INPUTCLASS 
+    NotInput  
+; no transform expressions - set via source code following each annual simulation
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE NEW Proj:MaxZnClgUnmetLdHrsName
+  DATATYPE
+    String
+  LONGFORM
+    MaximumZoneCoolingUnmetLoadHoursName  
+  DESCRIPTION
+    "Name of the zone with the maximum number of unmet cooling load hours"
+  HELP
+    "Name of the zone with the maximum number of unmet cooling load hours"
+  INPUTCLASS 
+    NotInput  
+; no transform expressions - set via source code following each annual simulation
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE NEW Proj:MaxZnHtgUnmetLdHrsName
+  DATATYPE
+    String
+  LONGFORM
+    MaximumZoneHeatingUnmetLoadHoursName  
+  DESCRIPTION
+    "Name of the zone with the maximum number of unmet heating load hours"
+  HELP
+    "Name of the zone with the maximum number of unmet heating load hours"
+  INPUTCLASS 
+    NotInput  
+; no transform expressions - set via source code following each annual simulation
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE NEW Proj:UnmetLdHrsFAQLink
+  DATATYPE
+    String
+  LONGFORM
+    UnmetLoadHoursFrequentlyAskedQuestionsLink  
+  DESCRIPTION
+    "Web URL to unmet load hours FAQ information"
+  HELP
+    "Web URL to unmet load hours FAQ information"
+  INPUTCLASS 
+    NotInput  
+  DEFAULT
+    "https://bees.noresco.com/faq_hvac.html#umlh"
+ENDRULE
+; prior to 06/10/22 was: "http://bees.archenergy.com/faq_hvac.html#umlh"  - SAC 06/10/22
+
+// ********** Ventilation/Exhaust/Flow Tolerances ****************************
+// Project level tolerances
+//------------------------------------------------------------------------------
+// For vent/exhaust in nonresidential spaces
+RULE NEW Proj:HRRVentSysChange
+  DATATYPE
+    Integer
+  LONGFORM
+    HighRiseResidentialVentilationSystemChange
+  DESCRIPTION
+    "If checked, the baseline ventilation rulese are changed for HRR spaces."
+  HELP
+    "For T24N 2019/2022/2025 research purposes only. Using this option will not
+     result in a valid compliance run."
+  INPUTCLASS : T24N_2016
+    NotInput
+  INPUTCLASS : T24N
+    NotInput  
+  DEFAULT
+    1 // Set to 1 for 2019.2.0 ACM Release
+ENDRULE
+
+RULE NEW Proj:ExhVentMultLimNonRes
+  DATATYPE
+    Float
+  LONGFORM
+    ExhaustVentilationMultiplierLimitNonresidential
+  DESCRIPTION
+    "The limit one the multiplier used to increase the baseline ventilation air
+     flow rate when the proposed design includes additional ventilation air to 
+     make-up for exhaust air flow. Applies to nonresidential spaces only."
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N
+    1.2
+  DEFAULT : S901G ECBC
+    1.15
+ENDRULE
+
+RULE NEW Proj:VentTolMaxLimNonRes
+  DATATYPE
+    Float
+  LONGFORM
+    VentilationToleranceMaximumLimitNonresidential
+  DESCRIPTION
+    "The upper tolerance limit for how close the proposed design ventilation 
+     air flow must be with respect to the code minimum. 
+     Applies to nonresidential spaces only."
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N_2016
+    0.10
+  DEFAULT : T24N
+    0.10    
+  DEFAULT : S901G ECBC
+    0.03
+ENDRULE
+
+RULE NEW Proj:VentTolMinLimNonRes
+  DATATYPE
+    Float
+  LONGFORM
+    VentilationToleranceMinimumLimitNonresidential
+  DESCRIPTION
+    "The lower tolerance limit for how close the proposed design ventilation 
+     air flow must be with respect to the code minimum. 
+     Applies to nonresidential spaces only."
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N_2016
+    0.05
+  DEFAULT : T24N
+    0.05    
+  DEFAULT : S901G ECBC
+    0.03
+ENDRULE
+
+RULE NEW Proj:ExhTolMaxLimNonRes
+  DATATYPE
+    Float
+  LONGFORM
+    ExhaustToleranceMaximumLimitNonresidential
+  DESCRIPTION
+    "The upper tolerance limit for how close the proposed design exhaust 
+     air flow must be with respect to the code minimum.
+     Applies to nonresidential spaces only."
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N_2016
+    0.10
+  DEFAULT : T24N
+    0.10 
+  DEFAULT : S901G ECBC
+    0.03
+ENDRULE
+
+RULE NEW Proj:ExhTolMinLimNonRes
+  DATATYPE
+    Float
+  LONGFORM
+    ExhaustToleranceMinimumLimitNonresidential
+  DESCRIPTION
+    "The lower tolerance limit for how close the proposed design exhaust 
+     air flow must be with respect to the code minimum.
+     Applies to nonresidential spaces only."
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N_2016
+    0.05
+  DEFAULT : T24N
+    0.05
+  DEFAULT : S901G ECBC
+    0.03
+ENDRULE
+
+//------------------------------------------------------------------------------
+// Tolerances for residential spaces
+RULE NEW Proj:ExhVentMultLimRes
+  DATATYPE
+    Float
+  LONGFORM
+    ExhaustVentilationMultiplierLimitResidential
+  DESCRIPTION
+    "The limit on the multiplier used to increase the baseline ventilation air
+     flow rate when the proposed design includes additional ventilation air to 
+     make-up for exhaust air flow. Applies to high-rise residential spaces only."
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N
+    1.2
+  DEFAULT : S901G ECBC
+    1.15
+ENDRULE
+
+RULE NEW Proj:VentTolMaxLimRes
+  DATATYPE
+    Float
+  LONGFORM
+    VentilationToleranceMaximumLimitResidential
+  DESCRIPTION
+    "The upper tolerance limit for how close the proposed design 
+     ventilation air flow must be with respect to the code minimum.
+     Applies to high-rise residential spaces only."
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N_2016
+;   100 // Was previously 0.10. Changed to basically no limit for 2019.0.2. See Ticket 3057
+    0.5 // For 2019.1.1. See Ticket 3040
+  DEFAULT : T24N
+;   100 // Was 0.20. Changed to basically no limit for 2019.0.2. See Ticket 3057 
+;   0.5 // For 2019.1.1 release. See Ticket 3040
+    if( Proj:HRRVentSysChange > 0 )
+;    then 0.1 // For 2019.2.0 ACM release. See Ticket 3040
+    then 0.25 // For 2019.2.0 RC release. See Ticket 3040
+    else 0.5 // For 2019.1.1-1.3 releases
+    endif
+  DEFAULT : S901G ECBC
+    0.5 // Was 0.03
+ENDRULE
+
+RULE NEW Proj:VentTolMinLimRes
+  DATATYPE
+    Float
+  LONGFORM
+    VentilationToleranceMinimumLimitResidential
+  DESCRIPTION
+    "The lower tolerance limit for how close the proposed design 
+     ventilation air flow must be with respect to the code minimum.
+     Applies to high-rise residential spaces only."
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N_2016
+    0.03 // Was previously 0.05, then 0.2. Changed to basically 0 for 2019.0.2. See Ticket 3057
+  DEFAULT : T24N
+;   0.2  // Was 0.05, then 0.2. 
+;   0.03 // For 2019.1.1 release
+    if( Proj:HRRVentSysChange > 0 )
+    then 0 // For 2019.2.0 ACM release. See Ticket 3057/3040  
+    else 0.03 // For 2019.1.1-1.3 releases
+    endif      
+  DEFAULT : S901G ECBC
+    0.1 // Was 0.03
+ENDRULE
+
+RULE NEW Proj:ExhTolMaxLimRes
+  DATATYPE
+    Float
+  LONGFORM
+    ExhaustToleranceMaximumLimitResidential
+  DESCRIPTION
+    "The upper tolerance limit for how close the proposed design 
+     exhaust air flow must be with respect to the code minimum.
+     Applies to high-rise residential spaces only."
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N_2016
+;   100 // Was previously 0.10
+    0.5 // For 2019.1.1 release. See Ticket 3040
+  DEFAULT : T24N
+;   100 // Was previously 0.20   
+    0.5 // For 2019.1.1 release. See Ticket 3040
+  DEFAULT : S901G ECBC
+    0.5 // Was 0.03
+ENDRULE
+
+RULE NEW Proj:ExhTolMinLimRes
+  DATATYPE
+    Float
+  LONGFORM
+    ExhaustToleranceMinimumLimitResidential
+  DESCRIPTION
+    "The lower tolerance limit for how close the proposed design 
+     exhaust air flow must be with respect to the code minimum.
+     Applies to high-rise residential spaces only."
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N_2016
+;   0.2  // Was 0.10
+    0.03 // Was 0.05, then 0.2. Changed to basically 0 for 2019.1.1. See Ticket 3057    
+  DEFAULT : T24N
+;   0.2 // Was 0.10 
+;   0 // Was 0.05, then 0.2. Changed to 0.03 for 2019.1.1, 0 for 2019.2.0. See Ticket 3057/3040  
+    if( Proj:HRRVentSysChange > 0 )
+    then 0 // For 2019.2.0 ACM release. See Ticket 3057/3040  
+    else 0.03 // For 2019.1.1-1.3 releases
+    endif        
+  DEFAULT : S901G ECBC
+    0.5 // Was 0.03
+ENDRULE
+
+RULE NEW Proj:BalancedVentTolRes
+  DATATYPE
+    Float
+  LONGFORM
+    BalancedVentilationToleranceResidential
+  DESCRIPTION
+    "The tolerance between supply and return or exhaust air flows
+     for a ventilation system to be considered 'balanced'. Applies to
+     high-rise residential spaces only"
+  HELP
+    "The tolerance is applied as to the following ratio:
+     ( Supply - Return/Exhaust ) / Supply."
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N_2016
+    100 // No tolerance
+  DEFAULT : T24N
+    0.3 // See ticket 3057/3040
+  DEFAULT : S901G ECBC
+    0.3
+ENDRULE
+
+RULE NEW Proj:HtRcvryVentTolRes
+  DATATYPE
+    Float
+  LONGFORM
+    HeatRecoveryVentilationToleranceResidential
+  DESCRIPTION
+    "The percent of additional ventilation air beyond the code minimum
+     that the user-defined effectiveness of HRV/ERVs is used. 
+     Applies to single zone HRV/ERV systems serving high-rise residential spaces only."
+  HELP
+    "Above this threshold, the effectiveness of HRV/ERVs is adjusted down 
+     based on the ratio of air provided above the limit to the code-minimum." 
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N_2016
+    0 // Not used
+  DEFAULT : T24N
+    0.1 // See ticket 3040. However, this adjustment is not used for 2.0 releases.
+ENDRULE
+
+RULE NEW Proj:HERSFanPwrTestAdj
+  DATATYPE
+    Float
+  LONGFORM
+    HERSFanPowerTestAdjustment
+  DESCRIPTION
+    "Applies to zonal high-rise residential ventilation systems only.
+     The percent of additional fan power simulated if the fan power is not
+     tested/verified in the field."
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N_2016
+    0 // Not used
+  DEFAULT : T24N_2019
+; Old value:    0.05 // 2019.2.0 Beta. See ticket 3040
+    0.0 // Set to 0 per CEC guidance for 2019.2.0 RC
+  DEFAULT : T24N_2022 T24N_2025
+    0.05 // Set to 0.05 per CEC guidance for 2022 release
+ENDRULE
+
+RULE NEW Proj:HERSFIDAdj
+  DATATYPE
+    Float
+  LONGFORM
+    HERSFaultIndicationDisplayAdjustment
+  DESCRIPTION
+    "Applies to zonal high-rise residential ventilation systems only.
+     The derating of fan power and H/ERV effectiveness if the system 
+     does not have fault indication display."
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N_2016
+    0 // Not used
+  DEFAULT : T24N
+    0.10 // See ticket 3040
+ENDRULE
+
+RULE NEW Proj:VentFanTolMaxLim
+  DATATYPE
+    Float
+  LONGFORM
+    VentilationFanToleranceMaximumLimit
+  DESCRIPTION
+    "The upper tolerance limit for how close the proposed design  
+     ventilation air flow must be with respect to the rated fan flow."
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N
+    0.05
+  DEFAULT : S901G ECBC
+    0.05
+ENDRULE
+
+RULE NEW Proj:VentFanTolMinLim
+  DATATYPE
+    Float
+  LONGFORM
+    VentilationFanToleranceMinimumLimit
+  DESCRIPTION
+    "The lower tolerance limit for how close the proposed design 
+     ventilation air flow must be with respect to the rated fan flow."
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N
+    0.02    
+  DEFAULT : S901G ECBC
+    0.02
+ENDRULE
+
+
+
+// ********** Compliance Report Generation *************************************
+RULE Proj:CompReportNum
+  DESCRIPTION
+    "A numeric value representing bitwise toggles identifying which report(s) to be
+     generated following analysis (1-XML, 2-PDF, 4-STD)"
+  INPUTCLASS 
+    NotInput  
+  DEFAULT
+    if (     IfValidAnd( CompReportXML > 0 ) .AND.
+             IfValidAnd( CompReportPDF > 0 ) .AND.
+             IfValidAnd( CompReportStd > 0 )   ) then  7
+    else if (IfValidAnd( CompReportXML > 0 )==0 .AND.
+             IfValidAnd( CompReportPDF > 0 ) .AND.
+             IfValidAnd( CompReportStd > 0 )   ) then  6
+    else if (IfValidAnd( CompReportXML > 0 ) .AND.
+             IfValidAnd( CompReportPDF > 0 )==0 .AND.
+             IfValidAnd( CompReportStd > 0 )   ) then  5
+    else if (IfValidAnd( CompReportXML > 0 ) .AND.
+             IfValidAnd( CompReportPDF > 0 ) .AND.
+             IfValidAnd( CompReportStd > 0 )==0) then  3
+    else if (IfValidAnd( CompReportXML > 0 )==0 .AND.
+             IfValidAnd( CompReportPDF > 0 )==0 .AND.
+             IfValidAnd( CompReportStd > 0 )   ) then  4
+    else if (IfValidAnd( CompReportXML > 0 ) .AND.
+             IfValidAnd( CompReportPDF > 0 )==0 .AND.
+             IfValidAnd( CompReportStd > 0 )==0) then  1
+    else if (IfValidAnd( CompReportXML > 0 )==0 .AND.
+             IfValidAnd( CompReportPDF > 0 ) .AND.
+             IfValidAnd( CompReportStd > 0 )==0) then  2
+    else  0  endif endif endif endif endif endif endif
+ENDRULE
+
+
+// ********** EnergyPlus Reporting Variables ***********************************
+// Property used to set DEFAULT value of all flags at the same time
+RULE Proj:SimVarsFlagSetAll
+  DESCRIPTION
+    "Flag that switches the DEFAULT status of all detailed EnergyPlus reporting flags."
+  HELP
+    "The variables for each SimVars flag variable are shown in the HELP section of the
+     property tooltip. The units shown are the default SI units specfied in the Output
+     reference/.rdd file. However, all variables are converted to IP units for CBECC
+     analysis."
+  INPUTCLASS 
+    Optional
+  DEFAULT
+    0  // Set to 0 for normal releases
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// Simulation variable reporting interval
+RULE Proj:SimVarsInterval
+  DESCRIPTION
+    "Interval for detailed EnergyPlus report variables.  The enumerations match
+     the enumerations specified in the EnergyPlus I/O reference"
+  INPUTCLASS 
+    Prescribed
+  OPTION
+    RunPeriod
+    Monthly
+    Daily
+    Hourly
+    Timestep
+    Detailed
+  DEFAULT
+    "Hourly"
+  SIZING
+// CBECC results retrieval relies on interval data to be in Hourly section of SQL database
+    "Hourly" 
+  ANNUAL
+    u:SimVarsInterval
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// Site variables
+RULE Proj:SimVarsSite
+  DESCRIPTION
+    "Flag that turns on detailed EnergyPlus report variables, for Site."
+  HELP
+    "The output variables for this flag include:
+
+
+     Output:Variable,*,Site Outdoor Air Drybulb Temperature,hourly; !- Zone Average [C]
+
+     Output:Variable,*,Site Outdoor Air Wetbulb Temperature,hourly; !- Zone Average [C]
+
+     Output:Variable,*,Site Direct Solar Radiation Rate per Area,hourly; !- Zone Average [W/m2]
+
+     Output:Variable,*,Site Diffuse Solar Radiation Rate per Area,hourly; !- Zone Average [W/m2]
+
+
+     Units converted to IP in final output."
+  INPUTCLASS 
+    Optional
+  DEFAULT
+    SimVarsFlagSetAll  
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// Dayltg variables
+RULE Proj:SimVarsDayltg
+  DESCRIPTION
+    "Flag that turns on detailed EnergyPlus report variables, for Daylighting."
+  HELP
+    "The output variables for this flag include:
+
+
+     Output:Variable,*,Zone Lights Electric Power,hourly; !- Zone Average [W]
+
+     Output:Variable,*,Daylighting Reference Point 1 Illuminance,hourly; !- Zone Average [lux]
+
+     Output:Variable,*,Daylighting Reference Point 2 Illuminance,hourly; !- Zone Average [lux]
+
+     Output:Variable,*,Daylighting Lighting Power Multiplier,hourly; !- Zone Average []
+
+
+     Units converted to IP in final output."
+  INPUTCLASS 
+    Optional
+  DEFAULT
+    SimVarsFlagSetAll  
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// Fenestration reporting variables
+RULE Proj:SimVarsFen
+  DESCRIPTION
+    "Flag that turns on detailed EnergyPlus report variables, for Fenestration components."
+  HELP
+    "The output variables for this flag include:
+
+
+     Output:Variable,*,Surface Window Heat Gain Rate,hourly; !- Zone Average [W]
+
+     Output:Variable,*,Surface Window Heat Loss Rate,detailed; !- Zone Average [W]
+
+     Output:Variable,*,Surface Inside Face Adjacent Air Temperature,hourly; !- Zone Average [C]
+
+     Output:Variable,*,Surface Outside Face Outdoor Air Drybulb Temperature,hourly; !- Zone Average [C]
+
+
+     Units converted to IP in final output."
+  INPUTCLASS 
+    Optional
+  DEFAULT
+    SimVarsFlagSetAll
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+// Fenestration reporting variables
+;Output:Variable,*,Surface Average Face Conduction Heat Gain Rate,hourly; !- Zone Average [W]
+;Output:Variable,*,Surface Average Face Conduction Heat Loss Rate,detailed; !- Zone Average [W]
+;Output:Variable,*,Surface Inside Inside Face Adjacent Air Temperature,hourly; !- Zone Average [C]
+;Output:Variable,*,Surface Outside Face Outdoor Air Drybulb Temperature,hourly; !- Zone Average [C]
+RULE Proj:SimVarsDr
+  DESCRIPTION
+    "Flag that turns on detailed EnergyPlus report variables, for Door components."
+  HELP
+    "The output variables for this flag include:
+
+
+     Output:Variable,*,Surface Average Face Conduction Heat Gain Rate,hourly; !- Zone Average [W]
+
+     Output:Variable,*,Surface Average Face Conduction Heat Loss Rate,hourly; !- Zone Average [W]
+
+     Output:Variable,*,Surface Inside Face Adjacent Air Temperature,hourly; !- Zone Average [C]
+
+     Output:Variable,*,Surface Outside Face Outdoor Air Drybulb Temperature,hourly; !- Zone Average [C]
+
+
+     Units converted to IP in final output."
+  INPUTCLASS 
+    Optional
+  DEFAULT
+    SimVarsFlagSetAll
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// Thermal zone variables
+;Output:Variable,*,Zone Air Temperature,<SimVarInterval>; !- HVAC Average [C]
+RULE Proj:SimVarsThrmlZn
+  DESCRIPTION
+    "Flag that turns on detailed EnergyPlus report variables, for Thermal Zones."
+  HELP
+    "The output variables for this flag include:
+
+
+     Output:Variable,*,Zone Air Temperature,hourly; !- HVAC Average [C]
+     
+     Output:Variable,*,Zone Mechanical Ventilation Standard Density Volume Flow Rate,hourly; !- HVAC Average [kg/s]
+     
+     Output:Variable,*,Zone Infiltration Standard Density Volume Flow Rate,hourly; !- HVAC Average [kg/s]
+
+     Output:Variable,*,System Node Temperature,hourly; !- HVAC Average [C]
+
+     Output:Variable,*,System Node Standard Density Volume Flow Rate,hourly; !- HVAC Average [kg/s]
+
+     Output:Variable,*,System Node Temperature,hourly; !- HVAC Average [C]
+
+     Output:Variable,*,System Node Mass Flow Rate,hourly; !- HVAC Average [kg/s]
+
+     Output:Variable,*,System Node Temperature,hourly; !- HVAC Average [C]
+
+     Output:Variable,*,System Node Standard Density Volume Flow Rate,hourly; !- HVAC Average [kg/s]
+
+
+     Units converted to IP in final output."
+  HELP
+
+  INPUTCLASS 
+    Optional
+  DEFAULT
+    SimVarsFlagSetAll
+  SIZING
+    0
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// HVAC Secondary component variables (AirLoopHVAC
+RULE Proj:SimVarsHVACSec
+  DESCRIPTION
+    "Flag that turns on detailed EnergyPlus report variables, for HVAC Secondary 
+     (primarily AirLoopHVAC) components."
+  HELP
+    "The output variables for this flag include:
+
+
+     Output:Variable,*,Heating Coil Air Heating Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Cooling Coil Total Cooling Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Heating Coil Gas Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Heating Coil Electric Power,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Heating Coil Heating Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Heating Coil Total Heating Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Cooling Coil Total Cooling Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Cooling Coil Sensible Cooling Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Cooling Coil Electric Power,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Cooling Coil Part Load Ratio,hourly; !- HVAC Average []
+
+     Output:Variable,*,Cooling Coil Runtime Fraction,hourly; !- HVAC Average []
+
+     Output:Variable,*,Heating Coil Heating Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Heating Coil Electric Power,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Heating Coil Runtime Fraction,hourly; !- HVAC Average []
+
+     Output:Variable,*,Heating Coil Part Load Ratio,hourly; !- HVAC Average []
+
+     Output:Variable,*,Fan Electric Power,hourly; !- HVAC Average [W]
+
+
+     Units converted to IP in final output."
+  INPUTCLASS 
+    Optional
+  DEFAULT
+    SimVarsFlagSetAll
+ENDRULE
+
+// HVAC Secondary temperature/flow variables
+RULE Proj:SimVarsHVACSecTempFlow
+  DESCRIPTION
+    "Flag that turns on detailed EnergyPlus report variables, for HVAC Secondary
+     (AirLoopHVAC) node air flows and temperatures."
+  HELP
+    "The output variables for this flag are for nodes that represent the following
+     points in all air-side systems:
+     - Return air node (before mixing box/return fan)
+
+     - Supply air node (downstream of coils/fans, before terminal or zone)
+
+     - Mixed air node (upstream of supply side coils/fan)
+
+     - Relief outlet node (at mixer, before any equipment on relief air branch)
+
+     - OA inlet node (at OA inlet, before any equipment on OA air branch)
+
+  
+     Output:Variable,*,System Node Temperature,hourly; !- HVAC Average [C]
+
+     Output:Variable,*,System Node Standard Density Volume Flow Rate,hourly; !- HVAC Average [kg/s]
+
+     Output:Variable,*,System Node Temperature,hourly; !- HVAC Average [C]
+
+     Output:Variable,*,System Node Standard Density Volume Flow Rate,hourly; !- HVAC Average [kg/s]
+
+     Output:Variable,*,System Node Temperature,hourly; !- HVAC Average [C]
+
+     Output:Variable,*,System Node Standard Density Volume Flow Rate,hourly; !- HVAC Average [kg/s]
+
+     Output:Variable,*,System Node Temperature,hourly; !- HVAC Average [C]
+
+     Output:Variable,*,System Node Standard Density Volume Flow Rate,hourly; !- HVAC Average [kg/s]
+
+     Output:Variable,*,System Node Temperature,hourly; !- HVAC Average [C]
+
+     Output:Variable,*,System Node Standard Density Volume Flow Rate,hourly; !- HVAC Average [kg/s]
+
+     Output:Variable,*,System Node Temperature,hourly; !- HVAC Average [C]
+
+     Output:Variable,*,System Node Standard Density Volume Flow Rate,hourly; !- HVAC Average [kg/s]
+
+     Output:Variable,*,Air System Outdoor Air Economizer Status,hourly; !- HVAC Average []
+
+     Output:Variable,*,Fan Unbalanced Air Mass Flow Rate,hourly;
+
+     Output:Variable,*,Air System Outdoor Air Mass Flow Rate,hourly;
+
+
+     Units converted to IP in final output."
+  INPUTCLASS 
+    Optional
+  DEFAULT
+    SimVarsFlagSetAll
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// HVAC Zone component variables
+RULE Proj:SimVarsHVACZn
+  DESCRIPTION
+    "Flag that turns on detailed EnergyPlus report variables, for HVAC Zone 
+     (primarily ZoneHVAC) components."
+  HELP
+    "The output variables for this flag include:
+
+
+     Output:Variable,*,Zone Air Terminal VAV Damper Position,hourly; !- HVAC Average []
+
+     Output:Variable,*,Zone Air Terminal Outdoor Air Volume Flow Rate,hourly; !- HVAC Average [m3/s]
+
+     Output:Variable,*,Zone Water to Air Heat Pump Total Heating Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Zone Water to Air Heat Pump Total Cooling Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Zone Water to Air Heat Pump Sensible Cooling Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Zone Water to Air Heat Pump Electricity Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Zone Water to Air Heat Pump Compressor Part Load Ratio,hourly; !- HVAC Average []
+
+     Output:Variable,*,Baseboard Electricity Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Zone Packaged Terminal Heat Pump Total Heating Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Zone Packaged Terminal Heat Pump Total Cooling Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Zone Packaged Terminal Air Conditioner Total Heating Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Zone Packaged Terminal Air Conditioner Total Cooling Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Baseboard Total Heating Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Zone VRF Air Terminal Cooling Electricity Rate,hourly; !- HVAC Average [W]
+     
+     Output:Variable,*,Zone VRF Air Terminal Total Cooling Rate,hourly; !- HVAC Average [W]
+     
+     Output:Variable,*,Zone VRF Air Terminal Sensible Cooling Rate,hourly; !- HVAC Average [W]
+     
+     Output:Variable,*,Zone VRF Air Terminal Latent Cooling Rate,hourly; !- HVAC Average [W]
+     
+     Output:Variable,*,Zone VRF Air Terminal Heating Electricity Rate,hourly; !- HVAC Average [W]
+     
+     Output:Variable,*,Zone VRF Air Terminal Total Heating Rate,hourly; !- HVAC Average [W]
+     
+     Output:Variable,*,Zone VRF Air Terminal Sensible Heating Rate,hourly; !- HVAC Average [W]
+     
+     Output:Variable,*,Zone VRF Air Terminal Latent Heating Rate,hourly; !- HVAC Average [W]
+     
+     Output:Variable,*,Zone VRF Air Terminal Fan Availability Status,hourly; !- HVAC Average []
+     
+     Output:Variable,*,Fan Electricity Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Zone Radiant HVAC Heating Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Zone Radiant HVAC Cooling Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Zone Radiant HVAC Mass Flow Rate,hourly; !- HVAC Average [kg/s]
+
+     Output:Variable,*,Zone Radiant HVAC Inlet Temperature,hourly; !- HVAC Average [C]
+
+     Output:Variable,*,Zone Radiant HVAC Outlet Temperature,hourly; !- HVAC Average [C]
+
+     Output:Variable,*,Zone Radiant HVAC Electricity Rate,hourly; !- HVAC Average [W]
+
+     Units converted to IP in final output."
+  INPUTCLASS 
+    Optional
+  DEFAULT
+    SimVarsFlagSetAll
+  SIZING
+    0
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// HVAC Zone temperature/flow variables
+RULE Proj:SimVarsHVACZnTempFlow
+  DESCRIPTION
+    "Flag that turns on detailed EnergyPlus report variables, for HVAC Zone
+     (ZoneHVAC) node air flows and temperatures."
+  HELP
+    "The output variables for this flag are for nodes that represent the following
+     points in all air-side systems:
+     - Mixed air node (upstream of supply side coils/fan)
+
+     - Relief outlet node (at mixer, before any equipment on relief air branch)
+
+     - OA inlet node (at OA inlet, before any equipment on OA air branch)
+
+
+     Output:Variable,*,System Node Temperature,hourly; !- HVAC Average [C]
+
+     Output:Variable,*,System Node Standard Density Volume Flow Rate,hourly; !- HVAC Average [kg/s]
+
+     Output:Variable,*,System Node Temperature,hourly; !- HVAC Average [C]
+
+     Output:Variable,*,System Node Standard Density Volume Flow Rate,hourly; !- HVAC Average [kg/s]
+
+     Output:Variable,*,System Node Temperature,hourly; !- HVAC Average [C]
+
+     Output:Variable,*,System Node Standard Density Volume Flow Rate,hourly; !- HVAC Average [kg/s]
+
+     Output:Variable,*,Zone Combined Outdoor Air Mass Flow Rate,hourly;
+
+
+     Units converted to IP in final output."
+  INPUTCLASS 
+    Optional
+  DEFAULT
+    SimVarsFlagSetAll
+  SIZING
+    0
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// VRF System variables
+RULE Proj:SimVarsVRFSys
+  DESCRIPTION
+    "Flag that turns on detailed EnergyPlus report variables, for VRF outdoor unit and zone
+     unit components."
+  HELP
+    "The output variables for this flag include:
+
+
+     Output:Variable,*,VRF Heat Pump Total Cooling Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,VRF Heat Pump Total Heating Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,VRF Heat Pump Cooling Electric Power,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,VRF Heat Pump Heating Electric Power,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,VRF Heat Pump Cooling COP,hourly; !- HVAC Average []
+
+     Output:Variable,*,VRF Heat Pump Heating COP,hourly; !- HVAC Average []
+
+     Output:Variable,*,VRF Heat Pump COP,hourly; !- HVAC Average []
+
+     Output:Variable,*,VRF Heat Pump Defrost Electric Power,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,VRF Heat Pump Part Load Ratio,hourly; !- HVAC Average []
+
+     Output:Variable,*,VRF Heat Pump Runtime Fraction,hourly; !- HVAC Average []
+
+     Output:Variable,*,VRF Heat Pump Cycling Ratio,hourly; !- HVAC Average []
+
+     Output:Variable,*,VRF Heat Pump Operating Mode,hourly; !- HVAC Average []
+
+     Output:Variable,*,VRF Heat Pump Condenser Inlet Temperature,hourly; !- HVAC Average [C]
+
+     Output:Variable,*,VRF Heat Pump Maximum Capacity Cooling Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,VRF Heat Pump Maximum Capacity Heating Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,VRF Heat Pump Crankcase Heater Electric Power,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,VRF Heat Pump Terminal Unit Cooling Load Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,VRF Heat Pump Terminal Unit Heating Load Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,VRF Heat Pump Heat Recovery Status Change Multiplier,hourly; !- HVAC Average []
+
+     Output:Variable,*,Zone VRF Air Terminal Cooling Electric Power,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Zone VRF Air Terminal Total Cooling Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Zone VRF Air Terminal Sensible Cooling Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Zone VRF Air Terminal Latent Cooling Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Zone VRF Air Terminal Heating Electric Power,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Zone VRF Air Terminal Total Heating Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Zone VRF Air Terminal Sensible Heating Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Zone VRF Air Terminal Latent Heating Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Zone VRF Air Terminal Fan Availability Status,hourly; !- HVAC Average []
+
+
+     Units converted to IP in final output."
+  INPUTCLASS 
+    Optional
+  DEFAULT
+    SimVarsFlagSetAll
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// HtRecvry variables
+RULE Proj:SimVarsHtRcvry
+  DESCRIPTION
+    "Flag that turns on detailed EnergyPlus report variables, for the air-to-air HX
+     component."
+  HELP
+    "The output variables for this flag include:
+
+
+     Output:Variable,*,Heat Exchanger Sensible Heating Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Heat Exchanger Latent Gain Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Heat Exchanger Total Heating Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Heat Exchanger Sensible Cooling Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Heat Exchanger Latent Cooling Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Heat Exchanger Total Cooling Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Heat Exchanger Electric Power,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Heat Exchanger Sensible Effectiveness,hourly; !- HVAC Average []
+
+     Output:Variable,*,Heat Exchanger Latent Effectiveness,hourly; !- HVAC Average []
+
+     Output:Variable,*,Heat Exchanger Supply Air Bypass Mass Flow Rate,hourly; !- HVAC Average [kg/s]
+
+     Output:Variable,*,Heat Exchanger Exhaust Air Bypass Mass Flow Rate,hourly; !- HVAC Average [kg/s]
+
+     Output:Variable,*,Heat Exchanger Defrost Time Fraction,hourly; !- HVAC Average []
+
+     Output:Variable,*,Air System Outdoor Air Heat Recovery Bypass Status,hourly; !- HVAC Average []
+
+
+     Units converted to IP in final output."
+  INPUTCLASS 
+    Optional
+  DEFAULT
+    SimVarsFlagSetAll
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// HVAC Primary variables
+RULE Proj:SimVarsHVACPri
+  DESCRIPTION
+    "Flag that turns on detailed EnergyPlus report variables, for HVAC Primary 
+     (PlantLoop) components."
+  HELP
+    "The output variables for this flag include:
+
+
+     Output:Variable,*,Pump Electric Power,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Pump Mass Flow Rate,hourly; !- HVAC Average [kg/s]
+
+     Output:Variable,*,Pump Outlet Temperature,hourly; !- HVAC Average [C]
+
+     Output:Variable,*,Debug Plant Loop Bypass Fraction,hourly; !- HVAC Average []
+
+     Output:Variable,*,Chiller Evaporator Cooling Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Chiller Condenser Heat Transfer Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Chiller Electric Power,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Cooling Tower Heat Transfer Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Cooling Tower Fan Electric Power,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Boiler Heating Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Boiler Gas Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Boiler Ancillary Electric Power,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Plant Supply Side Inlet Temperature,hourly; !- HVAC Average [C]
+
+     Output:Variable,*,Plant Supply Side Outlet Temperature,hourly; !- HVAC Average [C]
+
+
+     Units converted to IP in final output."
+  INPUTCLASS 
+    Optional
+  DEFAULT
+    SimVarsFlagSetAll
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// ThermalEnergyStorage reporting variables
+RULE Proj:SimVarsThrmlEngyStor
+  DESCRIPTION
+    "Flag that turns on detailed EnergyPlus report variables, for TES."
+  HELP
+    "The output variables for this flag include:
+
+
+     Output:Variable,*,Chilled Water Thermal Storage Tank Temperature,hourly; !- HVAC Average [C]
+
+     Output:Variable,*,Chilled Water Thermal Storage Use Side Mass Flow Rate,hourly; !- HVAC Average [kg/s]
+
+     Output:Variable,*,Chilled Water Thermal Storage Use Side Inlet Temperature,hourly; !- HVAC Average [C]
+
+     Output:Variable,*,Chilled Water Thermal Storage Use Side Outlet Temperature,hourly; !- HVAC Average [C]
+
+     Output:Variable,*,Chilled Water Thermal Storage Use Side Heat Transfer Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Chilled Water Thermal Storage Use Side Heat Transfer Energy,hourly; !- HVAC Sum [J]
+
+     Output:Variable,*,Chilled Water Thermal Storage Source Side Mass Flow Rate,hourly; !- HVAC Average [kg/s]
+
+     Output:Variable,*,Chilled Water Thermal Storage Source Side Inlet Temperature,hourly; !- HVAC Average [C]
+
+     Output:Variable,*,Chilled Water Thermal Storage Source Side Outlet Temperature,hourly; !- HVAC Average [C]
+
+     Output:Variable,*,Chilled Water Thermal Storage Source Side Heat Transfer Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Chilled Water Thermal Storage Source Side Heat Transfer Energy,hourly; !- HVAC Sum [J]
+
+
+     Units converted to IP in final output."
+  INPUTCLASS 
+    Optional
+  DEFAULT
+    SimVarsFlagSetAll
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// WaterHeater reporting variables
+RULE Proj:SimVarsWtrHtr
+  DESCRIPTION
+    "Flag that turns on detailed EnergyPlus report variables, for WaterHeater."
+  HELP
+    "The output variables for this flag include:
+
+
+     Output:Variable,*,Water Heater Tank Temperature,hourly; !- HVAC Average [C]
+ 
+     Output:Variable,*,Water Heater Electric Energy,hourly; !- HVAC Sum [J]
+
+     Output:Variable,*,Water Heater Electric Power,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Water Heater Gas Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Water Heater Gas Energy,hourly; !- HVAC Sum [J]
+
+     Output:Variable,*,Water Heater Heating Energy,hourly; !- HVAC Sum [J]
+
+     Output:Variable,*,Water Heater Heating Rate,hourly; !- HVAC Average [W]
+
+     Output:Variable,*,Water Heater Mains Water Volume,hourly; !- HVAC Sum [m3]
+
+     Output:Variable,*,Water Heater Use Side Inlet Temperature,hourly; !- HVAC Average [C]
+
+     Output:Variable,*,Water Heater Use Side Outlet Temperature,hourly; !- HVAC Average [C]
+
+     Output:Variable,*,Water Heater Water Volume Flow Rate,hourly; !- HVAC Average [m3/s]
+
+     Output:Variable,*,Water Heater Heat Pump Control Tank Final Temperature,hourly; !- HVAC Average [C]
+
+     Output:Variable,*,Water Heater Heat Pump Control Tank Temperature,hourly; !- HVAC Average [C]
+
+
+     Units converted to IP in final output."
+  INPUTCLASS 
+    Optional
+  DEFAULT
+    SimVarsFlagSetAll
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// Debug screen flag
+RULE NEW Proj:DebugScreen
+  DATATYPE
+    Integer
+  DESCRIPTION
+    "A flag to indicate that additional debug properties are shown on screen dialogs."
+  INPUTCLASS 
+    Prescribed
+  DEFAULT
+    0 
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// Whether system is referenced by ResOtherZn(s) vs. ThrmlZn(s)
+RULE NEW AirSys:ServesThrmlZn
+  DATATYPE
+    Integer
+  LONGFORM
+    ServesThermalZone
+  DESCRIPTION
+    "Whether this AirSys serves 1 or more ThrmlZn(s)."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( SumRevRef(ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:Area) > 1 .OR.
+        SumRevRef(ThrmlZn:PriAirCondgSysRef[2], ThrmlZn:Area) > 1 .OR.
+        SumRevRef(ThrmlZn:VentSysRef, ThrmlZn:Area) > 1 .OR.
+        SumRevRef(ThrmlZn:ExhSysRef, ThrmlZn:Area) > 1 .OR.
+        SumRevRef(ThrmlZn:SimSysRef[1], ThrmlZn:Area) > 1 .OR. 
+        SumRevRef(ThrmlZn:SimSysRef[2], ThrmlZn:Area) > 1 )
+    then 1
+    else 0
+    endif
+ENDRULE 
+RULE AirSys:ServesResZn
+;  DATATYPE
+;    Integer
+;  LONGFORM
+;    ServesResidentialZone
+  DESCRIPTION
+    "Whether this AirSys serves 1 or more ResOtherZn(s)."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( SumRevRef(ResOtherZn:ozHVACSystem, ResOtherZn:Area) > 1 )
+    then 1
+    else 0
+    endif
+ENDRULE 
+
+// -----------------------------------------------------------------------------
+// Additional project level properties for reporting purposes
+RULE NEW Proj:NumAirSys
+  DATATYPE
+    Integer
+  LONGFORM
+    NumberAirSystem
+  DESCRIPTION
+    "The number of AirSystem objects in the model"
+  INPUTCLASS 
+    NotInput  
+  DEFAULT
+    ComponentCount( AirSys )
+  ANNUAL
+    ComponentCount( AirSys )   
+ENDRULE
+
+RULE NEW Proj:NumAirSysWithMult
+  DATATYPE
+    Integer
+  LONGFORM
+    NumberAirSystemWithMult
+  DESCRIPTION
+    "The number of AirSystem objects (including multiplier) in the model"
+  INPUTCLASS 
+    NotInput  
+  DEFAULT
+    SumChildren( AirSys:Cnt )
+  ANNUAL
+    SumChildren( AirSys:Cnt ) 
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE Proj:NumZnSys
+  DESCRIPTION
+    "The number of ZoneSystem objects in the model"
+  INPUTCLASS 
+    NotInput  
+  DEFAULT
+    ComponentCount( ZnSys )
+  ANNUAL
+    ComponentCount( ZnSys )   
+ENDRULE
+
+RULE NEW Proj:NumZnSysWithMult
+  DATATYPE
+    Integer
+  LONGFORM
+    NumberZoneSystemWithMult
+  DESCRIPTION
+    "The number of ZoneSystem objects (including multiplier) in the model"
+  INPUTCLASS 
+    NotInput  
+  DEFAULT
+    SumChildren( ZnSys:Cnt )
+  ANNUAL
+    SumChildren( ZnSys:Cnt )
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE NEW Proj:NumTrmlUnit
+  DATATYPE
+    Integer
+  LONGFORM
+    NumberTerminalUnit
+  DESCRIPTION
+    "The number of non 'Uncontrolled' TerminalUnits used in the project AirSystems, 
+     including TrmlUnit:Cnt and AirSys:Cnt multipliers." 
+  INPUTCLASS 
+    NotInput  
+  DEFAULT
+    SumChildren( Bldg:NumTrmlUnit )
+  ANNUAL
+    SumChildren( Bldg:NumTrmlUnit ) 
+ENDRULE
+
+RULE NEW Proj:NumTrmlUnitControlledWithMult
+  DATATYPE
+    Integer
+  LONGFORM
+    NumberTerminalUnitControlledWithMult
+  DESCRIPTION
+    "The number of non 'Uncontrolled' TerminalUnits used in the project AirSystems, 
+     including TrmlUnit:Cnt and AirSys:Cnt multipliers." 
+  INPUTCLASS 
+    NotInput  
+  DEFAULT
+    SumChildren( TrmlUnit:SysCntControlledWithMult )
+  ANNUAL
+    SumChildren( TrmlUnit:SysCntControlledWithMult )
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE NEW Proj:NumThrmlZn
+  DATATYPE
+    Integer
+  LONGFORM
+    NumberThermalZone
+  DESCRIPTION
+    "The number of ThermalZone objects in the model"
+  INPUTCLASS 
+    NotInput  
+  DEFAULT
+    ComponentCount( ThrmlZn )
+ENDRULE
+
+RULE NEW Proj:NumThrmlZnWithMult
+  DATATYPE
+    Integer
+  LONGFORM
+    NumberThermalZoneWithMult
+  DESCRIPTION
+    "The number of ThermalZone objects (including multipliers) in the model"
+  INPUTCLASS 
+    NotInput  
+  DEFAULT
+    SumChildren( ThrmlZn:HVACZnCntWithMult )
+ENDRULE
+
+//------------------------------------------------------------------------------
+RULE NEW Proj:NumThrmlZnCond
+  DATATYPE
+    Integer
+  LONGFORM
+    NumberThermalZoneConditioned
+  DESCRIPTION
+    "The number of conditioned ThermalZone objects in the model"
+  INPUTCLASS 
+    NotInput  
+  DEFAULT
+    SumChildren( ThrmlZn:IsCond ) 
+ENDRULE
+
+RULE NEW Proj:NumThrmlZnCondWithMult
+  DATATYPE
+    Integer
+  LONGFORM
+    NumberThermalZoneConditionedWithMult
+  DESCRIPTION
+    "The number of conditioned ThermalZone objects (including multipliers) in the model"
+  INPUTCLASS 
+    NotInput  
+  DEFAULT
+    SumChildren( ThrmlZn:CondHVACZnCntWithMult ) 
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// This rule identifies which transform for which the report is currently being generated
+RULE NEW Proj:XFormFlag
+  DATATYPE
+    Integer
+  LONGFORM
+    TransformFlag
+  INPUTCLASS
+    NotInput
+  SIZING_PROPOSED
+    1
+  SIZING_BASELINE
+    2
+  ANNUAL_PROPOSED
+    3
+  ANNUAL_BASELINE
+    4
+ENDRULE
+
+
+// ********** CSE DHW Simulation Setup ******************************************
+RULE Proj:CSE_DHWUseMthd
+  DESCRIPTION
+    "CSE DhW simulation use & profiles method (2013 vs. later)"
+  INPUTCLASS 
+    Prescribed
+  OPTION
+    Old (via wsUse)
+    New (via wsDayUse)
+  DEFAULT : T24N_2016
+    "New (via wsDayUse)"
+  DEFAULT : T24N_2019 T24N_2022 T24N_2025
+    "New (via wsDayUse)"
+  DEFAULT
+    "Old (via wsUse)"
+ENDRULE
+
+RULE Proj:CSE_DHWUseIncFile
+  DESCRIPTION
+    "CSE DHW use & profiles include file"
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if (CSE_DHWUseMthd = "New (via wsDayUse)")
+    then  if (IfValidAnd( AnalysisVersion >= 190200 ))
+          then  "DHWDU2.txt"
+          else  "DHWDU.txt"
+          endif
+    else  UNDEFINED
+    endif
+ENDRULE
+
+RULE Proj:CSE_AllowCentralDHW
+  DESCRIPTION
+    "whether UI and rules should allow/incorporate central DHW (via CSE)"
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    1
+ENDRULE
+
+
+// ------------ Results (multiple sets) Calcs Data ----------------------------- SAC 11/03/19
+// NumberOfT24NResultsSets:NumSets("CodeVint",EngyCodeYearNum)
+TABLE NumberOfT24NResultsSets
+    CodeVint   NumSets   PrimIdx
+    2025       1         1
+    2022       1         1
+    *          1         1
+ENDTABLE
+// SAC 3/11/20 - added PrimIdx column
+//    2022       5   <- was used for testing
+
+RULE Proj:NumResultsSets
+  DESCRIPTION
+    "Number of unique results sets (w/ different TDV, source energy,
+     electric demand and/or CO2 emissions tables)"
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N
+    NumberOfT24NResultsSets:NumSets("CodeVint",EngyCodeYearNum)
+  DEFAULT
+    1
+ENDRULE
+
+; SAC 3/22/20 - no real benefit to allowing access to PrimResultSet, so remove until/unless TDV data in each set different enough to cause changes in battery charge/discharge pattern
+;RULE Proj:PrimResultSet
+;  DESCRIPTION
+;    "label of TDV result set that is considered the
+;     'Primary' (the one exported to hourly results & used in
+;     advanced battery control simulation)"
+;  INPUTCLASS : T24N_2022
+;    Default
+;  INPUTCLASS 
+;    NotInput
+;  OPTION
+;    Pol  0% RetAdd NoLeak 
+;    Pol 15% RetAdd NoLeak 
+;    Pol  0% RetAdd CH4Leak
+;    Pol 15% RetAdd CH4Leak
+;  DEFAULT : T24N_2022
+;    switch (NumberOfT24NResultsSets:PrimIdx("CodeVint",EngyCodeYearNum))
+;       case  1 :  "Pol  0% RetAdd NoLeak"
+;       case  2 :  "Pol 15% RetAdd NoLeak"
+;       case  3 :  "Pol  0% RetAdd CH4Leak"
+;       default :  "Pol 15% RetAdd CH4Leak"
+;    endswitch
+;  DEFAULT
+;    UNDEFINED
+;ENDRULE
+;RULE Proj:PrimResultSetIdx
+;  DESCRIPTION
+;    "1-based index of (TDV) result set that is considered the
+;     'Primary' (the one exported to hourly results & used in
+;     advanced battery control simulation)"
+;  INPUTCLASS 
+;    NotInput
+;  DEFAULT : T24N_2022
+;    switch (PrimResultSet)
+;       case  "Pol  0% RetAdd NoLeak"  :  1
+;       case  "Pol 15% RetAdd NoLeak"  :  2
+;       case  "Pol  0% RetAdd CH4Leak" :  3
+;       default                        :  4
+;    endswitch
+;  DEFAULT
+;    1
+;ENDRULE
+RULE Proj:PrimResultSetIdx
+  DESCRIPTION
+    "1-based index of (TDV) result set that is considered the
+     'Primary' (the one exported to hourly results & used in
+     advanced battery control simulation)"
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N
+    NumberOfT24NResultsSets:PrimIdx("CodeVint",EngyCodeYearNum)
+  DEFAULT
+    1
+ENDRULE
+
+RULE NEW Proj:ResultSetSector
+  DATATYPE
+    String
+  LONGFORM
+    ResultSetSector
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (IfValidAnd( BldgTypeScreenVal > 0 ) .AND.
+        IfValidAnd( ResTDVSrcEmisFac  > 0 ))
+    then  
+      if( SumChildren( ResZnGrp:TotFlrAreaWithMult ) > 0 )
+      then "Com"
+      else "Res"
+      endif
+    else  "Com"
+    endif
+ENDRULE
+
+// T24NResultSetData:NumSets("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", #)   - This Table uses 15 year gas and other CO2 factors.
+// NOTE:  changes to resutls sets below must include corresponding changes to PrimResultSet & PrimResultSetIdx RULEs above (incl. enumeration backward compatibility) - SAC 3/21/20
+// added SetID 2 to represent 2022 Residential tables & multipliers, for when model is >= 80% Res spaces - SAC 03/18/21
+// updated 2025 TDV, source energy and CO2 emisions tables to latest 2025 data - SAC 10/25/22
+TABLE T24NResultSetData
+    CodeVint   Sector   SetID   ResultSetName                    TDVTableName                            ElecDemTableName                         CO2ElecTableName                     CO2NatGasTableName               CO2NatGasMult        CO2OtherTableName                 CO2OtherMult    SrcEngyTableName
+    2025       Com      1       Metrics 2025 (Oct 2022)          2025NR_TDVbyCZandFuel                   CANonResDemandMultipliers:DemMult        2025NR_CO2ElecEmissionsbyCZ          n                                0.0054633            n                                 0.006288        2025NR_SrcbyCZandFuel      
+    2025       Res      1       Metrics 2025 (Oct 2022)          2025Res_TDVbyCZandFuel                  CANonResDemandMultipliers_Res:DemMult    2025Res_CO2ElecEmissionsbyCZ         n                                0.0060051            n                                 0.006288        2025Res_SrcbyCZandFuel  
+    2022       Com      1       Pol 15% RetAdd CH4Leak 20yr      TDVbyCZandFuel_Pol-15_CH4Leak_20yr      CANonResDemandMultipliers:DemMult        CarbonbyCZandFuel_CH4Leak_20yr       CarbonbyCZandFuel_CH4Leak_20yr   0.0                  CarbonbyCZandFuel_CH4Leak_20yr    0.0             SrcbyCZandFuel_CH4Leak_20yr      
+    2022       Res      1       Res Pol 15% RetAdd CH4Leak 20yr  TDVbyCZandFuel_Pol-15_CH4Leak_20yr_Res  CANonResDemandMultipliers_Res:DemMult    CarbonbyCZandFuel_CH4Leak_20yr_Res   n                                0.0058475            n                                 0.006309        SrcbyCZandFuel_CH4Leak_20yr_Res  
+    2019       *        *       SummaryResults                   TDVbyCZandFuel                          CANonResDemandMultipliers:DemMult        C02ElecByCZ                          n                                0.0585               n                                 0.07            n  
+    *          *        *       SummaryResults                   TDVbyCZandFuel                          CANonResDemandMultipliers:DemMult        n                                    n                                0.0                  n                                 0.0             n  
+ENDTABLE
+
+//    2022       2       Pol 15% RetAdd CH4Leak       TDVbyCZandFuel_Pol-15_CH4Leak       CANonResDemandMultipliers:DemMult    CarbonbyCZandFuel_CH4Leak        CarbonbyCZandFuel_CH4Leak        0.0                  CarbonbyCZandFuel_CH4Leak             0.0                   SrcbyCZandFuel_CH4Leak  
+//    2022       3       Pol 15% RetAdd NoLeak        TDVbyCZandFuel_Pol-15_NoLeak        CANonResDemandMultipliers:DemMult    CarbonbyCZandFuel_NoLeak         CarbonbyCZandFuel_NoLeak         0.0                  CarbonbyCZandFuel_NoLeak              0.0                   SrcbyCZandFuel_NoLeak  
+//    2022       4       Pol  0% RetAdd CH4Leak       TDVbyCZandFuel_Pol-0_CH4Leak        CANonResDemandMultipliers:DemMult    CarbonbyCZandFuel_CH4Leak        CarbonbyCZandFuel_CH4Leak        0.0                  CarbonbyCZandFuel_CH4Leak             0.0                   SrcbyCZandFuel_CH4Leak  
+//    2022       *       Pol  0% RetAdd NoLeak        TDVbyCZandFuel_Pol-0_NoLeak         CANonResDemandMultipliers:DemMult    CarbonbyCZandFuel_NoLeak         CarbonbyCZandFuel_NoLeak         0.0                  CarbonbyCZandFuel_NoLeak              0.0                   SrcbyCZandFuel_NoLeak  
+
+//    2022       1       Pol  0% RetAdd (Old)     TDVbyCZandFuel_Pol-0            CANonResDemandMultipliers:DemMult    C02ElecByCZ                 n                           0.00479486456718077  n                           0.00630898366606171   SrcbyCZandFuel_Pol-0   
+
+// SAC 12/20/19 - replaced second round of testing results sets (below) w/ single version for 2022.0.1 RV release (above)
+//    2022       1       Pol  0% RetAdd (Old)     TDVbyCZandFuel_Pol-0            CANonResDemandMultipliers:DemMult    C02ElecByCZ                 n                           0.00479486456718077  n                           0.00630898366606171   SrcbyCZandFuel_Pol-0   
+//    2022       2       Pol  0% RetAdd NoLeak    TDVbyCZandFuel_Pol-0_NoLeak     CANonResDemandMultipliers:DemMult    CarbonbyCZandFuel_NoLeak    CarbonbyCZandFuel_NoLeak    0.0                  CarbonbyCZandFuel_NoLeak    0.0                   SrcbyCZandFuel_NoLeak  
+//    2022       3       Pol 15% RetAdd NoLeak    TDVbyCZandFuel_Pol-15_NoLeak    CANonResDemandMultipliers:DemMult    CarbonbyCZandFuel_NoLeak    CarbonbyCZandFuel_NoLeak    0.0                  CarbonbyCZandFuel_NoLeak    0.0                   SrcbyCZandFuel_NoLeak  
+//    2022       4       Pol  0% RetAdd CH4Leak   TDVbyCZandFuel_Pol-0_CH4Leak    CANonResDemandMultipliers:DemMult    CarbonbyCZandFuel_CH4Leak   CarbonbyCZandFuel_CH4Leak   0.0                  CarbonbyCZandFuel_CH4Leak   0.0                   SrcbyCZandFuel_CH4Leak  
+//    2022       *       Pol 15% RetAdd CH4Leak   TDVbyCZandFuel_Pol-15_CH4Leak   CANonResDemandMultipliers:DemMult    CarbonbyCZandFuel_CH4Leak   CarbonbyCZandFuel_CH4Leak   0.0                  CarbonbyCZandFuel_CH4Leak   0.0                   SrcbyCZandFuel_CH4Leak  
+// SAC 12/10/19 - replaced following 2022 w/ above
+//    2022       1       MI 0% Ret Scale      TDVbyCZandFuel_MI-0      CANonResDemandMultipliers:DemMult    C02ElecByCZ        0.00530852994555354  0.00630898366606171  SrcbyCZandFuel_MI-0    
+//    2022       2       MI 50% Ret Scale     TDVbyCZandFuel_MI-50     CANonResDemandMultipliers:DemMult    C02ElecByCZ        0.00530852994555354  0.00630898366606171  SrcbyCZandFuel_MI-50   
+//    2022       3       MI 100% Ret Scale    TDVbyCZandFuel_MI-100    CANonResDemandMultipliers:DemMult    C02ElecByCZ        0.00530852994555354  0.00630898366606171  SrcbyCZandFuel_MI-100  
+//    2022       4       Pol 0% Ret Scale     TDVbyCZandFuel_Pol-0     CANonResDemandMultipliers:DemMult    C02ElecByCZ        0.00479486456718077  0.00630898366606171  SrcbyCZandFuel_Pol-0   
+//    2022       5       Pol 50% Ret Scale    TDVbyCZandFuel_Pol-50    CANonResDemandMultipliers:DemMult    C02ElecByCZ        0.00479486456718077  0.00630898366606171  SrcbyCZandFuel_Pol-50  
+//    2022       *       Pol 100% Ret Scale   TDVbyCZandFuel_Pol-100   CANonResDemandMultipliers:DemMult    C02ElecByCZ        0.00479486456718077  0.00630898366606171  SrcbyCZandFuel_Pol-100 
+
+RULE Proj:ResultSetName[1]
+  DESCRIPTION
+    "Name of first summary results set"
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N
+    T24NResultSetData:ResultSetName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 1)
+  DEFAULT
+    "-"
+ENDRULE
+RULE Proj:ResultSetName[2]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 2 )==0) then  UNDEFINED
+    else  T24NResultSetData:ResultSetName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 2)  endif
+ENDRULE
+RULE Proj:ResultSetName[3]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 3 )==0) then  UNDEFINED
+    else  T24NResultSetData:ResultSetName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 3)  endif
+ENDRULE
+RULE Proj:ResultSetName[4]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 4 )==0) then  UNDEFINED
+    else  T24NResultSetData:ResultSetName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 4)  endif
+ENDRULE
+RULE Proj:ResultSetName[5]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 5 )==0) then  UNDEFINED
+    else  T24NResultSetData:ResultSetName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 5)  endif
+ENDRULE
+RULE Proj:ResultSetName[6]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 6 )==0) then  UNDEFINED
+    else  T24NResultSetData:ResultSetName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 6)  endif
+ENDRULE
+RULE Proj:ResultSetName[7]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 7 )==0) then  UNDEFINED
+    else  T24NResultSetData:ResultSetName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 7)  endif
+ENDRULE
+RULE Proj:ResultSetName[8]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 8 )==0) then  UNDEFINED
+    else  T24NResultSetData:ResultSetName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 8)  endif
+ENDRULE
+RULE Proj:ResultSetName[9]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 9 )==0) then  UNDEFINED
+    else  T24NResultSetData:ResultSetName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 9)  endif
+ENDRULE
+RULE Proj:ResultSetName[10]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 10 )==0) then  UNDEFINED
+    else  T24NResultSetData:ResultSetName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 10)  endif
+ENDRULE
+
+RULE Proj:TDVMultTableName[1]
+  DESCRIPTION
+    "Name of table containing hourly TDV multipliers for the first result set"
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N
+    T24NResultSetData:TDVTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 1)
+  DEFAULT
+    "-"
+ENDRULE
+RULE Proj:TDVMultTableName[2]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 2 )==0) then  UNDEFINED
+    else  T24NResultSetData:TDVTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 2)  endif
+ENDRULE
+RULE Proj:TDVMultTableName[3]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 3 )==0) then  UNDEFINED
+    else  T24NResultSetData:TDVTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 3)  endif
+ENDRULE
+RULE Proj:TDVMultTableName[4]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 4 )==0) then  UNDEFINED
+    else  T24NResultSetData:TDVTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 4)  endif
+ENDRULE
+RULE Proj:TDVMultTableName[5]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 5 )==0) then  UNDEFINED
+    else  T24NResultSetData:TDVTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 5)  endif
+ENDRULE
+RULE Proj:TDVMultTableName[6]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 6 )==0) then  UNDEFINED
+    else  T24NResultSetData:TDVTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 6)  endif
+ENDRULE
+RULE Proj:TDVMultTableName[7]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 7 )==0) then  UNDEFINED
+    else  T24NResultSetData:TDVTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 7)  endif
+ENDRULE
+RULE Proj:TDVMultTableName[8]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 8 )==0) then  UNDEFINED
+    else  T24NResultSetData:TDVTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 8)  endif
+ENDRULE
+RULE Proj:TDVMultTableName[9]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 9 )==0) then  UNDEFINED
+    else  T24NResultSetData:TDVTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 9)  endif
+ENDRULE
+RULE Proj:TDVMultTableName[10]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 10 )==0) then  UNDEFINED
+    else  T24NResultSetData:TDVTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 10)  endif
+ENDRULE
+
+RULE Proj:ElecDemMultTableName[1]
+  DESCRIPTION
+    "Name of table containing hourly electric demand multipliers for the first result set"
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N
+    T24NResultSetData:ElecDemTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 1)
+  DEFAULT
+    "-"
+ENDRULE
+RULE Proj:ElecDemMultTableName[2]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 2 )==0) then  UNDEFINED
+    else  T24NResultSetData:ElecDemTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 2)  endif
+ENDRULE
+RULE Proj:ElecDemMultTableName[3]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 3 )==0) then  UNDEFINED
+    else  T24NResultSetData:ElecDemTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 3)  endif
+ENDRULE
+RULE Proj:ElecDemMultTableName[4]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 4 )==0) then  UNDEFINED
+    else  T24NResultSetData:ElecDemTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 4)  endif
+ENDRULE
+RULE Proj:ElecDemMultTableName[5]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 5 )==0) then  UNDEFINED
+    else  T24NResultSetData:ElecDemTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 5)  endif
+ENDRULE
+RULE Proj:ElecDemMultTableName[6]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 6 )==0) then  UNDEFINED
+    else  T24NResultSetData:ElecDemTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 6)  endif
+ENDRULE
+RULE Proj:ElecDemMultTableName[7]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 7 )==0) then  UNDEFINED
+    else  T24NResultSetData:ElecDemTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 7)  endif
+ENDRULE
+RULE Proj:ElecDemMultTableName[8]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 8 )==0) then  UNDEFINED
+    else  T24NResultSetData:ElecDemTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 8)  endif
+ENDRULE
+RULE Proj:ElecDemMultTableName[9]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 9 )==0) then  UNDEFINED
+    else  T24NResultSetData:ElecDemTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 9)  endif
+ENDRULE
+RULE Proj:ElecDemMultTableName[10]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 10 )==0) then  UNDEFINED
+    else  T24NResultSetData:ElecDemTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 10)  endif
+ENDRULE
+
+RULE Proj:CO2EmissionsElecTable[1]
+  DESCRIPTION
+    "Name of table containing hourly electric CO2 emissions multipliers for the first result set"
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N
+    T24NResultSetData:CO2ElecTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 1)
+  DEFAULT
+    "-"
+ENDRULE
+RULE Proj:CO2EmissionsElecTable[2]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 2 )==0) then  UNDEFINED
+    else  T24NResultSetData:CO2ElecTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 2)  endif
+ENDRULE
+RULE Proj:CO2EmissionsElecTable[3]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 3 )==0) then  UNDEFINED
+    else  T24NResultSetData:CO2ElecTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 3)  endif
+ENDRULE
+RULE Proj:CO2EmissionsElecTable[4]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 4 )==0) then  UNDEFINED
+    else  T24NResultSetData:CO2ElecTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 4)  endif
+ENDRULE
+RULE Proj:CO2EmissionsElecTable[5]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 5 )==0) then  UNDEFINED
+    else  T24NResultSetData:CO2ElecTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 5)  endif
+ENDRULE
+RULE Proj:CO2EmissionsElecTable[6]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 6 )==0) then  UNDEFINED
+    else  T24NResultSetData:CO2ElecTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 6)  endif
+ENDRULE
+RULE Proj:CO2EmissionsElecTable[7]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 7 )==0) then  UNDEFINED
+    else  T24NResultSetData:CO2ElecTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 7)  endif
+ENDRULE
+RULE Proj:CO2EmissionsElecTable[8]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 8 )==0) then  UNDEFINED
+    else  T24NResultSetData:CO2ElecTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 8)  endif
+ENDRULE
+RULE Proj:CO2EmissionsElecTable[9]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 9 )==0) then  UNDEFINED
+    else  T24NResultSetData:CO2ElecTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 9)  endif
+ENDRULE
+RULE Proj:CO2EmissionsElecTable[10]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 10 )==0) then  UNDEFINED
+    else  T24NResultSetData:CO2ElecTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 10)  endif
+ENDRULE
+
+
+RULE Proj:CO2EmissionsNatGasTable[1]
+  DESCRIPTION
+    "Name of table containing hourly natural gas CO2 emissions multipliers for the first result set"
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N
+    if ( T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 1) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 1)  endif
+  DEFAULT
+    "-"
+ENDRULE
+RULE Proj:CO2EmissionsNatGasTable[2]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 2 )==0 .OR.
+         T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 2) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 2)  endif
+ENDRULE
+RULE Proj:CO2EmissionsNatGasTable[3]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 3 )==0 .OR.
+         T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 3) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 3)  endif
+ENDRULE
+RULE Proj:CO2EmissionsNatGasTable[4]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 4 )==0 .OR.
+         T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 4) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 4)  endif
+ENDRULE
+RULE Proj:CO2EmissionsNatGasTable[5]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 5 )==0 .OR.
+         T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 5) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 5)  endif
+ENDRULE
+RULE Proj:CO2EmissionsNatGasTable[6]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 6 )==0 .OR.
+         T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 6) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 6)  endif
+ENDRULE
+RULE Proj:CO2EmissionsNatGasTable[7]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 7 )==0 .OR.
+         T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 7) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 7)  endif
+ENDRULE
+RULE Proj:CO2EmissionsNatGasTable[8]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 8 )==0 .OR.
+         T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 8) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 8)  endif
+ENDRULE
+RULE Proj:CO2EmissionsNatGasTable[9]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 9 )==0 .OR.
+         T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 9) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 9)  endif
+ENDRULE
+RULE Proj:CO2EmissionsNatGasTable[10]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 10 )==0 .OR.
+         T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 10) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 10)  endif
+ENDRULE
+
+RULE Proj:CO2EmissionsNatGasMult[1]
+  DESCRIPTION
+    "natural gas CO2 emissions multiplier (ton/MBtuh) for results set #1"
+  INPUTCLASS 
+    NotInput  
+  UNITS
+    ton/MBtuh
+  DEFAULT : T24N
+    if (LocalStatus( CO2EmissionsNatGasTable[1] ) > 0) then  UNDEFINED
+    else T24NResultSetData:CO2NatGasMult("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 1)  endif
+  DEFAULT
+    UNDEFINED
+ENDRULE
+RULE Proj:CO2EmissionsNatGasMult[2]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 2 )==0 .OR.
+        LocalStatus( CO2EmissionsNatGasTable[2] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2NatGasMult("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 2)  endif
+ENDRULE
+RULE Proj:CO2EmissionsNatGasMult[3]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 3 )==0 .OR.
+        LocalStatus( CO2EmissionsNatGasTable[3] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2NatGasMult("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 3)  endif
+ENDRULE
+RULE Proj:CO2EmissionsNatGasMult[4]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 4 )==0 .OR.
+        LocalStatus( CO2EmissionsNatGasTable[4] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2NatGasMult("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 4)  endif
+ENDRULE
+RULE Proj:CO2EmissionsNatGasMult[5]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 5 )==0 .OR.
+        LocalStatus( CO2EmissionsNatGasTable[5] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2NatGasMult("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 5)  endif
+ENDRULE
+RULE Proj:CO2EmissionsNatGasMult[6]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 6 )==0 .OR.
+        LocalStatus( CO2EmissionsNatGasTable[6] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2NatGasMult("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 6)  endif
+ENDRULE
+RULE Proj:CO2EmissionsNatGasMult[7]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 7 )==0 .OR.
+        LocalStatus( CO2EmissionsNatGasTable[7] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2NatGasMult("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 7)  endif
+ENDRULE
+RULE Proj:CO2EmissionsNatGasMult[8]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 8 )==0 .OR.
+        LocalStatus( CO2EmissionsNatGasTable[8] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2NatGasMult("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 8)  endif
+ENDRULE
+RULE Proj:CO2EmissionsNatGasMult[9]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 9 )==0 .OR.
+        LocalStatus( CO2EmissionsNatGasTable[9] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2NatGasMult("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 9)  endif
+ENDRULE
+RULE Proj:CO2EmissionsNatGasMult[10]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 10 )==0 .OR.
+        LocalStatus( CO2EmissionsNatGasTable[10] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2NatGasMult("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 10)  endif
+ENDRULE
+
+
+RULE Proj:CO2EmissionsOtherTable[1]
+  DESCRIPTION
+    "Name of table containing hourly other fuel CO2 emissions multipliers for the first result set"
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N
+    if ( T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 1) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 1)  endif
+  DEFAULT
+    "-"
+ENDRULE
+RULE Proj:CO2EmissionsOtherTable[2]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 2 )==0 .OR.
+         T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 2) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 2)  endif
+ENDRULE
+RULE Proj:CO2EmissionsOtherTable[3]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 3 )==0 .OR.
+         T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 3) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 3)  endif
+ENDRULE
+RULE Proj:CO2EmissionsOtherTable[4]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 4 )==0 .OR.
+         T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 4) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 4)  endif
+ENDRULE
+RULE Proj:CO2EmissionsOtherTable[5]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 5 )==0 .OR.
+         T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 5) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 5)  endif
+ENDRULE
+RULE Proj:CO2EmissionsOtherTable[6]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 6 )==0 .OR.
+         T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 6) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 6)  endif
+ENDRULE
+RULE Proj:CO2EmissionsOtherTable[7]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 7 )==0 .OR.
+         T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 7) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 7)  endif
+ENDRULE
+RULE Proj:CO2EmissionsOtherTable[8]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 8 )==0 .OR.
+         T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 8) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 8)  endif
+ENDRULE
+RULE Proj:CO2EmissionsOtherTable[9]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 9 )==0 .OR.
+         T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 9) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 9)  endif
+ENDRULE
+RULE Proj:CO2EmissionsOtherTable[10]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 10 )==0 .OR.
+         T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 10) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 10)  endif
+ENDRULE
+
+RULE Proj:CO2EmissionsOtherMult[1]
+  DESCRIPTION
+    "other fuel CO2 emissions multiplier (ton/MBtuh)"
+  INPUTCLASS 
+    NotInput  
+  UNITS
+    ton/MBtuh
+  DEFAULT : T24N
+    if (LocalStatus( CO2EmissionsOtherTable[1] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2OtherMult("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 1)  endif
+  DEFAULT
+    UNDEFINED
+ENDRULE
+RULE Proj:CO2EmissionsOtherMult[2]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 2 )==0 .OR.
+        LocalStatus( CO2EmissionsOtherTable[2] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2OtherMult("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 2)  endif
+ENDRULE
+RULE Proj:CO2EmissionsOtherMult[3]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 3 )==0 .OR.
+        LocalStatus( CO2EmissionsOtherTable[3] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2OtherMult("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 3)  endif
+ENDRULE
+RULE Proj:CO2EmissionsOtherMult[4]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 4 )==0 .OR.
+        LocalStatus( CO2EmissionsOtherTable[4] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2OtherMult("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 4)  endif
+ENDRULE
+RULE Proj:CO2EmissionsOtherMult[5]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 5 )==0 .OR.
+        LocalStatus( CO2EmissionsOtherTable[5] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2OtherMult("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 5)  endif
+ENDRULE
+RULE Proj:CO2EmissionsOtherMult[6]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 6 )==0 .OR.
+        LocalStatus( CO2EmissionsOtherTable[6] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2OtherMult("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 6)  endif
+ENDRULE
+RULE Proj:CO2EmissionsOtherMult[7]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 7 )==0 .OR.
+        LocalStatus( CO2EmissionsOtherTable[7] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2OtherMult("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 7)  endif
+ENDRULE
+RULE Proj:CO2EmissionsOtherMult[8]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 8 )==0 .OR.
+        LocalStatus( CO2EmissionsOtherTable[8] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2OtherMult("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 8)  endif
+ENDRULE
+RULE Proj:CO2EmissionsOtherMult[9]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 9 )==0 .OR.
+        LocalStatus( CO2EmissionsOtherTable[9] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2OtherMult("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 9)  endif
+ENDRULE
+RULE Proj:CO2EmissionsOtherMult[10]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 10 )==0 .OR.
+        LocalStatus( CO2EmissionsOtherTable[10] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2OtherMult("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 10)  endif
+ENDRULE
+
+
+RULE Proj:SrcEngyMultTableName[1]
+  DESCRIPTION
+    "Name of table containing hourly source energy use multipliers for the first result set"
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N
+    T24NResultSetData:SrcEngyTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 1)
+  DEFAULT
+    "-"
+ENDRULE
+RULE Proj:SrcEngyMultTableName[2]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 2 )==0) then  UNDEFINED
+    else  T24NResultSetData:SrcEngyTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 2)  endif
+ENDRULE
+RULE Proj:SrcEngyMultTableName[3]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 3 )==0) then  UNDEFINED
+    else  T24NResultSetData:SrcEngyTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 3)  endif
+ENDRULE
+RULE Proj:SrcEngyMultTableName[4]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 4 )==0) then  UNDEFINED
+    else  T24NResultSetData:SrcEngyTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 4)  endif
+ENDRULE
+RULE Proj:SrcEngyMultTableName[5]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 5 )==0) then  UNDEFINED
+    else  T24NResultSetData:SrcEngyTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 5)  endif
+ENDRULE
+RULE Proj:SrcEngyMultTableName[6]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 6 )==0) then  UNDEFINED
+    else  T24NResultSetData:SrcEngyTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 6)  endif
+ENDRULE
+RULE Proj:SrcEngyMultTableName[7]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 7 )==0) then  UNDEFINED
+    else  T24NResultSetData:SrcEngyTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 7)  endif
+ENDRULE
+RULE Proj:SrcEngyMultTableName[8]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 8 )==0) then  UNDEFINED
+    else  T24NResultSetData:SrcEngyTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 8)  endif
+ENDRULE
+RULE Proj:SrcEngyMultTableName[9]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 9 )==0) then  UNDEFINED
+    else  T24NResultSetData:SrcEngyTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 9)  endif
+ENDRULE
+RULE Proj:SrcEngyMultTableName[10]
+  DEFAULT : T24N
+    if (IfValidAnd( NumResultsSets >= 10 )==0) then  UNDEFINED
+    else  T24NResultSetData:SrcEngyTableName("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", 10)  endif
+ENDRULE
+
+
+// ------------ RESIDENTIAL results tables and multipliers --------------------- SAC 10/30/21
+RULE Proj:ResTDVMultTableName[1]
+  DESCRIPTION
+    "Name of table containing hourly Res TDV multipliers for the first result set"
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N_2022 T24N_2025
+    T24NResultSetData:TDVTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 1)
+  DEFAULT
+    "-"
+ENDRULE
+RULE Proj:ResTDVMultTableName[2]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 2 )==0) then  UNDEFINED
+    else  T24NResultSetData:TDVTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 2)  endif
+ENDRULE
+RULE Proj:ResTDVMultTableName[3]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 3 )==0) then  UNDEFINED
+    else  T24NResultSetData:TDVTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 3)  endif
+ENDRULE
+RULE Proj:ResTDVMultTableName[4]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 4 )==0) then  UNDEFINED
+    else  T24NResultSetData:TDVTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 4)  endif
+ENDRULE
+RULE Proj:ResTDVMultTableName[5]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 5 )==0) then  UNDEFINED
+    else  T24NResultSetData:TDVTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 5)  endif
+ENDRULE
+RULE Proj:ResTDVMultTableName[6]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 6 )==0) then  UNDEFINED
+    else  T24NResultSetData:TDVTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 6)  endif
+ENDRULE
+RULE Proj:ResTDVMultTableName[7]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 7 )==0) then  UNDEFINED
+    else  T24NResultSetData:TDVTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 7)  endif
+ENDRULE
+RULE Proj:ResTDVMultTableName[8]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 8 )==0) then  UNDEFINED
+    else  T24NResultSetData:TDVTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 8)  endif
+ENDRULE
+RULE Proj:ResTDVMultTableName[9]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 9 )==0) then  UNDEFINED
+    else  T24NResultSetData:TDVTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 9)  endif
+ENDRULE
+RULE Proj:ResTDVMultTableName[10]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 10 )==0) then  UNDEFINED
+    else  T24NResultSetData:TDVTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 10)  endif
+ENDRULE
+
+RULE Proj:ResElecDemMultTableName[1]
+  DESCRIPTION
+    "Name of table containing hourly Res electric demand multipliers for the first result set"
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N_2022 T24N_2025
+    T24NResultSetData:ElecDemTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 1)
+  DEFAULT
+    "-"
+ENDRULE
+RULE Proj:ResElecDemMultTableName[2]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 2 )==0) then  UNDEFINED
+    else  T24NResultSetData:ElecDemTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 2)  endif
+ENDRULE
+RULE Proj:ResElecDemMultTableName[3]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 3 )==0) then  UNDEFINED
+    else  T24NResultSetData:ElecDemTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 3)  endif
+ENDRULE
+RULE Proj:ResElecDemMultTableName[4]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 4 )==0) then  UNDEFINED
+    else  T24NResultSetData:ElecDemTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 4)  endif
+ENDRULE
+RULE Proj:ResElecDemMultTableName[5]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 5 )==0) then  UNDEFINED
+    else  T24NResultSetData:ElecDemTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 5)  endif
+ENDRULE
+RULE Proj:ResElecDemMultTableName[6]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 6 )==0) then  UNDEFINED
+    else  T24NResultSetData:ElecDemTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 6)  endif
+ENDRULE
+RULE Proj:ResElecDemMultTableName[7]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 7 )==0) then  UNDEFINED
+    else  T24NResultSetData:ElecDemTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 7)  endif
+ENDRULE
+RULE Proj:ResElecDemMultTableName[8]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 8 )==0) then  UNDEFINED
+    else  T24NResultSetData:ElecDemTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 8)  endif
+ENDRULE
+RULE Proj:ResElecDemMultTableName[9]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 9 )==0) then  UNDEFINED
+    else  T24NResultSetData:ElecDemTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 9)  endif
+ENDRULE
+RULE Proj:ResElecDemMultTableName[10]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 10 )==0) then  UNDEFINED
+    else  T24NResultSetData:ElecDemTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 10)  endif
+ENDRULE
+
+RULE Proj:ResCO2EmissionsElecTable[1]
+  DESCRIPTION
+    "Name of table containing hourly Res electric CO2 emissions multipliers for the first result set"
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N_2022 T24N_2025
+    T24NResultSetData:CO2ElecTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 1)
+  DEFAULT
+    "-"
+ENDRULE
+RULE Proj:ResCO2EmissionsElecTable[2]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 2 )==0) then  UNDEFINED
+    else  T24NResultSetData:CO2ElecTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 2)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsElecTable[3]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 3 )==0) then  UNDEFINED
+    else  T24NResultSetData:CO2ElecTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 3)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsElecTable[4]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 4 )==0) then  UNDEFINED
+    else  T24NResultSetData:CO2ElecTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 4)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsElecTable[5]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 5 )==0) then  UNDEFINED
+    else  T24NResultSetData:CO2ElecTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 5)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsElecTable[6]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 6 )==0) then  UNDEFINED
+    else  T24NResultSetData:CO2ElecTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 6)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsElecTable[7]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 7 )==0) then  UNDEFINED
+    else  T24NResultSetData:CO2ElecTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 7)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsElecTable[8]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 8 )==0) then  UNDEFINED
+    else  T24NResultSetData:CO2ElecTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 8)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsElecTable[9]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 9 )==0) then  UNDEFINED
+    else  T24NResultSetData:CO2ElecTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 9)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsElecTable[10]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 10 )==0) then  UNDEFINED
+    else  T24NResultSetData:CO2ElecTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 10)  endif
+ENDRULE
+
+
+RULE Proj:ResCO2EmissionsNatGasTable[1]
+  DESCRIPTION
+    "Name of table containing hourly Res natural gas CO2 emissions multipliers for the first result set"
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N_2022 T24N_2025
+    if ( T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 1) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 1)  endif
+  DEFAULT
+    "-"
+ENDRULE
+RULE Proj:ResCO2EmissionsNatGasTable[2]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 2 )==0 .OR.
+         T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 2) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 2)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsNatGasTable[3]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 3 )==0 .OR.
+         T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 3) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 3)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsNatGasTable[4]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 4 )==0 .OR.
+         T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 4) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 4)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsNatGasTable[5]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 5 )==0 .OR.
+         T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 5) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 5)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsNatGasTable[6]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 6 )==0 .OR.
+         T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 6) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 6)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsNatGasTable[7]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 7 )==0 .OR.
+         T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 7) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 7)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsNatGasTable[8]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 8 )==0 .OR.
+         T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 8) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 8)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsNatGasTable[9]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 9 )==0 .OR.
+         T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 9) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 9)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsNatGasTable[10]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 10 )==0 .OR.
+         T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 10) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 10)  endif
+ENDRULE
+
+RULE Proj:ResCO2EmissionsNatGasMult[1]
+  DESCRIPTION
+    "natural gas CO2 emissions multiplier (ton/MBtuh) for results set #1"
+  INPUTCLASS 
+    NotInput  
+  UNITS
+    ton/MBtuh
+  DEFAULT : T24N_2022 T24N_2025
+    if (LocalStatus( CO2EmissionsNatGasTable[1] ) > 0) then  UNDEFINED
+    else T24NResultSetData:CO2NatGasMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 1)  endif
+  DEFAULT
+    UNDEFINED
+ENDRULE
+RULE Proj:ResCO2EmissionsNatGasMult[2]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 2 )==0 .OR.
+        LocalStatus( CO2EmissionsNatGasTable[2] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2NatGasMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 2)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsNatGasMult[3]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 3 )==0 .OR.
+        LocalStatus( CO2EmissionsNatGasTable[3] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2NatGasMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 3)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsNatGasMult[4]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 4 )==0 .OR.
+        LocalStatus( CO2EmissionsNatGasTable[4] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2NatGasMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 4)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsNatGasMult[5]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 5 )==0 .OR.
+        LocalStatus( CO2EmissionsNatGasTable[5] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2NatGasMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 5)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsNatGasMult[6]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 6 )==0 .OR.
+        LocalStatus( CO2EmissionsNatGasTable[6] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2NatGasMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 6)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsNatGasMult[7]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 7 )==0 .OR.
+        LocalStatus( CO2EmissionsNatGasTable[7] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2NatGasMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 7)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsNatGasMult[8]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 8 )==0 .OR.
+        LocalStatus( CO2EmissionsNatGasTable[8] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2NatGasMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 8)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsNatGasMult[9]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 9 )==0 .OR.
+        LocalStatus( CO2EmissionsNatGasTable[9] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2NatGasMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 9)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsNatGasMult[10]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 10 )==0 .OR.
+        LocalStatus( CO2EmissionsNatGasTable[10] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2NatGasMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 10)  endif
+ENDRULE
+
+
+RULE Proj:ResCO2EmissionsOtherTable[1]
+  DESCRIPTION
+    "Name of table containing hourly Res other fuel CO2 emissions multipliers for the first result set"
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N_2022 T24N_2025
+    if ( T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 1) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 1)  endif
+  DEFAULT
+    "-"
+ENDRULE
+RULE Proj:ResCO2EmissionsOtherTable[2]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 2 )==0 .OR.
+         T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 2) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 2)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsOtherTable[3]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 3 )==0 .OR.
+         T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 3) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 3)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsOtherTable[4]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 4 )==0 .OR.
+         T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 4) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 4)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsOtherTable[5]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 5 )==0 .OR.
+         T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 5) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 5)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsOtherTable[6]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 6 )==0 .OR.
+         T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 6) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 6)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsOtherTable[7]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 7 )==0 .OR.
+         T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 7) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 7)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsOtherTable[8]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 8 )==0 .OR.
+         T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 8) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 8)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsOtherTable[9]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 9 )==0 .OR.
+         T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 9) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 9)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsOtherTable[10]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 10 )==0 .OR.
+         T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 10) == "n") then  UNDEFINED
+    else T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 10)  endif
+ENDRULE
+
+RULE Proj:ResCO2EmissionsOtherMult[1]
+  DESCRIPTION
+    "other fuel CO2 emissions multiplier (ton/MBtuh)"
+  INPUTCLASS 
+    NotInput  
+  UNITS
+    ton/MBtuh
+  DEFAULT : T24N_2022 T24N_2025
+    if (LocalStatus( CO2EmissionsOtherTable[1] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2OtherMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 1)  endif
+  DEFAULT
+    UNDEFINED
+ENDRULE
+RULE Proj:ResCO2EmissionsOtherMult[2]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 2 )==0 .OR.
+        LocalStatus( CO2EmissionsOtherTable[2] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2OtherMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 2)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsOtherMult[3]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 3 )==0 .OR.
+        LocalStatus( CO2EmissionsOtherTable[3] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2OtherMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 3)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsOtherMult[4]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 4 )==0 .OR.
+        LocalStatus( CO2EmissionsOtherTable[4] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2OtherMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 4)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsOtherMult[5]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 5 )==0 .OR.
+        LocalStatus( CO2EmissionsOtherTable[5] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2OtherMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 5)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsOtherMult[6]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 6 )==0 .OR.
+        LocalStatus( CO2EmissionsOtherTable[6] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2OtherMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 6)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsOtherMult[7]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 7 )==0 .OR.
+        LocalStatus( CO2EmissionsOtherTable[7] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2OtherMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 7)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsOtherMult[8]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 8 )==0 .OR.
+        LocalStatus( CO2EmissionsOtherTable[8] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2OtherMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 8)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsOtherMult[9]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 9 )==0 .OR.
+        LocalStatus( CO2EmissionsOtherTable[9] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2OtherMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 9)  endif
+ENDRULE
+RULE Proj:ResCO2EmissionsOtherMult[10]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 10 )==0 .OR.
+        LocalStatus( CO2EmissionsOtherTable[10] ) > 0) then  UNDEFINED
+    else  T24NResultSetData:CO2OtherMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 10)  endif
+ENDRULE
+
+
+RULE Proj:ResSrcEngyMultTableName[1]
+  DESCRIPTION
+    "Name of table containing hourly Res source energy use multipliers for the first result set"
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N_2022 T24N_2025
+    T24NResultSetData:SrcEngyTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 1)
+  DEFAULT
+    "-"
+ENDRULE
+RULE Proj:ResSrcEngyMultTableName[2]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 2 )==0) then  UNDEFINED
+    else  T24NResultSetData:SrcEngyTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 2)  endif
+ENDRULE
+RULE Proj:ResSrcEngyMultTableName[3]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 3 )==0) then  UNDEFINED
+    else  T24NResultSetData:SrcEngyTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 3)  endif
+ENDRULE
+RULE Proj:ResSrcEngyMultTableName[4]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 4 )==0) then  UNDEFINED
+    else  T24NResultSetData:SrcEngyTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 4)  endif
+ENDRULE
+RULE Proj:ResSrcEngyMultTableName[5]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 5 )==0) then  UNDEFINED
+    else  T24NResultSetData:SrcEngyTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 5)  endif
+ENDRULE
+RULE Proj:ResSrcEngyMultTableName[6]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 6 )==0) then  UNDEFINED
+    else  T24NResultSetData:SrcEngyTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 6)  endif
+ENDRULE
+RULE Proj:ResSrcEngyMultTableName[7]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 7 )==0) then  UNDEFINED
+    else  T24NResultSetData:SrcEngyTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 7)  endif
+ENDRULE
+RULE Proj:ResSrcEngyMultTableName[8]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 8 )==0) then  UNDEFINED
+    else  T24NResultSetData:SrcEngyTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 8)  endif
+ENDRULE
+RULE Proj:ResSrcEngyMultTableName[9]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 9 )==0) then  UNDEFINED
+    else  T24NResultSetData:SrcEngyTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 9)  endif
+ENDRULE
+RULE Proj:ResSrcEngyMultTableName[10]
+  DEFAULT : T24N_2022 T24N_2025
+    if (IfValidAnd( NumResultsSets >= 10 )==0) then  UNDEFINED
+    else  T24NResultSetData:SrcEngyTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 10)  endif
+ENDRULE
+
+
+// ------------ SourceEnergy Results ------------------------------------------- SAC 6/27/19
+// SAC 11/03/19 - replaced following w/ multiple results sets (above)
+//RULE Proj:SrcEngyMultTableName
+//  DESCRIPTION
+//    "name of ruleset table containing SourceEnergy multipliers by CZ & fuel"
+//  INPUTCLASS 
+//    NotInput  
+//  DEFAULT : T24N_2022
+//    "SrcbyCZandFuel"
+//  DEFAULT : T24N
+//    UNDEFINED
+//ENDRULE
+
+;RULE NEW Proj:SrcEngyPrimeMultTableName
+;  DATATYPE
+;    String
+;  LONGFORM
+;    SourceEnergyPrimeMultiplierTableName
+;  DESCRIPTION
+;    "name of ruleset table containing SourceEnergyPrime multipliers by CZ & fuel"
+;  INPUTCLASS 
+;    NotInput  
+;  DEFAULT : T24N
+;    UNDEFINED
+;ENDRULE
+;  DEFAULT : T24N_2022     SAC 9/23/19 - removed SrcPrm table & look-ups (from above rule block)
+;    "SrcPrmbyCZandFuel"
+
+
+// ------------ CO2 Emissions Results ------------------------------------------ SAC 9/11/19 (tic #3106)
+
+// SAC 11/03/19 - replaced following w/ multiple results sets (above)
+//RULE Proj:CO2EmissionsElecTable
+//  DESCRIPTION
+//    "name of ruleset table containing hourly electric CO2 emissions multipliers (ton/MWh) by CZ"
+//  INPUTCLASS 
+//    NotInput  
+//  DEFAULT : T24N_2019 T24N_2022 T24N_2025
+//    "C02ElecByCZ"
+//  DEFAULT : T24N
+//    UNDEFINED
+//ENDRULE
+//
+//; Res:  "NatGasCarbonEmis" - "CO2 emissions resulting from Natural Gas use" 
+//RULE Proj:CO2EmissionsNatGasMult
+//  DESCRIPTION
+//    "natural gas CO2 emissions multiplier (ton/MBtuh)"
+//  INPUTCLASS 
+//    NotInput  
+//  UNITS
+//    ton/MBtuh
+//  DEFAULT : T24N_2019 T24N_2022 T24N_2025
+//    0.0585
+//  DEFAULT : T24N
+//    UNDEFINED
+//ENDRULE
+//
+//; Res:  "OtherCarbonEmis"  - "CO2 emissions resulting from Other Fuel use" 
+//RULE Proj:CO2EmissionsOtherMult
+//  DESCRIPTION
+//    "other fuel CO2 emissions multiplier (ton/MBtuh)"
+//  INPUTCLASS 
+//    NotInput  
+//  UNITS
+//    ton/MBtuh
+//  DEFAULT : T24N_2019 T24N_2022 T24N_2025
+//    0.07
+//  DEFAULT : T24N
+//    UNDEFINED
+//ENDRULE
+
+RULE NEW Proj:CO2EmissionsElecConvFac
+  DATATYPE
+    Float
+  LONGFORM
+    CO2EmissionsElectricConversionFactor
+  DESCRIPTION
+    "electric CO2 emissions conversion factor (MWh-tonne/kWh-ton in 2019, unitless in 2022)"
+  INPUTCLASS 
+    NotInput  
+  UNITS : T24N_2022 T24N_2025
+    kWh/kWh
+  UNITS : T24N_2019
+    MWh-tonne/kWh-ton
+// only for 2019.  2022 is unitless = kWh-tonne/kWh-tonne
+  DEFAULT : T24N_2022 T24N_2025
+    1
+  DEFAULT : T24N_2019
+// 0.907185 Tonne/ton (metric ton / short ton)
+    0.001 * 0.907185
+  DEFAULT : T24N
+    UNDEFINED
+ENDRULE
+
+RULE NEW Proj:CO2EmissionsNatGasConvFac
+  DATATYPE
+    Float
+  LONGFORM
+    CO2EmissionsNaturalGasConversionFactor
+  DESCRIPTION
+    "natural gas CO2 emissions conversion factor (MBtu-tonne/therm-ton in 2019, MBtu/therm in 2022)"
+  INPUTCLASS 
+    NotInput  
+  UNITS : T24N_2022 T24N_2025
+    therm/therm
+  UNITS : T24N_2019
+    MBtu-tonne/therm-ton
+  DEFAULT : T24N_2022 T24N_2025
+    1
+  DEFAULT : T24N_2019
+    0.1 * 0.907185
+  DEFAULT : T24N
+    UNDEFINED
+ENDRULE
+
+RULE NEW Proj:CO2EmissionsOtherConvFac
+  DATATYPE
+    Float
+  LONGFORM
+    CO2EmissionsOtherConversionFactor
+  DESCRIPTION
+    "other fuel CO2 emissions conversion factor (MBtu-tonne/therm-ton in 2019, MBtu/therm in 2022)"
+  INPUTCLASS 
+    NotInput  
+  UNITS : T24N_2022 T24N_2025
+    therm/therm
+  UNITS : T24N_2019
+    MBtu-tonne/therm-ton
+  DEFAULT : T24N_2022 T24N_2025
+    1
+  DEFAULT : T24N_2019
+    0.1 * 0.907185
+  DEFAULT : T24N
+    UNDEFINED
+ENDRULE
+
+RULE NEW Proj:CO2EmissionsResultsUnit
+  DATATYPE
+    String
+  LONGFORM
+    CO2EmissionsResultsUnit
+  DESCRIPTION
+    "unit label for displaying CO2 emissions results"
+  INPUTCLASS 
+    NotInput  
+  DEFAULT : T24N_2019 T24N_2022 T24N_2025
+    "tonne"
+  DEFAULT : T24N
+    UNDEFINED
+ENDRULE
+
+RULE NEW Proj:CO2EmissionsResultsMult
+  DATATYPE
+    Float
+  LONGFORM
+    CO2EmissionsResultsMultiplier
+  DESCRIPTION
+    "multiplier for display of EnergyUse CO2 emissions results"
+  INPUTCLASS 
+    NotInput  
+  DEFAULT : T24N_2019 T24N_2022 T24N_2025
+    1
+  DEFAULT : T24N
+    UNDEFINED
+ENDRULE
+
+RULE NEW Proj:CO2EmissionsResultsDecPrec
+  DATATYPE
+    Integer
+  LONGFORM
+    CO2EmissionsResultsDecimalPrecision
+  DESCRIPTION
+    "decimal precision used to display CO2 emissions results"
+  INPUTCLASS 
+    NotInput  
+  DEFAULT : T24N_2019 T24N_2022 T24N_2025
+    2
+  DEFAULT : T24N
+    UNDEFINED
+ENDRULE
+
+
+// ********** INISettings Object Rules ******************************************
+RULE INISettings:SimulationStorage
+  // defined in BEMBase rather than as Rule New so that enumeration selections can begin w/ value of 0
+  HELP
+    "Controls retention of EnergyPlus simulation inputs and outputs produced during
+     compliance analysis."
+ENDRULE
+
+RULE INISettings:AnalysisStorage
+  // defined in BEMBase rather than as Rule New so that enumeration selections can begin w/ value of 0
+  HELP
+    "Controls retention of all files produced during analysis EXCEPT EnergyPlus
+     inputs and outputs (which is handled via another analysis option)."
+ENDRULE
+
+RULE INISettings:AnalysisThruStep
+  // defined in BEMBase rather than as Rule New so that enumeration selections can begin w/ value of 0
+  HELP
+    "Determines what analysis step to terminate analysis following"
+ENDRULE
+
+RULE INISettings:DontAbortOnErrorsThruStep
+  // defined in BEMBase rather than as Rule New so that enumeration selections can begin w/ value of 0
+  HELP
+    "Prevents analysis from aborting through a specific analysis step"
+ENDRULE
+
+RULE NEW INISettings:StoreBEMDetails
+  DATATYPE
+    Integer
+  HELP
+    "Enables automatic storage of 'detailed' project files at various times during
+     program use - following each File-Open (both ibd & xml formats), following evaluation of any
+     rulelist (triggered via Tools-Eval...) and at each main step of compliance analysis."
+  INPUTCLASS
+    Prescribed
+ENDRULE
+
+RULE NEW INISettings:EnableRptGenStatusChecks
+  DATATYPE
+    Integer
+  HELP
+    "Whether or not to perform automatic checks on report generator status prior to performing analyis
+     and also inside the analyis routine immediately prior to calling for reports to be generated."
+  INPUTCLASS
+    Prescribed
+ENDRULE
+
+RULE NEW INISettings:ExportHourlyResults_All
+  DATATYPE
+    Integer
+  HELP
+    "Causes generation of CSV files by run containing hourly results by fuel and enduse plus TDV multipliers"
+  INPUTCLASS
+    Prescribed
+ENDRULE
+
+RULE NEW INISettings:SimOutputVariablesToCSV_All
+  DATATYPE
+    Integer
+  HELP
+    "Causes export of E+ Output:Variables to CSV files by run for ALL analysis models"
+  INPUTCLASS
+    Prescribed
+ENDRULE
+
+RULE NEW INISettings:SimOutputVariablesToCSV_ap
+  DATATYPE
+    Integer
+  HELP
+    "Causes export of E+ Output:Variables to CSV files by run for Annual Proposed model"
+  INPUTCLASS
+    Prescribed
+ENDRULE
+
+RULE NEW INISettings:SimOutputVariablesToCSV_ab
+  DATATYPE
+    Integer
+  HELP
+    "Causes export of E+ Output:Variables to CSV files by run for Annual Baseline model"
+  INPUTCLASS
+    Prescribed
+ENDRULE
+
+RULE NEW INISettings:ModelRpt_ALL
+  DATATYPE
+    Integer
+  HELP
+    "Causes output of a variety of rule-based, CSV model reports generated during analysis"
+  INPUTCLASS
+    Prescribed
+ENDRULE
+
+RULE NEW INISettings:VerboseInputLogging
+  DATATYPE
+    Integer
+  HELP
+    "Controls whether or not detailed rule evaluation logging is activated for
+     defaulting rules (triggered following each modification of project data).
+     Should be set to 1 only when debugging defaulting rules, as project log files
+     can grow very large when this option is activated."
+  INPUTCLASS
+    Prescribed
+ENDRULE
+
+RULE NEW INISettings:LogRuleEvaluation
+  DATATYPE
+    Integer
+  HELP
+    "Controls whether or not detailed rule evaluation logging is activated for
+     during compliance analysis. Warning - activation causes project log files
+     to grow very large.
+
+     0 => no detailed logging
+     1 => detailed logging with time stamps on each record
+     2 => detailed logging without time stamps (for comparing between runs)"
+  INPUTCLASS
+    Prescribed
+ENDRULE
+
+RULE NEW INISettings:LogRecircDHWSimulation
+  DATATYPE
+    Integer
+  HELP
+    "Post messages to project log file related to recirculation (CSE) simulations"
+  INPUTCLASS
+    Prescribed
+ENDRULE
+
+RULE NEW INISettings:BypassCheckSimRules
+  DATATYPE
+    Integer
+  HELP
+    "Bypasses checks intended to ensure the user-specified building model can be simulated"
+  INPUTCLASS
+    Prescribed
+ENDRULE
+
+RULE NEW INISettings:BypassCheckCodeRules
+  DATATYPE
+    Integer
+  HELP
+    "Bypasses checks intended to ensure the user-specified building model meets energy code requirements"
+  INPUTCLASS
+    Prescribed
+ENDRULE
+
+RULE NEW INISettings:BypassOpenStudio_all
+  DATATYPE
+    Integer
+  HELP
+    "Causes bypass of all OpenStudio calls for ALL analysis runs, including translation of
+     SDD XML -> OSM -> IDF and E+ simulation"
+  INPUTCLASS
+    Prescribed
+ENDRULE
+
+RULE NEW INISettings:BypassOpenStudio_zp
+  DATATYPE
+    Integer
+  HELP
+    "Causes bypass of all OpenStudio calls for the Proposed Sizing model, including translation of
+     SDD XML -> OSM -> IDF and E+ simulation"
+  INPUTCLASS
+    Prescribed
+ENDRULE
+
+RULE NEW INISettings:BypassOpenStudio_zb
+  DATATYPE
+    Integer
+  HELP
+    "Causes bypass of all OpenStudio calls for the Baseline Sizing model, including translation of
+     SDD XML -> OSM -> IDF and E+ simulation"
+  INPUTCLASS
+    Prescribed
+ENDRULE
+
+RULE NEW INISettings:BypassOpenStudio_ap
+  DATATYPE
+    Integer
+  HELP
+    "Causes bypass of all OpenStudio calls for the Annual Proposed model, including translation of
+     SDD XML -> OSM -> IDF and E+ simulation"
+  INPUTCLASS
+    Prescribed
+ENDRULE
+
+RULE NEW INISettings:BypassOpenStudio_ab
+  DATATYPE
+    Integer
+  HELP
+    "Causes bypass of all OpenStudio calls for the Annual Baseline model, including translation of
+     SDD XML -> OSM -> IDF and E+ simulation"
+  INPUTCLASS
+    Prescribed
+ENDRULE
+
+RULE NEW INISettings:ComplianceReportPDF
+  DATATYPE
+    Integer
+  HELP
+    "Flag value indicating whether a PDF compliance report should always
+     be produced (checked) vs. relying on the Proj:CompReportPDF property
+     (unchacked) to determine PDF report generation."
+  INPUTCLASS
+    Prescribed
+ENDRULE
+
+RULE NEW INISettings:ComplianceReportXML
+  DATATYPE
+    Integer
+  HELP
+    "Flag value indicating whether a full (XML) compliance report should always
+     be produced (checked) vs. relying on the Proj:CompReportPDF property
+     (unchacked) to determine full report generation."
+  INPUTCLASS
+    Prescribed
+ENDRULE
+
+RULE NEW INISettings:UseProxyServerSettings
+  DATATYPE
+    Integer
+  HELP
+    "Flag value indicating whether or not to use the Proxy Server settings
+     when communicating with the compliance report generator website."
+  INPUTCLASS
+    Prescribed
+ENDRULE
+
+RULE NEW INISettings:ProxyServerAddress
+  DATATYPE
+    String
+  HELP
+    "Address of proxy server needed to be negotiated in order to transmit
+     analysis results to and receive compliance reports from the
+     CEC compliance report generator website."
+  INPUTCLASS
+    Prescribed
+ENDRULE
+
+RULE NEW INISettings:ProxyServerCredentials
+  DATATYPE
+    String
+  HELP
+    "Specify this entry if you need to set authentication information in
+     conjunction with the proxy server identified by the ProxyServerAddress
+     input.  Expected format is user:password."
+  INPUTCLASS
+    Prescribed
+ENDRULE
+
+RULE NEW INISettings:ShowProxyServerCredentials
+  DATATYPE
+    Integer
+  HELP
+    "Whether or not to display proxy server credential characters in user
+     interface."
+  INPUTCLASS
+    Prescribed
+ENDRULE
+
+RULE Proj:ResBaseSysChange
+  DESCRIPTION
+    "If checked, the baseline for HRR buildings >8 stories is modeled as 
+     System 1 (SZAC) instead of System 2 (FPFC)."
+  HELP
+    "For T24N 2019/2022 research purposes only. Using this option will not
+     result in a valid compliance run."
+  INPUTCLASS : T24N_2016
+    NotInput
+  INPUTCLASS : T24N
+    NotInput 
+  DEFAULT
+    1 // Set to 1 for 2019 v2.0 and 2022 releases, and make NotInput
+ENDRULE
+
+// *************** Daylight Saving Time Settings for Simulation ********************
+
+RULE Proj:DayltSavTimeSim
+  DESCRIPTION
+    "Flag to enable or disable Daylight Saving Time in simulation"
+  INPUTCLASS 
+    Optional
+  DEFAULT
+    0
+ENDRULE
+
+RULE Proj:DayltSavTimeStartDate
+  DESCRIPTION
+    "Daylight Savings Time Start Date"
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    "2nd Sunday in Mar"
+ENDRULE
+
+RULE Proj:DayltSavTimeEndDate
+  DESCRIPTION
+    "Daylight Savings Time End Date"
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    "1st Sunday in Nov"
+ENDRULE
+

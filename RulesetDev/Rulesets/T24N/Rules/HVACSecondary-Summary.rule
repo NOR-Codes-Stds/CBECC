@@ -1,0 +1,3019 @@
+// AirSystem - Summary
+//
+// -------------------------------------------------------------------------
+//  Copyright (c) 2012-2017, California Energy Commission
+//  All rights reserved.
+//  Redistribution and use in source and binary forms, with or without
+//  modification, are permitted provided that the following conditions are
+//  met:
+// 
+//    * Redistributions of source code must retain the above copyright
+//  notice, this list of conditions and the following disclaimer.
+//    * Redistributions in binary form must reproduce the above copyright
+//  notice, this list of conditions and the following disclaimer in
+//  the documentation and/or other materials provided with the
+//  distribution.
+//    * Neither the name of the California Energy Commission nor the names of its
+//  contributors may be used to endorse or promote products
+//  derived from this software without specific prior written
+//  permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+//  IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+//  TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION
+//  BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+//  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+//  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+//  BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+//  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+//  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// -------------------------------------------------------------------------
+
+
+
+
+RULE Fan:CtrlMthdSim
+  DESCRIPTION
+    "The method used to control fan flow, for simulation."       
+  INPUTCLASS
+    NotInput
+  OPTION
+    ConstantVolume
+    VariableSpeedDrive
+    TwoSpeed
+  SIZING
+    if( LocalStatus( ParentComp ) > 0 )
+    then 
+      switch ( ParentComp )
+        case "AirSys" :
+          switch( CtrlMthd )
+            case "ConstantVolume"     : "ConstantVolume"
+            case "VariableSpeedDrive" : "VariableSpeedDrive"
+            case "Dampers"            : "VariableSpeedDrive"
+            case "InletVanes"         : "VariableSpeedDrive"
+            case "VariablePitch"      : "VariableSpeedDrive"
+            case "TwoSpeed"           : "ConstantVolume"
+            default : "ConstantVolume"
+          endswitch
+        case "ZnSys" :
+          switch( CtrlMthd )
+            case "VariableSpeedDrive" : if( ZnSys:HasSysFlowProp > 0 .AND. ZnSys:TypeSim != "FPFC" )
+                                        then "TwoSpeed"
+                                        else "VariableSpeedDrive"
+                                        endif
+            case "TwoSpeed"           : "TwoSpeed"
+            default : "ConstantVolume"
+          endswitch
+        case "TrmlUnit"               : "ConstantVolume"
+        default : "ConstantVolume"
+      endswitch
+    else "ConstantVolume"
+    endif
+  ANNUAL
+    if( LocalStatus( ParentComp ) > 0 )
+    then 
+      switch ( ParentComp )
+        case "AirSys" :
+          switch( CtrlMthd )
+            case "ConstantVolume"     : "ConstantVolume"
+            case "VariableSpeedDrive" : "VariableSpeedDrive"
+            case "Dampers"            : "VariableSpeedDrive"
+            case "InletVanes"         : "VariableSpeedDrive"
+            case "VariablePitch"      : "VariableSpeedDrive"
+            case "TwoSpeed"           : "ConstantVolume"
+            default : "ConstantVolume"
+          endswitch
+        case "ZnSys" :
+          switch( CtrlMthd )
+            case "VariableSpeedDrive" : if( ZnSys:HasSysFlowProp > 0 .AND. ZnSys:TypeSim != "FPFC" )
+                                        then "TwoSpeed"
+                                        else "VariableSpeedDrive"
+                                        endif
+            case "TwoSpeed"           : "TwoSpeed"
+            default : "ConstantVolume"
+          endswitch
+        case "TrmlUnit"               : "ConstantVolume"
+        default : "ConstantVolume"
+      endswitch
+    else "ConstantVolume"
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// Calculate fan power and power per flow (PwrIdx) for UI and reporting
+RULE NEW Fan:Pwr
+  DATATYPE
+    Float
+  LONGFORM
+    Power
+  DESCRIPTION
+    "The design power of the fan, for reference."
+  INPUTCLASS
+    NotInput
+  UNITS
+    kW
+  DEFAULT
+    if( IfValidAnd( ModelingMthd = "StaticPressure" ) .AND.
+        IfValidAnd( FlowCap >= 0 ) .AND. 
+        IfValidAnd( TotStaticPress >= 0 ) .AND. 
+        IfValidAnd( TotEff > 0 ) )
+    then FlowCap * TotStaticPress * 0.1175 / TotEff / 1000
+    else 
+    if( ModelingMthd = "BrakeHorsePower" .AND.
+        IfValidAnd( MtrBHP >= 0 ) .AND.
+        IfValidAnd( MtrEff > 0 ) )
+    then MtrBHP * 745.6 / MtrEff / 1000
+    else 
+    if( IfValidAnd( PwrIdx >= 0 ) .AND. 
+        IfValidAnd( FlowCap >= 0 ) )
+    then PwrIdx * FlowCap / 1000
+    else 0
+    endif endif endif
+  SIZING
+    if( BaseSysNum > 0 ) 
+    then 0 // No fan power for sizing
+    else    
+    if( IfValidAnd( FlowCap >= 0 ) .AND. 
+        IfValidAnd( TotStaticPress >= 0 ) .AND. 
+        IfValidAnd( TotEff > 0 ) )
+    then FlowCap * TotStaticPress * 0.1175 / TotEff / 1000
+    else UNCHANGED
+    endif endif
+  ANNUAL
+    if( IfValidAnd( FlowCap >= 0 ) .AND. 
+        IfValidAnd( TotStaticPress >= 0 ) .AND. 
+        IfValidAnd( TotEff > 0 ) )
+    then FlowCap * TotStaticPress * 0.1175 / TotEff / 1000
+    else 0
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// Recalculate PwrIdx and MtrBHP for reporting
+RULE Fan:PwrIdx    
+  DEFAULT
+    if( IfValidAnd( FlowCap > 0 ) .AND.
+        IfValidAnd( Pwr >= 0 ) ) 
+    then Pwr * 1000 / FlowCap
+    else UNCHANGED
+    endif
+  SIZING
+    if( IfValidAnd( FlowCap > 0 ) .AND.
+        IfValidAnd( Pwr >= 0 ) ) 
+    then Pwr * 1000 / FlowCap
+    else UNCHANGED
+    endif
+  ANNUAL
+    if( IfValidAnd( FlowCap > 0 ) .AND.
+        IfValidAnd( Pwr >= 0 ) ) 
+    then Pwr * 1000 / FlowCap
+    else UNCHANGED
+    endif
+ENDRULE
+
+RULE Fan:MtrBHP
+  REPORTPRECISION
+    3
+  ANNUAL
+    if( LocalStatus( PwrIdx ) > 0 .AND.
+        LocalStatus( FlowCap ) > 0 .AND.
+        LocalStatus( MtrEff ) > 0 ) 
+    then PwrIdx * FlowCap * MtrEff / 745.6
+    else UNCHANGED
+    endif
+ENDRULE
+
+RULE Fan:PwrRpt
+  REPORTPRECISION
+    3
+  ANNUAL
+    if ( IfValidAnd( ModelingMthd = "StaticPressure" ) )
+    then TotStaticPress
+    else if ( IfValidAnd( ModelingMthd = "BrakeHorsePower" ) )
+    then MtrBHP
+    else if ( IfValidAnd( ModelingMthd = "PowerPerUnitFlow" ) )
+    then PwrIdx
+    else 0
+    endif endif endif
+ENDRULE
+
+RULE Fan:PwrUnitRpt
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if ( IfValidAnd( ModelingMthd = "StaticPressure" ) )
+    then "inH2O"
+    else if ( IfValidAnd( ModelingMthd = "BrakeHorsePower" ) )
+    then "bhp"
+    else if ( IfValidAnd( ModelingMthd = "PowerPerUnitFlow" ) )
+    then "W/cfm"
+    else "NA"
+    endif endif endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// Sum fan power to the AirSeg/ZnSys level
+RULE NEW AirSeg:FanPwr
+  DATATYPE
+    Float
+  LONGFORM
+    FanPower
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    SumChildren( Fan:Pwr )
+   SIZING
+    SumChildren( Fan:Pwr )   
+  ANNUAL
+    SumChildren( Fan:Pwr )
+ENDRULE
+RULE NEW ZnSys:FanPwr
+  DATATYPE
+    Float
+  LONGFORM
+    TotalFanPower
+  INPUTCLASS
+    NotInput
+  UNITS
+    kW
+  DEFAULT
+    SumChildren( Fan:Pwr )
+  SIZING
+    SumChildren( Fan:Pwr )  
+  ANNUAL
+    SumChildren( Fan:Pwr )
+ENDRULE
+
+// ---------- System Summary Capcacities ------------------------------------------
+// =========================== AirSystem =======================================
+// ---------- Fans -------------------------------------------
+RULE AirSys:SupFanPwr
+  INPUTCLASS
+    NotInput
+  UNITS
+    kW
+  REPORTPRECISION
+    3
+  DEFAULT
+    SumChildrenIf( AirSeg:FanPwr, AirSeg:Type = "Supply" )
+  SIZING
+    SumChildrenIf( AirSeg:FanPwr, AirSeg:Type = "Supply" )
+  ANNUAL
+    SumChildrenIf( AirSeg:FanPwr, AirSeg:Type = "Supply" )
+ENDRULE
+RULE NEW AirSys:SupFanPwrIdx
+  DATATYPE
+    Float
+  LONGFORM
+    SupplyFanPowerPerFlow
+  INPUTCLASS
+    NotInput
+  UNITS
+    W/cfm
+  DEFAULT
+    if( SupFanCap > 0 )
+    then SupFanPwr * 1000 / SupFanCap 
+    else 0
+    endif
+  SIZING
+    if( IfValidAnd( SupFanCap > 0 ) )
+    then SupFanPwr * 1000 / SupFanCap 
+    else 0
+    endif
+  ANNUAL
+    if( SupFanCap > 0 )
+    then SupFanPwr * 1000 / SupFanCap 
+    else 0
+    endif    
+ENDRULE
+// Return fans
+RULE NEW AirSys:RetFanPwr
+  DATATYPE
+    Float
+  LONGFORM
+    ReturnFanPower
+  INPUTCLASS
+    NotInput
+  UNITS
+    kW
+  REPORTPRECISION
+    3
+  DEFAULT
+    SumChildrenIf( AirSeg:FanPwr, AirSeg:Type = "Return" )
+  SIZING
+    SumChildrenIf( AirSeg:FanPwr, AirSeg:Type = "Return" )
+  ANNUAL
+    SumChildrenIf( AirSeg:FanPwr, AirSeg:Type = "Return" )
+ENDRULE
+// Relief fans
+RULE NEW AirSys:ReliefFanPwr
+  DATATYPE
+    Float
+  LONGFORM
+    ReliefFanPower
+  INPUTCLASS
+    NotInput
+  UNITS
+    kW
+  REPORTPRECISION
+    3
+  DEFAULT
+    SumChildrenIf( AirSeg:FanPwr, AirSeg:Type = "Relief" )
+  SIZING
+    SumChildrenIf( AirSeg:FanPwr, AirSeg:Type = "Relief" )
+  ANNUAL
+    SumChildrenIf( AirSeg:FanPwr, AirSeg:Type = "Relief" )
+ENDRULE
+// Exhaust fans
+RULE NEW AirSys:SysExhFlow
+  DATATYPE
+    Float
+  LONGFORM
+    SystemExhaustFlow
+  DESCRIPTION
+    "The total design exhaust air flow of the zones served by the AirSystem."
+  INPUTCLASS
+    NotInput
+  UNITS 
+    cfm
+  DEFAULT
+    SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:ExhFlowSim ) / Cnt
+  SIZING
+    SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:ExhFlowSim ) / Cnt
+  ANNUAL
+    SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:ExhFlowSim ) / Cnt
+ENDRULE
+RULE NEW AirSys:SysCodeExhFlow
+  DATATYPE
+    Float
+  LONGFORM
+    SystemCodeExhaustFlow
+  DESCRIPTION
+    "The total code exhaust air flow of the zones served by the AirSystem."
+  INPUTCLASS
+    NotInput
+  UNITS 
+    cfm
+  DEFAULT
+    SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:CodeExhFlowSim ) / Cnt
+  SIZING
+    SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:CodeExhFlowSim ) / Cnt
+  ANNUAL
+    SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:CodeExhFlowSim ) / Cnt
+ENDRULE
+RULE AirSys:ExhFanCap
+  DESCRIPTION
+    "The total exhaust fan capacity of the AirSystem"
+  INPUTCLASS
+    NotInput
+  REPORTPRECISION
+    0 
+  DEFAULT
+    SumChildrenIf( AirSeg:FanFlowCap, AirSeg:Type = "Exhaust" )
+  CHECKCODE
+    if( IsExhSys > 0 ) // Is a system modeled as Fan:ZoneExhaust
+    then
+      if( IsHRRVentSys > 0 ) // Is only referenced as a VentSysRef for HRR
+      then // Exhaust system is Res ventilation, check that exh fan cap is sufficient
+        if( ExhFanCap < SysExhFlow * ( 1 - Proj:ExhTolMinLimRes ) ) 
+        then // ExhFanCap is > sum of ThrmlZn:VentFlow
+          PostError("Exhaust system '%s' has a flow capacity of %.0f cfm,
+                     which is more than %.0f percent less than the design 
+                     ventilation flow of the zone(s) it serves.  
+                     Revise inputs for consistency.", 
+                     Name, ExhFanCap, Proj:ExhTolMinLimRes * 100 ) 
+        else
+        if( ExhFanCap > SysExhFlow * ( 1 + Proj:ExhTolMaxLimRes ) ) 
+        then // ExhFanCap is < sum of ThrmlZn:VentFlow
+          PostError("Exhaust system '%s' has a flow capacity of %.0f cfm,
+                     which is more than %.0f percent greater than the design
+                     ventilation flow of the zone(s) it serves. 
+                     Revise inputs for consistency.", 
+                     Name, ExhFanCap, Proj:ExhTolMaxLimRes * 100 ) 
+        else UNCHANGED
+        endif endif
+      else // Exhaust is NonRes exhaust, check that exh fan cap is sufficent
+      if( ExhFanCap < SysExhFlow * ( 1 - Proj:ExhTolMaxLimNonRes ) ) 
+      then // ExhFanCap is < sum of ThrmlZn:ExhFlow
+        PostError("Exhaust system '%s' has a flow capacity of %.0f cfm,
+                   which is more than %.0f percent less than the design
+                   exhaust flow of the zone(s) it serves.  
+                   Revise inputs for consistency.", 
+                   Name, ExhFanCap, Proj:ExhTolMaxLimNonRes * 100 ) 
+      else
+      if( ExhFanCap > SysExhFlow * ( 1 + Proj:ExhTolMaxLimNonRes ) )
+      then  // ExhFanCap is > sum of ThrmlZn:ExhFlow
+        if( IfValidAnd( PrkgGarArea > 0 ) )
+        then // Warning for parking garage systems since they are not regulated
+          PostWarning("Exhaust system '%s' has a flow capacity of %.0f cfm,
+                     which is more than %.0f percent greater than the design
+                     exhaust flow of the zone(s) it serves. 
+                     Revise inputs for consistency.", 
+                     Name, ExhFanCap, Proj:ExhTolMaxLimNonRes * 100 ) 
+        else // Error for other systems
+          PostError("Exhaust system '%s' has a flow capacity of %.0f cfm,
+                     which is more than %.0f percent greater than the design
+                     exhaust flow of the zone(s) it serves. 
+                     Revise inputs for consistency.", 
+                     Name, ExhFanCap, Proj:ExhTolMaxLimNonRes * 100 ) 
+        endif
+      else UNCHANGED
+      endif endif endif
+    else UNCHANGED
+    endif
+  ANNUAL
+    SumChildrenIf( AirSeg:FanFlowCap, AirSeg:Type = "Exhaust" )
+ENDRULE
+RULE AirSys:ExhFlowMin
+  DESCRIPTION
+    "The minimum exhaust fan capacity of the AirSystem"
+  INPUTCLASS
+    NotInput
+  REPORTPRECISION
+    0 
+  ANNUAL
+    SumChildrenIf( AirSeg:FanFlowMinCap, AirSeg:Type = "Exhaust" )
+ENDRULE
+RULE AirSys:ExhFanPwr
+  INPUTCLASS
+    NotInput
+  REPORTPRECISION
+    3  
+  DEFAULT
+    SumChildrenIf( AirSeg:FanPwr, AirSeg:Type = "Exhaust" )
+  SIZING
+    SumChildrenIf( AirSeg:FanPwr, AirSeg:Type = "Exhaust" )
+  ANNUAL
+    SumChildrenIf( AirSeg:FanPwr, AirSeg:Type = "Exhaust" )
+ENDRULE
+RULE NEW AirSys:ExhSysFanPwr
+  DATATYPE
+    Float
+  LONGFORM
+    ExhaustSystemFanPower
+  INPUTCLASS
+    NotInput
+  REPORTPRECISION
+    3  
+  DEFAULT
+    if( IsExhSys > 0 )
+    then ExhFanPwr + SupFanPwr
+    else 0
+    endif
+  SIZING
+    if( IsExhSys > 0 )
+    then ExhFanPwr + SupFanPwr
+    else 0
+    endif
+  ANNUAL
+    if( IsExhSys > 0 )
+    then ExhFanPwr + SupFanPwr
+    else 0
+    endif
+ENDRULE
+RULE NEW AirSys:ExhSysFanPwrIdx
+  DATATYPE
+    Float
+  LONGFORM
+    ExhaustSystemFanPowerPerFlow
+  INPUTCLASS
+    NotInput
+  UNITS
+    W/cfm
+  DEFAULT
+    if( ExhFanCap > 0 )
+    then ExhSysFanPwr * 1000 / ExhFanCap 
+    else 0
+    endif
+  SIZING
+    if( IfValidAnd( ExhFanCap > 0 ) )
+    then ExhSysFanPwr * 1000 / ExhFanCap 
+    else 0
+    endif
+  ANNUAL
+    if( ExhFanCap > 0 )
+    then ExhSysFanPwr * 1000 / ExhFanCap 
+    else 0
+    endif    
+ENDRULE
+
+
+// ---------- Terminal Units ----------------------------------
+RULE NEW AirSys:TrmlFanCap
+  DATATYPE
+    Float
+  LONGFORM
+    TerminalFanCapacity
+  INPUTCLASS
+    NotInput
+  UNITS 
+    cfm
+  DEFAULT
+    SumChildren( TrmlUnit:FanFlowCap )
+  ANNUAL
+    SumChildren( TrmlUnit:FanFlowCap )
+ENDRULE
+RULE NEW AirSys:TrmlCoilHtgCap
+  DATATYPE
+    Float
+  LONGFORM
+    TerminalCoilHeatingCapacity
+  DESCRIPTION
+    "The maximum air flow rate of the fan at design conditions, for simulation."    
+  INPUTCLASS
+    NotInput
+  UNITS 
+    Btu/h
+  DEFAULT
+    SumChildren( TrmlUnit:CoilHtgCap )
+  ANNUAL
+    SumChildren( TrmlUnit:CoilHtgCap )
+ENDRULE
+
+
+// =========================== ZoneSystem ======================================
+// ---------- Fans -------------------------------------------
+RULE ZnSys:SupFanPwr
+  INPUTCLASS
+    NotInput
+  UNITS
+    kW
+  REPORTPRECISION
+    3  
+  DEFAULT
+    if( IsExhSys = 0 )
+    then FanPwr
+    else 0
+    endif
+  SIZING
+    if( IsExhSys = 0 )
+    then FanPwr
+    else 0
+    endif
+  ANNUAL
+    if( IsExhSys = 0 )
+    then FanPwr
+    else 0
+    endif
+ENDRULE
+RULE NEW ZnSys:SupFanPwrIdx
+  DATATYPE
+    Float
+  LONGFORM
+    SupplyFanPowerPerFlow
+  INPUTCLASS
+    NotInput
+  UNITS
+    W/cfm
+  DEFAULT
+    if( SupFanCap > 0 )
+    then FanPwr * 1000 / SupFanCap 
+    else 0
+    endif
+  SIZING
+    if( SupFanCap > 0 )
+    then FanPwr * 1000 / SupFanCap 
+    else 0
+    endif
+  ANNUAL
+    if( SupFanCap > 0 )
+    then FanPwr * 1000 / SupFanCap 
+    else 0
+    endif
+ENDRULE
+// Return fans
+RULE NEW ZnSys:RetFanPwr
+  DATATYPE
+    Float
+  LONGFORM
+    ReturnFanPower
+  INPUTCLASS
+    NotInput
+  UNITS
+    kW
+  REPORTPRECISION
+    3
+  DEFAULT
+    0
+  ANNUAL
+    0
+ENDRULE
+// Relief fans
+RULE NEW ZnSys:ReliefFanPwr
+  DATATYPE
+    Float
+  LONGFORM
+    ReliefFanPower
+  INPUTCLASS
+    NotInput
+  UNITS
+    kW
+  REPORTPRECISION
+    3
+  DEFAULT
+    0
+  ANNUAL
+    0
+ENDRULE
+// Exhaust
+RULE NEW ZnSys:SysExhFlow
+  DATATYPE
+    Float
+  LONGFORM
+    SystemExhaustFlow
+  DESCRIPTION
+    "The total design exhaust air flow of the zones served by the ZoneSystem, for simulation."
+  INPUTCLASS
+    NotInput
+  UNITS 
+    cfm
+  DEFAULT
+    SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:ExhFlowSim ) / Cnt
+  SIZING
+    SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:ExhFlowSim ) / Cnt
+  ANNUAL
+    SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:ExhFlowSim ) / Cnt
+ENDRULE
+RULE NEW ZnSys:SysCodeExhFlow
+  DATATYPE
+    Float
+  LONGFORM
+    SystemCodeExhaustFlow
+  DESCRIPTION
+    "The total code exhaust air flow of the zones served by the ZoneSystem, for simulation."
+  INPUTCLASS
+    NotInput
+  UNITS 
+    cfm
+  DEFAULT
+    SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:CodeExhFlowSim ) / Cnt
+  SIZING
+    SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:CodeExhFlowSim ) / Cnt
+  ANNUAL
+    SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:CodeExhFlowSim ) / Cnt
+ENDRULE
+RULE ZnSys:ExhFanCap
+  DESCRIPTION
+    "The total exhaust fan capacity of the ZoneSystem"
+  INPUTCLASS 
+    NotInput         
+  DEFAULT
+    if( IsExhSys > 0 )
+    then
+      if( Type = "VentilationOnly" )
+      then RtdFlowCap
+      else SumChildren( Fan:FlowCap )
+      endif
+    else 0
+    endif
+  REPORTPRECISION
+    0  
+  CHECKCODE
+    if( IsExhSys > 0 .AND. // Is a system modeled as Fan:ZoneExhaust
+        Type != "VentilationOnly" ) // Isn't a VentilationOnly system
+    then
+      if( IsHRRVentSys > 0 ) // Is only referenced as a VentSysRef
+      then // Exhaust system is Res ventilation, check that exh fan cap is sufficient
+        if( ExhFanCap < SysExhFlow * ( 1 - Proj:ExhTolMinLimRes ) ) 
+        then // ExhFanCap is < sum of ThrmlZn:VentFlow
+          PostError("Exhaust system '%s' has a flow capacity of %.0f cfm,
+                     which is more than %.0f percent less than the design 
+                     ventilation flow of the zone(s) it serves.  
+                     Revise inputs for consistency.", 
+                     Name, ExhFanCap, Proj:ExhTolMinLimRes * 100 ) 
+        else
+        if( ExhFanCap > SysExhFlow * ( 1 + Proj:ExhTolMaxLimRes ) ) 
+        then // ExhFanCap is > sum of ThrmlZn:VentFlow
+          PostError("Exhaust system '%s' has a flow capacity of %.0f cfm,
+                     which is more than %.0f percent greater than the design
+                     ventilation flow of the zone(s) it serves. 
+                     Revise inputs for consistency.", 
+                     Name, ExhFanCap, Proj:ExhTolMaxLimRes * 100 ) 
+        else UNCHANGED
+        endif endif
+      else // Exhaust is NonRes exhaust, check that exh fan cap is sufficent
+      if( ExhFanCap < SysExhFlow * ( 1 - Proj:ExhTolMaxLimNonRes ) ) 
+      then // ExhFanCap is < sum of ThrmlZn:ExhFlow
+        PostError("Exhaust system '%s' has a flow capacity of %.0f cfm,
+                   which is more than %.0f percent less than the design
+                   ventilation flow of the zone(s) it serves.  
+                   Revise inputs for consistency.", 
+                   Name, ExhFanCap, Proj:ExhTolMaxLimNonRes * 100 ) 
+      else
+      if( ExhFanCap > SysExhFlow * ( 1 + Proj:ExhTolMaxLimNonRes ) ) 
+      then // ExhFanCap is > sum of ThrmlZn:ExhFlow
+        PostError("Exhaust system '%s' has a flow capacity of %.0f cfm,
+                   which is more than %.0f percent greater than the design
+                   ventilation flow of the zone(s) it serves. 
+                   Revise inputs for consistency.", 
+                   Name, ExhFanCap, Proj:ExhTolMaxLimNonRes * 100 ) 
+      else UNCHANGED
+      endif endif endif
+    else UNCHANGED
+    endif
+ENDRULE
+RULE ZnSys:ExhFlowMin
+  DESCRIPTION
+    "The minimum exhaust fan capacity of the ZoneSystem"
+  INPUTCLASS 
+    NotInput
+  UNITS
+    cfm 
+  REPORTPRECISION
+    0    
+  DEFAULT
+    if( IsExhSys )
+    then SumChildren( Fan:FlowMin )
+    else 0
+    endif    
+ENDRULE
+RULE ZnSys:ExhFanPwr
+  INPUTCLASS
+    NotInput
+  UNITS
+    kW
+  REPORTPRECISION
+    3  
+  DEFAULT
+    if( Type = "VentilationOnly" .AND.
+        IfValidAnd( RtdPwr > 0 ) )
+    then RtdPwr / 1000
+    else
+    if( ExhFanCap > 0 )
+    then FanPwr
+    else 0
+    endif endif
+ENDRULE
+RULE NEW ZnSys:ExhSysFanPwrIdx
+  DATATYPE
+    Float
+  LONGFORM
+    ExhaustSystemFanPowerIndex
+  INPUTCLASS
+    NotInput
+  UNITS
+    W/cfm
+  DEFAULT
+    if( Type = "VentilationOnly" .AND.
+        IfValidAnd( RtdPwr > 0 ) .AND.
+        IfValidAnd( RtdFlowCap > 0 ) )
+    then RtdPwr / RtdFlowCap
+    else
+    if( ExhFanCap > 0 )
+    then ExhFanPwr * 1000 / ExhFanCap
+    else 0
+    endif endif
+ENDRULE
+
+
+//  Properties referenced in REPORT rules
+// =========================== AirSystem =======================================  
+RULE NEW AirSys:ClgCapPerArea
+  DATATYPE
+    Float
+  LONGFORM
+    CoolingCapacityPerArea
+  INPUTCLASS
+    NotInput
+  DEFAULT  
+    if( IfValidAnd( TotCondFlrArea > 0 ) .AND. 
+        IfValidAnd( ClgCap > 0 ) )
+    then ClgCap * Cnt / TotCondFlrArea
+    else 0
+    endif
+  ANNUAL
+    if( IfValidAnd( TotCondFlrArea > 0 ) )
+    then ClgCap * Cnt / TotCondFlrArea
+    else 0
+    endif
+ENDRULE
+// -----------------------------------------------------------------------------
+RULE NEW AirSys:SupFlowPerTon
+  DATATYPE
+    Float
+  LONGFORM
+    SupplyFlowPerTon
+  INPUTCLASS
+    NotInput
+  DEFAULT  
+    if( IfValidAnd( ClgCap > 0 ) .AND. 
+        IfValidAnd( SupFanCap > 0 ) )
+    then SupFanCap / ( ClgCap / 12000 )
+    else 0
+    endif
+  CHECKSIM
+// TO DO: Review/test limits in actual projects.
+    if( IfValidAnd( ResHVACAutoSizing > 0 ) )
+    then UNCHANGED 
+    else
+    if( IfValidAnd( UnitaryCat = "AC" ) .OR. 
+        IfValidAnd( UnitaryCat = "HP" ) )
+    then 
+      if( IfValidAnd( SupFlowPerTon < ( 300 * 0.95 ) ) .OR. 
+          IfValidAnd( SupFlowPerTon > ( 450 * 1.10 ) ) )
+      then
+        PostWarning("AirSystem '%s' has a DX cooling coil and the rated supply flow
+                   per ton of (net) cooling capacity is %.0f cfm/ton. The acceptable
+                   range for successful simulation of DX cooling coils in EnergyPlus
+                   is normally ~300 to ~450 cfm/ton.
+                   If the compliance simulation fails, check flow/cooling capacity
+                   inputs for consistency with the design. If simulation still fails,
+                   contact the CBECC support team for assistance.", 
+                   Name, SupFlowPerTon)
+      else
+      if( IfValidAnd( SupFlowPerTon < 250 ) .OR. 
+          IfValidAnd( SupFlowPerTon > 550 ) )
+      then
+        PostError("AirSystem '%s' has a DX cooling coil and the rated supply flow
+                   per ton of (net) cooling capacity is %.0f cfm/ton. The acceptable
+                   range for successful simulation of DX cooling coils in EnergyPlus
+                   is normally ~300 to ~450 cfm/ton.", 
+                   Name, SupFlowPerTon)
+      else UNCHANGED
+      endif endif
+    else UNCHANGED
+    endif endif
+  ANNUAL
+    if( IfValidAnd ( ClgCap > 0 ) )
+    then SupFanCap / ( ClgCap / 12000 )
+    else 0
+    endif
+ENDRULE
+// -----------------------------------------------------------------------------
+RULE NEW AirSys:HtgCapPerArea
+  DATATYPE
+    Float
+  LONGFORM
+    HeatingCapacityPerArea
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( TotCondFlrArea > 0 ) .AND. 
+        IfValidAnd( HtgCap > 0 ) )
+    then HtgCap * Cnt / TotCondFlrArea
+    else 0
+    endif
+  ANNUAL
+    if( IfValidAnd( TotCondFlrArea > 0 ) )
+    then HtgCap * Cnt / TotCondFlrArea
+    else 0
+    endif
+ENDRULE
+// -----------------------------------------------------------------------------
+RULE NEW AirSys:SupFlowPerArea
+  DATATYPE
+    Float
+  LONGFORM
+    SupplyFlowPerArea
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( TotCondFlrArea > 0 )
+    then SupFanCap * Cnt / TotCondFlrArea
+    else 0
+    endif
+  ANNUAL
+    if( IfValidAnd( TotCondFlrArea > 0 ) )
+    then SupFanCap * Cnt / TotCondFlrArea
+    else 0
+    endif
+ENDRULE
+// -----------------------------------------------------------------------------
+RULE NEW AirSys:OAFlowPerArea
+  DATATYPE
+    Float
+  LONGFORM
+    OutsideAirFlowPerArea
+  INPUTCLASS
+    NotInput
+  DEFAULT  
+    if( IfValidAnd( TotCondFlrArea > 0 ) .AND.
+        IfValidAnd( SysVentFlow >= 0 ) .AND. 
+        IfValidAnd( TotCondFlrArea > 0 ) )
+    then SysVentFlow * Cnt / TotCondFlrArea
+    else 0
+    endif
+  ANNUAL
+    if( IfValidAnd( TotCondFlrArea > 0 ) )
+    then SysVentFlow * Cnt / TotCondFlrArea
+    else 0
+    endif
+ENDRULE
+// -----------------------------------------------------------------------------
+RULE NEW AirSys:SupAirSegHtgCap
+  DATATYPE
+    Float
+  LONGFORM
+    SupplyAirSegmentHeatingCapacity
+  DESCRIPTION
+    "The total heating capacity of coils that are children of Type = 'Supply'
+     AirSegments, not including supplemental heating coils."
+  INPUTCLASS
+    NotInput
+  UNITS 
+    Btu/h
+  DEFAULT
+    SumChildren( AirSeg:HtgCap )
+  ANNUAL
+    SumChildren( AirSeg:HtgCap )
+ENDRULE
+
+
+// =========================== ZoneSystem ======================================
+RULE NEW ZnSys:ClgCapPerArea
+  DATATYPE
+    Float
+  LONGFORM
+    CoolingCapacityPerArea
+  INPUTCLASS
+    NotInput
+  DEFAULT  
+    if( IfValidAnd( ClgCap > 0 ) .AND. 
+        IfValidAnd( Cnt > 0 ) .AND. 
+        IfValidAnd( TotCondFlrArea > 0 ) )
+    then ClgCap * Cnt / TotCondFlrArea
+    else 0
+    endif
+  ANNUAL
+    if( IfValidAnd( TotCondFlrArea > 0 ) )
+    then ClgCap * Cnt / TotCondFlrArea
+    else 0
+    endif
+ENDRULE
+// -----------------------------------------------------------------------------
+RULE NEW ZnSys:SupFlowPerTon
+  DATATYPE
+    Float
+  LONGFORM
+    SupplyFlowPerTon
+  INPUTCLASS
+    NotInput
+  DEFAULT  
+    if( IfValidAnd( ClgCap > 0 ) )
+    then SupFanCap / ( ClgCap / 12000 )
+    else 0
+    endif
+  CHECKSIM
+// TO DO: Review/test limits in actual projects.
+    if( SumChildrenIf(CoilClg:CapTotNetRtd, CoilClg:Type = "DirectExpansion" ) > 0 )
+    then
+      if( IfValidAnd( SupFlowPerTon < 300 * 0.9) .OR. 
+          IfValidAnd( SupFlowPerTon > 450 * 1.1 ) )
+      then
+        PostWarning("ZoneSystem '%s' has a DX cooling coil and the rated supply flow
+                   per ton of cooling capacity is %.0f cfm/ton. The acceptable range
+                   for successful EnergyPlus simulations is ~300 to ~450 cfm/ton.
+                   If the compliance simulation fails, check flow/cooling capacity
+                   inputs for consistency, and then contact CBECC support for
+                   assistance.", Name, SupFlowPerTon)
+      else
+      if( IfValidAnd( SupFlowPerTon < 250 ) .OR. 
+          IfValidAnd( SupFlowPerTon > 550 ) )
+      then
+        PostError("ZoneSystem '%s' has a DX cooling coil and the rated supply flow
+                   per ton of (net) cooling capacity is %.0f cfm/ton. The acceptable
+                   range for successful simulation of DX cooling coils in EnergyPlus
+                   is normally ~300 to ~450 cfm/ton.", 
+                   Name, SupFlowPerTon)
+      else UNCHANGED
+      endif endif
+    else UNCHANGED
+    endif
+  ANNUAL
+    if( IfValidAnd( ClgCap > 0 ) )
+    then SupFanCap / ( ClgCap / 12000 )
+    else 0
+    endif
+ENDRULE
+// -----------------------------------------------------------------------------
+RULE NEW ZnSys:HtgCapPerArea
+  DATATYPE
+    Float
+  LONGFORM
+    HeatingCapacityPerArea
+  INPUTCLASS
+    NotInput
+  DEFAULT 
+    if( IfValidAnd( HtgCap > 0 ) .AND. 
+        IfValidAnd( TotCondFlrArea > 0 ) )
+    then HtgCap * Cnt / TotCondFlrArea
+    else 0
+    endif
+  ANNUAL
+    if( IfValidAnd( TotCondFlrArea > 0 ) )
+    then HtgCap * Cnt / TotCondFlrArea
+    else 0
+    endif
+ENDRULE
+// -----------------------------------------------------------------------------
+RULE NEW ZnSys:SupFlowPerArea
+  DATATYPE
+    Float
+  LONGFORM
+    SupplyFlowPerArea
+  INPUTCLASS
+    NotInput
+  DEFAULT  
+    if( IfValidAnd( SupFanCap > 0 ) .AND. 
+        IfValidAnd( TotCondFlrArea > 0 ) )
+    then SupFanCap * Cnt / TotCondFlrArea
+    else 0
+    endif
+  ANNUAL
+    if( IfValidAnd( TotCondFlrArea > 0 ) )
+    then SupFanCap * Cnt / TotCondFlrArea
+    else 0
+    endif
+ENDRULE
+// -----------------------------------------------------------------------------
+RULE NEW ZnSys:OAFlowPerArea
+  DATATYPE
+    Float
+  LONGFORM
+    OutsideAirFlowPerArea
+  INPUTCLASS
+    NotInput
+  DEFAULT  
+    if( IfValidAnd( TotCondFlrArea > 0 ) )
+    then SysVentFlow * Cnt / TotCondFlrArea
+    else 0
+    endif
+  ANNUAL
+    if( IfValidAnd( TotCondFlrArea > 0 ) )
+    then SysVentFlow * Cnt / TotCondFlrArea
+    else 0
+    endif
+ENDRULE
+
+
+// Additional PERF1 and Detailed reporting rules
+// =========================== AirSystem =======================================
+RULE AirSys:IsComplexSys
+  DESCRIPTION
+    "A boolean (0/1) flag to indicate whether an HVAC system is Simple or 
+     Complex, used for reporting."
+  HELP
+    "Complex systems serve multiple zones or use hydronic heating or cooling. 
+     Simple systems are all other systems.  Single zone air systems are simple, 
+     except for any with hot water heating or chilled water cooling.  All 
+     multizone air systems are complex."
+  INPUTCLASS 
+    Default
+  DEFAULT
+    IsMultiZnSys
+  ANNUAL
+    if( BaseSysNum > 0 ) then 0 
+    else z:IsComplexSys
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE AirSys:IsComplexSysRpt
+  DESCRIPTION
+    "A text string (Simple or Complex) showing the complexity of HVAC Systems
+     for reporting."
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+    if( BaseSysNum > 0 ) then "NA" 
+    else 
+      if( IfValidAnd( IsComplexSys = 0 ) )
+      then "Simple"
+      else "Complex" 
+      endif
+    endif
+ENDRULE
+
+// =========================== ZoneSystem ======================================
+RULE ZnSys:IsComplexSys
+  DESCRIPTION
+    "A boolean (0/1) flag to indicate whether an HVAC system is Simple or 
+     Complex, used for reporting."
+  HELP
+    "Complex systems serve multiple zones or use hydronic heating or cooling. 
+     Simple systems are all other systems.  PTAC, PTHP and exhaust zone systems
+     are simple - FPFC, WSHP and Baseboard zone systems are complex."
+  INPUTCLASS 
+    Default
+  DEFAULT
+    if( Type = "FPFC" .OR. 
+        Type = "WSHP" .OR. 
+        Type = "Baseboard" .OR. 
+        Type = "PassiveBeam" .OR.
+        IfValidAnd( Type = "VRF" ) )
+    then 1 
+    else 0
+    endif    
+  ANNUAL_PROPOSED
+    if( BaseSysNum > 0 .OR. IfValidAnd( IsActiveBeam > 0 ) ) then 0 
+    else u:IsComplexSys
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE ZnSys:IsComplexSysRpt
+  DESCRIPTION
+    "A text string (Simple or Complex) showing the complexity of HVAC Systems
+     for reporting."
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+    if( BaseSysNum > 0 ) then "NA" 
+    else 
+      if( IfValidAnd( IsComplexSys = 0 ) )
+      then "Simple"
+      else "Complex" 
+      endif
+    endif
+ENDRULE
+
+
+// =========================== AirSystem =======================================
+RULE AirSys:DCVRpt
+  DESCRIPTION
+    "An string that indicate how many zones of the system have DCV (CO2Sensor)
+     control."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( SumRevRef(ThrmlZn:VentSysRef, ThrmlZn:HasDCV ) > 0 )
+    then
+      Format("%g Zones With CO2Sensor Vent. Control", SumRevRef(ThrmlZn:VentSysRef, ThrmlZn:HasDCV ) )
+    else "No DCV Controls"
+    endif
+ENDRULE
+
+
+// =========================== AirSystem =======================================
+
+RULE AirSys:ClgEffUnitRpt
+  DESCRIPTION
+    "A text string for reporting the (DX) cooling efficiency unit of system."
+  INPUTCLASS 
+    NotInput
+  ANNUAL
+    if( SumChildrenIf( CoilClg:CapTotNetRtd, CoilClg:Type = "DirectExpansion" ) > 0 )
+    then
+      if( IfValidAnd( EffMetric = "SEER2/EER2/HSPF2" ) .AND. 
+          IfValidAnd( SEER2IsValid > 0 ) .AND.
+          IfValidAnd( MaxChild( CoilClg:DXSEER2 ) > 0 ) )
+      then
+        "SEER2/EER2"
+      else
+      if( IfValidAnd( MaxChild( CoilClg:DXSEER ) > 0 ) .AND.
+          IfValidAnd( MaxChild( CoilClg:CodeMinSEER ) > 0 ) )
+      then
+        "SEER/EER"
+      else
+      if( IfValidAnd( MaxChild( CoilClg:DXEER ) > 0 ) )
+      then
+       "EER"
+      else 
+        "NA"
+      endif endif endif
+    else 
+      "NA"
+    endif
+ENDRULE
+
+RULE AirSys:ClgEffRpt
+  DESCRIPTION
+    "A text string for reporting the (DX) cooling efficiency of system."
+  INPUTCLASS 
+    NotInput
+  ANNUAL
+    if( IfValidAnd( ClgEffUnitRpt != "NA" ) )
+    then
+      if( IfValidAnd( ClgEffUnitRpt = "SEER2/EER2" ) )
+      then
+        if( MaxChild( CoilClg:DXEER2 ) > 0 )
+        then // EER2 rating required
+          Format( FltToStr( MaxChild( CoilClg:DXSEER2 ), MaxChild( CoilClg:EERSEERRndScl ) ) ) + " / " +
+          Format( FltToStr( MaxChild( CoilClg:DXEER2 ), MaxChild( CoilClg:EERSEERRndScl ) ) ) 
+        else 
+          Format( FltToStr( MaxChild( CoilClg:DXSEER2 ), MaxChild( CoilClg:EERSEERRndScl ) ) ) + " / NA"
+        endif
+      else
+      if( IfValidAnd( ClgEffUnitRpt = "SEER/EER" ) )
+      then
+        Format( FltToStr( MaxChild( CoilClg:DXSEERRnd ), MaxChild( CoilClg:EERSEERRndScl ) ) ) + " / " +
+        Format( FltToStr( MaxChild( CoilClg:DXEERRnd ), MaxChild( CoilClg:EERSEERRndScl ) ) )        
+      else
+      if( IfValidAnd( ClgEffUnitRpt = "EER" ) )
+      then
+        Format( FltToStr( MaxChild( CoilClg:DXEERRnd ), MaxChild( CoilClg:EERSEERRndScl ) ) )
+      else 
+        "NA"
+      endif endif endif
+    else 
+    if( SumChildrenIf( CoilClg:CapTotNetRtd, CoilClg:Type = "ChilledWater" ) > 0 )
+    then
+      "NA - See Chiller"
+    else 
+      "NA"
+    endif endif
+ENDRULE
+
+
+
+
+// -----------------------------------------------------------------------------
+
+RULE AirSys:HtgEffUnitRpt
+  DESCRIPTION
+    "A text string for reporting the heating efficiency unit of the system."
+  INPUTCLASS 
+    NotInput
+  ANNUAL
+    if( SumChildrenIf( CoilHtg:CapTotNetRtd, CoilHtg:Type = "HeatPump" ) > 0 )
+    then
+      if( IfValidAnd( EffMetric = "SEER2/EER2/HSPF2" ) .AND. 
+          IfValidAnd( HSPF2IsValid > 0 ) .AND.
+          IfValidAnd( MaxChild( CoilHtg:HtPumpHSPF2 ) > 0 ) )
+      then
+        "HSPF2"
+      else
+      if( IfValidAnd( MaxChild( CoilHtg:HtPumpHSPF ) > 0 ) .AND.
+          IfValidAnd( MaxChild( CoilHtg:CodeMinHSPF ) > 0 ) )
+      then
+        "HSPF"
+      else 
+      if( IfValidAnd( MaxChild( CoilHtg:HtPumpCOP ) > 0 ) )
+      then
+        "COP"
+      else 
+        "NA"
+      endif endif endif
+    else
+    if( SumChildrenIf( CoilHtg:CapTotGrossRtd, CoilHtg:Type = "Furnace" ) > 0 )
+    then 
+      if( IfValidAnd( MaxChild( CoilHtg:FurnAFUE ) > 0 ) .AND. 
+          MaxChild( CoilHtg:CapTotGrossRtd ) < 225000 )
+      then
+        "AFUE"
+      else if( IfValidAnd( MaxChild( CoilHtg:FurnThrmlEff ) > 0 ) )
+      then
+        "ThrmlEff"
+      else 
+        "NA"
+      endif endif 
+    else 
+    if( SumChildren( AirSeg:ElecResHtgCap) > 0 )
+    then 
+      "NA"
+    else 
+      "NA"
+    endif endif endif
+ENDRULE
+
+RULE AirSys:HtgEffRpt
+  DESCRIPTION
+    "A text string for reporting the heating efficiency of the system."
+  INPUTCLASS 
+    NotInput
+  ANNUAL
+    if( IfValidAnd( HtgEffUnitRpt != "NA" ) )
+    then
+      if( IfValidAnd( HtgEffUnitRpt = "HSPF2" ) )
+      then
+        Format( FltToStr( MaxChild( CoilHtg:HtPumpHSPF2 ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) )
+      else
+      if( IfValidAnd( HtgEffUnitRpt = "HSPF" ) )
+      then
+        Format( FltToStr( MaxChild( CoilHtg:HtPumpHSPFRnd ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) )
+      else
+      if( IfValidAnd( HtgEffUnitRpt = "COP" ) )
+      then
+        Format( FltToStr( MaxChild( CoilHtg:HtPumpCOPRnd ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) )
+      else
+      if( IfValidAnd( HtgEffUnitRpt = "AFUE" ) )
+      then
+        Format( FltToStr( MaxChild( CoilHtg:FurnAFUE ) * 100, 1 ) )
+      else
+      if( IfValidAnd( HtgEffUnitRpt = "ThrmlEff" ) )
+      then
+        Format( FltToStr( MaxChild( CoilHtg:FurnThrmlEff ) * 100, 1 ) )
+      else 
+        "NA"
+      endif endif endif endif endif
+    else
+    if( SumChildren( AirSeg:ElecResHtgCap ) > 0 )
+    then
+      "Elec. Res."
+    else
+    if( SumChildrenIf( CoilHtg:CapTotGrossRtd, CoilHtg:Type = "HotWater" ) > 0 )
+    then
+      "NA - See Boiler"
+    else 
+      "NA"
+    endif endif endif
+ENDRULE
+
+// =========================== ZoneSystem ======================================
+
+RULE ZnSys:ClgEffUnitRpt
+  DESCRIPTION
+    "A text string for reporting the cooling efficiency unit of system."
+  INPUTCLASS 
+    NotInput
+  ANNUAL
+    if( SumChildrenIf( CoilClg:CapTotNetRtd, CoilClg:Type = "DirectExpansion" ) > 0 )
+    then 
+      if( IfValidAnd( EffMetric = "SEER2/EER2/HSPF2" ) .AND. 
+          IfValidAnd( SEER2IsValid > 0 ) .AND.
+          IfValidAnd( MaxChild( CoilClg:DXSEER2 ) > 0 ) )
+      then
+        "SEER2/EER2"
+      else
+      if( IfValidAnd( MaxChild( CoilClg:DXSEER ) > 0 ) .AND.
+          IfValidAnd( MaxChild( CoilClg:CodeMinSEER ) > 0 ) )
+      then
+        "SEER/EER"
+      else 
+      if( IfValidAnd( MaxChild( CoilClg:DXEER ) > 0 ) )
+      then
+       "EER"
+      else 
+        "NA"
+      endif endif endif
+    else 
+      "NA"
+    endif
+ENDRULE
+
+RULE ZnSys:ClgEffRpt
+  DESCRIPTION
+    "A text string for reporting the cooling efficiency of system."
+  INPUTCLASS 
+    NotInput
+  ANNUAL
+    if( IfValidAnd( ClgEffUnitRpt != "NA" ) )
+    then
+      if( IfValidAnd( ClgEffUnitRpt = "SEER2/EER2" ) )
+      then
+        if( MaxChild( CoilClg:DXEER2 ) > 0 )
+        then // EER2 specified
+          Format( FltToStr( MaxChild( CoilClg:DXSEER2 ), MaxChild( CoilClg:EERSEERRndScl ) ) ) + " / " +
+          Format( FltToStr( MaxChild( CoilClg:DXEER2 ), MaxChild( CoilClg:EERSEERRndScl ) ) ) 
+        else 
+          Format( FltToStr( MaxChild( CoilClg:DXSEER2 ), MaxChild( CoilClg:EERSEERRndScl ) ) ) + " / NA"
+        endif
+      else  
+      if( IfValidAnd( ClgEffUnitRpt = "SEER/EER" ) )
+      then
+        if( MaxChild( CoilClg:DXEER ) > 0 )
+        then // EER specified
+          Format( FltToStr( MaxChild( CoilClg:DXSEERRnd ), MaxChild( CoilClg:EERSEERRndScl ) ) ) + " / " +
+          Format( FltToStr( MaxChild( CoilClg:DXEERRnd ), MaxChild( CoilClg:EERSEERRndScl ) ) )
+        else 
+          Format( FltToStr( MaxChild( CoilClg:DXSEER ), MaxChild( CoilClg:EERSEERRndScl ) ) ) + " / NA"
+        endif        
+      else
+      if( IfValidAnd( ClgEffUnitRpt = "EER" ) )
+      then
+        Format( FltToStr( MaxChild( CoilClg:DXEERRnd ), MaxChild( CoilClg:EERSEERRndScl ) ) )
+      else 
+        "NA"
+      endif endif endif
+    else 
+    if ( SumChildrenIf( CoilClg:CapTotNetRtd, CoilClg:Type = "ChilledWater" ) > 0 )
+    then
+      "NA - See Chiller"
+    else 
+      "NA"
+    endif endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+
+RULE ZnSys:HtgEffUnitRpt
+  DESCRIPTION
+    "A text string for reporting the heating efficiency unit of the system."
+  INPUTCLASS 
+    NotInput
+  ANNUAL
+    if( SumChildrenIf( CoilHtg:CapTotNetRtd, CoilHtg:Type = "HeatPump" ) > 0 )
+    then 
+      if( IfValidAnd( EffMetric = "SEER2/EER2/HSPF2" ) .AND. 
+          IfValidAnd( HSPF2IsValid > 0 ) .AND.
+          IfValidAnd( MaxChild( CoilHtg:HtPumpHSPF2 ) > 0 ) )
+      then
+        "HSPF2"
+      else
+      if( IfValidAnd( MaxChild( CoilHtg:HtPumpHSPF ) > 0 ) .AND.
+          IfValidAnd( MaxChild( CoilHtg:CodeMinHSPF ) > 0 ) )
+      then
+        "HSPF"
+      else
+      if( IfValidAnd( MaxChild( CoilHtg:HtPumpCOP ) > 0 ) )
+      then
+        "COP"
+      else 
+        "NA"
+      endif endif endif
+    else
+    if( SumChildrenIf( CoilHtg:CapTotGrossRtd, CoilHtg:Type = "Furnace" ) > 0 )
+    then 
+      if( IfValidAnd( MaxChild( CoilHtg:FurnAFUE ) > 0 ) .AND. 
+          MaxChild( CoilHtg:CapTotGrossRtd ) < 225000 )
+      then
+        "AFUE"
+      else if( IfValidAnd( MaxChild( CoilHtg:FurnThrmlEff ) > 0 ) )
+      then
+        "ThrmlEff"
+      else 
+        "NA"
+      endif endif 
+    else 
+      "NA"
+    endif endif
+ENDRULE
+
+RULE ZnSys:HtgEffRpt
+  DESCRIPTION
+    "A text string for reporting the heating efficiency of the system."
+  INPUTCLASS 
+    NotInput
+  ANNUAL
+    if( IfValidAnd( HtgEffUnitRpt != "NA" ) )
+    then
+      if( IfValidAnd( HtgEffUnitRpt = "HSPF2" ) )
+      then
+        Format( FltToStr( MaxChild( CoilHtg:HtPumpHSPF2 ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) )
+      else
+      if( IfValidAnd( HtgEffUnitRpt = "HSPF" ) )
+      then
+        Format( FltToStr( MaxChild( CoilHtg:HtPumpHSPFRnd ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) )
+      else
+      if( IfValidAnd( HtgEffUnitRpt = "COP" ) )
+      then
+        Format( FltToStr( MaxChild( CoilHtg:HtPumpCOPRnd ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) )
+      else
+      if( IfValidAnd( HtgEffUnitRpt = "AFUE" ) )
+      then
+        Format( FltToStr( MaxChild( CoilHtg:FurnAFUE ) * 100, 1 ) )
+      else
+      if( IfValidAnd( HtgEffUnitRpt = "ThrmlEff" ) )
+      then
+        Format( FltToStr( MaxChild( CoilHtg:FurnThrmlEff ) * 100, 1 ) )
+      else 
+        "NA"
+      endif endif endif endif endif
+    else
+    if( SumChildrenIf( CoilHtg:CapTotGrossRtd, CoilHtg:Type = "Resistance" ) > 0 )
+    then
+      "Elec. Res."
+    else
+    if( SumChildrenIf( CoilHtg:CapTotGrossRtd, CoilHtg:Type = "HotWater" ) > 0 )
+    then
+      "NA - See Boiler"
+    else 
+      "NA"
+    endif endif endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE AirSys:HERSDuctReq
+  DESCRIPTION
+    "A boolean (0/1) flag to indicate whether HERS duct leakage testing is 
+     required."
+  HELP
+    "HERS duct leakage testing is required if duct systems:
+     1. Supply conditioned air to occupiable space from a single zone 
+     constant speed system, 2. Serve less than 5,000 ft² of conditioned floor 
+     area, and 3. More than 25% of the total duct system surface area is 
+     located in unconditioned space."  
+  INPUTCLASS 
+    Default
+  DEFAULT
+    0
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE AirSys:HERSDuctReqRpt
+  DESCRIPTION
+    "A text string (Yes or No) showing whether HERS duct leakage testing 
+     is required, used for reporting."
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+    if( BaseSysNum > 0 .OR. IsHlthCareSys = 1 ) then "NA" 
+    else 
+      if( IfValidAnd( HERSDuctReq = 0 ) .OR.
+          IsExhSys )
+      then "No"
+      else "Yes" 
+      endif
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE AirSys:HERSDuctTested
+  DESCRIPTION
+    "A boolean (0/1) flag to indicate whether HERS duct leakage testing will 
+     be performed, per reference appendix NA2."
+  HELP
+    ""  
+  INPUTCLASS 
+    Default
+  DEFAULT
+    0
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE AirSys:HERSDuctTestedRpt
+  DESCRIPTION
+    "A text string (Yes or No) showing whether HERS duct leakage testing will 
+     be performed, per reference appendix NA2, used for reporting."
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+    if( BaseSysNum > 0 .OR. IsHlthCareSys = 1 ) then "NA" 
+    else 
+      if( IfValidAnd( HERSDuctTested = 0 ) .OR.
+          IsExhSys )
+//      if( IfValidAnd( HERSDuctReq = 0 ) .OR. IfValidAnd( HERSDuctTested = 0 ) )
+      then "No"
+      else "Yes" 
+      endif
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW AirSys:HERSDuctReqTested
+  DATATYPE
+    Integer
+  LONGFORM
+    HERSDuctRequiredTested
+  DESCRIPTION
+    "A boolean (0/1) flag to indicate HERS duct leakage testing is 
+     required and is field verified."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( BaseSysNum > 0 .OR. IsHlthCareSys = 1 ) 
+    then 0 
+    else 
+      if( IfValidAnd( HERSDuctReq = 1 ) .AND. IfValidAnd( HERSDuctTested = 1 ) )
+      then 1
+      else 0 
+      endif
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW AirSys:HERSDuctTestedOnly
+  DATATYPE
+    Integer
+  LONGFORM
+    HERSDuctTestedOnly
+  DESCRIPTION
+    "A boolean (0/1) flag to indicate HERS duct leakage testing is 
+     not required but is field verified."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( BaseSysNum > 0 .OR. IsHlthCareSys = 1 ) 
+    then 0 
+    else 
+      if( IfValidAnd( HERSDuctReq = 0 ) .AND. IfValidAnd( HERSDuctTested = 1 ) )
+      then 1
+      else 0 
+      endif
+    endif
+ENDRULE
+
+
+
+// -----------------------------------------------------------------------------
+RULE NEW AirSys:DuctLeakage
+  DATATYPE
+    Float
+  LONGFORM
+    DuctLeakage
+  DESCRIPTION
+    "A duct leakage for the air system, expressed as a percentage of 
+     total airflow."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( BaseSysNum > 0 .OR. IsHlthCareSys = 1 ) then 0 
+    else 
+      if( IfValidAnd( HERSDuctReq = 1 ) .AND. 
+          IfValidAnd( HERSDuctTested != 1 ) .AND. DuctStatus = 0 )
+      then 0.09
+      else 0 
+      endif
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW AirSys:DuctLeakCredit
+  DATATYPE
+    Integer
+  LONGFORM
+    DuctLeakCredit
+  DESCRIPTION
+    "A flag for the air system indicating that a fan power credit will be 
+     assigned because HERS Duct Testing is not required but is being done 
+     anyway."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( BaseSysNum > 0 .OR. IsHlthCareSys = 1 ) then 0 
+    else 
+      if( IfValidAnd( HERSDuctReq != 1 ) .AND. 
+          IfValidAnd( HERSDuctTested = 1 ) .AND. DuctStatus = 0 )
+      then 1
+      else 0 
+      endif
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// HERS ventilation system checks
+// Not currently supported, but may be used in future
+// See ticket 3040
+RULE AirSys:HERSFanPwrTested
+  DESCRIPTION
+    "A flag to indicate whether HERS fan power testing will be performed."
+  HELP
+    "Only applicable to single-zone ventilation systems serving high-rise 
+     residential zones."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    0
+ENDRULE
+RULE AirSys:ResVentEquipHasFID
+  DESCRIPTION
+    "A boolean flag to indicate whether the zonal H/ERV has fault detection."
+  HELP
+    "For reporting purposes. Only applicable to single-zone ventilation systems
+     serving high-rise residential zones."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:ResVentFIDChkReq ) > 0 .AND. 
+        SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:ResVentEquipHasFID ) > 0 )
+    then 1 // ResVent FID applies, and it has been checked at the zone
+    else 0
+    endif
+ENDRULE
+RULE AirSys:ResVentEquipIsAccessible
+  DESCRIPTION
+    "A boolean flag to indicate whether the residential ventilation system
+     is 'accessible' per RACM Reference Manual requirements."
+  HELP
+    "For reporting purposes. Only applicable to single-zone ventilation systems
+     serving high-rise residential zones."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:ResVentEquipChkReq ) > 0 .AND. 
+        SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:ResVentEquipIsAccessible ) > 0 )
+    then 1 // ResVent accessibility applies, and it has been checked at the zone
+    else 0
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE AirSys:DuctLctn
+  DESCRIPTION
+    "The duct location (Conditioned, Unconditioned, Other, Ductless) for reporting
+     and mandatory duct insulation checks."
+  INPUTCLASS 
+    Required
+//  OPTION   - option list moved to Enums.txt to ensure backward compatibility
+//    Conditioned
+//    Unconditioned
+//    Other
+//    Ductless
+  RESETS
+    ResetTheFollowingWhenThisIsModified
+      DuctIns
+      HERSDuctReq
+      HERSDuctTested
+  DEFAULT : S901G ECBC
+    if( BaseSysNum > 0 .OR. IsExhSys ) then 
+      "Ductless"
+    else 
+      "Conditioned"
+    endif
+  DEFAULT : T24N
+    if( BaseSysNum > 0 .OR. 
+        IsExhSys ) then 
+      "Ductless"
+    else if( Proj:AutoEffInput = 1 ) then
+      "Conditioned"
+    else "Unconditioned" 
+    endif endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE AirSys:DuctStatus
+  DESCRIPTION
+    "A boolean (0/1) flag to indicate whether a duct is existing."
+  HELP
+    ""  
+  INPUTCLASS 
+    Default
+  DEFAULT: T24N
+    if( BaseSysNum > 0  ) then
+      0
+    else if( Status = "Existing" ) then
+      1
+    else 
+      0
+    endif endif
+  CHECKCODE
+    if( Proj:IsAddOrAlt = 0 .AND. DuctStatus = 1 ) then
+      PostWarning("The duct for system '%s' has a status of 'Existing', but Compliance Type is '%s'.
+                   The status of the duct will be changed to 'New' for compliance
+                   analysis.",Name,Proj:CompType)
+		else UNCHANGED
+    endif
+  ANNUAL_PROPOSED
+    if( BaseSysNum > 0 ) then 
+      0 
+    else 
+      if( Proj:IsAddOrAlt = 0 .AND. DuctStatus = 1 ) then
+      0
+      else 
+      UNCHANGED 
+      endif
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW AirSys:DuctInsMin
+  DATATYPE
+    Float
+  LONGFORM
+    DuctInsulationMinimum
+  DESCRIPTION
+    "The mandatory minimum duct insulation per 120.4(a)."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( BaseSysNum > 0  ) then
+      0 
+//    else if( Status = "Existing" ) then
+//      0
+    else if ( DuctLctn = "Conditioned" .OR. DuctLctn = "Ductless" ) then
+      0
+    else if ( DuctLctn = "Unconditioned" .AND. DuctStatus = 0 ) then
+      8
+    else if ( DuctLctn = "Unconditioned" .AND. DuctStatus = 1 .AND. Proj:IsAddOrAlt = 0 ) then
+      8
+    else if ( DuctLctn = "Other" .AND. DuctStatus = 0 ) then
+      4.2
+    else if ( DuctLctn = "Other" .AND. DuctStatus = 1 .AND. Proj:IsAddOrAlt = 0 ) then
+      4.2
+    else 0
+//    else UNCHANGED
+//    endif 
+    endif endif endif endif endif endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE AirSys:DuctIns
+  DESCRIPTION
+    "The duct insulation R-value for reporting."
+  INPUTCLASS 
+    Optional
+  DEFAULT
+    0
+  CHECKCODE : T24N
+    if( BaseSysNum > 0 .OR. IsHlthCareSys = 1 ) then
+      UNCHANGED 
+    else if ( DuctLctn = "Conditioned" .OR. DuctLctn = "Ductless" ) then
+      UNCHANGED
+    else if ( DuctLctn = "Unconditioned" ) then
+      if( DuctIns < DuctInsMin - 0.01 ) then
+        PostError("The R-value of the duct insulation for system '%s', is 
+                   '%.1f', which does not meet the mandatory requirement in 
+                   Section 120.4(a) for ducts in unconditioned space, R-%.1f.",
+                   Name,DuctIns,DuctInsMin ) 
+      else UNCHANGED
+      endif 
+    else if ( DuctLctn = "Other" ) then
+      if( DuctIns < DuctInsMin - 0.01 ) then
+        PostError("The R-value of the duct insulation for system '%s', is 
+                   '%.1f', which does not meet the mandatory requirement in 
+                   Section 120.4(a) for ducts that are not in conditioned or 
+                   unconditioned space, R-%.1f.",
+                   Name,DuctIns,DuctInsMin ) 
+      else UNCHANGED
+      endif
+    else UNCHANGED
+    endif endif endif endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE AirSys:DuctInsRpt
+  DESCRIPTION
+    "A text string for reporting the Duct Insulation"
+  INPUTCLASS 
+    NotInput
+ ANNUAL_PROPOSED
+    if( BaseSysNum > 0 .OR. IsHlthCareSys = 1 ) 
+    then
+      UNCHANGED 
+    else if( LocalStatus( DuctLctn ) > 0 ) 
+    then 
+      if ( DuctLctn = "Ductless" ) 
+      then 
+        "NA"
+      else
+        FltToStr( DuctIns, 1 )
+      endif
+    else
+      "NA"
+    endif endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE ZnSys:HERSDuctReq
+  DESCRIPTION
+    "A boolean (0/1) flag to indicate whether HERS duct leakage testing is 
+     required."
+  HELP
+    "HERS duct leakage testing is required if duct systems:
+     1. Supply conditioned air to occupiable space from a single zone 
+     constant speed system, 2. Serve less than 5,000 ft² of conditioned floor 
+     area, and 3. More than 25% of the total duct system surface area is 
+     located in unconditioned space."  
+  INPUTCLASS 
+    Default
+  DEFAULT
+    0
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE ZnSys:HERSDuctReqRpt
+  DESCRIPTION
+    "A text string (Yes or No) showing whether HERS duct leakage testing 
+     is required, for reporting."
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+    if( BaseSysNum > 0 .OR. IsHlthCareSys = 1 ) then "NA" 
+    else 
+      if( IfValidAnd( HERSDuctReq = 0 ) .OR.
+        Type = "PTAC" .OR.
+        Type = "PTHP" .OR. 
+        Type = "Baseboard" .OR.
+        Type = "VRF" .OR.
+        Type = "Furnace" .OR.
+        Type = "PassiveBeam" .OR.
+        IsExhSys )
+      then "No"
+      else "Yes" 
+      endif
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE ZnSys:HERSDuctTested
+  DESCRIPTION
+    "A boolean (0/1) flag to indicate whether HERS duct leakage testing will 
+     be performed, per reference appendix NA2."
+  HELP
+    ""  
+  INPUTCLASS 
+    Default
+  DEFAULT
+    0
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE ZnSys:HERSDuctTestedRpt
+  DESCRIPTION
+    "A text string (Yes or No) showing whether HERS duct leakage testing will 
+     be performed, per reference appendix NA2, used for reporting."
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+    if( BaseSysNum > 0 .OR. IsHlthCareSys = 1 ) then "NA" 
+    else 
+//      if( IfValidAnd( HERSDuctReq = 0 ) .OR. IfValidAnd( HERSDuctTested = 0 ) )
+      if( IfValidAnd( HERSDuctTested = 0 ) .OR.
+        Type = "PTAC" .OR.
+        Type = "PTHP" .OR. 
+        Type = "Baseboard" .OR.
+        Type = "VRF" .OR.
+        Type = "Furnace" .OR.
+        Type = "PassiveBeam" .OR.
+        IsExhSys )
+      then "No"
+      else "Yes" 
+      endif
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW ZnSys:HERSDuctReqTested
+  DATATYPE
+    Integer
+  LONGFORM
+    HERSDuctRequiredTested
+  DESCRIPTION
+    "A boolean (0/1) flag to indicate HERS duct leakage testing is 
+     required and is field verified."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( BaseSysNum > 0 .OR. IsHlthCareSys = 1 ) 
+    then 0 
+    else 
+      if( IfValidAnd( HERSDuctReq = 1 ) .AND. IfValidAnd( HERSDuctTested = 1 ) )
+      then 1
+      else 0 
+      endif
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW ZnSys:HERSDuctTestedOnly
+  DATATYPE
+    Integer
+  LONGFORM
+    HERSDuctTestedOnly
+  DESCRIPTION
+    "A boolean (0/1) flag to indicate HERS duct leakage testing is 
+     not required but is field verified."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( BaseSysNum > 0 .OR. IsHlthCareSys = 1 ) 
+    then 0 
+    else 
+      if( IfValidAnd( HERSDuctReq = 0 ) .AND. IfValidAnd( HERSDuctTested = 1 ) )
+      then 1
+      else 0 
+      endif
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// HERS ventilation system checks
+// Not currently supported, but may be used in future
+// See ticket 3040
+RULE ZnSys:HERSFanPwrTested
+  DESCRIPTION
+    "A flag to indicate whether HERS fan power testing will be performed."
+  HELP
+    "Only applicable to single-zone ventilation systems serving high-rise 
+     residential zones."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    0
+ENDRULE
+RULE ZnSys:ResVentEquipHasFID
+  DESCRIPTION
+    "A boolean flag to indicate whether the zonal H/ERV has fault detection."
+  HELP
+    "For reporting purposes. Only applicable to single-zone ventilation systems
+     serving high-rise residential zones."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:ResVentFIDChkReq ) > 0 .AND. 
+        SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:ResVentEquipHasFID ) > 0 )
+    then 1 // ResVent FID applies, and it has been checked at the zone
+    else 0
+    endif
+ENDRULE
+RULE ZnSys:ResVentEquipIsAccessible
+  DESCRIPTION
+    "A boolean flag to indicate whether the residential ventilation system
+     is 'accessible' per RACM Reference Manual requirements."
+  HELP
+    "For reporting purposes. Only applicable to single-zone ventilation systems
+     serving high-rise residential zones."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:ResVentEquipChkReq ) > 0 .AND. 
+        SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:ResVentEquipIsAccessible ) > 0 )
+    then 1 // ResVent accessibility applies, and it has been checked at the zone
+    else 0
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW ZnSys:DuctLeakage
+  DATATYPE
+    Float
+  LONGFORM
+    DuctLeakage
+  DESCRIPTION
+    "A duct leakage for the zone system, expressed as a percentage of 
+     total airflow."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( BaseSysNum > 0 .OR. IsHlthCareSys = 1 )
+    then 0 
+    else if( Type = "PTAC" .OR. 
+             Type = "PTHP"  .OR. 
+             Type = "Baseboard" .OR.
+             Type = "VRF" .OR.
+             Type = "Furnace" .OR.
+             Type = "PassiveBeam" .OR.
+             IsExhSys )
+    then 0
+    else 
+      if( IfValidAnd( HERSDuctReq = 1 ) .AND. 
+          IfValidAnd( HERSDuctTested != 1 ) .AND. DuctStatus = 0 )
+      then 0.09
+      else 0 
+      endif
+    endif endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW ZnSys:DuctLeakCredit
+  DATATYPE
+    Float
+  LONGFORM
+    DuctLeakCredit
+  DESCRIPTION
+    "A flag for the zone system indicating that a fan power credit will be 
+     assigned because HERS Duct Testing is not required but is being done 
+     anyway."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( BaseSysNum > 0 .OR. IsHlthCareSys = 1 )
+    then 0 
+    else if( Type = "PTAC" .OR. 
+             Type = "PTHP"  .OR. 
+             Type = "Baseboard" .OR.
+             Type = "VRF" .OR.
+             Type = "Furnace" .OR.
+             Type = "PassiveBeam" .OR.
+             IsExhSys )
+    then 0
+    else 
+      if( IfValidAnd( HERSDuctReq != 1 ) .AND. 
+          IfValidAnd( HERSDuctTested = 1 ) .AND. DuctStatus = 0 )
+      then 1
+      else 0 
+      endif
+    endif endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW ZnSys:DuctSysType
+  DATATYPE
+    Float
+  LONGFORM
+    DuctSystemType
+  DESCRIPTION
+    "A flag to indicate the types of zone systems that may have ducts."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( BaseSysNum > 0 )
+    then 0 
+    else if( Type = "SZAC" .OR. 
+             Type = "SZHP"  .OR. 
+             Type = "SZDFHP"  .OR. 
+             Type = "FPFC" .OR.
+             Type = "WSHP" .OR. 
+             Type = "SPVAC" .OR.
+             Type = "SPVHP" .OR.
+             Type = "MiniSplitAC" .OR.
+              Type = "MiniSplitHP"  )
+    then 1
+    else 0 
+    endif endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE ZnSys:DuctLctn
+  DESCRIPTION
+    "The duct location (Conditioned, Unconditioned, Other, Ductless) for reporting
+     and mandatory duct insulation checks."
+  INPUTCLASS 
+    Required
+//  OPTION   - option list moved to Enums.txt to ensure backward compatibility
+//    Conditioned
+//    Unconditioned
+//    Other
+//    Ductless
+  RESETS
+    ResetTheFollowingWhenThisIsModified
+      DuctIns
+      HERSDuctReq
+      HERSDuctTested
+  DEFAULT : S901G ECBC
+    if( BaseSysNum > 0 .OR. Type = "PTAC" .OR.
+        Type = "PTHP"  .OR. Type = "Baseboard" .OR.
+        IsExhSys ) then 
+      "Ductless"
+    else
+      "Conditioned"
+    endif
+  DEFAULT : T24N
+    if( BaseSysNum > 0 .OR. 
+        Type = "PTAC" .OR.
+        Type = "PTHP" .OR. 
+        Type = "Baseboard" .OR.
+        Type = "VRF" .OR.
+        Type = "Furnace" .OR.
+        Type = "PassiveBeam" .OR.
+        Type = "Radiant" .OR.
+        IsExhSys ) then
+      "Ductless"
+    else if( Proj:AutoEffInput = 1 .OR. Type = "VentilationOnly") then
+      "Conditioned"
+    else "Unconditioned" 
+    endif endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE ZnSys:DuctStatus
+  DESCRIPTION
+    "A boolean (0/1) flag to indicate whether a duct is existing."
+  HELP
+    ""  
+  INPUTCLASS 
+    Default
+  DEFAULT: T24N
+    if( BaseSysNum > 0 ) then
+      0
+    else if( Status = "Existing" ) then
+      1
+    else 
+      0
+    endif endif
+  CHECKCODE
+    if( Proj:IsAddOrAlt = 0 .AND. DuctStatus = 1 ) then
+      PostWarning("The duct for system '%s' has a status of 'Existing', but Compliance Type is '%s'.
+                   The status of the duct will be changed to 'New' for compliance
+                   analysis.",Name,Proj:CompType)
+		else UNCHANGED
+    endif
+  ANNUAL_PROPOSED
+    if( BaseSysNum > 0 ) then 
+      0 
+    else 
+      if( Proj:IsAddOrAlt = 0 .AND. DuctStatus = 1 ) then
+      0
+      else 
+      UNCHANGED 
+      endif
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ZnSys:DuctInsMin
+  DATATYPE
+    Float
+  LONGFORM
+    DuctInsulationMinimum
+  DESCRIPTION
+    "The mandatory minimum duct insulation per 120.4(a)."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( BaseSysNum > 0 ) then
+      0 
+//    else if( Status = "Existing" ) then
+//      0
+    else if ( DuctLctn = "Conditioned" .OR. DuctLctn = "Ductless" ) then
+      0
+    else if ( DuctLctn = "Unconditioned" .AND. DuctStatus = 0 ) then
+      8
+    else if ( DuctLctn = "Unconditioned" .AND. DuctStatus = 1 .AND. Proj:IsAddOrAlt = 0 ) then
+      8
+    else if ( DuctLctn = "Other" .AND. DuctStatus = 0 ) then
+      4.2
+    else if ( DuctLctn = "Other" .AND. DuctStatus = 1 .AND. Proj:IsAddOrAlt = 0 ) then
+      4.2
+    else 0
+//    else UNCHANGED
+//    endif 
+    endif endif endif endif endif endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE ZnSys:DuctIns
+  DESCRIPTION
+    "The duct insulation R-value for reporting."
+  INPUTCLASS 
+    Optional
+  DEFAULT
+    0
+  CHECKCODE : T24N
+    if( BaseSysNum > 0 .OR. Type = "- specify -" .OR. IsHlthCareSys = 1 ) then
+      UNCHANGED 
+    else if ( DuctLctn = "Conditioned" .OR. DuctLctn = "Ductless" ) then
+      UNCHANGED
+    else if ( DuctLctn = "Unconditioned" ) then
+      if( DuctIns < DuctInsMin - 0.01 ) then
+        PostError("The R-value of the duct insulation for system '%s', is 
+                   '%.1f', which does not meet the mandatory requirement in 
+                   Section 120.4(a) for ducts in unconditioned space, R-%.1f.",
+                   Name,DuctIns,DuctInsMin ) 
+      else UNCHANGED
+      endif 
+    else if ( DuctLctn = "Other" ) then
+      if( DuctIns < DuctInsMin - 0.01 ) then
+        PostError("The R-value of the duct insulation for system '%s', is 
+                   '%.1f', which does not meet the mandatory requirement in 
+                   Section 120.4(a) for ducts that are not in conditioned or 
+                   unconditioned space, R-%.1f.",
+                   Name,DuctIns,DuctInsMin ) 
+      else UNCHANGED
+      endif
+    else UNCHANGED
+    endif endif endif endif
+ ENDRULE
+ 
+// -----------------------------------------------------------------------------
+RULE ZnSys:DuctInsRpt
+  DESCRIPTION
+    "A text string for reporting the Duct Insulation"
+  INPUTCLASS 
+    NotInput
+ ANNUAL_PROPOSED
+    if( BaseSysNum > 0 ) 
+    then
+      UNCHANGED 
+    else if( LocalStatus( DuctLctn ) > 0 ) 
+    then 
+      if ( DuctLctn = "Ductless" .OR.
+        Type = "PTAC" .OR.
+        Type = "PTHP" .OR. 
+        Type = "Baseboard" .OR.
+        Type = "VRF" .OR.
+        Type = "Furnace" .OR.
+        Type = "PassiveBeam" .OR.
+        IsExhSys )
+      then 
+        "NA"
+      else
+        FltToStr( DuctIns, 1 )
+      endif
+    else
+      "NA"
+    endif endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE AirSys:COCtrlRpt
+  DESCRIPTION
+    "A text string (Yes or No) describing whether an exhaust system uses CO
+     control."
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+    if( LocalStatus( ExhCtrlMthd ) > 0 ) then 
+      if( ExhCtrlMthd = "COControl" ) then "Yes"
+      else "No"
+      endif
+    else "No"
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE ZnSys:COCtrlRpt
+  DESCRIPTION
+    "A text string (Yes or No) describing whether an exhaust system uses CO
+     control, used for reporting."
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+    if( LocalStatus( ExhCtrlMthd ) > 0 ) then 
+      if( ExhCtrlMthd = "COControl" ) then "Yes"
+      else "No"
+      endif
+    else "No"
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE AirSys:EconoTypeRpt
+  DESCRIPTION
+    "A text string describing the economizer type, used for reporting on 
+     computer room systems."
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+    if( LocalStatus( HasAirEcono ) > 0 ) then 
+      if( HasAirEcono = 0 ) then "None"
+      else "Air"
+      endif
+    else "None"
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE ThrmlZn:HasDDCCtrl
+  DESCRIPTION
+    "A flag to indicate if the ThermalZone is served by a multi-zone system with
+     direct digital control (DDC) for each zone."
+  HELP
+    "This flag is usually only applicable to zones that are served by multi-zone
+     AirSystems of Type 'DOASVAV', 'PVAV', and 'VAV'."
+  INPUTCLASS 
+    NotInput
+  DEFAULT 
+    if( LocalCompAssigned( VentSysRef ) = ComponentType( "AirSys" ) )
+    then 
+      if( IfValidAnd( VentSysRef:CtrlSysType = "DDCToZone" ) )
+        then 1
+        else 0
+        endif
+    else 0
+    endif
+  ANNUAL 
+    if( LocalCompAssigned( VentSysRef ) = ComponentType( "AirSys" ) )
+    then 
+      if( IfValidAnd( VentSysRef:CtrlSysType = "DDCToZone" ) )
+        then 1
+        else 0
+        endif
+    else 0
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE ThrmlZn:TransferVentFlow
+  RULESETS
+    T24N
+  DESCRIPTION
+    "The amount of zone ventilation air flow, in cfm adn at design conditions,
+     that is transferred from other ventilated spaces."
+  HELP
+    "Per EXCEPTION to Section 120.1(b)2 spaces combined, use of transfer air for
+     ventilation is acceptable if:
+
+     A. None of the spaces from which air is transferred have any unusual sources
+     of indoor air contaminants; and
+
+     B. The outdoor air that is supplied to all spaces combined, is sufficient
+     to meet the requirements of Section 120.1(b)2 for each space individually.
+
+    The criteria for B is determined for each BuildingStory, and does not allow
+    for ventilation air from laboratory and parking garage spaces to be counted
+    in the balance."
+  INPUTCLASS 
+    NotInput
+  UNITS
+    cfm
+  REPORTPRECISION
+    0
+  ANNUAL
+    if( ( CodeVentFlow - VentFlow ) > 0 )
+    then // VentFlow is less than CodeVentFlow
+      CodeVentFlow - VentFlow
+    else UNDEFINED
+    endif
+ENDRULE
+
+
+// List of zones that are referenced as PriAirCondgSysRef[1]
+RULE AirSys:ZnServedAsPriAirCondgSys
+  DESCRIPTION
+    "A string that lists the names of thermal zones served by the local AirSystem
+     object as it's primary heating/cooling system, as defined by the 
+     ThrmlZn:PriAirCondgSysRef[1] property."
+  INPUTCLASS 
+    NotInput
+  ANNUAL
+    ListRevRef( ThrmlZn:PriAirCondgSysRef[1], "%s", "\n%s", "\n%s", ThrmlZn:Name )
+ENDRULE
+RULE ZnSys:ZnServedAsPriAirCondgSys
+  DESCRIPTION
+    "A string that lists the names of thermal zones served by the local ZoneSystem
+     object as it's primary heating/cooling system, as defined by the 
+     ThrmlZn:PriAirCondgSysRef[1] property."
+  INPUTCLASS 
+    NotInput
+  ANNUAL
+    ListRevRef( ThrmlZn:PriAirCondgSysRef[1], "%s", "\n%s", "\n%s", ThrmlZn:Name )
+ENDRULE
+
+
+// List of zones that are referenced as VentSysRef
+RULE AirSys:ZnServedAsVentSys
+  DESCRIPTION
+    "A string that lists the names of thermal zones served by the local AirSystem
+     object as it's primary ventilation system, as defined by the 
+     ThrmlZn:VentSysRef property."
+  INPUTCLASS 
+    NotInput
+  ANNUAL
+    ListRevRef( ThrmlZn:VentSysRef, "%s", "\n%s", "\n%s", ThrmlZn:Name )
+ENDRULE
+RULE ZnSys:ZnServedAsVentSys
+  DESCRIPTION
+    "A string that lists the names of thermal zones served by the local ZoneSystem
+     object as it's primary ventilation system, as defined by the 
+     ThrmlZn:VentSysRef property."
+  INPUTCLASS 
+    NotInput
+  ANNUAL
+    ListRevRef( ThrmlZn:VentSysRef, "%s", "\n%s", "\n%s", ThrmlZn:Name )
+ENDRULE
+
+
+// List of zones that are referenced as ExhSysRef
+RULE AirSys:ZnServedAsExhSys
+  DESCRIPTION
+    "A string that lists the names of thermal zones served by the local AirSystem
+     object as it's exhaust system, as defined by the ThrmlZn:ExhSysRef property."
+  INPUTCLASS 
+    NotInput
+  ANNUAL
+    ListRevRef( ThrmlZn:ExhSysRef, "%s", "\n%s", "\n%s", ThrmlZn:Name )
+ENDRULE
+RULE ZnSys:ZnServedAsExhSys
+  DESCRIPTION
+    "A string that lists the names of thermal zones served by the local ZoneSystem
+     object as it's exhaust system, as defined by the ThrmlZn:ExhSysRef property."
+  INPUTCLASS 
+    NotInput
+  ANNUAL
+    ListRevRef( ThrmlZn:ExhSysRef, "%s", "\n%s", "\n%s", ThrmlZn:Name )
+ENDRULE
+
+
+
+// =============================================================================
+RULE AirSys:EconoCtrlRpt
+  DESCRIPTION
+    "A text string describing the economizer controls for reporting."
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+    if( LocalStatus( AirEconoTypeCode ) > 0 ) then
+      if( AirEconoTypeCode = 1 ) then 
+        "No Economizer"
+      else if( AirEconoTypeCode = 2 ) then
+        "Fixed Drybulb Economizer"
+      else if( AirEconoTypeCode = 3 ) then
+        "Differential Drybulb Economizer"
+      else if( AirEconoTypeCode = 4 ) then
+        "Differential Enthalpy Economizer"
+      else if( AirEconoTypeCode = 5 ) then
+        "Differential Enthalpy and Drybulb Economizer"
+      else
+        "Economizer type not properly specified "
+      endif endif endif endif endif
+    else
+      "Economizer not properly specified"
+    endif
+ENDRULE
+
+
+// =============================================================================
+RULE AirSys:ClgCtrlRpt
+  DESCRIPTION
+    "A text string describing the supply air temperature controls for reporting."
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+    if( ClgCtrl = "NoSATControl" ) then
+      "No Supply Air Temp. Control"
+    else if( ClgCtrl = "Fixed" ) then
+      Format( "Supply Air Temp. Fixed at %g", ClgFixedSupTemp )
+    else if( ClgCtrl = "OutsideAirReset" ) then
+      "Supply Air Temp. Reset on Outside Air Temp." 
+    else if( ClgCtrl = "Scheduled" ) then
+      "Scheduled Supply Air Temp." 
+    else if( ClgCtrl = "WarmestResetFlowFirst" ) then
+      "Warmest Zone Supply Air Temp. Reset - Flow First" 
+    else if( ClgCtrl = "WarmestResetTemperatureFirst" ) then
+      "Warmest Zone Supply Air Temp. Reset - Temp. First" 
+    else if( ClgCtrl = "WarmestReset" ) then
+      "Warmest Zone Supply Air Temp. Reset" 
+    else
+      "ClgCtrl not properly specified"
+    endif endif endif endif endif endif endif
+ENDRULE
+
+
+// =============================================================================
+RULE AirSys:CtrlRpt
+  DESCRIPTION
+    "A text string describing the air system controls for reporting."
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+    if( LocalStatus( CtrlSysType ) > 0 ) then
+      if( CtrlSysType = "DDCToZone" ) then 
+        if( LocalStatus( ReheatCtrlMthd ) > 0 ) then
+          if( ReheatCtrlMthd = "SingleMaximum" ) then
+            DCVRpt + ", DDC Controls and Single Maximum Reheat Controls"
+          else if( ReheatCtrlMthd = "DualMaximum" ) then
+            DCVRpt + ", DDC Controls and Dual Maximum Reheat Controls"
+          else
+            DCVRpt + ", DDC Controls - Reheat Control not properly specified"
+          endif endif
+        else
+          DCVRpt + ", DDC Controls"
+        endif
+      else if( CtrlSysType = "Other" ) then
+        if( LocalStatus( ReheatCtrlMthd ) > 0 ) then
+          if( ReheatCtrlMthd = "SingleMaximum" ) then
+            DCVRpt + ", No DDC and Single Maximum Reheat Controls"
+          else if( ReheatCtrlMthd = "DualMaximum" ) then
+            DCVRpt + ", No DDC and Dual Maximum Reheat Controls"
+          else
+            DCVRpt + ", No DDC - Reheat Control not properly specified"
+          endif endif
+        else
+          DCVRpt + ", No DDC"
+        endif
+      else
+        if( LocalStatus( ReheatCtrlMthd ) > 0 ) then
+          if( ReheatCtrlMthd = "SingleMaximum" ) then
+            DCVRpt + ", DDC Control not properly specified, Single Maximum Reheat Controls"
+          else if( ReheatCtrlMthd = "DualMaximum" ) then
+            DCVRpt + ", DDC Control not properly specified, Dual Maximum Reheat Controls"
+          else
+            DCVRpt + ", DDC Control and Reheat Control not properly specified"
+          endif endif
+        else
+          DCVRpt + ", DDC Control not properly specified"
+        endif
+      endif endif
+    else
+      if( LocalStatus( ReheatCtrlMthd ) > 0 ) then
+        if( ReheatCtrlMthd = "SingleMaximum" ) then
+          DCVRpt + ", Single Maximum Reheat Controls"
+        else if( ReheatCtrlMthd = "DualMaximum" ) then
+          DCVRpt + ", Dual Maximum Reheat Controls"
+        else
+          DCVRpt + ", Reheat Control not properly specified"
+        endif endif
+      else
+        DCVRpt
+      endif
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW AirSys:HasDirectEvapClr
+  DATATYPE
+    Integer
+  LONGFORM
+    HasDirectEvaporativeCooler
+  DESCRIPTION
+    "A flag that indicates whether the AirSystem has a direct evaporative cooler"
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( SumChildrenIf( EvapClr:Eff, EvapClr:Type = "Direct" ) > 0.01 )
+    then 1
+    else 0
+    endif
+  ANNUAL
+    if( SumChildrenIf( EvapClr:Eff, EvapClr:Type = "Direct" ) > 0.01 )
+    then 1
+    else 0
+    endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW AirSys:HasIndirectEvapClr
+  DATATYPE
+    Integer
+  LONGFORM
+    HasIndirectEvaporativeCooler
+  DESCRIPTION
+    "A flag that indicates whether the AirSystem has a indirect evaporative cooler"
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( SumChildrenIf( EvapClr:Eff, EvapClr:Type = "Indirect" ) > 0.01 )
+    then 1
+    else 0
+    endif
+  ANNUAL
+    if( SumChildrenIf( EvapClr:Eff, EvapClr:Type = "Indirect" ) > 0.01 )
+    then 1
+    else 0
+    endif
+ENDRULE
+
+
+// ----------------------------------------------------------------
+RULE AirSys:EvapClrRpt
+
+  DESCRIPTION
+    "A flag that indicates whether the AirSystem has an evaporative cooler"
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+    if( IfValidAnd( HasDirectEvapClr = 1 ) .AND. 
+          IfValidAnd( HasIndirectEvapClr = 1) )
+    then "Evaporative Cooler (Direct and Indirect)"
+     else
+      if( IfValidAnd( HasIndirectEvapClr = 1 ) )
+       then "Evaporative Cooler (Indirect)" 
+     else 
+      if( IfValidAnd( HasDirectEvapClr = 1 ) )
+      then "Evaporative Cooler (Direct)" 
+      else "No Evaporative Cooler"
+      endif
+     endif 
+    endif
+ENDRULE
+
+// =============================================================================
+RULE AirSys:HtRcvryRpt
+  DESCRIPTION
+    "A text string describing the heat recovery for reporting."
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+    if( ChildCount( HtRcvry ) > 0 ) then
+        ChildRef  ( HtRcvry:HtRcvryRpt, 1 ) 
+    else
+      "No Heat Recovery"
+    endif
+ENDRULE
+
+
+// =======================Air System DDC Control Reporting=====================
+RULE AirSys:SysCtrlRpt[1]
+  DESCRIPTION
+    "A text string describing the air system controls for reporting "
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+    if( LocalStatus( CtrlSysType ) > 0 ) then
+       if( CtrlSysType = "DDCToZone" ) then 
+       "DDC Controls"
+       else "NA"
+       endif
+    else
+      "NA" 
+    endif
+ENDRULE
+
+// =======================Air System Reheat Control Reporting===================
+RULE AirSys:SysCtrlRpt[2]
+  DESCRIPTION
+    "A text string describing the air system controls for reporting "
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+	  if( LocalStatus( ReheatCtrlMthd ) > 0 ) then
+	    if( ReheatCtrlMthd = "SingleMaximum" ) then
+	      "Single Maximum Reheat Controls"
+	    else if( ReheatCtrlMthd = "DualMaximum" ) then
+	     "Dual Maximum Reheat Controls"
+	    else
+	     "NA"
+	    endif endif
+	  else
+	    "NA" 
+	  endif
+
+ENDRULE
+
+// ====================Air System DCV(CO2 Sensor) Control Reporting=============
+RULE AirSys:SysCtrlRpt[3]
+  DESCRIPTION
+    "A text string describing the air system controls for reporting "
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+    if( SumRevRef(ThrmlZn:VentSysRef, ThrmlZn:HasDCV ) > 0 )
+    then
+//      Format("%g Zones With CO2Sensor Vent. Control", SumRevRef(ThrmlZn:VentSysRef, ThrmlZn:HasDCV ) )
+      "Zones With CO2Sensor Vent. Control"
+    else "NA"
+    endif
+ENDRULE
+
+// =================Air System Supply Air Temperature Control Reporting==========
+RULE AirSys:SysCtrlRpt[4]
+  DESCRIPTION
+    "A text string describing the air system controls for reporting "
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+    if( ClgCtrl = "NoSATControl" ) then
+      "NA"
+    else if( ClgCtrl = "Fixed" ) then
+//      Format( "Supply Air Temp. Fixed at %g", ClgFixedSupTemp )
+      "Fixed Supply Air Temp."
+    else if( ClgCtrl = "OutsideAirReset" ) then
+      "Supply Air Temp. Reset on Outside Air Temp." 
+    else if( ClgCtrl = "Scheduled" ) then
+      "Scheduled Supply Air Temp." 
+    else if( ClgCtrl = "WarmestResetFlowFirst" ) then
+      "Warmest Zone Supply Air Temp. Reset - Flow First" 
+    else if( ClgCtrl = "WarmestResetTemperatureFirst" ) then
+      "Warmest Zone Supply Air Temp. Reset - Temp. First" 
+    else if( ClgCtrl = "WarmestReset" ) then
+      "Warmest Zone Supply Air Temp. Reset" 
+    else
+      "NA"
+    endif endif endif endif endif endif endif
+ENDRULE
+
+// =====================Air System Economizer Control Reporting=================
+RULE AirSys:SysCtrlRpt[5]
+  DESCRIPTION
+    "A text string describing the air system controls for reporting "
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+    if( LocalStatus( AirEconoTypeCode ) > 0 ) then
+      if( AirEconoTypeCode = 1 ) then 
+        "NA"
+      else if( AirEconoTypeCode = 2 ) then
+        "Fixed Drybulb Economizer"
+      else if( AirEconoTypeCode = 3 ) then
+        "Differential Drybulb Economizer"
+      else if( AirEconoTypeCode = 4 ) then
+        "Differential Enthalpy Economizer"
+      else if( AirEconoTypeCode = 5 ) then
+        "Differential Enthalpy and Drybulb Economizer"
+      else
+        "NA "
+      endif endif endif endif endif
+    else
+      "NA"
+    endif
+ENDRULE
+
+// =====================Air System Heat Recovery Reporting=================
+RULE AirSys:SysCtrlRpt[6]
+  DESCRIPTION
+    "A text string describing the air system controls for reporting "
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+    if( ChildCount( HtRcvry ) > 0 ) then
+//        "Heat Recovery - " + ChildRef  ( HtRcvry:Type, 1 ) 
+      "Heat Recovery"
+    else
+      "NA"
+    endif
+ENDRULE
+
+// =====================Air System Evaporative Cooler Reporting=================
+RULE AirSys:SysCtrlRpt[7]
+  DESCRIPTION
+    "A text string describing the air system controls for reporting"
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+    if( IfValidAnd( HasDirectEvapClr = 1 ) .AND. 
+          IfValidAnd( HasIndirectEvapClr = 1) )
+    then "Evaporative Cooler (Direct and Indirect)"
+    else
+      if( IfValidAnd( HasIndirectEvapClr = 1 ) )
+      then "Evaporative Cooler (Indirect)" 
+      else 
+        if( IfValidAnd( HasDirectEvapClr = 1 ) )
+        then "Evaporative Cooler (Direct)" 
+        else "NA"
+        endif
+      endif 
+    endif
+ENDRULE
+
+// =====================Air System Optimum Start Reporting=================
+RULE AirSys:SysCtrlRpt[8]
+  DESCRIPTION
+    "A text string describing the air system controls for reporting"
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+    if( IfValidAnd( OptStart> 0 ) )
+    then "Optimum Start"
+    else
+     "NA"
+    endif
+ENDRULE
+
+
+// =====================Air System FID Reporting=================
+RULE AirSys:SysCtrlRpt[9]
+  DESCRIPTION
+    "A text string describing the air system controls for reporting"
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+    if( IfValidAnd ( ResVentEquipHasFID > 0 ) ) then
+      "Fault Indicator Display"
+    else "NA"    
+    endif
+ENDRULE
+
+
+// =====================Air System Accessibility Reporting=================
+RULE AirSys:SysCtrlRpt[10]
+  DESCRIPTION
+    "A text string describing the air system controls for reporting"
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+    if( IfValidAnd ( ResVentEquipIsAccessible > 0 ) ) then
+      "Supply inlet, filter, and H/ERV core accessible per RACM Reference Manual"
+    else "NA"    
+    endif
+ENDRULE
+
+
+
+// =====================Zone System Heat Recovery Reporting=================
+RULE ZnSys:SysCtrlRpt[1]
+  DESCRIPTION
+    "A text string describing the zone system controls for reporting"
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+    if( Type = "VentilationOnly") then
+      if ( HXType = "Plate" .OR. HXType = "Wheel" ) then
+      "Heat Recovery"
+      else "NA"    
+      endif
+    else
+      "NA"
+    endif
+ENDRULE
+
+RULE ZnSys:SysCtrlRpt[2]
+  DESCRIPTION
+    "A text string describing the zone system controls for reporting"
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+    if( IfValidAnd ( ResVentEquipHasFID > 0 ) ) then
+      "Fault Indicator Display"
+    else "NA"    
+    endif
+ENDRULE
+
+RULE ZnSys:SysCtrlRpt[3]
+  DESCRIPTION
+    "A text string describing the zone system controls for reporting"
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+    if( IfValidAnd ( ResVentEquipIsAccessible > 0 ) ) then
+      "Supply inlet, filter, and H/ERV core accessible per RACM Reference Manual"
+    else "NA"    
+    endif
+ENDRULE
+
+
+// ===================== HVACSecondary Screen Reporting Messages =================
+// AirSystem
+RULE NEW AirSys:AirSysErrID
+  DATATYPE
+    Integer
+  LONGFORM
+    AirSystemErrorID
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( Type != "- specify -" ) = 0 )
+    then 1
+    else 
+    if( LocalCompAssigned( CtrlZnRef ) = 0 .AND.
+        ( IfValidAnd( ServesResZn > 0 ) .OR. IfValidAnd( IsSglZnSys > 0 ) ) )  
+    then 2
+    else 0
+    endif endif
+ENDRULE
+RULE NEW AirSys:AirSysErrMsg
+  DATATYPE
+    String
+  LONGFORM
+    AirSystemErrorMessage
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    switch( AirSysErrID ) 
+      case    1 : "System 'Type' must be defined"
+      case    2 : "A control zone must be specified"
+      default   : UNDEFINED
+    endswitch
+ENDRULE
+RULE NEW AirSys:PDAdjErrMsg
+  DATATYPE
+    String
+  LONGFORM
+    PressureDropAdjustmentsErrorMessage
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( ServesResZn > 0 ) )
+    then "Fan power credits are not supported for AirSystems serving residential common areas."
+    else UNDEFINED
+    endif
+ENDRULE
+
+// AirSegment
+RULE NEW AirSeg:TypeErrMsg
+  DATATYPE
+    String
+  LONGFORM
+    TypeErrorMessage
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( ServesResZn > 0 ) .AND.
+        IfValidAnd( Type != "Supply" ) .OR. IfValidAnd( Type != "Return" ) )
+    then "Only Type = 'Supply' or 'Return' are not supported for AirSystems serving residential common areas."
+    else UNDEFINED
+    endif
+ENDRULE
+
+// CoilClg
+RULE NEW CoilClg:CoilClgErrID
+  DATATYPE
+    Integer
+  LONGFORM
+    CoilCoolingErrorID
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( ServesResZn > 0 ) )
+    then 
+      if( IfValidAnd( Type = "ChilledWater" ) .OR.
+          IfValidAnd( Type = "VRF" ) )
+      then 1
+      else 
+      if( IfValidAnd( CndsrType = "WaterSource" ) )
+      then 2
+      else 0
+      endif endif
+    else 0
+    endif
+ENDRULE
+RULE NEW CoilClg:CoilClgErrMsg
+  DATATYPE
+    String
+  LONGFORM
+    AirSystemErrorMessage
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    switch( CoilClgErrID ) 
+      case    1 : "'ChilledWater' coils are not supported."
+      case    2 : "'WaterSource' condenser type is not supported."
+      default   : UNDEFINED
+    endswitch
+ENDRULE
+
+// CoilHtg
+RULE NEW CoilHtg:CoilHtgErrID
+  DATATYPE
+    Integer
+  LONGFORM
+    CoilHeatingErrorID
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( ServesResZn > 0 ) )
+    then 
+      if( IfValidAnd( Type = "HotWater" ) .OR.
+          IfValidAnd( Type = "VRF" ) )
+      then 1
+      else 
+      if( IfValidAnd( CndsrType = "WaterSource" ) )
+      then 2
+      else 0
+      endif endif
+    else 0
+    endif
+ENDRULE
+RULE NEW CoilHtg:CoilHtgErrMsg
+  DATATYPE
+    String
+  LONGFORM
+    CoilHeatingMessage
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    switch( CoilHtgErrID ) 
+      case    1 : "'HotWater' and coils are not supported."
+      case    2 : "'WaterSource' condenser type is not supported."
+      default   : UNDEFINED
+    endswitch
+ENDRULE
+

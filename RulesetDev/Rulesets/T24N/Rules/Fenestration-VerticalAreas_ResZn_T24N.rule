@@ -1,0 +1,1320 @@
+// ResZn and ResZn Exterior Wall and Exterior Win Calculations for reporting
+
+//
+// -------------------------------------------------------------------------
+//  Copyright (c) 2012-2022, California Energy Commission
+//  All rights reserved.
+//  Redistribution and use in source and binary forms, with or without
+//  modification, are permitted provided that the following conditions are
+//  met:
+// 
+//    * Redistributions of source code must retain the above copyright
+//  notice, this list of conditions and the following disclaimer.
+//    * Redistributions in binary form must reproduce the above copyright
+//  notice, this list of conditions and the following disclaimer in
+//  the documentation and/or other materials provided with the
+//  distribution.
+//    * Neither the name of the California Energy Commission nor the names of its
+//  contributors may be used to endorse or promote products
+//  derived from this software without specific prior written
+//  permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+//  IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+//  TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION
+//  BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+//  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+//  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+//  BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+//  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+//  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// -------------------------------------------------------------------------
+
+
+RULE NEW ResWin:TotWinAreaMult
+  DATATYPE
+    Float
+  LONGFORM
+    TotalWindowAreaMultiplier
+  DESCRIPTION
+    "Area of all Windows on the Exterior Wall."  
+  INPUTCLASS
+    NotInput   
+  DEFAULT
+    if ( IfValidAnd( Area > 0 ) .AND. IfValidAnd( Multiplier > 0 )  )
+    then
+      Area * Multiplier
+    else 0
+    endif
+  SIZING_PROPOSED
+    TotWinAreaMult
+  SIZING_BASELINE
+    if ( IfValidAnd( Area > 0 ) .AND. IfValidAnd( Multiplier > 0 ) )
+    then
+      Area * Multiplier
+    else 0
+    endif
+  ANNUAL
+    TotWinAreaMult
+ENDRULE
+
+
+RULE NEW ResExtWall:WinArea
+  DATATYPE
+    Float
+  LONGFORM
+    WinArea
+  DESCRIPTION
+    "Area of all Windows on the Exterior Wall."  
+  INPUTCLASS
+    NotInput   
+  DEFAULT   
+    SumChildren( ResWin:TotWinAreaMult )    
+  CHECKSIM
+    if( IfValidAnd( WinArea >= Area ) )
+    then PostError( "Exterior Wall '%s' has window area greater than or equal
+                    to total wall area.  Window area must be reduced, or wall
+                    area increased.", Name )
+    else UNCHANGED
+    endif
+  SIZING_PROPOSED
+    WinArea
+  SIZING_BASELINE
+    SumChildren( ResWin:TotWinAreaMult )
+  ANNUAL
+    WinArea
+ENDRULE
+
+//---------- Exterior Walls ---------------------------------------------------
+RULE NEW ResExtWall:IsCondExtEnv
+  RULESETS
+    T24N
+  DATATYPE
+    Integer
+  LONGFORM
+    IsConditionedExteriorEnvelope
+  DESCRIPTION
+    "Flag to identify Exterior Walls which serve as part of the conditioned 
+     exterior envelope for WWR Calculation Purposes.  Wall area included in
+     T-24 WWR calculation includes Gross Exterior Wall Area that is above grade
+     and which is adjacent to conditioned space (direclty conditioned,
+     indirectly conditioned, or plenum.)"
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( ParentIsCond = 0 ) // .OR. ResZn:Type = "Unconditioned")
+    then 0
+    else 1
+    endif
+ENDRULE
+
+
+// ---------- T-24 WWR Calc, Exterior Wall Categories -------------------------
+RULE NEW ResExtWall:CondExtWallArea
+  DATATYPE
+    Float
+  LONGFORM
+    ConditionedExteriorWallArea
+  DESCRIPTION
+    "Area of exterior wall that is adjacent to conditioned space."  
+  HELP
+    ""  
+  INPUTCLASS
+    NotInput   
+  DEFAULT   
+    if( IsCondExtEnv = 1 .AND.
+        IfValidAnd( Area > 0 ) )
+    then Area
+    else 0
+    endif
+  SIZING
+    CondExtWallArea
+  ANNUAL
+    CondExtWallArea
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW ResExtWall:CondExtWinArea
+  DATATYPE
+    Float
+  LONGFORM
+    ConditionedExteriorWindowArea
+  DESCRIPTION
+    "Area of all Windows on the exterior wall that is adjacent to conditioned
+     space."  
+  HELP
+    ""  
+  INPUTCLASS
+    NotInput   
+  DEFAULT   
+   if( IsCondExtEnv = 1 )
+   then WinArea  // SumChildren( ResWin:Area * ResWin:Multiplier )
+    else 0
+    endif
+  SIZING_PROPOSED
+    CondExtWinArea
+  SIZING_BASELINE
+    if( IsCondExtEnv = 1 )
+    then WinArea // SumChildren( ResWin:Area  * ResWin:Multiplier ) 
+    else 0
+    endif
+  ANNUAL
+    CondExtWinArea
+ENDRULE
+
+// ---------- Identify/Flag Primary Direction of each wall --------------------
+RULE NEW ResExtWall:NorthFlag
+  DATATYPE
+    Integer
+  LONGFORM
+    NorthFacingFlag
+  DESCRIPTION
+    "Set a flag if an exterior wall is north facing"  
+  HELP
+    "1 -> North Facing: 315 < Azimuth <= 45
+     0 - Not North Facing"  
+  REFERENCE 
+    
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    if (IfValidAnd( Azimuth > 315 ) .OR. IfValidAnd( Azimuth <= 45 ))
+    then 1
+    else 0
+    endif 
+  SIZING
+    NorthFlag
+  ANNUAL
+    NorthFlag
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResExtWall:EastFlag
+  DATATYPE
+    Integer
+  LONGFORM
+    EastFacingFlag
+  DESCRIPTION
+    "Set a flag if an exterior wall is east facing"  
+  HELP
+    "1 -> East Facing: 225 < Azimuth <= 315
+     0 - Not East Facing"  
+  REFERENCE 
+    
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    if (IfValidAnd( Azimuth > 45 ) .AND. IfValidAnd( Azimuth <= 135))
+    then 1
+    else 0
+    endif 
+  SIZING
+    EastFlag
+  ANNUAL
+    EastFlag
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResExtWall:SouthFlag
+  DATATYPE
+    Integer
+  LONGFORM
+    SouthFacingFlag
+  DESCRIPTION
+    "Set a flag if an exterior wall is south facing"  
+  HELP
+    "1 -> South Facing: 225 < Azimuth <= 315
+     0 - Not South Facing"  
+  REFERENCE 
+    
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    if (IfValidAnd( Azimuth > 135 ) .AND. IfValidAnd( Azimuth <= 225 ))
+    then 1
+    else 0
+    endif 
+  SIZING
+    SouthFlag
+  ANNUAL
+    SouthFlag
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResExtWall:WestFlag
+  DATATYPE
+    Integer
+  LONGFORM
+    WestFacingFlag
+  DESCRIPTION
+    "Set a flag if an exterior wall is west facing"  
+  HELP
+    "1 -> West Facing: 225 < Azimuth <= 315
+     0 - Not West Facing"  
+  REFERENCE 
+    
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    if (IfValidAnd( Azimuth > 225 ) .AND. IfValidAnd( Azimuth <= 315 ))
+    then 1
+    else 0
+    endif 
+  SIZING
+    WestFlag
+  ANNUAL
+    WestFlag
+ENDRULE
+
+
+// ********** Space Parameters for WWR Calcs***********************************
+// ---------- T-24 WWR Calc, Relevant Areas ResZn -----------------------------------
+RULE NEW ResZn:CondExtWallArea
+  DATATYPE
+    Float
+  LONGFORM
+    ConditionedExteriorWallArea
+  DESCRIPTION
+    "The total Exterior Wall area adjacent to conditioned space and excluding 
+     DEMISING walls."  
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    SumChildren( ResExtWall:CondExtWallArea )
+  SIZING
+    CondExtWallArea
+  ANNUAL
+    CondExtWallArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResZn:NorthCondExtWallArea
+  DATATYPE
+    Float
+  LONGFORM
+    NorthConditionedExteriorWallArea
+  DESCRIPTION
+    "The total north facing Exterior Wall area adjacent to conditioned space 
+     and excluding DEMISING walls."    
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    SumChildrenIf(ResExtWall:CondExtWallArea, ResExtWall:NorthFlag == 1)
+  SIZING
+    NorthCondExtWallArea
+  ANNUAL
+    NorthCondExtWallArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResZn:EastCondExtWallArea
+  DATATYPE
+    Float
+  LONGFORM
+    EastConditionedExteriorWallArea
+  DESCRIPTION
+    "The total East facing Exterior Wall area adjacent to conditioned space 
+     and excluding DEMISING walls."    
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    SumChildrenIf(ResExtWall:CondExtWallArea, ResExtWall:EastFlag == 1)
+  SIZING
+    EastCondExtWallArea
+  ANNUAL
+    EastCondExtWallArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResZn:SouthCondExtWallArea
+  DATATYPE
+    Float
+  LONGFORM
+    SouthConditionedExteriorWallArea
+  DESCRIPTION
+    "The total South facing Exterior Wall area adjacent to conditioned space 
+     and excluding DEMISING walls."    
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    SumChildrenIf(ResExtWall:CondExtWallArea, ResExtWall:SouthFlag == 1)
+  SIZING
+    SouthCondExtWallArea
+  ANNUAL
+    SouthCondExtWallArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResZn:WestCondExtWallArea
+  DATATYPE
+    Float
+  LONGFORM
+    WestConditionedExteriorWallArea
+  DESCRIPTION
+    "The total West facing Exterior Wall area adjacent to conditioned space 
+     and excluding DEMISING walls."    
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    SumChildrenIf(ResExtWall:CondExtWallArea, ResExtWall:WestFlag == 1)
+  SIZING
+    WestCondExtWallArea
+  ANNUAL
+    WestCondExtWallArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResZn:CondExtWinArea
+  DATATYPE
+    Float
+  LONGFORM
+    ConditionedExteriorWindowArea
+  DESCRIPTION
+    "The total Exterior Window area adjacent to conditioned space, excluding 
+     windows in DEMISING walls."  
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    SumChildren( ResExtWall:CondExtWinArea )
+  SIZING_PROPOSED
+    CondExtWinArea
+  SIZING_BASELINE
+    SumChildren( ResExtWall:CondExtWinArea )
+  ANNUAL
+    CondExtWinArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResZn:NorthCondExtWinArea
+  DATATYPE
+    Float
+  LONGFORM
+    NorthConditionedExteriorWindowArea
+  DESCRIPTION
+    "The total north facing Exterior Window area adjacent to conditioned space
+     excluding windows in DEMISING walls."  
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    SumChildrenIf(ResExtWall:CondExtWinArea, ResExtWall:NorthFlag == 1)
+  SIZING_PROPOSED
+    NorthCondExtWinArea
+  SIZING_BASELINE
+    SumChildrenIf(ResExtWall:CondExtWinArea, ResExtWall:NorthFlag == 1)
+  ANNUAL
+    NorthCondExtWinArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResZn:EastCondExtWinArea
+  DATATYPE
+    Float
+  LONGFORM
+    EastConditionedExteriorWindowArea
+  DESCRIPTION
+    "The total East facing Exterior Window area adjacent to conditioned space
+     excluding windows in DEMISING walls."  
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    SumChildrenIf(ResExtWall:CondExtWinArea, ResExtWall:EastFlag == 1)
+  SIZING_PROPOSED
+    EastCondExtWinArea
+  SIZING_BASELINE
+    SumChildrenIf(ResExtWall:CondExtWinArea, ResExtWall:EastFlag == 1)
+  ANNUAL
+    EastCondExtWinArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResZn:SouthCondExtWinArea
+  DATATYPE
+    Float
+  LONGFORM
+    SouthConditionedExteriorWindowArea
+  DESCRIPTION
+    "The total South facing Exterior Window area adjacent to conditioned space
+     excluding windows in DEMISING walls."  
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    SumChildrenIf(ResExtWall:CondExtWinArea, ResExtWall:SouthFlag == 1)
+  SIZING_PROPOSED
+    SouthCondExtWinArea
+  SIZING_BASELINE
+    SumChildrenIf(ResExtWall:CondExtWinArea, ResExtWall:SouthFlag == 1)
+  ANNUAL
+    SouthCondExtWinArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResZn:WestCondExtWinArea
+  DATATYPE
+    Float
+  LONGFORM
+    WestConditionedExteriorWindowArea
+  DESCRIPTION
+    "The total West facing Exterior Window area adjacent to conditioned space
+     excluding windows in DEMISING walls."  
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    SumChildrenIf(ResExtWall:CondExtWinArea, ResExtWall:WestFlag == 1)
+  SIZING_PROPOSED
+    WestCondExtWinArea
+  SIZING_BASELINE
+    SumChildrenIf(ResExtWall:CondExtWinArea, ResExtWall:WestFlag == 1)
+  ANNUAL
+    WestCondExtWinArea
+ENDRULE
+
+// ********** Spc w/ Multipliers*********************************************
+// ---------- T-24 WWR Calc, Relevant Areas -----------------------------------
+RULE NEW ResZn:MultCondExtWallArea
+  DATATYPE
+    Float
+  LONGFORM
+    MultipliedConditionedExteriorWallArea
+  DESCRIPTION
+    "The total Exterior Wall Area adjacent to conditioned space, excluding 
+     DEMISING walls, multiplied by any space multipliers."  
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    CondExtWallArea*Parent(Mult)
+ SIZING
+    MultCondExtWallArea
+  ANNUAL
+    MultCondExtWallArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResZn:MultNorthCondExtWallArea
+  DATATYPE
+    Float
+  LONGFORM
+    MultipliedNorthConditionedExteriorWallArea
+  DESCRIPTION
+    "The total north facingExterior Wall Area adjacent to conditioned space, 
+     excluding DEMISING walls, multiplied by any space multipliers." 
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    NorthCondExtWallArea*Parent(Mult) 
+ SIZING
+    MultNorthCondExtWallArea
+  ANNUAL
+    MultNorthCondExtWallArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResZn:MultEastCondExtWallArea
+  DATATYPE
+    Float
+  LONGFORM
+    MultipliedEastConditionedExteriorWallArea
+  DESCRIPTION
+    "The total East facingExterior Wall Area adjacent to conditioned space, 
+     excluding DEMISING walls, multiplied by any space multipliers." 
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    EastCondExtWallArea*Parent(Mult) 
+ SIZING
+    MultEastCondExtWallArea
+  ANNUAL
+    MultEastCondExtWallArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResZn:MultSouthCondExtWallArea
+  DATATYPE
+    Float
+  LONGFORM
+    MultipliedSouthConditionedExteriorWallArea
+  DESCRIPTION
+    "The total South facingExterior Wall Area adjacent to conditioned space, 
+     excluding DEMISING walls, multiplied by any space multipliers." 
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    SouthCondExtWallArea*Parent(Mult) 
+ SIZING
+    MultSouthCondExtWallArea
+  ANNUAL
+    MultSouthCondExtWallArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResZn:MultWestCondExtWallArea
+  DATATYPE
+    Float
+  LONGFORM
+    MultipliedWestConditionedExteriorWallArea
+  DESCRIPTION
+    "The total West facingExterior Wall Area adjacent to conditioned space, 
+     excluding DEMISING walls, multiplied by any space multipliers." 
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    WestCondExtWallArea*Parent(Mult) 
+ SIZING
+    MultWestCondExtWallArea
+  ANNUAL
+    MultWestCondExtWallArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResZn:MultCondExtWinArea
+  DATATYPE
+    Float
+  LONGFORM
+    MultipliedConditionedExteriorWindowArea
+  DESCRIPTION
+    "The total Exterior Window Area adjacent to conditioned space, excluding 
+     windows in DEMISING walls, multiplied by any space multipliers." 
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    CondExtWinArea*Parent(Mult)
+  SIZING_PROPOSED
+    MultCondExtWinArea
+  SIZING_BASELINE
+    CondExtWinArea*Parent(Mult)
+  ANNUAL
+    MultCondExtWinArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResZn:MultNorthCondExtWinArea
+  DATATYPE
+    Float
+  LONGFORM
+    MultipliedNorthConditionedExteriorWindowArea
+  DESCRIPTION
+    "The total north facing Exterior Window Area adjacent to conditioned space, 
+     excluding windows in DEMISING walls, multiplied by any space multipliers."  
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    NorthCondExtWinArea*Parent(Mult)
+  SIZING_PROPOSED
+    MultNorthCondExtWinArea
+  SIZING_BASELINE
+    NorthCondExtWinArea*Parent(Mult)
+  ANNUAL
+    MultNorthCondExtWinArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResZn:MultEastCondExtWinArea
+  DATATYPE
+    Float
+  LONGFORM
+    MultipliedEastConditionedExteriorWindowArea
+  DESCRIPTION
+    "The total East facing Exterior Window Area adjacent to conditioned space, 
+     excluding windows in DEMISING walls, multiplied by any space multipliers."  
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    EastCondExtWinArea*Parent(Mult)
+  SIZING_PROPOSED
+    MultEastCondExtWinArea
+  SIZING_BASELINE
+    EastCondExtWinArea*Parent(Mult)
+  ANNUAL
+    MultEastCondExtWinArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResZn:MultSouthCondExtWinArea
+  DATATYPE
+    Float
+  LONGFORM
+    MultipliedSouthConditionedExteriorWindowArea
+  DESCRIPTION
+    "The total South facing Exterior Window Area adjacent to conditioned space, 
+     excluding windows in DEMISING walls, multiplied by any space multipliers."  
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    SouthCondExtWinArea*Parent(Mult)
+  SIZING_PROPOSED
+    MultSouthCondExtWinArea
+  SIZING_BASELINE
+    SouthCondExtWinArea*Parent(Mult)
+  ANNUAL
+    MultSouthCondExtWinArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResZn:MultWestCondExtWinArea
+  DATATYPE
+    Float
+  LONGFORM
+    MultipliedWestConditionedExteriorWindowArea
+  DESCRIPTION
+    "The total West facing Exterior Window Area adjacent to conditioned space, 
+     excluding windows in DEMISING walls, multiplied by any space multipliers."  
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    WestCondExtWinArea*Parent(Mult)
+  SIZING_PROPOSED
+    MultWestCondExtWinArea
+  SIZING_BASELINE
+    WestCondExtWinArea*Parent(Mult)
+  ANNUAL
+    MultWestCondExtWinArea
+ENDRULE
+
+// ********** Space Parameters for WWR Calcs***********************************
+// ---------- T-24 WWR Calc, Relevant Areas ResOtherZn -----------------------------------
+RULE NEW ResOtherZn:CondExtWallArea
+  DATATYPE
+    Float
+  LONGFORM
+    ConditionedExteriorWallArea
+  DESCRIPTION
+    "The total Exterior Wall area adjacent to conditioned space and excluding 
+     DEMISING walls."  
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    SumChildren( ResExtWall:CondExtWallArea )
+  SIZING
+    CondExtWallArea
+  ANNUAL
+    CondExtWallArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResOtherZn:NorthCondExtWallArea
+  DATATYPE
+    Float
+  LONGFORM
+    NorthConditionedExteriorWallArea
+  DESCRIPTION
+    "The total north facing Exterior Wall area adjacent to conditioned space 
+     and excluding DEMISING walls."    
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    SumChildrenIf(ResExtWall:CondExtWallArea, ResExtWall:NorthFlag == 1)
+  SIZING
+    NorthCondExtWallArea
+  ANNUAL
+    NorthCondExtWallArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResOtherZn:EastCondExtWallArea
+  DATATYPE
+    Float
+  LONGFORM
+    EastConditionedExteriorWallArea
+  DESCRIPTION
+    "The total East facing Exterior Wall area adjacent to conditioned space 
+     and excluding DEMISING walls."    
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    SumChildrenIf(ResExtWall:CondExtWallArea, ResExtWall:EastFlag == 1)
+  SIZING
+    EastCondExtWallArea
+  ANNUAL
+    EastCondExtWallArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResOtherZn:SouthCondExtWallArea
+  DATATYPE
+    Float
+  LONGFORM
+    SouthConditionedExteriorWallArea
+  DESCRIPTION
+    "The total South facing Exterior Wall area adjacent to conditioned space 
+     and excluding DEMISING walls."    
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    SumChildrenIf(ResExtWall:CondExtWallArea, ResExtWall:SouthFlag == 1)
+  SIZING
+    SouthCondExtWallArea
+  ANNUAL
+    SouthCondExtWallArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResOtherZn:WestCondExtWallArea
+  DATATYPE
+    Float
+  LONGFORM
+    WestConditionedExteriorWallArea
+  DESCRIPTION
+    "The total West facing Exterior Wall area adjacent to conditioned space 
+     and excluding DEMISING walls."    
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    SumChildrenIf(ResExtWall:CondExtWallArea, ResExtWall:WestFlag == 1)
+  SIZING
+    WestCondExtWallArea
+  ANNUAL
+    WestCondExtWallArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResOtherZn:CondExtWinArea
+  DATATYPE
+    Float
+  LONGFORM
+    ConditionedExteriorWindowArea
+  DESCRIPTION
+    "The total Exterior Window area adjacent to conditioned space, excluding 
+     windows in DEMISING walls."  
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    SumChildren( ResExtWall:CondExtWinArea )
+  SIZING_PROPOSED
+    CondExtWinArea
+  SIZING_BASELINE
+    SumChildren( ResExtWall:CondExtWinArea )
+  ANNUAL
+    CondExtWinArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResOtherZn:NorthCondExtWinArea
+  DATATYPE
+    Float
+  LONGFORM
+    NorthConditionedExteriorWindowArea
+  DESCRIPTION
+    "The total north facing Exterior Window area adjacent to conditioned space
+     excluding windows in DEMISING walls."  
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    SumChildrenIf(ResExtWall:CondExtWinArea, ResExtWall:NorthFlag == 1)
+  SIZING_PROPOSED
+    NorthCondExtWinArea
+  SIZING_BASELINE
+    SumChildrenIf(ResExtWall:CondExtWinArea, ResExtWall:NorthFlag == 1)
+  ANNUAL
+    NorthCondExtWinArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResOtherZn:EastCondExtWinArea
+  DATATYPE
+    Float
+  LONGFORM
+    EastConditionedExteriorWindowArea
+  DESCRIPTION
+    "The total East facing Exterior Window area adjacent to conditioned space
+     excluding windows in DEMISING walls."  
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    SumChildrenIf(ResExtWall:CondExtWinArea, ResExtWall:EastFlag == 1)
+  SIZING_PROPOSED
+    EastCondExtWinArea
+  SIZING_BASELINE
+    SumChildrenIf(ResExtWall:CondExtWinArea, ResExtWall:EastFlag == 1)
+  ANNUAL
+    EastCondExtWinArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResOtherZn:SouthCondExtWinArea
+  DATATYPE
+    Float
+  LONGFORM
+    SouthConditionedExteriorWindowArea
+  DESCRIPTION
+    "The total South facing Exterior Window area adjacent to conditioned space
+     excluding windows in DEMISING walls."  
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    SumChildrenIf(ResExtWall:CondExtWinArea, ResExtWall:SouthFlag == 1)
+  SIZING_PROPOSED
+    SouthCondExtWinArea
+  SIZING_BASELINE
+    SumChildrenIf(ResExtWall:CondExtWinArea, ResExtWall:SouthFlag == 1)
+  ANNUAL
+    SouthCondExtWinArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResOtherZn:WestCondExtWinArea
+  DATATYPE
+    Float
+  LONGFORM
+    WestConditionedExteriorWindowArea
+  DESCRIPTION
+    "The total West facing Exterior Window area adjacent to conditioned space
+     excluding windows in DEMISING walls."  
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    SumChildrenIf(ResExtWall:CondExtWinArea, ResExtWall:WestFlag == 1)
+  SIZING_PROPOSED
+    WestCondExtWinArea
+  SIZING_BASELINE
+    SumChildrenIf(ResExtWall:CondExtWinArea, ResExtWall:WestFlag == 1)
+  ANNUAL
+    WestCondExtWinArea
+ENDRULE
+
+// ********** Spc w/ Multipliers*********************************************
+// ---------- T-24 WWR Calc, Relevant Areas -----------------------------------
+RULE NEW ResOtherZn:MultCondExtWallArea
+  DATATYPE
+    Float
+  LONGFORM
+    MultipliedConditionedExteriorWallArea
+  DESCRIPTION
+    "The total Exterior Wall Area adjacent to conditioned space, excluding 
+     DEMISING walls, multiplied by any space multipliers."  
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    CondExtWallArea*Parent(Mult)
+ SIZING
+    MultCondExtWallArea
+  ANNUAL
+    MultCondExtWallArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResOtherZn:MultNorthCondExtWallArea
+  DATATYPE
+    Float
+  LONGFORM
+    MultipliedNorthConditionedExteriorWallArea
+  DESCRIPTION
+    "The total north facingExterior Wall Area adjacent to conditioned space, 
+     excluding DEMISING walls, multiplied by any space multipliers." 
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    NorthCondExtWallArea*Parent(Mult) 
+ SIZING
+    MultNorthCondExtWallArea
+  ANNUAL
+    MultNorthCondExtWallArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResOtherZn:MultEastCondExtWallArea
+  DATATYPE
+    Float
+  LONGFORM
+    MultipliedEastConditionedExteriorWallArea
+  DESCRIPTION
+    "The total East facingExterior Wall Area adjacent to conditioned space, 
+     excluding DEMISING walls, multiplied by any space multipliers." 
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    EastCondExtWallArea*Parent(Mult) 
+ SIZING
+    MultEastCondExtWallArea
+  ANNUAL
+    MultEastCondExtWallArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResOtherZn:MultSouthCondExtWallArea
+  DATATYPE
+    Float
+  LONGFORM
+    MultipliedSouthConditionedExteriorWallArea
+  DESCRIPTION
+    "The total South facingExterior Wall Area adjacent to conditioned space, 
+     excluding DEMISING walls, multiplied by any space multipliers." 
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    SouthCondExtWallArea*Parent(Mult) 
+ SIZING
+    MultSouthCondExtWallArea
+  ANNUAL
+    MultSouthCondExtWallArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResOtherZn:MultWestCondExtWallArea
+  DATATYPE
+    Float
+  LONGFORM
+    MultipliedWestConditionedExteriorWallArea
+  DESCRIPTION
+    "The total West facingExterior Wall Area adjacent to conditioned space, 
+     excluding DEMISING walls, multiplied by any space multipliers." 
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    WestCondExtWallArea*Parent(Mult) 
+ SIZING
+    MultWestCondExtWallArea
+  ANNUAL
+    MultWestCondExtWallArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResOtherZn:MultCondExtWinArea
+  DATATYPE
+    Float
+  LONGFORM
+    MultipliedConditionedExteriorWindowArea
+  DESCRIPTION
+    "The total Exterior Window Area adjacent to conditioned space, excluding 
+     windows in DEMISING walls, multiplied by any space multipliers." 
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    CondExtWinArea*Parent(Mult)
+  SIZING_PROPOSED
+    MultCondExtWinArea
+  SIZING_BASELINE
+    CondExtWinArea*Parent(Mult)
+  ANNUAL
+    MultCondExtWinArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResOtherZn:MultNorthCondExtWinArea
+  DATATYPE
+    Float
+  LONGFORM
+    MultipliedNorthConditionedExteriorWindowArea
+  DESCRIPTION
+    "The total north facing Exterior Window Area adjacent to conditioned space, 
+     excluding windows in DEMISING walls, multiplied by any space multipliers."  
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    NorthCondExtWinArea*Parent(Mult)
+  SIZING_PROPOSED
+    MultNorthCondExtWinArea
+  SIZING_BASELINE
+    NorthCondExtWinArea*Parent(Mult)
+  ANNUAL
+    MultNorthCondExtWinArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResOtherZn:MultEastCondExtWinArea
+  DATATYPE
+    Float
+  LONGFORM
+    MultipliedEastConditionedExteriorWindowArea
+  DESCRIPTION
+    "The total East facing Exterior Window Area adjacent to conditioned space, 
+     excluding windows in DEMISING walls, multiplied by any space multipliers."  
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    EastCondExtWinArea*Parent(Mult)
+  SIZING_PROPOSED
+    MultEastCondExtWinArea
+  SIZING_BASELINE
+    EastCondExtWinArea*Parent(Mult)
+  ANNUAL
+    MultEastCondExtWinArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResOtherZn:MultSouthCondExtWinArea
+  DATATYPE
+    Float
+  LONGFORM
+    MultipliedSouthConditionedExteriorWindowArea
+  DESCRIPTION
+    "The total South facing Exterior Window Area adjacent to conditioned space, 
+     excluding windows in DEMISING walls, multiplied by any space multipliers."  
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    SouthCondExtWinArea*Parent(Mult)
+  SIZING_PROPOSED
+    MultSouthCondExtWinArea
+  SIZING_BASELINE
+    SouthCondExtWinArea*Parent(Mult)
+  ANNUAL
+    MultSouthCondExtWinArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResOtherZn:MultWestCondExtWinArea
+  DATATYPE
+    Float
+  LONGFORM
+    MultipliedWestConditionedExteriorWindowArea
+  DESCRIPTION
+    "The total West facing Exterior Window Area adjacent to conditioned space, 
+     excluding windows in DEMISING walls, multiplied by any space multipliers."  
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    WestCondExtWinArea*Parent(Mult)
+  SIZING_PROPOSED
+    MultWestCondExtWinArea
+  SIZING_BASELINE
+    WestCondExtWinArea*Parent(Mult)
+  ANNUAL
+    MultWestCondExtWinArea
+ENDRULE
+
+
+
+// ********** Story including Spc Multipliers *******************************
+// ---------- T-24 WWR Calc, Relevant Areas -----------------------------------
+RULE NEW ResZnGrp:CondExtWallArea
+  DATATYPE
+    Float
+  LONGFORM
+    ConditionedExteriorWallArea
+  DESCRIPTION
+    "Story Exterior Wall area adjacent to conditioned space."  
+  HELP                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              ""  
+  REFERENCE 
+    
+  INPUTCLASS
+    NotInput         
+  DEFAULT
+    SumChildren(ResZn:MultCondExtWallArea) + SumChildren(ResOtherZn:MultCondExtWallArea)
+ SIZING
+    CondExtWallArea
+  ANNUAL
+    CondExtWallArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResZnGrp:NorthCondExtWallArea
+  DATATYPE
+    Float
+  LONGFORM
+    NorthConditionedExteriorWallArea
+  DESCRIPTION
+    "Story north facing Exterior Wall area adjacent to conditioned space."  
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    SumChildren(ResZn:MultNorthCondExtWallArea) + SumChildren(ResOtherZn:MultNorthCondExtWallArea)
+ SIZING
+    NorthCondExtWallArea
+  ANNUAL
+    NorthCondExtWallArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResZnGrp:EastCondExtWallArea
+  DATATYPE
+    Float
+  LONGFORM
+    EastConditionedExteriorWallArea
+  DESCRIPTION
+    "Story east facing Exterior Wall area adjacent to conditioned space." 
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    SumChildren(ResZn:MultEastCondExtWallArea)  + SumChildren(ResOtherZn:MultEastCondExtWallArea)
+ SIZING
+    EastCondExtWallArea
+  ANNUAL
+    EastCondExtWallArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResZnGrp:SouthCondExtWallArea
+  DATATYPE
+    Float
+  LONGFORM
+    SouthConditionedExteriorWallArea
+  DESCRIPTION
+    "Story south facing Exterior Wall area adjacent to conditioned space."
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    SumChildren(ResZn:MultSouthCondExtWallArea) + SumChildren(ResOtherZn:MultSouthCondExtWallArea)
+ SIZING
+    SouthCondExtWallArea
+  ANNUAL
+    SouthCondExtWallArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResZnGrp:WestCondExtWallArea
+  DATATYPE
+    Float
+  LONGFORM
+    WestConditionedExteriorWallArea
+  DESCRIPTION
+    "Story west facing Exterior Wall area adjacent to conditioned space."
+  INPUTCLASS
+    NotInput       
+  DEFAULT
+    SumChildren(ResZn:MultWestCondExtWallArea) + SumChildren(ResOtherZn:MultWestCondExtWallArea)
+ SIZING
+    WestCondExtWallArea
+  ANNUAL
+    WestCondExtWallArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResZnGrp:CondExtWinArea
+  DATATYPE
+    Float
+  LONGFORM
+    ConditionedExteriorWindowArea
+  DESCRIPTION
+    "The total Exterior Window area adjacent to conditioned space."
+  INPUTCLASS
+    NotInput           
+  DEFAULT
+    SumChildren(ResZn:MultCondExtWinArea) + SumChildren(ResOtherZn:MultCondExtWinArea)
+  SIZING_PROPOSED
+    CondExtWinArea
+  SIZING_BASELINE
+    SumChildren(ResZn:MultCondExtWinArea) + SumChildren(ResOtherZn:MultCondExtWinArea)
+  ANNUAL
+    CondExtWinArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResZnGrp:NorthCondExtWinArea
+  DATATYPE
+    Float
+  LONGFORM
+    NorthConditionedExteriorWindowArea
+  DESCRIPTION
+    "The total north facing Exterior Window area adjacent to conditioned space."
+  INPUTCLASS
+    NotInput      
+  DEFAULT
+    SumChildren(ResZn:MultNorthCondExtWinArea) + SumChildren(ResOtherZn:MultNorthCondExtWinArea)
+  SIZING_PROPOSED
+    NorthCondExtWinArea
+  SIZING_BASELINE
+    SumChildren(ResZn:MultNorthCondExtWinArea) + SumChildren(ResOtherZn:MultNorthCondExtWinArea)
+  ANNUAL
+    NorthCondExtWinArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResZnGrp:EastCondExtWinArea
+  DATATYPE
+    Float
+  LONGFORM
+    EastConditionedExteriorWindowArea
+  DESCRIPTION
+    "The total East facing Exterior Window area adjacent to conditioned space."
+  INPUTCLASS
+    NotInput      
+  DEFAULT
+    SumChildren(ResZn:MultEastCondExtWinArea) + SumChildren(ResOtherZn:MultEastCondExtWinArea)
+  SIZING_PROPOSED
+    EastCondExtWinArea
+  SIZING_BASELINE
+    SumChildren(ResZn:MultEastCondExtWinArea) + SumChildren(ResOtherZn:MultEastCondExtWinArea)
+  ANNUAL
+    EastCondExtWinArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResZnGrp:SouthCondExtWinArea
+  DATATYPE
+    Float
+  LONGFORM
+    SouthConditionedExteriorWindowArea
+  DESCRIPTION
+    "The total South facing Exterior Window area adjacent to conditioned space."
+  INPUTCLASS
+    NotInput      
+  DEFAULT
+    SumChildren(ResZn:MultSouthCondExtWinArea) + SumChildren(ResOtherZn:MultSouthCondExtWinArea)
+  SIZING_PROPOSED
+    SouthCondExtWinArea
+  SIZING_BASELINE
+    SumChildren(ResZn:MultSouthCondExtWinArea) + SumChildren(ResOtherZn:MultSouthCondExtWinArea)
+  ANNUAL
+    SouthCondExtWinArea
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
+RULE NEW ResZnGrp:WestCondExtWinArea
+  DATATYPE
+    Float
+  LONGFORM
+    WestConditionedExteriorWindowArea
+  DESCRIPTION
+    "The total West facing Exterior Window area adjacent to conditioned space."
+  INPUTCLASS
+    NotInput      
+  DEFAULT
+    SumChildren(ResZn:MultWestCondExtWinArea) + SumChildren(ResOtherZn:MultWestCondExtWinArea)
+  SIZING_PROPOSED
+    WestCondExtWinArea
+  SIZING_BASELINE
+    SumChildren(ResZn:MultWestCondExtWinArea) + SumChildren(ResOtherZn:MultWestCondExtWinArea)
+  ANNUAL
+    WestCondExtWinArea
+ENDRULE
+
+

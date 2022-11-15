@@ -1,0 +1,1299 @@
+// HVAC Secondary Systems - Exhaust Controls
+//
+// -------------------------------------------------------------------------
+//  Copyright (c) 2012-2017, California Energy Commission
+//  All rights reserved.
+//  Redistribution and use in source and binary forms, with or without
+//  modification, are permitted provided that the following conditions are
+//  met:
+// 
+//    * Redistributions of source code must retain the above copyright
+//  notice, this list of conditions and the following disclaimer.
+//    * Redistributions in binary form must reproduce the above copyright
+//  notice, this list of conditions and the following disclaimer in
+//  the documentation and/or other materials provided with the
+//  distribution.
+//    * Neither the name of the California Energy Commission nor the names of its
+//  contributors may be used to endorse or promote products
+//  derived from this software without specific prior written
+//  permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+//  IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+//  TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION
+//  BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+//  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+//  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+//  BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+//  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+//  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// -------------------------------------------------------------------------
+//  
+
+//  This rule file addresses the following building descriptors:
+
+
+
+// ********** Exhaust System Type *********************************************
+// =========================== AirSystem ======================================
+RULE AirSys:ExhSysType
+  DESCRIPTION
+    "The type of exhaust system."  
+  HELP
+    "This input is used to default assumptions for system controls and power. 
+     Laboratory, CommercialKitchen, and ParkingGarage exhaust systems can only
+     be assigned to ThermalZones comprised of the applicable specific SpaceFunction 
+     categories."
+  REFERENCE 
+    NACM Section 5.7.3.4  
+  INPUTCLASS
+    Default
+  OPTION
+    General
+    Laboratory
+    CommercialKitchen
+    ParkingGarage
+  DEFAULT
+    if( IsExhSys > 0 )
+    then
+      if( LabArea > 0 )
+      then "Laboratory"
+      else if( CommKitArea > 0 )
+      then "CommercialKitchen"
+      else if( PrkgGarArea > 0 )
+      then "ParkingGarage"
+      else "General"
+      endif endif endif
+    else UNDEFINED
+    endif
+  SIZING
+    if( IsExhSys = 0 )
+    then UNDEFINED
+    else ExhSysType
+    endif 
+ENDRULE
+// =========================== ZoneSystem =====================================
+RULE ZnSys:ExhSysType
+  DESCRIPTION
+    "The type of 'Exhaust' or 'VentilationOnly' system."  
+  HELP
+    "This input is used to default assumptions for system controls and power. 
+
+     For 'Exhaust' system, Laboratory, CommercialKitchen, and ParkingGarage can only
+     be assigned to ThermalZones comprised of the applicable specific SpaceFunction 
+     categories.
+
+     For 'VentilationOnly', there are four options that are common to zonal
+     ventilation systems, and in all cases, a childe Fan object is not required."
+  INPUTCLASS
+    Default
+//OPTION
+//  General
+//  Laboratory
+//  CommercialKitchen
+//  ExhaustOnly
+//  SupplyOnly
+//  Balanced
+//  HeatRecovery
+  DEFAULT
+    if( Type = "Exhaust" )
+    then
+      if( LabArea > 0 )
+      then "Laboratory"
+      else if( CommKitArea > 0 )
+      then "CommercialKitchen"
+      else if( PrkgGarArea > 0 )
+      then "ParkingGarage"
+      else "General"
+      endif endif endif
+    else 
+    if( Type = "VentilationOnly" )
+    then "ExhaustOnly"
+    else UNDEFINED
+    endif endif
+//CHECKCODE : T24N_2019
+// Check code not longer needed since this is now supported. See ticket 3040
+;   if( Type = "VentilationOnly" .AND. 
+;       IfValidAnd( ExhSysType = "HeatRecovery" ) )
+;   then
+;     PostError("ZoneSystem '%s' is 'VentilationOnly', Type = 'HeatRecovery'.
+;               This option is not supported for the 2019.2.0 RC release. This
+;               system should be modeled as an AirSystem to simulate the heat recovery
+;               type, efficiency and control. The final 2019.2.0 release will
+;               include support for this 'VentilationOnly' Type, with conversion to
+;               AirSystem automatically performed by the ruleset.", Name)
+;   else UNCHANGED
+;   endif
+  SIZING
+    if( IsExhSys > 0 .OR. Type = "VentilationOnly" )
+    then ExhSysType
+    else UNDEFINED
+    endif 
+ENDRULE
+
+
+// ********** Laboratory Fume Hood Sash Controls ******************************
+
+// Table 140.9-B for Fume Hood Intensive Labs
+// Used to determine if the baseline has automatic sash controls 
+TABLE StdLabFumeHoodIntensiveDensity
+   LabMinVentACH    LabFumeHoodDensMin
+   <=4              6          
+   <=6              8         
+   <=8              10         
+   <=10             12          
+   <=12             14          
+   <=14             16
+   >14              0                     
+ENDTABLE 
+
+// =========================== AirSystem ======================================
+RULE NEW AirSys:LabExhSysMinVentFlow
+  DATATYPE
+    Float
+  LONGFORM
+    LaboratoryExhaustSystemMinimumVentilationFlow
+  DESCRIPTION
+    "The design minimum ventilation flow, in cfm, for a laboratory exhaust system."
+  INPUTCLASS
+    NotInput
+  UNITS
+    cfm
+  DEFAULT
+    if( IsExhSys > 0 .AND. LabArea > 0 ) 
+    then SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:MinVentFlowWithMult ) / Cnt
+    else 0
+    endif
+ENDRULE
+
+RULE NEW AirSys:LabExhSysMinVentACH
+  DATATYPE
+    Float
+  LONGFORM
+    LaboratoryExhaustSystemMinimumVentilationACH
+  DESCRIPTION
+    "The design minimum ventilation air flow, in ACH, for a laboratory exhaust system."
+  INPUTCLASS
+    NotInput
+  UNITS
+    ACH
+  DEFAULT
+    if( IsExhSys > 0 .AND. LabArea > 0 .AND.
+        SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:VolWithMult ) > 0 )
+    then LabExhSysMinVentFlow * Cnt * 60 / SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:VolWithMult )
+    else 0
+    endif
+ENDRULE
+
+RULE NEW AirSys:LabExhSysMinExhFlow
+  DATATYPE
+    Float
+  LONGFORM
+    LaboratoryExhaustSystemMinimumExhaustFlow
+  DESCRIPTION
+    "The design minimum exhaust air flow rate, in cfm, for a laboratory exhaust system."
+  INPUTCLASS
+    NotInput
+  UNITS
+    cfm
+  DEFAULT
+    if( IsExhSys > 0 .AND. LabArea > 0 ) 
+    then SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:MinExhFlowWithMult ) / Cnt
+    else 0
+    endif
+ENDRULE
+
+RULE NEW AirSys:LabExhSysMinExhACH
+  DATATYPE
+    Float
+  LONGFORM
+    LaboratoryExhaustSystemMinimumExhaustACH
+  DESCRIPTION
+    "The design minimum exhaust air flow rate, in ACH, for a laboratory exhaust system."
+  INPUTCLASS
+    NotInput
+  UNITS
+    ACH
+  DEFAULT
+    if( IsExhSys > 0 .AND. LabArea > 0 .AND.
+        SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:VolWithMult ) > 0 )
+    then LabExhSysMinExhFlow * 60 / SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:VolWithMult )
+    else 0
+    endif  
+ENDRULE
+
+// Calculate fume hood density for system
+RULE AirSys:LabFumeHoodDens
+  DESCRIPTION
+    "For a laboratory exhaust system, the total horizontal length of laboratory fume 
+     hoods ( with vertical or horizontal sashes ) per 10,000 ft3 of zone volume."
+  INPUTCLASS 
+    NotInput
+  UNITS
+    ft
+  DEFAULT : T24N_2016
+    UNDEFINED
+  DEFAULT
+    if( IsExhSys > 0 .AND. LabArea > 0 .AND.
+        SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:VolWithMult ) > 0 )
+    then 
+      SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:LabFumeHoodLenWithMult ) / 
+      SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:VolWithMult ) * 10000
+    else 0
+    endif
+ENDRULE
+
+// Look up "fume hood intenisve" density threshold
+RULE NEW AirSys:LabFumeHoodIntensiveDens
+  DATATYPE
+    Integer
+  LONGFORM
+    LaboratoryFumeHoodIntensiveDensity
+  DESCRIPTION
+    "The fume hood density above which a laboratory is considered
+     'intensive', and therefore automatic sash controls are required 
+     for vertical fume hoods."
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N_2016
+    UNDEFINED  
+  DEFAULT
+    if( IsExhSys > 0 .AND. LabArea > 0 .AND. LabExhSysMinVentACH > 0 )
+    then StdLabFumeHoodIntensiveDensity:LabFumeHoodDensMin( "LabMinVentACH", LabExhSysMinVentACH )
+    else 0
+    endif 
+ENDRULE
+
+// =========================== ZoneSystem =====================================
+RULE NEW ZnSys:LabExhSysMinVentFlow
+  DATATYPE
+    Float
+  LONGFORM
+    LaboratoryExhaustSystemMinimumVentilationFlow
+  DESCRIPTION
+    "The design minimum ventilation flow, in cfm, for a laboratory exhaust system."
+  INPUTCLASS
+    NotInput
+  UNITS
+    cfm
+  DEFAULT
+    if( IsExhSys > 0 .AND. LabArea > 0 ) 
+    then SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:MinVentFlowWithMult ) / Cnt
+    else 0
+    endif
+ENDRULE
+
+RULE NEW ZnSys:LabExhSysMinVentACH
+  DATATYPE
+    Float
+  LONGFORM
+    LaboratoryExhaustSystemMinimumVentilationACH
+  DESCRIPTION
+    "The design minimum ventilation air flow, in ACH, for a laboratory exhaust system."
+  INPUTCLASS
+    NotInput
+  UNITS
+    ACH
+  DEFAULT
+    if( IsExhSys > 0 .AND. LabArea > 0 .AND.
+        SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:VolWithMult ) > 0 )
+    then LabExhSysMinVentFlow * Cnt * 60 / SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:VolWithMult )
+    else 0
+    endif
+ENDRULE
+
+RULE NEW ZnSys:LabExhSysMinExhFlow
+  DATATYPE
+    Float
+  LONGFORM
+    LaboratoryExhaustSystemMinimumExhaustFlow
+  DESCRIPTION
+    "The design minimum exhaust air flow, in cfm, for a laboratory exhaust system."
+  INPUTCLASS
+    NotInput
+  UNITS
+    cfm
+  DEFAULT
+    if( IsExhSys > 0 .AND. LabArea > 0 ) 
+    then SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:MinExhFlowWithMult ) / Cnt
+    else 0
+    endif
+ENDRULE
+
+RULE NEW ZnSys:LabExhSysMinExhACH
+  DATATYPE
+    Float
+  LONGFORM
+    LaboratoryExhaustSystemMinimumExhaustACH
+  DESCRIPTION
+    "The design minimum exhaust air flow, in ACH, for a laboratory exhaust system."
+  INPUTCLASS
+    NotInput
+  UNITS
+    ACH
+  DEFAULT
+    if( IsExhSys > 0 .AND. LabArea > 0 .AND.
+        SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:VolWithMult ) > 0 )
+    then LabExhSysMinExhFlow * Cnt * 60 / SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:VolWithMult )
+    else 0
+    endif
+ENDRULE
+
+// Calculate fume hood density for system
+RULE ZnSys:LabFumeHoodDens
+  DESCRIPTION
+    "For a laboratory exhaust system, the total horizontal length of laboratory fume 
+     hoods ( with vertical or horizontal sashes ) per 10,000 ft3 of zone volume."
+  INPUTCLASS 
+    NotInput
+  UNITS
+    ft
+  DEFAULT : T24N_2016
+    UNDEFINED
+  DEFAULT
+    if( IsExhSys > 0 .AND. LabArea > 0 .AND.
+        SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:VolWithMult ) > 0 )
+    then 
+      SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:LabFumeHoodLenWithMult ) / 
+      SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:VolWithMult ) * 10000
+    else 0
+    endif
+ENDRULE
+
+// Look up "fume hood intenisve" density threshold
+RULE NEW ZnSys:LabFumeHoodIntensiveDens
+  DATATYPE
+    Integer
+  LONGFORM
+    LaboratoryFumeHoodIntensiveDensity
+  DESCRIPTION
+    "The fume hood density above which a laboratory is considered
+     'intensive', and therefore automatic sash controls are required 
+     for vertical fume hoods."
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N_2016
+    UNDEFINED  
+  DEFAULT
+    if( IsExhSys > 0 .AND. LabArea > 0 .AND. LabExhSysMinVentACH > 0 )
+    then StdLabFumeHoodIntensiveDensity:LabFumeHoodDensMin( "LabMinVentACH", LabExhSysMinVentACH )
+    else 0
+    endif 
+ENDRULE
+
+// =========================== ThermalZone ===================================
+RULE NEW ThrmlZn:PropLabExhSysMinExhACH
+  DATATYPE
+    Float
+  LONGFORM
+    ProposedSystemLabExhaustMinimumExhaustACH
+  DESCRIPTION
+    "The proposed design minimum laboratory exhaust air flow, in ACH, for the 
+     exhaust system serving the zone, transfered to the ThrmlZn. Used to 
+     determine baseline exhaust control."
+  INPUTCLASS
+    NotInput
+  UNITS
+    ACH
+  DEFAULT : T24N_2016
+    UNDEFINED
+  DEFAULT
+    if( LabArea > 0 .AND. LocalCompAssigned( ExhSysRef ) )
+    then ExhSysRef:LabExhSysMinExhACH
+    else 0
+    endif
+ENDRULE
+
+RULE NEW ThrmlZn:PropLabExhSysMinVentACH
+  DATATYPE
+    Float
+  LONGFORM
+    ProposedSystemLabExhaustMinimumVentilationACH
+  DESCRIPTION
+    "The proposed design minimum laboratory ventilation air flow, in ACH, for the 
+     exhaust system serving the zone, transfered to the ThrmlZn. Used to 
+     determine baseline exhaust control."
+  INPUTCLASS
+    NotInput
+  UNITS
+    ACH
+  DEFAULT : T24N_2016
+    UNDEFINED
+  DEFAULT
+    if( LabArea > 0 .AND. LocalCompAssigned( ExhSysRef ) )
+    then ExhSysRef:LabExhSysMinVentACH
+    else 0
+    endif
+ENDRULE
+
+RULE NEW ThrmlZn:IsLabFumeHoodIntensive
+  DATATYPE
+    Float
+  LONGFORM
+    IsLaboratoryFumeHoodIntensive
+  DESCRIPTION
+    "A flag that indicates the proposed design is considered 
+     a 'fume hood intensive labortory', per Table 140.9-B."
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N_2016
+    UNDEFINED
+  DEFAULT
+    if( LabArea > 0 .AND. LocalCompAssigned( ExhSysRef ) )
+    then
+      if( ExhSysRef:LabFumeHoodDens > ExhSysRef:LabFumeHoodIntensiveDens )
+      then 1
+      else 0
+      endif
+    else 0
+    endif
+ENDRULE
+
+// ********** Laboratory Anemometer Controls ******************************
+// =========================== AirSystem ======================================
+RULE AirSys:LabExhHasAnemometerCtrl
+  DESCRIPTION
+    "Indicates the laboratory exhaust system uses a local anemometer to control 
+     flow rate."
+  HELP
+    "Controls comply with requirements defined in Section 140.9(c)3C."
+  INPUTCLASS : T24N_2016
+    NotInput
+  INPUTCLASS
+    Optional
+  DEFAULT : T24N_2016
+    UNDEFINED
+  DEFAULT
+    0
+ENDRULE
+// =========================== ZoneSystem =====================================
+RULE ZnSys:LabExhHasAnemometerCtrl
+  DESCRIPTION
+    "Indicates the laboratory exhaust system uses a local anemometer to control 
+     flow rate."
+  HELP
+    "Controls comply with requirements defined in Section 140.9(c)3C."
+  INPUTCLASS : T24N_2016
+    NotInput
+  INPUTCLASS
+    Optional
+  DEFAULT : T24N_2016
+    UNDEFINED
+  DEFAULT
+    0
+ENDRULE
+
+
+// ********** Laboratory Contaminant Controls ******************************
+// =========================== AirSystem ======================================
+RULE AirSys:LabExhHasContaminantCtrl
+  DESCRIPTION
+    "Indicates the laboratory exhaust system uses contaminant sensors to control 
+     flow rate."
+  HELP
+    "Controls comply with requirements defined in Section 140.9(c)3D."
+  INPUTCLASS : T24N_2016
+    NotInput
+  INPUTCLASS
+    Optional
+  DEFAULT : T24N_2016
+    UNDEFINED
+  DEFAULT
+    0
+ENDRULE
+// =========================== ZoneSystem =====================================
+RULE ZnSys:LabExhHasContaminantCtrl
+  DESCRIPTION
+    "Indicates the laboratory exhaust system uses contaminant sensors to control 
+     flow rate."
+  HELP
+    "Controls comply with requirements defined in Section 140.9(c)3D."
+  INPUTCLASS : T24N_2016
+    NotInput
+  INPUTCLASS
+    Optional
+  DEFAULT : T24N_2016
+    UNDEFINED
+  DEFAULT
+    0
+ENDRULE
+
+
+// ********** Parking Garage Exhaust Capacity *********************************
+RULE NEW Bldg:PrkgGarExhFlowCap
+  LONGFORM
+    ParkingGarageExhaustFlowCapacity
+  DATATYPE
+    Float
+  DESCRIPTION
+    "The total parking garage exhaust fan flow capacity for the building."  
+  HELP
+    ""
+  REFERENCE 
+    
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    SumChildrenIf( AirSys:ExhFanCap, AirSys:ExhSysType = "ParkingGarage" ) + 
+    SumChildrenIf( ZnSys:ExhFanCap, ZnSys:ExhSysType = "ParkingGarage" )
+  SIZING
+    Max( ValidOr( PrkgGarExhFlowCap, 0 ), SumChildrenIf( Spc:ExhFlowWithMult, PrkgGarArea > 0 ) )
+ENDRULE
+
+
+// ********** Exhaust Operation Mode *******************************************
+// =========================== AirSystem ======================================
+RULE AirSys:ExhOperMode
+  DESCRIPTION
+    "Describes whether exahust system availabilty control is interlocked with
+     the HVAC system availability, including when the system night cycles."
+  INPUTCLASS 
+    Default
+  OPTION
+    DecoupledFromSystem
+    CoupledToSystem
+  DEFAULT
+    if( IsExhSys > 0 )
+    then
+      if( ExhSysType = "Laboratory" )
+      then "CoupledToSystem"
+      else "DecoupledFromSystem"
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+// =========================== ZoneSystem =====================================
+RULE ZnSys:ExhOperMode
+  DESCRIPTION
+    "Describes whether exahust system availabilty control is interlocked with
+     the HVAC system availability, including when the system night cycles."
+  INPUTCLASS 
+    Default
+  OPTION
+    DecoupledFromSystem
+    CoupledToSystem
+  DEFAULT
+    if( IsExhSys > 0 )
+    then
+      if( ExhSysType = "Laboratory" )
+      then "CoupledToSystem"
+      else "DecoupledFromSystem"
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+
+// ********** Exhaust Control Type *********************************************
+// =========================== AirSystem ======================================
+RULE AirSys:ExhCtrlMthd
+  DESCRIPTION
+    "The type of exhaust control."
+  HELP
+    "The control is defaulted based on the specification of ExhaustSystemType.
+     This property should be coordinated with the specification of Fan:ControlMethod.
+     When applicable, it is used in rules to specify the exhaust flow schedule
+     or overall, average system power."
+  INPUTCLASS 
+    Default
+//OPTION
+//  ConstantFlowConstantSpeedFan
+//  VariableFlowConstantSpeedFan
+//  VariableFlowVariableSpeedFan
+//  NoCOControl
+//  COControl   
+//DEFAULT - handled in BEMEnums
+  CHECKCODE : T24N
+    if( IfValidAnd( ExhSysType = "ParkingGarage" ) .AND.
+        Bldg:PrkgGarExhFlowCap >= 10000 .AND.
+        ExhCtrlMthd != "COControl" )
+    then PostError( "For Exhaust System %s, CO based controls are required; 
+                     total building parking garage exhaust fan capacity is 
+                     greater than or equal to 10,000 cfm.",
+                     Name )
+    else UNCHANGED
+    endif
+ENDRULE
+// =========================== ZoneSystem =====================================
+RULE ZnSys:ExhCtrlMthd
+  DESCRIPTION
+    "The type of exhaust control."
+  HELP
+    "The control is defaulted based on the specification of ExhaustSystemType.
+     This property should be coordinated with the specification of Fan:ControlMethod.
+     When applicable, it is used in rules to specify the exhaust flow schedule
+     or overall, average system power."
+  INPUTCLASS 
+    Default
+//OPTION
+//  ConstantFlowConstantSpeedFan
+//  VariableFlowConstantSpeedFan
+//  VariableFlowVariableSpeedFan
+//  NoCOControl
+//  COControl  
+  CHECKCODE : T24N
+    if( IfValidAnd( ExhSysType = "ParkingGarage" ) .AND.
+        Bldg:PrkgGarExhFlowCap >= 10000 .AND.
+        ExhCtrlMthd != "COControl" )
+    then PostError( "For Exhaust System %s, CO based controls are required; 
+                     total building parking garage exhaust fan capacity is 
+                     greater than or equal to 10,000 cfm.",
+                     Name )
+    else UNCHANGED
+    endif
+ENDRULE
+
+
+// ********** Exhaust Flow Schedule Reference **********************************
+// =========================== AirSystem ======================================
+RULE AirSys:ExhFlowSchRef
+  DESCRIPTION
+    "The schedule that defines the hourly multiplier on the exhasut flow."
+  HELP
+    "This schedule is prescibed for Type = CommercialKitchen and Laboratory exhaust
+     systems. For General exhaust, the schedule is user defined, but will default 
+     to match the HVAC system availabilty schedule for the ThermalZones that the 
+     exhaust system serves. For ParkingGarage systems, the schedule is prescibed
+     to be constant, and the fan power is adjusted to account for variable speed
+     fan control."
+  INPUTCLASS
+    Prescribed
+ENDRULE
+// =========================== ZoneSystem =====================================
+RULE ZnSys:ExhFlowSchRef
+  DESCRIPTION
+    "The schedule that defines the hourly multiplier on the exhasut flow."
+  HELP
+    "This schedule is prescibed for Type = CommercialKitchen and Laboratory exhaust
+     systems. For General exhaust, the schedule is user defined, but will default 
+     to match the HVAC system availabilty schedule for the ThermalZones that the 
+     exhaust system serves. For ParkingGarage systems, the schedule is prescibed
+     to be constant, and the fan power is adjusted to account for variable speed
+     fan control."
+  INPUTCLASS
+    Prescribed
+ENDRULE
+
+
+// ---------- Exhaust fan controls at the ThermalZone --------------------------
+// These are the actual control specifications actually used for simulation
+// Fan control method
+RULE ThrmlZn:ExhCtrlMthd
+  DESCRIPTION
+    "Echo of the control method defined at exhaust system referenced by the
+     ThermalZone"
+  INPUTCLASS
+    NotInput
+  OPTION
+    ConstantFlowConstantSpeedFan
+    VariableFlowConstantSpeedFan
+    VariableFlowVariableSpeedFan
+    NoCOControl
+    COControl       
+  DEFAULT
+    if( ExhFlow > 0 )
+    then 
+      if( LocalCompAssigned( ExhSysRef ) )
+      then
+        if( IfValidAnd( ExhSysRef:ExhCtrlMthd != "" ) )
+        then ExhSysRef:ExhCtrlMthd
+        else "ConstantFlowConstantSpeedFan"
+        endif
+      else UNDEFINED
+      endif
+    else UNDEFINED
+    endif
+// Issue 2139: remove minimum air flow for variable flow lab exhaust
+; CHECKCODE : T24N
+;   if( LocalStatus( ExhCtrlMthd ) > 0 .AND. 
+;       LabArea > 0 .AND.
+;       DsgnExhACH > 0 )
+;   then 
+;     if( ( ExhCtrlMthd = "VariableFlowConstantSpeedFan" .OR. 
+;           ExhCtrlMthd = "VariableFlowVariableSpeedFan" ) .AND. 
+;         DsgnExhACH < 10  )
+;     then 
+;       PostWarning("The vent/exhaust flow rate for Labortory ThermalZone '%s'
+;                    must be at least 10 ACH to use variable flow exahust.
+;                    ConstantFlow exhaust will be simulated.", Name )
+;     else UNCHANGED
+;     endif
+;   else UNCHANGED
+;   endif
+  SIZING : T24N_2016
+    if( ExhFlow > 0 )
+    then 
+      if( BaseSysNum > 0 .AND. IsNewExh != 0 )
+      then
+        if( LabArea > 0 )
+        then
+          if( Bldg:LabExhFlow > 2000 .AND. DsgnExhACH <= 10.000001  )
+          then // Zone design exhaust flow is <= 10 ACH, use variable flow
+            "VariableFlowVariableSpeedFan"
+          else // Baseline = proposed, see Issue 2139
+            zp:ExhCtrlMthd
+          endif
+        else if( CommKitArea > 0 )
+        then 
+          if( Bldg:TotKitExhHoodFlow > 5000 )
+          then // Building kitchen exhaust hood flow is > 5000, 
+               // use variable flow/speed exhaust
+            "VariableFlowVariableSpeedFan"
+          else // Use constant flow/speed exhaust
+            "ConstantFlowConstantSpeedFan" 
+          endif
+        else
+        if( PrkgGarArea > 0 )
+        then
+          ExhCtrlMthd
+// Ticket 3061: Make baseline control same as proposed
+;         if( Bldg:PrkgGarExhFlowCap > 10000 )
+;         then "COControl"
+;         else "NoCOControl"
+;         endif
+        else ExhCtrlMthd // Control is same as proposed
+        endif endif endif
+// Issue 2139: remove minimum air flow for variable flow lab exhaust
+;     else if( LabArea > 0 .AND. DsgnExhACH < 10  )
+;     then "ConstantFlowConstantSpeedFan" // Use constant for labs < 10ACH
+      else ExhCtrlMthd // Control is same as proposed
+      endif
+    else UNDEFINED
+    endif
+  SIZING
+    if( ExhFlow > 0 )
+    then 
+      if( BaseSysNum > 0 .AND. IsNewExh != 0 )
+      then
+        if( LabArea > 0 )
+        then
+          if( PropLabExhSysMinExhACH <= 10.000001  )
+          then // System minimum exhaust flow is <= 10 ACH, use variable flow
+            "VariableFlowVariableSpeedFan"
+          else // Baseline = proposed, see Issue 2139
+            zp:ExhCtrlMthd
+          endif
+        else
+        if( CommKitArea > 0 )
+        then 
+          if( Bldg:TotKitExhHoodFlow > 5000 )
+          then // Building kitchen exhaust hood flow is > 5000, 
+               // use variable flow/speed exhaust
+            "VariableFlowVariableSpeedFan"
+          else // Use constant flow/speed exhaust
+            "ConstantFlowConstantSpeedFan" 
+          endif
+        else
+        if( PrkgGarArea > 0 )
+        then
+          ExhCtrlMthd
+// Ticket 3061: Make baseline control same as proposed
+;         if( Bldg:PrkgGarExhFlowCap > 10000 )
+;         then "COControl"
+;         else "NoCOControl"
+;         endif
+        else ExhCtrlMthd // Control is same as proposed
+        endif endif endif  
+// Issue 2139: remove minimum air flow for variable flow lab exhaust
+;     else if( LabArea > 0 .AND. DsgnExhACH < 10  )
+;     then "ConstantFlowConstantSpeedFan" // Use constant for labs < 10ACH
+      else ExhCtrlMthd // Control is same as proposed
+      endif
+    else UNDEFINED
+    endif
+  SIZING : S901G ECBC
+    ExhCtrlMthd
+  ANNUAL
+    z:ExhCtrlMthd
+ENDRULE
+// Operation mode
+RULE ThrmlZn:ExhOperMode
+  DESCRIPTION
+    "Echo of the operation mode defined at exhaust system referenced by the
+     ThermalZone"
+  INPUTCLASS 
+    NotInput
+  OPTION
+    DecoupledFromSystem
+    CoupledToSystem
+  DEFAULT
+    if( IfValidAnd( ExhFlow > 0 ) .OR. IfValidAnd( PropVentSysIsExh > 0 ) )
+    then 
+      if( LocalCompAssigned( ExhSysRef ) )
+      then ExhSysRef:ExhOperMode
+      else if( LocalCompAssigned( VentSysRef ) )
+      then VentSysRef:ExhOperMode
+      else "DecoupledFromSystem"
+      endif endif
+    else UNDEFINED
+    endif
+  SIZING : T24N
+    if( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 )
+    then // Use Baseline HVAC rules
+      if( ( CommKitArea > 0 .OR. LabArea > 0 ) .AND. 
+          ExhCtrlMthd = "VariableFlowVariableSpeedFan" )
+      then "CoupledToSystem"
+			else
+      if( LabArea > 0 .AND. DsgnExhACH > 10 )
+      then zp:ExhOperMode
+      else "DecoupledFromSystem"
+      endif endif
+    else
+    if( ExhFlow > 0 )
+    then 
+      if( ( CommKitArea > 0 .OR. LabArea > 0 ) .AND.
+          ExhCtrlMthd = "VariableFlowVariableSpeedFan" .AND. 
+          VentSysRef:IsVAVSys )
+      then // Under these conditions, the user can specify any operation mode
+        ExhOperMode
+      else // Allow user to specify the operation mode, see issue 2225.
+           // Previously was hard-coded as "DecoupledFromSystem",
+           // now this is default if not user-specified
+        ValidOr( ExhOperMode, "DecoupledFromSystem" ) 
+      endif
+    else UNDEFINED
+    endif endif
+  SIZING : S901G ECBC
+    ExhOperMode
+  ANNUAL
+    z:ExhOperMode
+ENDRULE
+
+// Create composite exh fan flow/power schedules based on SashCtrl fraction
+// First, define min flow fraction values for lab schedules
+RULE NEW  Proj:LabExhVAVManualSashCtrlMinFrac
+  DATATYPE
+    Float
+  LONGFORM
+    LaboratoryExhaustVAVManualSashControlMinimumFraction
+  DESCRIPTION
+    "The minimum (unoccupied) value of the hourly schedule."
+  INPUTCLASS
+    NotInput     
+  DEFAULT : T24N_2016
+    UNDEFINED
+  DEFAULT : T24N
+    if( SumChildren( Bldg:LabArea ) > 0 )
+    then 0.5
+    else UNDEFINED
+    endif
+ENDRULE
+RULE NEW  Proj:LabExhVAVAutoSashCtrlMinFrac
+  DATATYPE
+    Float
+  LONGFORM
+    LaboratoryExhaustVAVAutomaticSashControlMinimumFraction
+  DESCRIPTION
+    "The minimum (unoccupied) value of the hourly schedule."
+  INPUTCLASS
+    NotInput     
+  DEFAULT : T24N_2016
+    UNDEFINED
+  DEFAULT : T24N
+    if( SumChildren( Bldg:LabArea ) > 0 )
+    then 0.2
+    else UNDEFINED
+    endif
+ENDRULE
+RULE NEW  Proj:LabExhCAVMinFrac
+  DATATYPE
+    Float
+  LONGFORM
+    LaboratoryExhaustCAVMinimumFraction
+  DESCRIPTION
+    "The minimum (unoccupied) value of the hourly schedule."
+  INPUTCLASS
+    NotInput     
+  DEFAULT : T24N_2016
+    UNDEFINED
+  DEFAULT : T24N
+    if( SumChildren( Bldg:LabArea ) > 0 )
+    then 0.9
+    else UNDEFINED
+    endif
+ENDRULE
+
+
+// Step 1) Retrieve ManualSashCtrlSch and AutoSashCtrlSch
+// Sch1 = ManualSashCtrl
+RULE NEW ThrmlZn:ExhCtrlSch1Ref
+  DATATYPE
+    Schedule
+  LONGFORM
+    ExhaustControlSchedule1Reference
+  DESCRIPTION
+    "Placeholder property for the ManualSashCtrl flow schedule."
+  INPUTCLASS
+    NotInput
+  SIZING_PROPOSED : T24N_2016
+    UNDEFINED     
+  SIZING_PROPOSED
+    if( ExhFlow > 0 .AND. LabArea > 0 )
+    then
+      if( ExhCtrlMthd = "VariableFlowVariableSpeedFan" .OR. 
+          ExhCtrlMthd = "VariableFlowConstantSpeedFan" )
+      then RuleLibrary( Schedule, "LabExhaustVAVManualSashCtrl" )
+      else UNDEFINED
+      endif
+    else UNDEFINED
+    endif
+  SIZING_BASELINE : T24N_2016
+    UNDEFINED     
+  SIZING_BASELINE
+    if( ExhFlow > 0 .AND. LabArea > 0 )
+    then
+      if( ExhCtrlMthd = "VariableFlowVariableSpeedFan" .OR. 
+          ExhCtrlMthd = "VariableFlowConstantSpeedFan" )
+      then RuleLibrary( Schedule, "LabExhaustVAVManualSashCtrl" )
+      else UNDEFINED
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+// Sch2 = AutoSashCtrl
+RULE NEW ThrmlZn:ExhCtrlSch2Ref
+  DATATYPE
+    Schedule
+  LONGFORM
+    ExhaustControlSchedule2Reference
+  DESCRIPTION
+    "Placeholder property for the AutoSashCtrl flow schedule."
+  INPUTCLASS
+    NotInput   
+  SIZING : T24N_2016
+    UNDEFINED    
+  SIZING
+    if( ExhFlow > 0 .AND. LabArea > 0 )
+    then
+      if( ( ExhCtrlMthd = "VariableFlowVariableSpeedFan" .OR. 
+            ExhCtrlMthd = "VariableFlowConstantSpeedFan" ) .AND.
+          IfValidAnd( LabExhFlowAutoSashCtrlFrac > 0 ) )
+      then RuleLibrary( Schedule, "LabExhaustVAVAutoSashCtrl" )
+      else ExhCtrlSch1Ref
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+// Step 3) Create composite exhaust fan flow sch by interpolating between
+// AutoSashCtrl and ManualSashCtrl schedules based on the fraction of total exhaust
+// that is controlled. 
+// If ConstantFlowConstantSpeed, use CAV schedule
+// The flow schedule is used to develop a schedule for fan power and 
+// TrmlUnit flow tracking.
+RULE NEW ThrmlZn:ExhCtrlFlowSchRef
+  DATATYPE
+    Schedule
+  LONGFORM
+    ExhaustControlFlowScheduleReference
+  DESCRIPTION
+    "The exhaust fan flow schedule."
+  INPUTCLASS
+    NotInput
+  SIZING : T24N_2016
+    UNDEFINED       
+  SIZING
+    if( ExhFlow > 0 .AND. LabArea > 0 )
+    then
+      if( ExhCtrlMthd = "VariableFlowVariableSpeedFan" .OR. 
+          ExhCtrlMthd = "VariableFlowConstantSpeedFan" )
+      then // Is VAV flow
+        if( HasUnknownHVAC = 1 )
+        then // Always assume VAVAutoSashCtrl for HasUnknownHVAC
+          RuleLibrary( Schedule, "LabExhaustVAVAutoSashCtrl" )
+        else
+        if( LocalCompAssigned( ExhCtrlSch1Ref ) .AND. 
+            LocalCompAssigned( ExhCtrlSch2Ref ) .AND. 
+            IfValidAnd( LabExhFlowAutoSashCtrlFrac > 0 ) )
+        then // Create composite schedule based on sash fraction
+          ScheduleSum( "LabExhaustVAVComposite", 2, 
+                        ExhCtrlSch1Ref, // ManualSashCtrl
+                        ExhCtrlSch2Ref, // AutoSashCtrl
+                        1 - LabExhFlowAutoSashCtrlFrac,
+                        LabExhFlowAutoSashCtrlFrac  )
+        else // ManualSashCtrl
+          ExhCtrlSch1Ref 
+        endif endif
+      else // "ConstantFlowConstantSpeedFan"
+        RuleLibrary( Schedule, "LabExhaustCAV" )
+      endif
+    else UNDEFINED
+    endif  
+ENDRULE
+
+// Step 4) Create composite exhaust fan power schedule. This is equal to 
+// the FlowSch if VariableFlowVariableSpeed control.
+// If VariableFlowConstantSpeed or ConstantFlowConstantSpeed, use
+// CAV schedule.
+RULE NEW ThrmlZn:ExhCtrlPwrSchRef
+  DATATYPE
+    Schedule
+  LONGFORM
+    ExhaustControlPowerScheduleReference
+  DESCRIPTION
+    "The exhaust fan power schedule."
+  INPUTCLASS
+    NotInput
+  SIZING : T24N_2016
+    UNDEFINED 
+  SIZING
+    if( ExhFlow > 0 .AND. LabArea > 0 )
+    then
+      if( ExhCtrlMthd = "VariableFlowVariableSpeedFan" )
+      then // If VAV pwr
+        ExhCtrlFlowSchRef
+      else // For ConstantSpeedFan options, use CAV schedule
+        RuleLibrary( Schedule, "LabExhaustCAV" )
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+// Step 5) Set exhaust flow schedule at ThrmlZn. This is equal to the power schedule
+RULE ThrmlZn:ExhFlowSchRef
+  DESCRIPTION
+    "Echo of the flow schedule defined at exhaust system referenced by the
+     ThermalZone"
+  HELP
+    "If a schedule is defined, the flow rate that the fan operates will be this
+     fraction times the maximum flow rate. This allows a variable speed exhaust
+     fan to be modeled according to a schedule.
+     
+     For compliance analysis, the exhaust flow schedule is prescribed for process
+     spaces, and otherwise assumed to run continuous when according to the HVAC
+     system availabilty schedule."
+  INPUTCLASS 
+    Prescribed
+  DEFAULT
+    if( LocalCompAssigned( ExhSysRef ) )
+    then ExhSysRef:ExhFlowSchRef
+    else UNDEFINED
+    endif
+  SIZING_PROPOSED : T24N_2016
+    if( ExhFlow > 0 )
+    then
+      if( LabArea > 0 )
+      then // Is lab, define schedule based on control method
+        if( ExhCtrlMthd = "VariableFlowVariableSpeedFan" )
+        then RuleLibrary( Schedule, "LabExhaustVAVAuto" )
+        else RuleLibrary( Schedule, "LabExhaustCAV" )
+        endif
+      else if ( CommKitArea > 0 )
+      then // Is commercial kitchen, define schedule based on control method
+        if( ExhCtrlMthd = "VariableFlowVariableSpeedFan" )
+        then RuleLibrary( Schedule, "RestaurantExhaustHoodGreaterThan5000cfm" )
+        else RuleLibrary( Schedule, "RestaurantExhaustHoodEqualOrLessThan5000cfm" )
+        endif
+      else if( PrkgGarArea > 0 )
+      then // Is parking garage, fan power is prescribed and it is based on 24/7 operation
+        RuleLibrary( Schedule, "On" )
+      else if( IsRes > 0 .AND. PropVentSysIsExh > 0 )
+      then // Is Res and baseline ventilation system is an exhaust fan, prescribe 24/7/100% flow
+        RuleLibrary( Schedule, "On" )
+      else if( HasUnknownHVAC = 1 )
+      then // Is Partial compliance w/ no mechanical (complete or addition)
+        if( PropVentSysIsExh = 2 )
+        then // Is Res and baseline ventilation system is an exhaust fan, prescribe 24/7/100% flow
+          RuleLibrary( Schedule, "On" )
+        else // Exhaust is prescribed for Labs and CommKit (see above), but otherwise is not simulated
+          UNDEFINED 
+        endif
+  // TO DO: Consider addding this check to make sure the proposed schedule for exhaust-based vent
+  // system is reasonable.
+  ;   else if( PropVentSysIsExh > 0 .AND. 
+  ;            ( ExhFlow < VentFlow * Proj:ExhVentMultLim ) .AND. 
+  ;            ( ExhFlow < VentFlow / Proj:ExhVentMultLim ) )
+  ;   then // Ventilation system is an exhaust fan, prescribe 24/7/100% flow if withing 20% 
+  ;        // of ventilation requirement.
+  ;     RuleLibrary( Schedule, "On" )
+      else // Use user defined exhaust schedule
+        ExhFlowSchRef
+      endif endif endif endif endif
+    else UNDEFINED
+    endif
+  SIZING_PROPOSED
+    if( ExhFlow > 0 )
+    then
+      if( LabArea > 0 )
+      then // Is lab area, flow and pwr schedule are the same for sizing
+        ExhCtrlPwrSchRef
+      else
+      if ( CommKitArea > 0 )
+      then // Is commercial kitchen, define schedule based on control method
+        if( ExhCtrlMthd = "VariableFlowVariableSpeedFan" )
+        then RuleLibrary( Schedule, "RestaurantExhaustHoodGreaterThan5000cfm" )
+        else RuleLibrary( Schedule, "RestaurantExhaustHoodEqualOrLessThan5000cfm" )
+        endif
+      else
+      if( PrkgGarArea > 0 )
+      then // Is parking garage, fan power is prescribed and it is based on 24/7 operation
+        RuleLibrary( Schedule, "On" )
+      else
+      if( PropVentSysIsExh = 2 .OR. PropVentSysIsExh = 3 )
+      then // Is HRR or proposed ventilation system is an exhaust fan
+        RuleLibrary( Schedule, "On" )
+      else // Use user defined exhaust schedule
+        ExhFlowSchRef
+      endif endif endif endif
+    else UNDEFINED
+    endif
+  SIZING_BASELINE : T24N_2016
+    if( ExhFlow > 0 )
+    then
+      if( LabArea > 0 )
+      then // Is lab
+        if( ExhCtrlMthd = "VariableFlowVariableSpeedFan" )
+        then RuleLibrary( Schedule, "LabExhaustVAVAuto" )
+        else RuleLibrary( Schedule, "LabExhaustCAV" )
+        endif
+      else if ( CommKitArea > 0 )
+      then // Is commercial kitchen, define schedule based on control method
+        if( ExhCtrlMthd = "VariableFlowVariableSpeedFan" )
+        then RuleLibrary( Schedule, "RestaurantExhaustHoodGreaterThan5000cfm" )
+        else RuleLibrary( Schedule, "RestaurantExhaustHoodEqualOrLessThan5000cfm" )
+        endif
+      else if( PrkgGarArea > 0 )
+      then // Is parking garage, fan power is prescribed and it is based on 24/7 operation
+        RuleLibrary( Schedule, "On" )
+      else if( PropVentSysIsExh = 2 )
+      then // Is Res and baseline ventilation system is an exhaust fan
+        RuleLibrary( Schedule, "On" )
+      else // Baseline exhaust schedule same as proposed
+        UNCHANGED
+      endif endif endif endif
+    else UNDEFINED
+    endif
+  SIZING_BASELINE
+    if( ExhFlow > 0 )
+    then
+      if( LabArea > 0 )
+      then // Is lab area, flow and pwr schedule are the same for sizing
+        ExhCtrlPwrSchRef
+      else
+      if ( CommKitArea > 0 )
+      then // Is commercial kitchen, define schedule based on control method
+        if( ExhCtrlMthd = "VariableFlowVariableSpeedFan" )
+        then RuleLibrary( Schedule, "RestaurantExhaustHoodGreaterThan5000cfm" )
+        else RuleLibrary( Schedule, "RestaurantExhaustHoodEqualOrLessThan5000cfm" )
+        endif
+      else
+      if( PrkgGarArea > 0 )
+      then // Is parking garage, fan power is prescribed and it is based on 24/7 operation
+        RuleLibrary( Schedule, "On" )
+      else
+      if( BaseVentSysIsExh = 2 .OR. BaseVentSysIsExh = 3 )
+      then // Is Res and baseline ventilation system is an exhaust fan, prescribe 24/7/100% flow
+        RuleLibrary( Schedule, "On" )
+      else // Use user defined exhaust schedule
+        ExhFlowSchRef
+      endif endif endif endif
+    else UNDEFINED
+    endif
+// Set ANNUAL scheduled for labs
+  ANNUAL : T24N_2016
+    z:ExhFlowSchRef
+// Set schedules for sizing
+  ANNUAL
+    if( ExhFlow > 0 )
+    then
+      if( LabArea > 0 )
+      then // Is lab area, see rules above for defining flow/power schedules
+        ExhCtrlFlowSchRef
+      else z:ExhFlowSchRef
+      endif
+    else z:ExhFlowSchRef
+    endif
+ENDRULE
+
+
+// Exhaust air balancing schedule
+RULE ThrmlZn:ExhBalancedSchRef
+  DESCRIPTION
+    "A fractional schedule that defines how much of the exhaust air flow is
+     balanced by the simple air flows, such as infiltration, ventilation air
+     provided directly to the zone, or ventilation air transfered from other
+     adjacent zones."
+  HELP
+    "If the zone's HVAC system if modeled as an AirSystem, and the schedule is not
+     specified or set to 0s, then the exhaust air flow is not balanced by
+     simple air flows, and unbalanced exhaust make-up air is modeled as being 
+     outdoor air provided by the zone's AirSystem. 
+     If the schedule is set to 1s, then make-up air for exhaust flow is assumed
+     to be balanced by simple air flows, and there is no interaction with with
+     the zone's AirSystem system. 
+
+
+     If the zone's HVAC system is a ZoneSystem, make-up air for unbalanced exhaust 
+     will not provided by the system; make-up air for exhaust flow is always
+     assumed to be provided by simple airflows and does not impact the the ZoneSystem
+     outdoor air flow rates."
+  INPUTCLASS 
+    Prescribed
+  SIZING_PROPOSED
+    if( IfValidAnd( ExhFlowSim > 0 ) )
+    then
+      if( PropVentSysIsExh = 2 .OR. PropVentSysIsExh = 3 )
+      then // Is Res and set to Off as work around for issue 2225 
+        RuleLibrary( Schedule, "Off" )
+      else
+      if( ExhOperMode = "CoupledToSystem" ) 
+      then // Based on user specification of ExhOperMode
+        RuleLibrary( Schedule, "Off" )
+      else // Balanced for all other systems
+        RuleLibrary( Schedule, "On" )
+      endif endif
+    else UNDEFINED
+    endif
+  SIZING_BASELINE
+    if( IfValidAnd( ExhFlowSim > 0 ) )
+    then
+      if( BaseVentSysIsExh = 2 .OR. BaseVentSysIsExh = 3 )
+      then // Is Res and set to Off as work around for issue 2225 
+        RuleLibrary( Schedule, "Off" )
+      else 
+      if( ExhOperMode = "CoupledToSystem" ) 
+      then 
+        RuleLibrary( Schedule, "Off" )
+      else // Balanced for all other systems
+        RuleLibrary( Schedule, "On" )
+      endif endif
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:ExhBalancedSchRef
+ENDRULE
+// Flag that indicates the flow control is variable
+RULE NEW ThrmlZn:IsVarFlowExh
+  DATATYPE
+    Integer
+  LONGFORM
+    IsVariableFlowExhaust
+  INPUTCLASS
+    NotInput
+  SIZING
+    if( ExhFlow > 0 .AND. 
+        ExhOperMode = "CoupledToSystem" .AND.
+        ( IfValidAnd( ExhCtrlMthd = "VariableFlowConstantSpeedFan" ) .OR.
+          IfValidAnd( ExhCtrlMthd = "VariableFlowVariableSpeedFan" ) ) )
+    then 1
+    else UNDEFINED
+    endif
+ENDRULE
+
+// This property is not currently used
+RULE ThrmlZn:ExhMinZnTempSchRef 
+  DESCRIPTION
+    "A temperature schedule that defines when the exhaust fan will turn on."
+  HELP
+    "The fan control will be based on a comparison between the current zone 
+     air temperature and the schedule values. If the zone is warmer than the 
+     scheduled limit, then the fan will operate.
+
+     This property is not currently used, but is supported by the SDD->OS->E+
+     translator"
+  INPUTCLASS 
+    NotInput
+ENDRULE
+

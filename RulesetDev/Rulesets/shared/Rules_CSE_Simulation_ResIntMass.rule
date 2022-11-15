@@ -1,0 +1,391 @@
+; -------------------------------------------------------------------------
+; Rules pertaining to:   Setup Interior Mass Surface objects for CSE Energy Simulation
+; CEC Title-24 Residential Energy Code
+; -------------------------------------------------------------------------
+; Copyright (c) 2012-2014, California Energy Commission
+; Copyright (c) 2012-2014, Wrightsoft Corporation
+; All rights reserved.
+; Redistribution and use in source and binary forms, with or without modification,
+; are permitted provided that the following conditions are met:
+; - Redistributions of source code must retain the above copyright notice, this
+;   list of conditions and the following disclaimer.
+; - Redistributions in binary form must reproduce the above copyright notice, this
+;   list of conditions, the following disclaimer in the documentation and/or other
+;   materials provided with the distribution.
+; - Neither the name of the California Energy Commission nor the names of its
+;   contributors may be used to endorse or promote products derived from this
+;   software without specific prior written permission.
+; DISCLAIMER: THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+; "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+; THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+; NON-INFRINGEMENT ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION,
+; WRIGHTSOFT CORPORATION, ITRON, INC. OR ANY OTHER AUTHOR OR COPYRIGHT HOLDER OF
+; THIS SOFTWARE (COLLECTIVELY, THE "AUTHORS") BE LIABLE FOR ANY DIRECT, INDIRECT,
+; INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+; LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA,
+; OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+; LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
+; OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+; ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.  EACH LICENSEE AND SUBLICENSEE OF THE
+; SOFTWARE AGREES NOT TO ASSERT ANY CLAIM AGAINST ANY OF THE AUTHORS RELATING TO
+; THIS SOFTWARE, WHETHER DUE TO PERFORMANCE ISSUES, TITLE OR INFRINGEMENT ISSUES,
+; STRICT LIABILITY OR OTHERWISE.
+; -------------------------------------------------------------------------
+
+ENUM_PROPERTIES_VALUE   ; ensures retrieval/logic/us of enum properties assume numeric value (alternative is ENUM_PROPERTIES_STRING)
+
+;*************************************************************************
+RULELIST "CSE_SimulationPrep_IntMass" 1 0 0 1
+;*************************************************************************
+ ; Internal Mass calcs/elements
+   ; SAC 8/25/14 - excluded InteriorFloor area from ExtFlrArea value - and then RE-ADDED IT - this property should represent ALL IntFlr surfaces modeled - to identify any missing flr area modeled as imass floor...
+   "Set ResZn:IMassExtFlrArea"         ResZn:IMassExtFlrArea         =
+      {        SumChildren( ResSlabFlr:Area ) + SumChildren( ResExtFlr:Area ) + SumChildren( ResFlrOverCrawlSpc:Area ) +
+               SumChildren( ResIntFlr:Area ) + SumChildren( ResUndgrFlr:Area )  }
+   ; SAC 6/7/20 - revisd to handle uncond same as cond re: flr areas (MFamProto)
+   ;   {  if (Type > 9) then  0      ; uncond
+   ;      else  SumChildren( ResSlabFlr:Area ) + SumChildren( ResExtFlr:Area ) + SumChildren( ResFlrOverCrawlSpc:Area ) +
+   ;            SumChildren( ResIntFlr:Area ) + SumChildren( ResUndgrFlr:Area )  endif  }
+   "Set ResZn:IMassIntFlrArea"         ResZn:IMassIntFlrArea         = {   max( 0, FloorArea - IMassExtFlrArea )  }
+
+   "Set ResOtherZn:IMassExtFlrArea"   ResOtherZn:IMassExtFlrArea   =
+      {        SumChildren( ResSlabFlr:Area ) + SumChildren( ResExtFlr:Area ) + SumChildren( ResFlrOverCrawlSpc:Area ) +
+               SumChildren( ResIntFlr:Area ) + SumChildren( ResUndgrFlr:Area )  }
+   ; SAC 6/7/20 - revisd to handle uncond same as cond re: flr areas (MFamProto)
+   ;   {  if (Type > 9) then  0      ; uncond
+   ;      else  SumChildren( ResSlabFlr:Area ) + SumChildren( ResExtFlr:Area ) + SumChildren( ResFlrOverCrawlSpc:Area ) +
+   ;            SumChildren( ResIntFlr:Area ) + SumChildren( ResUndgrFlr:Area )  endif  }
+   "Set ResOtherZn:IMassIntFlrArea"   ResOtherZn:IMassIntFlrArea   = {   max( 0, Area - IMassExtFlrArea )  }
+
+   ; SAC 9/18/19 - handle OtherZone same as Zone (MFamProto)
+   ; revisions to ensure that IntWalls between zones & Garages are handled the same regardless of IntWall parent - SAC 11/24/20 (tic #1253)
+   "Set ResIntWall:IMassIZWallArea"      ResIntWall:IMassIZWallArea      =
+      {  if ( Proj:AnalysisVersion >= 190200)
+         then  if ( ( ParentComponentType() = "ResGarage" .AND.
+                      (LocalCompAssigned( Outside ) == ComponentType( "ResZn" ) .OR. LocalCompAssigned( Outside ) == ComponentType( "ResOtherZn" )) ) .OR.
+                    ( (ParentComponentType() == "ResZn" .OR. ParentComponentType() == "ResOtherZn") .AND.
+                      LocalCompAssigned( Outside ) == ComponentType( "ResGarage" ) ) )
+               then  Area / 2
+               else if (LocalCompAssigned( Outside ) == ComponentType( "ResZn" ) .OR. LocalCompAssigned( Outside ) == ComponentType( "ResOtherZn" ))
+               then  if (Outside:Name == Parent( name ))
+                     then   Area
+                     else   Area / 2  endif   ; prevents double counting int wall area already setup inside THIS zone
+               else  0  endif endif
+         else  if (LocalCompAssigned( Outside ) == ComponentType( "ResZn" ) .OR. LocalCompAssigned( Outside ) == ComponentType( "ResOtherZn" ))
+               then  if (Outside:Name == Parent( name ))
+                     then   Area
+                     else   Area / 2  endif   ; prevents double counting int wall area already setup inside THIS zone
+               else  0  endif endif  }
+   ; SAC 6/7/20 - revisd to handle uncond same as cond (MFamProto)
+   ;   {  if (LocalCompAssigned( Outside ) == ComponentType( "ResZn" ) .OR. LocalCompAssigned( Outside ) == ComponentType( "ResOtherZn" ))
+   ;      then  if (Outside:Type < 10)
+   ;            then  if (Outside:Name == Parent( name ))
+   ;                  then   Area
+   ;                  else   Area / 2  endif   ; prevents double counting int wall area already setup inside THIS zone
+   ;            else  0  endif
+   ;      else  0  endif  }
+   "Set ResZn:IMassIZWallArea"         ResZn:IMassIZWallArea         =
+      {  SumChildren( ResIntWall:IMassIZWallArea ) + SumRevRef( ResIntWall:Outside, ResIntWall:IMassIZWallArea )  }
+   ; SAC 6/7/20 - revisd to handle uncond same as cond (MFamProto)
+   ;   {  if (Type > 9) then  0      ; uncond
+   ;      else  SumChildren( ResIntWall:IMassIZWallArea ) + SumRevRef( ResIntWall:Outside, ResIntWall:IMassIZWallArea )
+   ;      endif  }
+   "Set ResZn:IMassIntWallArea"      ResZn:IMassIntWallArea      = {   max( 0, FloorArea - (0.5 * IMassIZWallArea) )  }
+   "Set ResOtherZn:IMassIZWallArea"      ResOtherZn:IMassIZWallArea   =
+      {  SumChildren( ResIntWall:IMassIZWallArea ) + SumRevRef( ResIntWall:Outside, ResIntWall:IMassIZWallArea )  }
+   ; SAC 6/7/20 - revisd to handle uncond same as cond (MFamProto)
+   ;   {  if (Type > 9) then  0      ; uncond
+   ;      else  SumChildren( ResIntWall:IMassIZWallArea ) + SumRevRef( ResIntWall:Outside, ResIntWall:IMassIZWallArea )
+   ;      endif  }
+   "Set ResOtherZn:IMassIntWallArea"      ResOtherZn:IMassIntWallArea   = {   max( 0, Area - (0.5 * IMassIZWallArea) )  }
+
+   ; SAC 11/28/17 - added rounding to ensure adequate area to simulate (tic #933)
+   "Zero out nearly-zero ResZn:IMassExtFlrArea"     ResZn:IMassExtFlrArea    = {  if (IMassExtFlrArea  > 0.08) then  UNCHANGED  else  0  endif  }
+   "Zero out nearly-zero ResZn:IMassIntFlrArea"     ResZn:IMassIntFlrArea    = {  if (IMassIntFlrArea  > 0.08) then  UNCHANGED  else  0  endif  }
+   "Zero out nearly-zero ResZn:IMassIZWallArea"     ResZn:IMassIZWallArea    = {  if (IMassIZWallArea  > 0.08) then  UNCHANGED  else  0  endif  }
+   "Zero out nearly-zero ResZn:IMassIntWallArea"    ResZn:IMassIntWallArea   = {  if (IMassIntWallArea > 0.08) then  UNCHANGED  else  0  endif  }
+   "Zero out nearly-zero ResOtherZn:IMassExtFlrArea"     ResOtherZn:IMassExtFlrArea    = {  if (IMassExtFlrArea  > 0.08) then  UNCHANGED  else  0  endif  }
+   "Zero out nearly-zero ResOtherZn:IMassIntFlrArea"     ResOtherZn:IMassIntFlrArea    = {  if (IMassIntFlrArea  > 0.08) then  UNCHANGED  else  0  endif  }
+   "Zero out nearly-zero ResOtherZn:IMassIZWallArea"     ResOtherZn:IMassIZWallArea    = {  if (IMassIZWallArea  > 0.08) then  UNCHANGED  else  0  endif  }
+   "Zero out nearly-zero ResOtherZn:IMassIntWallArea"    ResOtherZn:IMassIntWallArea   = {  if (IMassIntWallArea > 0.08) then  UNCHANGED  else  0  endif  }
+
+      ; (#4 in write-up) create and assign FurnCon  (as "IntMassFurnCon")
+   ; setup furniture internal mass construction
+   "Set up furniture internal mass CSE CONSTRUCTIONs"   ResProj:Action   = { EvalRulelist( "Setup_CSE_CONSTRUCTION_Furniture_internal_mass" )   }
+   "Set up furniture internal mass CSE SURFACEs"      ResZn:Action =
+      ; SAC 6/7/20 - revisd to handle uncond same as cond (MFamProto)
+      ;{  if (Local( CondFloorArea ) > 0.5)
+      {  if (Local( FloorArea ) > 0.5)
+         then EvalRulelist( "Setup_CSE_SURFACE_Furniture_internal_mass", 1 )
+         else  UNCHANGED  endif    }
+   "Set up furniture internal mass CSE SURFACEs (OtherZone)"   ResOtherZn:Action =
+      ; SAC 6/7/20 - revisd to handle uncond same as cond (MFamProto)
+      ;{  if (Local( CondFloorArea ) > 0.5)
+      {  if (Local( Area ) > 0.5)
+         then EvalRulelist( "Setup_CSE_SURFACE_Furniture_internal_mass_ResOtherZone", 1 )
+         else  UNCHANGED  endif    }     ; SAC 9/20/19 - OtherZone (MFamProto)
+      ; (#4 & 3d in Internal Mass write-up) iff SumAll( ResZn:IMassIntFlrArea ) > 0, then create and assign IntFFrm(Cav)2x10  (as "IntMassFlrFrm(Cav)2x10Con")
+   "Set up internal floor CSE CONSTRUCTIONs"         ResProj:Action   = { if (SumAll( ResZn:IMassIntFlrArea ) + SumAll( ResOtherZn:IMassIntFlrArea ) > 0)
+                                                            then  EvalRulelist( "Setup_CSE_CONSTRUCTION_internal_floor" )
+                                                            else  UNCHANGED  endif   }
+   "Set up internal floor CSE SURFACEs"            ResZn:Action = { if (IMassIntFlrArea > 0)
+                                                            then EvalRulelist( "Setup_CSE_SURFACE_internal_floor", 1 )
+                                                            else UNCHANGED endif   }
+   "Set up internal floor CSE SURFACEs (OtherZone)"   ResOtherZn:Action = { if (IMassIntFlrArea > 0)
+                                                            then EvalRulelist( "Setup_CSE_SURFACE_internal_floor_ResOtherZone", 1 )
+                                                            else UNCHANGED endif   }     ; SAC 9/20/19 - OtherZone (MFamProto)
+
+      ; (#4 & 3b in Internal Mass write-up) iff SumAll( ResZn:IMassIntWallArea ) > 0, then create and assign IntwallFrm(Cav)  (as "IntMassWallFrm(Cav)Con")
+   "Set up internal wall CSE CONSTRUCTIONs"         ResProj:Action   = { if (SumAll( ResZn:IMassIntWallArea ) + SumAll( ResOtherZn:IMassIntWallArea ) > 0 )
+                                                            then EvalRulelist( "Setup_CSE_CONSTRUCTION_internal_wall" )
+                                                            else UNCHANGEd endif   }
+   "Set up internal wall CSE SURFACEs"               ResZn:Action = { if (IMassIntWallArea > 0 )
+                                                            then EvalRulelist( "Setup_CSE_SURFACE_internal_wall", 1 )
+                                                            else UNCHANGED endif   }
+   "Set up internal wall CSE SURFACEs (OtherZone)"      ResOtherZn:Action = { if (IMassIntWallArea > 0 )
+                                                            then EvalRulelist( "Setup_CSE_SURFACE_internal_wall_ResOtherZone", 1 )
+                                                            else UNCHANGED endif   }     ; SAC 9/20/19 - OtherZone (MFamProto)
+END
+;*************************************************************************
+
+
+;*************************************************************************
+RULELIST "Setup_CSE_CONSTRUCTION_Furniture_internal_mass" 1 0 0 1
+;
+;*************************************************************************
+	"Create furniture internal mass cons"			ResProj:IntMassFurnCon					= { CreateComp( cseCONSTRUCTION, "con-FurnIMass" )	}			
+	"Create furniture internal mass layer"			ResProj:IntMassFurnConLAYERs[1]		= {	CreateComp( cseLAYER, "cl1-FurnIMass" )	}
+	"Set furniture internal mass layer Parent"		ResProj:IntMassFurnConLAYERs[1]:Parent	= {	Local( IntMassFurnCon )  }
+	"Set furniture internal mass layer Material"	ResProj:IntMassFurnConLAYERs[1]:lrMat	= {	RuleLibrary( cseMATERIAL, "IntMassMat-SoftWood" )  }
+	"Set furniture internal mass layer Thickness"	ResProj:IntMassFurnConLAYERs[1]:lrThk	= {	2.5/12.	}
+END
+
+;*************************************************************************
+RULELIST "Setup_CSE_SURFACE_Furniture_internal_mass" 1 0 0 1
+;
+;*************************************************************************
+;"Create ResZn:IMassFurnitureSurf"		ResZn:IMassFurnitureSurf			=	{	if (LocalCompAssigned( IMassFurniture ) < 0.5)
+;																				then UNDEFINED
+;																				else  CreateComp( cseSURFACE, "Furniture-imass" )
+;																				endif
+;																			}
+	"Create ResZn:IMassFurnitureSurf"		ResZn:IMassFurnitureSurf			=	{	CreateComp( cseSURFACE, "Furniture-imass" )	}
+	"Set ResZn:IMassFurnitureSurf:Parent"	ResZn:IMassFurnitureSurf:Parent = {	Local(CSE_ZONE) } 
+	"Set ResZn:IMassFurnitureSurf:sfType"	ResZn:IMassFurnitureSurf:sfType	= {	"wall" } 
+	"Set ResZn:IMassFurnitureSurf:sfArea"	ResZn:IMassFurnitureSurf:sfArea	= {	Local(FloorArea) * 2. }       ; SAC 6/7/20 - CondFloorArea -> FloorArea
+	"Set ResZn:IMassFurnitureSurf:sfCon"		ResZn:IMassFurnitureSurf:sfCon	= {	Global( ResProj:IntMassFurnCon ) } 
+	"Set ResZn:IMassFurnitureSurf:sfAZM"		ResZn:IMassFurnitureSurf:sfAZM	= {	0 } 
+	"Set ResZn:IMassFurnitureSurf:sfExCnd"	ResZn:IMassFurnitureSurf:sfExCnd = {"ADJZN" } 
+	"Set ResZn:IMassFurnitureSurf:sfAdjZn"	ResZn:IMassFurnitureSurf:sfAdjZn = {	Local(CSE_ZONE) } 
+	"Set ResZn:IMassFurnitureSurf:sfModel"	ResZn:IMassFurnitureSurf:sfModel = {	"Forward_Difference" }
+END
+;*************************************************************************
+RULELIST "Setup_CSE_SURFACE_Furniture_internal_mass_ResOtherZone" 1 0 0 1
+;
+;*************************************************************************
+;"Create ResOtherZn:IMassFurnitureSurf"		ResOtherZn:IMassFurnitureSurf			=	{	if (LocalCompAssigned( IMassFurniture ) < 0.5)
+;																				then UNDEFINED
+;																				else  CreateComp( cseSURFACE, "Furniture-imass" )
+;																				endif
+;																			}
+	"Create ResOtherZn:IMassFurnitureSurf"		ResOtherZn:IMassFurnitureSurf			=	{	CreateComp( cseSURFACE, "Furniture-imass" )	}
+	"Set ResOtherZn:IMassFurnitureSurf:Parent"	ResOtherZn:IMassFurnitureSurf:Parent = {	Local(CSE_ZONE) } 
+	"Set ResOtherZn:IMassFurnitureSurf:sfType"	ResOtherZn:IMassFurnitureSurf:sfType	= {	"wall" } 
+	"Set ResOtherZn:IMassFurnitureSurf:sfArea"	ResOtherZn:IMassFurnitureSurf:sfArea	= {	Local(Area) * 2. }      ; SAC 6/7/20 - CondFloorArea -> Area
+	"Set ResOtherZn:IMassFurnitureSurf:sfCon"		ResOtherZn:IMassFurnitureSurf:sfCon	= {	Global( ResProj:IntMassFurnCon ) } 
+	"Set ResOtherZn:IMassFurnitureSurf:sfAZM"		ResOtherZn:IMassFurnitureSurf:sfAZM	= {	0 } 
+	"Set ResOtherZn:IMassFurnitureSurf:sfExCnd"	ResOtherZn:IMassFurnitureSurf:sfExCnd = {"ADJZN" } 
+	"Set ResOtherZn:IMassFurnitureSurf:sfAdjZn"	ResOtherZn:IMassFurnitureSurf:sfAdjZn = {	Local(CSE_ZONE) } 
+	"Set ResOtherZn:IMassFurnitureSurf:sfModel"	ResOtherZn:IMassFurnitureSurf:sfModel = {	"Forward_Difference" }
+END
+
+;*************************************************************************
+RULELIST "Setup_CSE_CONSTRUCTION_internal_wall" 1 0 0 1
+;
+;*************************************************************************
+	;	Frame
+	"Create internal wall frame cons"				ResProj:IntMassWallFrmCon					= { CreateComp( cseCONSTRUCTION, "con-WallFrmIMass" )	}			
+	"Create internal wall frame layer 1"			ResProj:IntMassWallFrmConLAYERs[1]			= {	CreateComp( cseLAYER, "cl1-WallFrmIMass" )	}
+	"Set internal wall frame layer 1 Parent"		ResProj:IntMassWallFrmConLAYERs[1]:Parent	= {	Local( IntMassWallFrmCon )  }
+	"Set internal wall frame layer 1 Material"		ResProj:IntMassWallFrmConLAYERs[1]:lrMat	= {	RuleLibrary( cseMATERIAL, "IntMassMat-Gypsum" )  }
+	"Set internal wall frame layer 1 Thickness"		ResProj:IntMassWallFrmConLAYERs[1]:lrThk	= {	0.5/12.	}
+
+	"Create internal wall frame 2 layer"			ResProj:IntMassWallFrmConLAYERs[2]			= {	CreateComp( cseLAYER, "cl2-WallFrmIMass" )	}
+	"Set internal wall frame layer 2 Parent"		ResProj:IntMassWallFrmConLAYERs[2]:Parent	= {	Local( IntMassWallFrmCon )  }
+	"Set internal wall frame layer 2 Material"		ResProj:IntMassWallFrmConLAYERs[2]:lrMat	= {	RuleLibrary( cseMATERIAL, "IntMassMat-SoftWood" )  }
+	"Set internal wall frame layer 2 Thickness"		ResProj:IntMassWallFrmConLAYERs[2]:lrThk	= {	3.5/12.	}
+
+	"Create internal wall frame layer 3"			ResProj:IntMassWallFrmConLAYERs[3]			= {	CreateComp( cseLAYER, "cl3-WallFrmIMass" )	}
+	"Set internal wall frame layer 3 Parent"		ResProj:IntMassWallFrmConLAYERs[3]:Parent	= {	Local( IntMassWallFrmCon )  }
+	"Set internal wall frame layer 3 Material"		ResProj:IntMassWallFrmConLAYERs[3]:lrMat	= {	RuleLibrary( cseMATERIAL, "IntMassMat-Gypsum" )  }
+	"Set internal wall frame layer 3 Thickness"		ResProj:IntMassWallFrmConLAYERs[3]:lrThk	= {	0.5/12.	}
+
+	;	Cavity
+	"Create internal wall cavity cons"				ResProj:IntMassWallCavCon					= { CreateComp( cseCONSTRUCTION, "con-WallCavIMass" )	}			
+	"Create internal wall cavity layer 1"			ResProj:IntMassWallCavConLAYERs[1]			= {	CreateComp( cseLAYER, "cl1-WallCavIMass" )	}
+	"Set internal wall cavity layer 1 Parent"		ResProj:IntMassWallCavConLAYERs[1]:Parent	= {	Local( IntMassWallCavCon )  }
+	"Set internal wall cavity layer 1 Material"		ResProj:IntMassWallCavConLAYERs[1]:lrMat	= {	RuleLibrary( cseMATERIAL, "IntMassMat-Gypsum" )  }
+	"Set internal wall cavity layer 1 Thickness"	ResProj:IntMassWallCavConLAYERs[1]:lrThk	= {	0.5/12.	}
+
+	"Create internal wall cavity layer 2"			ResProj:IntMassWallCavConLAYERs[2]			= {	CreateComp( cseLAYER, "cl2-WallCavIMass" )	}
+	"Set internal wall cavity layer 2 Parent"		ResProj:IntMassWallCavConLAYERs[2]:Parent	= {	Local( IntMassWallCavCon )  }
+	"Set internal wall cavity layer 2 Material"		ResProj:IntMassWallCavConLAYERs[2]:lrMat	= {	RuleLibrary( cseMATERIAL, "IntMassMat-Gypsum" )  }
+	"Set internal wall cavity layer 2 Thickness"	ResProj:IntMassWallCavConLAYERs[2]:lrThk	= {	0.5/12.	}
+END
+
+;*************************************************************************
+RULELIST "Setup_CSE_SURFACE_internal_wall" 1 0 0 1
+;
+;*************************************************************************
+	"Create ResZn:IMassWallFrmSurf"		ResZn:IMassWallFrmSurf			= {	CreateComp( cseSURFACE, "WallFrm-imass" )	}
+	"Set ResZn:IMassWallFrmSurf:Parent"	ResZn:IMassWallFrmSurf:Parent	= {	Local(CSE_ZONE) } 
+	"Set ResZn:IMassWallFrmSurf:sfType"	ResZn:IMassWallFrmSurf:sfType	= {	"Wall" } 
+	"Set ResZn:IMassWallFrmSurf:sfArea"	ResZn:IMassWallFrmSurf:sfArea	= {	Local(IMassIntWallArea) * 0.25 } 
+	"Set ResZn:IMassWallFrmSurf:sfCon"	ResZn:IMassWallFrmSurf:sfCon		= {	Global( ResProj:IntMassWallFrmCon ) } 
+	"Set ResZn:IMassWallFrmSurf:sfAZM"	ResZn:IMassWallFrmSurf:sfAZM		= {	0 } 
+	"Set ResZn:IMassWallFrmSurf:sfExCnd"	ResZn:IMassWallFrmSurf:sfExCnd	= {"ADJZN" } 
+	"Set ResZn:IMassWallFrmSurf:sfAdjZn"	ResZn:IMassWallFrmSurf:sfAdjZn	= {	Local(CSE_ZONE) } 
+	"Set ResZn:IMassWallFrmSurf:sfModel"	ResZn:IMassWallFrmSurf:sfModel	= {	"Forward_Difference" }
+
+	"Create ResZn:IMassWallCavSurf"		ResZn:IMassWallCavSurf			= {	CreateComp( cseSURFACE, "WallCav-imass" )	}
+	"Set ResZn:IMassWallCavSurf:Parent"	ResZn:IMassWallCavSurf:Parent	= {	Local(CSE_ZONE) } 
+	"Set ResZn:IMassWallCavSurf:sfType"	ResZn:IMassWallCavSurf:sfType	= {	"Wall" } 
+	"Set ResZn:IMassWallCavSurf:sfArea"	ResZn:IMassWallCavSurf:sfArea	= {	Local(IMassIntWallArea) * 0.75 } 
+	"Set ResZn:IMassWallCavSurf:sfCon"	ResZn:IMassWallCavSurf:sfCon		= {	Global( ResProj:IntMassWallCavCon ) } 
+	"Set ResZn:IMassWallCavSurf:sfAZM"	ResZn:IMassWallCavSurf:sfAZM		= {	0 } 
+	"Set ResZn:IMassWallCavSurf:sfExCnd"	ResZn:IMassWallCavSurf:sfExCnd	= {"ADJZN" } 
+	"Set ResZn:IMassWallCavSurf:sfAdjZn"	ResZn:IMassWallCavSurf:sfAdjZn	= {	Local(CSE_ZONE) } 
+	"Set ResZn:IMassWallCavSurf:sfModel"	ResZn:IMassWallCavSurf:sfModel	= {	"Forward_Difference" }
+END
+;*************************************************************************
+RULELIST "Setup_CSE_SURFACE_internal_wall_ResOtherZone" 1 0 0 1
+;
+;*************************************************************************
+	"Create ResOtherZn:IMassWallFrmSurf"		ResOtherZn:IMassWallFrmSurf			= {	CreateComp( cseSURFACE, "WallFrm-imass" )	}
+	"Set ResOtherZn:IMassWallFrmSurf:Parent"	ResOtherZn:IMassWallFrmSurf:Parent	= {	Local(CSE_ZONE) } 
+	"Set ResOtherZn:IMassWallFrmSurf:sfType"	ResOtherZn:IMassWallFrmSurf:sfType	= {	"Wall" } 
+	"Set ResOtherZn:IMassWallFrmSurf:sfArea"	ResOtherZn:IMassWallFrmSurf:sfArea	= {	Local(IMassIntWallArea) * 0.25 } 
+	"Set ResOtherZn:IMassWallFrmSurf:sfCon"	ResOtherZn:IMassWallFrmSurf:sfCon		= {	Global( ResProj:IntMassWallFrmCon ) } 
+	"Set ResOtherZn:IMassWallFrmSurf:sfAZM"	ResOtherZn:IMassWallFrmSurf:sfAZM		= {	0 } 
+	"Set ResOtherZn:IMassWallFrmSurf:sfExCnd"	ResOtherZn:IMassWallFrmSurf:sfExCnd	= {"ADJZN" } 
+	"Set ResOtherZn:IMassWallFrmSurf:sfAdjZn"	ResOtherZn:IMassWallFrmSurf:sfAdjZn	= {	Local(CSE_ZONE) } 
+	"Set ResOtherZn:IMassWallFrmSurf:sfModel"	ResOtherZn:IMassWallFrmSurf:sfModel	= {	"Forward_Difference" }
+
+	"Create ResOtherZn:IMassWallCavSurf"		ResOtherZn:IMassWallCavSurf			= {	CreateComp( cseSURFACE, "WallCav-imass" )	}
+	"Set ResOtherZn:IMassWallCavSurf:Parent"	ResOtherZn:IMassWallCavSurf:Parent	= {	Local(CSE_ZONE) } 
+	"Set ResOtherZn:IMassWallCavSurf:sfType"	ResOtherZn:IMassWallCavSurf:sfType	= {	"Wall" } 
+	"Set ResOtherZn:IMassWallCavSurf:sfArea"	ResOtherZn:IMassWallCavSurf:sfArea	= {	Local(IMassIntWallArea) * 0.75 } 
+	"Set ResOtherZn:IMassWallCavSurf:sfCon"	ResOtherZn:IMassWallCavSurf:sfCon		= {	Global( ResProj:IntMassWallCavCon ) } 
+	"Set ResOtherZn:IMassWallCavSurf:sfAZM"	ResOtherZn:IMassWallCavSurf:sfAZM		= {	0 } 
+	"Set ResOtherZn:IMassWallCavSurf:sfExCnd"	ResOtherZn:IMassWallCavSurf:sfExCnd	= {"ADJZN" } 
+	"Set ResOtherZn:IMassWallCavSurf:sfAdjZn"	ResOtherZn:IMassWallCavSurf:sfAdjZn	= {	Local(CSE_ZONE) } 
+	"Set ResOtherZn:IMassWallCavSurf:sfModel"	ResOtherZn:IMassWallCavSurf:sfModel	= {	"Forward_Difference" }
+END
+
+;*************************************************************************
+RULELIST "Setup_CSE_CONSTRUCTION_internal_floor" 1 0 0 1
+;
+;*************************************************************************
+	;	Frame
+	"Create internal floor frame cons"				ResProj:IntMassFlrFrm2x10Con					= { CreateComp( cseCONSTRUCTION, "con-FloorFrmIMass" )	}			
+	"Create internal floor frame layer 1"			ResProj:IntMassFlrFrm2x10ConLAYERs[1]			= {	CreateComp( cseLAYER, "cl1-FloorFrmIMass" )	}
+	"Set internal floor frame layer 1 Parent"		ResProj:IntMassFlrFrm2x10ConLAYERs[1]:Parent	= {	Local( IntMassFlrFrm2x10Con )  }
+	"Set internal floor frame layer 1 Material"		ResProj:IntMassFlrFrm2x10ConLAYERs[1]:lrMat	= {	RuleLibrary( cseMATERIAL, "IntMassMat-Carpet" )  }
+	"Set internal floor frame layer 1 Thickness"	ResProj:IntMassFlrFrm2x10ConLAYERs[1]:lrThk	= {	0.5/12.	}
+
+	"Create internal floor frame 2 layer"			ResProj:IntMassFlrFrm2x10ConLAYERs[2]			= {	CreateComp( cseLAYER, "cl2-FloorFrmIMass" )	}
+	"Set internal floor frame layer 2 Parent"		ResProj:IntMassFlrFrm2x10ConLAYERs[2]:Parent	= {	Local( IntMassFlrFrm2x10Con )  }
+	"Set internal floor frame layer 2 Material"		ResProj:IntMassFlrFrm2x10ConLAYERs[2]:lrMat	= {	RuleLibrary( cseMATERIAL, "IntMassMat-WoodLayer" )  }
+	"Set internal floor frame layer 2 Thickness"	ResProj:IntMassFlrFrm2x10ConLAYERs[2]:lrThk	= {	0.5/12.	}
+
+	"Create internal floor frame layer 3"			ResProj:IntMassFlrFrm2x10ConLAYERs[3]			= {	CreateComp( cseLAYER, "cl3-FloorFrmIMass" )	}
+	"Set internal floor frame layer 3 Parent"		ResProj:IntMassFlrFrm2x10ConLAYERs[3]:Parent	= {	Local( IntMassFlrFrm2x10Con )  }
+	"Set internal floor frame layer 3 Material"		ResProj:IntMassFlrFrm2x10ConLAYERs[3]:lrMat	= {	RuleLibrary( cseMATERIAL, "IntMassMat-SoftWood" )  }
+	"Set internal floor frame layer 3 Thickness"	ResProj:IntMassFlrFrm2x10ConLAYERs[3]:lrThk	= {	9.25/12.	}
+
+	"Create internal floor frame layer 4"			ResProj:IntMassFlrFrm2x10ConLAYERs[4]			= {	CreateComp( cseLAYER, "cl4-FloorFrmIMass" )	}
+	"Set internal floor frame layer 4 Parent"		ResProj:IntMassFlrFrm2x10ConLAYERs[4]:Parent	= {	Local( IntMassFlrFrm2x10Con )  }
+	"Set internal floor frame layer 4 Material"		ResProj:IntMassFlrFrm2x10ConLAYERs[4]:lrMat	= {	RuleLibrary( cseMATERIAL, "IntMassMat-Gypsum" )  }
+	"Set internal floor frame layer 4 Thickness"	ResProj:IntMassFlrFrm2x10ConLAYERs[4]:lrThk	= {	0.5/12.	}
+
+	;	Cavity
+	"Create internal floor cavity cons"				ResProj:IntMassFlrCav2x10Con					= { CreateComp( cseCONSTRUCTION, "con-FloorCavIMass" )	}			
+	"Create internal floor cavity layer 1"			ResProj:IntMassFlrCav2x10ConLAYERs[1]			= {	CreateComp( cseLAYER, "cl1-FloorCavIMass" )	}
+	"Set internal floor cavity layer 1 Parent"		ResProj:IntMassFlrCav2x10ConLAYERs[1]:Parent	= {	Local( IntMassFlrCav2x10Con )  }
+	"Set internal floor cavity layer 1 Material"	ResProj:IntMassFlrCav2x10ConLAYERs[1]:lrMat	= {	RuleLibrary( cseMATERIAL, "IntMassMat-Carpet" )  }
+	"Set internal floor cavity layer 1 Thickness"	ResProj:IntMassFlrCav2x10ConLAYERs[1]:lrThk	= {	0.5/12.	}
+
+	"Create internal floor cavity layer 2"			ResProj:IntMassFlrCav2x10ConLAYERs[2]			= {	CreateComp( cseLAYER, "cl2-FloorCavIMass" )	}
+	"Set internal floor cavity layer 2 Parent"		ResProj:IntMassFlrCav2x10ConLAYERs[2]:Parent	= {	Local( IntMassFlrCav2x10Con )  }
+	"Set internal floor cavity layer 2 Material"	ResProj:IntMassFlrCav2x10ConLAYERs[2]:lrMat	= {	RuleLibrary( cseMATERIAL, "IntMassMat-WoodLayer" )  }
+	"Set internal floor cavity layer 2 Thickness"	ResProj:IntMassFlrCav2x10ConLAYERs[2]:lrThk	= {	0.5/12.	}
+
+	"Create internal floor cavity layer 3"			ResProj:IntMassFlrCav2x10ConLAYERs[3]			= {	CreateComp( cseLAYER, "cl3-FloorCavIMass" )	}
+	"Set internal floor cavity layer 3 Parent"		ResProj:IntMassFlrCav2x10ConLAYERs[3]:Parent	= {	Local( IntMassFlrCav2x10Con )  }
+	"Set internal floor cavity layer 3 Material"	ResProj:IntMassFlrCav2x10ConLAYERs[3]:lrMat	= {	RuleLibrary( cseMATERIAL, "IntMassMat-Carpet" )  }
+	"Set internal floor cavity layer 3 Thickness"	ResProj:IntMassFlrCav2x10ConLAYERs[3]:lrThk	= {	1./12.	}
+
+	"Create internal floor cavity layer 4"			ResProj:IntMassFlrCav2x10ConLAYERs[4]			= {	CreateComp( cseLAYER, "cl4-FloorCavIMass" )	}
+	"Set internal floor cavity layer 4 Parent"		ResProj:IntMassFlrCav2x10ConLAYERs[4]:Parent	= {	Local( IntMassFlrCav2x10Con )  }
+	"Set internal floor cavity layer 4 Material"	ResProj:IntMassFlrCav2x10ConLAYERs[4]:lrMat	= {	RuleLibrary( cseMATERIAL, "IntMassMat-Carpet" )  }
+	"Set internal floor cavity layer 4 Thickness"	ResProj:IntMassFlrCav2x10ConLAYERs[4]:lrThk	= {	1./12.	}
+
+	"Create internal floor cavity layer 5"			ResProj:IntMassFlrCav2x10ConLAYERs[5]			= {	CreateComp( cseLAYER, "cl5-FloorCavIMass" )	}
+	"Set internal floor cavity layer 5 Parent"		ResProj:IntMassFlrCav2x10ConLAYERs[5]:Parent	= {	Local( IntMassFlrCav2x10Con )  }
+	"Set internal floor cavity layer 5 Material"	ResProj:IntMassFlrCav2x10ConLAYERs[5]:lrMat	= {	RuleLibrary( cseMATERIAL, "IntMassMat-Gypsum" )  }
+	"Set internal floor cavity layer 5 Thickness"	ResProj:IntMassFlrCav2x10ConLAYERs[5]:lrThk	= {	0.5/12.	}
+END
+
+;*************************************************************************
+RULELIST "Setup_CSE_SURFACE_internal_floor" 1 0 0 1
+;
+;*************************************************************************
+	"Create ResZn:IMassFloorFrmSurf"			ResZn:IMassFloorFrmSurf			= {	CreateComp( cseSURFACE, "FloorFrm-imass" )	}
+	"Set ResZn:IMassFloorFrmSurf:Parent"		ResZn:IMassFloorFrmSurf:Parent	= {	Local(CSE_ZONE) } 
+	"Set ResZn:IMassFloorFrmSurf:sfType"		ResZn:IMassFloorFrmSurf:sfType	= {	"Floor" } 
+	"Set ResZn:IMassFloorFrmSurf:sfArea"		ResZn:IMassFloorFrmSurf:sfArea	= {	Local(IMassIntFlrArea) * 0.1 } 
+	"Set ResZn:IMassFloorFrmSurf:sfCon"		ResZn:IMassFloorFrmSurf:sfCon	= {	Global( ResProj:IntMassFlrFrm2x10Con ) } 
+	"Set ResZn:IMassFloorFrmSurf:sfExCnd"	ResZn:IMassFloorFrmSurf:sfExCnd	= {"ADJZN" } 
+	"Set ResZn:IMassFloorFrmSurf:sfAdjZn"	ResZn:IMassFloorFrmSurf:sfAdjZn	= {	Local(CSE_ZONE) } 
+	"Set ResZn:IMassFloorFrmSurf:sfModel"	ResZn:IMassFloorFrmSurf:sfModel	= {	"Forward_Difference" }
+
+	"Create ResZn:IMassFloorCavSurf"			ResZn:IMassFloorCavSurf			= {	CreateComp( cseSURFACE, "FloorCav-imass" )	}
+	"Set ResZn:IMassFloorCavSurf:Parent"		ResZn:IMassFloorCavSurf:Parent	= {	Local(CSE_ZONE) } 
+	"Set ResZn:IMassFloorCavSurf:sfType"		ResZn:IMassFloorCavSurf:sfType	= {	"Floor" } 
+	"Set ResZn:IMassFloorCavSurf:sfArea"		ResZn:IMassFloorCavSurf:sfArea	= {	Local(IMassIntFlrArea) * 0.9 } 
+	"Set ResZn:IMassFloorCavSurf:sfCon"		ResZn:IMassFloorCavSurf:sfCon	= {	Global( ResProj:IntMassFlrCav2x10Con ) } 
+	"Set ResZn:IMassFloorCavSurf:sfExCnd"	ResZn:IMassFloorCavSurf:sfExCnd	= {"ADJZN" } 
+	"Set ResZn:IMassFloorCavSurf:sfAdjZn"	ResZn:IMassFloorCavSurf:sfAdjZn	= {	Local(CSE_ZONE) } 
+	"Set ResZn:IMassFloorCavSurf:sfModel"	ResZn:IMassFloorCavSurf:sfModel	= {	"Forward_Difference" }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "Setup_CSE_SURFACE_internal_floor_ResOtherZone" 1 0 0 1
+;
+;*************************************************************************
+	"Create ResOtherZn:IMassFloorFrmSurf"			ResOtherZn:IMassFloorFrmSurf			= {	CreateComp( cseSURFACE, "FloorFrm-imass" )	}
+	"Set ResOtherZn:IMassFloorFrmSurf:Parent"		ResOtherZn:IMassFloorFrmSurf:Parent	= {	Local(CSE_ZONE) } 
+	"Set ResOtherZn:IMassFloorFrmSurf:sfType"		ResOtherZn:IMassFloorFrmSurf:sfType	= {	"Floor" } 
+	"Set ResOtherZn:IMassFloorFrmSurf:sfArea"		ResOtherZn:IMassFloorFrmSurf:sfArea	= {	Local(IMassIntFlrArea) * 0.1 } 
+	"Set ResOtherZn:IMassFloorFrmSurf:sfCon"		ResOtherZn:IMassFloorFrmSurf:sfCon	= {	Global( ResProj:IntMassFlrFrm2x10Con ) } 
+	"Set ResOtherZn:IMassFloorFrmSurf:sfExCnd"	ResOtherZn:IMassFloorFrmSurf:sfExCnd	= {"ADJZN" } 
+	"Set ResOtherZn:IMassFloorFrmSurf:sfAdjZn"	ResOtherZn:IMassFloorFrmSurf:sfAdjZn	= {	Local(CSE_ZONE) } 
+	"Set ResOtherZn:IMassFloorFrmSurf:sfModel"	ResOtherZn:IMassFloorFrmSurf:sfModel	= {	"Forward_Difference" }
+
+	"Create ResOtherZn:IMassFloorCavSurf"			ResOtherZn:IMassFloorCavSurf			= {	CreateComp( cseSURFACE, "FloorCav-imass" )	}
+	"Set ResOtherZn:IMassFloorCavSurf:Parent"		ResOtherZn:IMassFloorCavSurf:Parent	= {	Local(CSE_ZONE) } 
+	"Set ResOtherZn:IMassFloorCavSurf:sfType"		ResOtherZn:IMassFloorCavSurf:sfType	= {	"Floor" } 
+	"Set ResOtherZn:IMassFloorCavSurf:sfArea"		ResOtherZn:IMassFloorCavSurf:sfArea	= {	Local(IMassIntFlrArea) * 0.9 } 
+	"Set ResOtherZn:IMassFloorCavSurf:sfCon"		ResOtherZn:IMassFloorCavSurf:sfCon	= {	Global( ResProj:IntMassFlrCav2x10Con ) } 
+	"Set ResOtherZn:IMassFloorCavSurf:sfExCnd"	ResOtherZn:IMassFloorCavSurf:sfExCnd	= {"ADJZN" } 
+	"Set ResOtherZn:IMassFloorCavSurf:sfAdjZn"	ResOtherZn:IMassFloorCavSurf:sfAdjZn	= {	Local(CSE_ZONE) } 
+	"Set ResOtherZn:IMassFloorCavSurf:sfModel"	ResOtherZn:IMassFloorCavSurf:sfModel	= {	"Forward_Difference" }
+END
+;*************************************************************************
+
+
+;*************************************************************************
+;*************************************************************************
+
+ENDFILE

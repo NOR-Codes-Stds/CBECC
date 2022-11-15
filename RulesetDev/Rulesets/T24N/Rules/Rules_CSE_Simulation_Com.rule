@@ -1,0 +1,1051 @@
+; -------------------------------------------------------------------------
+; Rules pertaining to:   Prep For and Clean-up After each CSE Energy Simulation
+; CEC Title-24 Residential Energy Code
+; -------------------------------------------------------------------------
+; Copyright (c) 2012-2017, California Energy Commission
+; Copyright (c) 2012-2017, Wrightsoft Corporation
+; All rights reserved.
+; Redistribution and use in source and binary forms, with or without modification,
+; are permitted provided that the following conditions are met:
+; - Redistributions of source code must retain the above copyright notice, this
+;   list of conditions and the following disclaimer.
+; - Redistributions in binary form must reproduce the above copyright notice, this
+;   list of conditions, the following disclaimer in the documentation and/or other
+;   materials provided with the distribution.
+; - Neither the name of the California Energy Commission nor the names of its
+;   contributors may be used to endorse or promote products derived from this
+;   software without specific prior written permission.
+; DISCLAIMER: THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+; "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+; THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+; NON-INFRINGEMENT ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION,
+; WRIGHTSOFT CORPORATION, ITRON, INC. OR ANY OTHER AUTHOR OR COPYRIGHT HOLDER OF
+; THIS SOFTWARE (COLLECTIVELY, THE "AUTHORS") BE LIABLE FOR ANY DIRECT, INDIRECT,
+; INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+; LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA,
+; OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+; LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
+; OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+; ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.  EACH LICENSEE AND SUBLICENSEE OF THE
+; SOFTWARE AGREES NOT TO ASSERT ANY CLAIM AGAINST ANY OF THE AUTHORS RELATING TO
+; THIS SOFTWARE, WHETHER DUE TO PERFORMANCE ISSUES, TITLE OR INFRINGEMENT ISSUES,
+; STRICT LIABILITY OR OTHERWISE.
+; -------------------------------------------------------------------------
+
+
+;*************************************************************************
+RULELIST "CSE_SimulationPrep_Com" 1 0 0 1
+;   Rules which are executed immediately prior to performing a CSE simulation
+;*************************************************************************
+
+	"Perform CSE simulation engine defaulting"		Proj:Action = {	EvalRulelist( "CSE_Defaulting_Project_Com" )  }
+
+; removed rules not related to DHW
+;	"Blast all cseIZXFER components"						Proj:Action	= {	DeleteAllComps( cseIZXFER )  }
+;
+;	"Setup CSE Construction/Layers/Materials data"	Proj:Action	= {	EvalRulelist( "CSE_SimulationPrep_Cons" )  }		; SAC 5/16/16
+
+
+	; Create meters for tracking electric and fuel use
+	"Create site-wide Elec meter"			Proj:CSE_ElecMETER		= {	; if (Local( Fuel_HaveElec   ) < 0.5) then  UNDEFINED
+																							CreateComp( cseMETER, "MtrElec" )    }
+	"Create site-wide Elec2 meter"		Proj:CSE_Elec2METER		=     ; for tracking Regulated Ltg & Process Motors - SAC 04/13/22 (Com tic #3366)
+      {  if (SumAll( ResOtherZn:IntLPDRegSim ) < 0.01 .AND.
+             SumAcrossIf( ResOtherZn:CodeExhFanPwr, ResOtherZn:IsGarage ) < 0.01) then  UNDEFINED
+         else  CreateComp( cseMETER, "MtrElec2" )  endif  }
+	"Create site-wide NatGas meter"		Proj:CSE_NatGasMETER		=     ; switched logic to rely mainly on Proj:RptFuelUseAs in order to choose proper Std design fuel - SAC 10/09/20
+      {  if (RptFuelUseAs == 2 .OR. (RptFuelUseAs == -1 .AND. GasType != "NaturalGas")) then  UNDEFINED
+			else  CreateComp( cseMETER, "MtrNatGas" )  endif  }
+	"Create site-wide <other> meter"		Proj:CSE_OtherFuelMETER	=
+      {  if (RptFuelUseAs == 1 .OR. (RptFuelUseAs == -1 .AND. GasType == "NaturalGas")) then  UNDEFINED
+			else  CreateComp( cseMETER, "MtrOther" )  endif  }
+
+
+; removed rules not related to DHW
+;	"Setup CSE Zones and Internal Gains data"		Proj:Action	= {	EvalRulelist( "CSE_SimulationPrep_Zones_IntGains" )  }		; SAC 5/16/16
+
+
+;"store BEMProc details"		Proj:Action = {  StoreBEMProc( Format( "CSEwrite-%s", RunAbbrev ), 0 )  }
+
+; SAC 4/14/16 - MOVED UP HERE from below so that DHWSYS objects in place to be referenced by gain objects during their setup
+	"Init Proj:CSE_DHWPreRunReqd"	Proj:CSE_DHWPreRunReqd	= {	0  }		; SAC 3/22/16
+	; Create and setup CSE DHW objects - SAC 7/6/15
+	"Setup CSE DHW objects"			Proj:Action		=
+      {  EvalRulelist( "CSE_SimulationPrep_DHW" )  }
+      ;{	if (EngyCodeYearNum <= 2019)
+      ;   then  EvalRulelist( "CSE_SimulationPrep_DHW" )
+      ;   else  UNCHANGED  endif  }
+
+
+; removed rules not related to DHW
+;	"Setup CSE Zones and Internal Gains data - part2"		Proj:Action	= {	EvalRulelist( "CSE_SimulationPrep_Zones_IntGains_part2" )  }		; SAC 5/16/16
+;
+;	"Setup CSE Surface data"										Proj:Action	= {	EvalRulelist( "CSE_SimulationPrep_Surfaces" )  }		; SAC 5/16/16
+;
+;	"Setup CSE Internal Mass data"								Proj:Action	= {	EvalRulelist( "CSE_SimulationPrep_IntMass" )  }			; SAC 5/16/16
+;
+;	"Setup CSE HVAC & AirNet data"								Proj:Action	= {	EvalRulelist( "CSE_SimulationPrep_HVAC" )  }				; SAC 5/16/16
+
+
+	; Create and setup CSE PVARRAY objects - SAC 1/27/16   - SAC 7/12/18 - ported from Res rules
+	; SAC 10/6/16 - allow PV sim regardless of *DesignRating* settings for 2019 analysis
+	"Delete all csePVARRAY objects"		      Proj:Action = {  DeleteAllComps( csePVARRAY )  }
+   ; revised logic to include Std Design PV system for 2019+ codes - SAC 1/9/18
+	"Setup CSE csePVARRAY objects"		      Proj:Action	= {
+         if ( EngyCodeYearNum < 2019 .OR. SumAll( PVArray:DCSysSize ) < 0.1 )
+         then  UNCHANGED
+         else	EvalRulelist( "CSE_SimulationPrep_PV" )  endif  }
+      ;   else if (((Proj:RunAbbrev == "s"  .OR. Proj:RunAbbrev == "S" .OR. Proj:RunAbbrev == "smf") .AND. EngyCodeYearNum < 2019) .OR.
+      ;              Proj:RunAbbrev == "dr" .OR. Proj:RunAbbrev == "DR")
+      ;   then  UNCHANGED		; prevent PVARRAY in std (<2019) and design rtg runs
+
+   ; Create and setup CSE BATTERY object - SAC 12/14/16
+   "Delete all cseBATTERY objects"         Proj:Action = {  DeleteAllComps( cseBATTERY )  }
+; to do
+;   "Delete CSE IMPORTFILE object used to support simulation of battery control"  Proj:BattCtrlImportFile  = {
+;         if (LocalCompAssigned( BattCtrlImportFile )) then  DeleteComp()  else  UNCHANGED  endif  }
+   ; SAC 4/28/17 - revised logic to enable battery simulation in 2016 runs
+   "Create and setup cseBATTERY object"   Proj:Action = {
+         if ( ( ComponentCount( csePVARRAY ) < 1 .AND. IfValidAnd( HaveStandaloneBatt > 0 )==0 ) .OR.
+              SumAll( Batt:MaxCap ) < 0.1 )
+         then  UNCHANGED
+         else  EvalRulelist( "CSE_SimulationPrep_Battery" )  endif  }
+;         else if (Proj:RunAbbrev == "s"  .OR. Proj:RunAbbrev == "S" .OR. Proj:RunAbbrev == "smf" .OR.
+;                  Proj:RunAbbrev == "dr" .OR. Proj:RunAbbrev == "DR")
+;         then  UNCHANGED      ; prevent BATTERY in std and design rtg runs (??)
+;         else  EvalRulelist( "CSE_SimulationPrep_Battery" )  endif endif  }
+
+  ; SAC 2/24/17 - cseSHADEX object to representing building and site shades (separate from window shades) - SAC 9/13/18
+   "Delete all cseSHADEX objects"   Proj:Action    = {	DeleteAllComps( cseSHADEX )  }
+   "Create CSE cseSHADEX objects from Shades"   PVArrayShade:SimShade = {
+         if ((Type != "Site Shade" .AND. Type != "Building Shade") .OR.
+             LocalCompAssigned( ChildPolyLpRef ) < 1) then  UNDEFINED
+         else  CreateComp( cseSHADEX, "sx-" + substr( Name, 0, 53 ) )  endif  }
+   "Set PVArrayShade:SimShade:sxMounting"  PVArrayShade:SimShade:sxMounting  = {
+         switch (Type)
+            case "Site Shade"     :  "Site"
+            case "Building Shade" :  "Building"
+            default               :  UNDEFINED
+         endswitch  }
+   "Set PVArrayShade:SimShade:sxVertices"  PVArrayShade:SimShade:sxVertices  = {   ChildPolyLpRef  }
+
+  ; SAC 3/2/17 - cseSHADEX object to representing building and site PVArrayGeom objects - SAC 9/13/18
+   "Create CSE cseSHADEX objects from PVArrayGeoms"   PVArrayGeom:SimShade = {
+         if (LocalCompAssigned( ChildPolyLpRef ) < 1 .OR. IfValidAnd( NumPVArrayRefs > 0 )==0) then  UNDEFINED
+         else  CreateComp( cseSHADEX, "sx-" + substr( Name, 0, 53 ) )  endif  }
+   "Set PVArrayGeom:SimShade:sxMounting"  PVArrayGeom:SimShade:sxMounting  = {   IsBldgAttached+1  }  ; 1=>Site, 2=>Bldg
+   "Set PVArrayGeom:SimShade:sxVertices"  PVArrayGeom:SimShade:sxVertices  = {   ChildPolyLpRef  }
+
+   ; SAC 7/16/18 - ported Proj:CSE_WriteTDV from Res for battery simulations
+   ; revise logic to ensure TDV CSV written for models w/ no PV and standalone battery - SAC 07/30/22
+   "Ensure Proj:CSE_WriteTDV toggled ON when needed"     Proj:CSE_WriteTDV  = {
+         if ( ComponentCount( cseBATTERY ) < 1 .OR.
+              (ComponentCount( csePVARRAY ) < 1 .AND. IfValidAnd( HaveStandaloneBatt > 0 )==0) )
+         then  UNDEFINED
+         else  1  endif  }
+;         if ((IfValidAnd( PreCl_DataValid > 0 ) .AND. IfValidAnd( IsPropFlexRun > 0 )) .OR.
+;             SumAcrossIf( DHWSys:NumDHWHeaters, DHWSys:DemandResponseFlag = 2 ) > 0 .OR.
+;             (AllowBattInputs > 0 .AND. IfValidAnd( BattMaxCap > 0 )))
+;         then  EvalRulelist( "ForceOn_CSE_WriteTDV" )
+;         else  UNCHANGED  endif  }
+;   "Default Proj:CSE_WriteTDV to undef when not needed"     Proj:CSE_WriteTDV  = {
+;         if ((IfValidAnd( PreCl_DataValid > 0 )==0 .OR. IfValidAnd( IsPropFlexRun > 0 )==0) .AND.
+;             SumAcrossIf( DHWSys:NumDHWHeaters, DHWSys:DemandResponseFlag = 2 )==0 .AND.
+;             (AllowBattInputs < 1 .OR. IfValidAnd( BattMaxCap > 0 )==0))
+;         then  UNDEFINED
+;         else  UNCHANGED  endif  }
+
+  ; Create and default EXPORT definitions to output hourly energy use results
+	"Create site-wide Elec export"			Proj:CSE_ElecEXPORT			= {	if (LocalCompAssigned( CSE_ElecMETER ) < 0.5) then  UNDEFINED
+																									else  CreateComp( cseEXPORT, "ExportElec" )  endif  }
+	"Create site-wide NatGas export"			Proj:CSE_NatGasEXPORT		= {	if (LocalCompAssigned( CSE_NatGasMETER ) < 0.5) then  UNDEFINED
+																									else  CreateComp( cseEXPORT, "ExportNatGas" )  endif  }
+	"Create site-wide <other> export"		Proj:CSE_OtherFuelEXPORT	= {	if (LocalCompAssigned( CSE_OtherFuelMETER ) < 0.5) then  UNDEFINED
+																									else  CreateComp( cseEXPORT, "ExportOther" )  endif  }
+	"Create site-wide Elec2 export"			Proj:CSE_Elec2EXPORT			= {	if (LocalCompAssigned( CSE_Elec2METER ) < 0.5) then  UNDEFINED
+																									else  CreateComp( cseEXPORT, "ExportElec2" )  endif  }      ; SAC 04/13/22 (Com tic #3366)
+
+   "Set Proj:CSE_ElecEXPORT:exExportfile"    Proj:CSE_ElecEXPORT:exExportfile    = {  "Primary"  }    ; SAC 2/2/20 (Com tic #3157)
+	"Set Proj:CSE_ElecEXPORT:exType"				Proj:CSE_ElecEXPORT:exType				= {	"MTR"     }
+	"Set Proj:CSE_ElecEXPORT:exFreq"				Proj:CSE_ElecEXPORT:exFreq				= {	"HOUR"    }
+	"Set Proj:CSE_ElecEXPORT:exMeter"			Proj:CSE_ElecEXPORT:exMeter			= {	Local( CSE_ElecMETER )  }
+	"Set Proj:CSE_ElecEXPORT:exBtuSf"			Proj:CSE_ElecEXPORT:exBtuSf			= {	1000      }
+	"Set Proj:CSE_ElecEXPORT:exDayBeg_x"		Proj:CSE_ElecEXPORT:exDayBeg_x		= {	"Jan 1"   }
+	"Set Proj:CSE_ElecEXPORT:exDayEnd_x"		Proj:CSE_ElecEXPORT:exDayEnd_x		= {	"Dec 31"  }
+
+   "Set Proj:CSE_NatGasEXPORT:exExportfile"  Proj:CSE_NatGasEXPORT:exExportfile  = {  "Primary"  }    ; SAC 2/2/20 (Com tic #3157)
+	"Set Proj:CSE_NatGasEXPORT:exType"			Proj:CSE_NatGasEXPORT:exType			= {	"MTR"     }
+	"Set Proj:CSE_NatGasEXPORT:exFreq"			Proj:CSE_NatGasEXPORT:exFreq			= {	"HOUR"    }
+	"Set Proj:CSE_NatGasEXPORT:exMeter"			Proj:CSE_NatGasEXPORT:exMeter			= {	Local( CSE_NatGasMETER )  }
+	"Set Proj:CSE_NatGasEXPORT:exBtuSf"			Proj:CSE_NatGasEXPORT:exBtuSf			= {	1000      }
+	"Set Proj:CSE_NatGasEXPORT:exDayBeg_x"		Proj:CSE_NatGasEXPORT:exDayBeg_x		= {	"Jan 1"   }
+	"Set Proj:CSE_NatGasEXPORT:exDayEnd_x"		Proj:CSE_NatGasEXPORT:exDayEnd_x		= {	"Dec 31"  }
+
+   "Set Proj:CSE_OtherFuelEXPORT:exExportfile" Proj:CSE_OtherFuelEXPORT:exExportfile = {  "Primary"  }    ; SAC 2/2/20 (Com tic #3157)
+	"Set Proj:CSE_OtherFuelEXPORT:exType"		Proj:CSE_OtherFuelEXPORT:exType		= {	"MTR"     }
+	"Set Proj:CSE_OtherFuelEXPORT:exFreq"		Proj:CSE_OtherFuelEXPORT:exFreq		= {	"HOUR"    }
+	"Set Proj:CSE_OtherFuelEXPORT:exMeter"		Proj:CSE_OtherFuelEXPORT:exMeter		= {	Local( CSE_OtherFuelMETER )  }
+	"Set Proj:CSE_OtherFuelEXPORT:exBtuSf"		Proj:CSE_OtherFuelEXPORT:exBtuSf		= {	1000      }
+	"Set Proj:CSE_OtherFuelEXPORT:exDayBeg_x"	Proj:CSE_OtherFuelEXPORT:exDayBeg_x	= {	"Jan 1"   }
+	"Set Proj:CSE_OtherFuelEXPORT:exDayEnd_x"	Proj:CSE_OtherFuelEXPORT:exDayEnd_x	= {	"Dec 31"  }
+
+   "Set Proj:CSE_Elec2EXPORT:exExportfile"   Proj:CSE_Elec2EXPORT:exExportfile   = {  "Primary"  }    ; SAC 04/13/22 (Com tic #3366)
+	"Set Proj:CSE_Elec2EXPORT:exType"			Proj:CSE_Elec2EXPORT:exType			= {	"MTR"     }
+	"Set Proj:CSE_Elec2EXPORT:exFreq"			Proj:CSE_Elec2EXPORT:exFreq			= {	"HOUR"    }
+	"Set Proj:CSE_Elec2EXPORT:exMeter"			Proj:CSE_Elec2EXPORT:exMeter			= {	Local( CSE_Elec2METER )  }
+	"Set Proj:CSE_Elec2EXPORT:exBtuSf"			Proj:CSE_Elec2EXPORT:exBtuSf			= {	1000      }
+	"Set Proj:CSE_Elec2EXPORT:exDayBeg_x"		Proj:CSE_Elec2EXPORT:exDayBeg_x		= {	"Jan 1"   }
+	"Set Proj:CSE_Elec2EXPORT:exDayEnd_x"		Proj:CSE_Elec2EXPORT:exDayEnd_x		= {	"Dec 31"  }
+
+; in the future, only export Std run SSF if in research mode: (Proj:RunAbbrev == "s" .AND. EnableResearchMode > 0)
+   "Setup DHWSolarSys SSF export for Proposed model"  Proj:Action  =    ; SAC 1/28/20 - (tic #1013)
+      {  if (ComponentCount( cseDHWSOLARSYS ) > 0 .AND.
+             (Proj:RunAbbrev == "ap" .OR. Proj:RunAbbrev == "u" .OR. (Proj:RunAbbrev == "ab")))
+         then  EvalRulelist( "CSE_Project_SetupSolarSysSSFExport" )
+         else  UNCHANGED  endif  }
+
+   "Setup DHWMeter hourly export for annual runs"     Proj:Action  =    ; SAC 05/20/21
+      {  if (ComponentCount( cseDHWSYS ) > 0 .AND.
+             (Proj:RunAbbrev == "ap" .OR. Proj:RunAbbrev == "u" .OR. Proj:RunAbbrev == "ab"))
+         then  EvalRulelist( "CSE_Project_SetupHourlyDHWMeterExport" )
+         else  UNCHANGED  endif  }
+
+
+;"store BEMProc details"		Proj:Action = {  StoreBEMProc( Format( "CSEwriteDone-%s", RunAbbrev ), 0 )  }
+
+END
+
+
+;*************************************************************************
+RULELIST "CSE_Defaulting_Project_Com" 1 0 0 1
+;*************************************************************************
+	"Create cseTOP component (if none exists)"	Proj:Action = {	if (ComponentCount( cseTOP ) > 0) then  UNCHANGED
+																						else  CreateComp( cseTOP, "CSE run" )  endif  }
+
+	"Default cseTOP:repHdrL"		cseTOP:repHdrL	= {	if (strlen( Global( Proj:RunTitle ) ) > 0) then  Global( Proj:RunTitle )
+																	;	else if (strlen( Global( Proj:SimReportHeader ) ) > 0) then  Proj:SimReportHeader
+																		else  "CA Com Simulation"  endif  }
+	"Default cseTOP:wfName"			cseTOP:wfName	= {	Proj:AnnualWeatherFile  }
+
+   "Set cseTOP:doMainSim"     cseTOP:doMainSim  =        ; Main/annual (YES) vs. HVAC Sizing (NO) - SAC 05/09/22
+      {  if (IfValidAnd( Proj:HVACAutoSizing > 0 ))
+         then  "NO"  else  UNDEFINED  endif  }
+
+;	"Default cseTOP:begDay=Jan 1                     //
+;	"Default cseTOP:endDay=Dec 31                    //
+	"Default cseTOP:ebTolHour"		cseTOP:ebTolHour	= {	0.001  }
+	"Default cseTOP:ebTolDay"     cseTOP:ebTolDay	= {	0.001  }
+	"Default cseTOP:ebTolMon"     cseTOP:ebTolMon	= {	0.001  }
+	"Default cseTOP:ebTolSubHr"   cseTOP:ebTolSubHr	= {	0.001  }
+   "Default cseTOP:tol"          cseTOP:tol        = {   0.01   }    ; SAC 05/12/22 (MFam)
+
+;	"Default cseTOP:jan1DOW"		cseTOP:jan1DOW		= {	"TUE"  }
+	"Default cseTOP:jan1DOW"      cseTOP:jan1DOW		= {	;if (IfValidAnd( Proj:DHWCalcMethod = 2 ))		; SAC 7/14/15 - special processing to match CSE DHW results to old CEC engine
+																			;then	"FRI"
+																			"THU"  }
+
+
+	; SAC 1/15/15 - call subordinate rulelists to setup simulation speed inputs based on Proj:SimSpeedOption
+	"Setup simulation speed settings"	Proj:Action	= {	EvalRulelist( "CSE_SimSpeedOption_Compliance" )  }
+;	"Setup simulation speed settings"	Proj:Action	= {	switch (SimSpeedOption)
+;																				case  0 :  EvalRulelist( "CSE_SimSpeedOption_Compliance" )
+;																				case  1 :  EvalRulelist( "CSE_SimSpeedOption_Quick"      )
+;																				case  2 :  EvalRulelist( "CSE_SimSpeedOption_Custom"     )
+;																				default :  UNCHANGED
+;																			endswitch  }
+
+;	"Default cseTOP:skyModel"     cseTOP:skyModel	= {	"anisotropic"  }
+;	"Default cseTOP:dflExH"			cseTOP:dflExH		= {	5.158  }					; Exterior combined surface coefficient for regular walls  (5.160 for FL vs. 5.158 for BESTEST ???)
+;	"Default cseTOP:windF"			cseTOP:windF		= {	0.25   }					; site located exactly at weather station with wind at 0.2m below top of building
+  ; SAC 1/13/13 - write out Proj:FrontOrientation as cseTOP:bldgAzm
+;	"Default cseTOP:bldgAzm"		cseTOP:bldgAzm		= {   Proj:FrontOrientation  }
+
+	"Default cseTOP:dt"           cseTOP:dt			= {	;if (IfValidAnd( Proj:DHWCalcMethod = 2 ))		; SAC 7/14/15 - special processing to match CSE DHW results to old CEC engine
+																			;then	"NO"
+																			"YES"  }
+; file I/O must be altered to output these items w/OUT bounding double quotes
+;	"Default cseTOP:dtBegDay"     cseTOP:dtBegDay	= {	"Mar 08"  }		; 2009 calendar "In 2009, daylight saving time began at 2:00 a.m. (02:00) on Sunday, March 8, and it ended at 2:00 a.m. (02:00) on Sunday, November 1."
+;	"Default cseTOP:dtEndDay"     cseTOP:dtEndDay	= {	"Nov 01"  }
+
+; 1/3/13 - added design day #defines
+;	"Set Proj:CSE_DefineName[1]"		Proj:CSE_DefineName[1]		= {	"DD1"  }
+;	"Set Proj:CSE_DefineType[1]"		Proj:CSE_DefineType[1]		= {	3  }		; #define type: 0-name only, 1-float, 2-string w/ quotes, 3-string no quotes
+;	"Set Proj:CSE_DefineString[1]"	Proj:CSE_DefineString[1]	= {	CA13ClimateZoneDesignDay:DD1( "ClimateZone", Proj:CliZnNum )  }  ; "Jun 30"  }
+;	"Set Proj:CSE_DefineName[2]"		Proj:CSE_DefineName[2]		= {	"CD1"  }
+;	"Set Proj:CSE_DefineType[2]"		Proj:CSE_DefineType[2]		= {	3  }		; #define type: 0-name only, 1-float, 2-string w/ quotes, 3-string no quotes
+;	"Set Proj:CSE_DefineString[2]"	Proj:CSE_DefineString[2]	= {	CA13ClimateZoneDesignDay:CD1( "ClimateZone", Proj:CliZnNum )  }  ; "Jul 10"  }
+;	"Set Proj:CSE_DefineName[3]"		Proj:CSE_DefineName[3]		= {	"HD1"  }
+;	"Set Proj:CSE_DefineType[3]"		Proj:CSE_DefineType[3]		= {	3  }		; #define type: 0-name only, 1-float, 2-string w/ quotes, 3-string no quotes
+;	"Set Proj:CSE_DefineString[3]"	Proj:CSE_DefineString[3]	= {	CA13ClimateZoneDesignDay:HD1( "ClimateZone", Proj:CliZnNum )  }  ; "Dec 03"  }
+;	
+;	"Set Proj:CSE_DefineName[4]"		Proj:CSE_DefineName[4]	= { "SEASONCHANGESETPT" }
+;	"Set Proj:CSE_DefineType[4]"		Proj:CSE_DefineType[4]	= {	1  }
+;	"Set Proj:CSE_DefineFloat[4]"		Proj:CSE_DefineFloat[4] = { Proj:SeasonChangeSetpt }
+;	
+;	"Set Proj:CSE_DefineName[5]"		Proj:CSE_DefineName[5]	= { "FANVENTLOCKOUTTEMP" }
+;	"Set Proj:CSE_DefineType[5]"		Proj:CSE_DefineType[5]	= {	1  }
+;	"Set Proj:CSE_DefineFloat[5]"		Proj:CSE_DefineFloat[5] = { Proj:FanVentLockoutTemp }
+
+	"Set Proj:CSE_DefineName[6]"		Proj:CSE_DefineName[6]	= { "ISSEASONCOOLING" }
+	"Set Proj:CSE_DefineType[6]"		Proj:CSE_DefineType[6]	= {	3 }
+	"Set Proj:CSE_DefineString[6]"	Proj:CSE_DefineString[6] ={ "(@weather.taDbAvg07 > SEASONCHANGESETPT)" }
+
+	"Set Proj:CSE_DefineName[7]"		Proj:CSE_DefineName[7]	= { "FANVENTAVAIL" }
+	"Set Proj:CSE_DefineType[7]"		Proj:CSE_DefineType[7]	= {	3 }
+	"Set Proj:CSE_DefineString[7]"	Proj:CSE_DefineString[7] ={ "(@weather.taDbAvg07 > FANVENTLOCKOUTTEMP)" }
+
+;	"Set Proj:CSE_DefineName[8]"		Proj:CSE_DefineName[8]	= { "WINDOWVENTAVAIL" }
+;	"Set Proj:CSE_DefineType[8]"		Proj:CSE_DefineType[8]	= {	3 }
+;	"Set Proj:CSE_DefineString[8]"	Proj:CSE_DefineString[8] ={ "($hour < 24 && ($hour > 12 || $radDiff > 1))" }
+
+	"Set Proj:CSE_DefineName[8]"		Proj:CSE_DefineName[8]	   = {   "ClimateZone" }   ; SAC 2/2/20 (Com tic #3157)
+	"Set Proj:CSE_DefineType[8]"		Proj:CSE_DefineType[8]	   = {    3  }
+	"Set Proj:CSE_DefineString[8]"	Proj:CSE_DefineString[8]   = {    Format( "    %5.0f   // %s", CliZnNum, CliZn ) }
+
+	; SAC 7/6/15
+	"Set Proj:CSE_DefineName[9]"		Proj:CSE_DefineName[9]		= { "HWUSEF_WD" }
+	"Set Proj:CSE_DefineType[9]"		Proj:CSE_DefineType[9]		= {	3 }
+	"Set Proj:CSE_DefineString[9]"	Proj:CSE_DefineString[9]	= { "hourval( 0.014, 0.008, 0.009, 0.011, 0.020, 0.044, 0.089, 0.107, 0.089, 0.066, 0.052, 0.038, 0.036, 0.033, 0.032, 0.026, 0.042, 0.048, 0.052, 0.047, 0.042, 0.039, 0.036, 0.022 )" }
+
+	"Set Proj:CSE_DefineName[10]"		Proj:CSE_DefineName[10]		= { "HWUSEF_WE" }
+	"Set Proj:CSE_DefineType[10]"		Proj:CSE_DefineType[10]		= {	3 }
+	"Set Proj:CSE_DefineString[10]"	Proj:CSE_DefineString[10]	= { "hourval( 0.018, 0.010, 0.009, 0.008, 0.015, 0.023, 0.026, 0.047, 0.077, 0.083, 0.074, 0.061, 0.051, 0.043, 0.039, 0.039, 0.052, 0.058, 0.056, 0.052, 0.047, 0.044, 0.040, 0.028 )" }
+
+	; DHW use #define values 11-23 - left undefined if not using new DHW use profiles - SAC 3/15/16
+	"Set Proj:CSE_Define*[11-23] depending on DHW Use mechanism"		Proj:Action	= {
+									if (CSE_DHWUseMthd == "Old (via wsUse)")	then	EvalRulelist( "CSE_BlastDHWUseInclude" )
+																							else	EvalRulelist( "CSE_SetDHWUseInclude"   )  endif  }
+
+   ; added from CSE_Defaulting_Project - SAC 03/01/22
+;   ; SAC 11/4/18 - VCHP
+;	"Set Proj:CSE_DefineName[61]"		Proj:CSE_DefineName[61]	   = { "FVCHPC" }
+;	"Set Proj:CSE_DefineType[61]"		Proj:CSE_DefineType[61]	   = {	3  }
+;	"Set Proj:CSE_DefineString[61]"	Proj:CSE_DefineString[61]  = { "0.95		// VCHP cooling input energy factor" }
+;	"Set Proj:CSE_DefineName[62]"		Proj:CSE_DefineName[62]	   = { "FVCHPH" }
+;	"Set Proj:CSE_DefineType[62]"		Proj:CSE_DefineType[62]	   = {	3  }
+;	"Set Proj:CSE_DefineString[62]"	Proj:CSE_DefineString[62]  = { "0.88		// VCHP heating input energy factor" }
+
+	"Set Proj:CSE_DefineName[63]"		Proj:CSE_DefineName[63]	   = { "NumCntrlWHtrs( s)" }     ; SAC 12/4/19 - to facilitate central electric DHWSys heater autosizing
+	"Set Proj:CSE_DefineType[63]"		Proj:CSE_DefineType[63]	   = {   3  }
+;	"Set Proj:CSE_DefineString[63]"	Proj:CSE_DefineString[63]  = { "max( 1, @DHWSYS[ s].loadMax / (15400 * @DHWSYS[ s].loadMaxDur))" }
+	"Set Proj:CSE_DefineString[63]"	Proj:CSE_DefineString[63]  = { "tofloat( 1+fix(@DHWSYS[ s].loadMax / (15400. * @DHWSYS[ s].loadMaxDur)))" }
+
+; not working for Htl/Mtl - SAC 03/01/22
+;	"Set Proj:CSE_DefineName[64]"		Proj:CSE_DefineName[64]	   = { "RunFileName" }
+;	"Set Proj:CSE_DefineType[64]"		Proj:CSE_DefineType[64]	   = {   3  }
+;	"Set Proj:CSE_DefineString[64]"	Proj:CSE_DefineString[64]  = { ValidOr( ProjFileNameNoExt, "" ) + ValidOr( RunIDProcFile, "" )  }
+
+	"Set Proj:CSE_DefineName[65]"		Proj:CSE_DefineName[65]	   = { UNDEFINED }      ; next #define goes here...
+	"Set Proj:CSE_DefineType[65]"		Proj:CSE_DefineType[65]	   = { UNDEFINED }
+	"Set Proj:CSE_DefineFloat[65]"	Proj:CSE_DefineFloat[65]   = { UNDEFINED }
+	"Set Proj:CSE_DefineString[65]"	Proj:CSE_DefineString[65]  = { UNDEFINED }
+
+
+	; Internal Gains #define values 24-50 - left undefined for IntGainsMethod < 2016 - SAC 4/13/16
+;	"Set Proj:CSE_Define*[24-50] depending on IntGainsMethod"		Proj:Action	= {
+;														if (IntGainsMethod == 2016)	then	EvalRulelist( "CSE_Set2016InternalGains" )
+;																								else	EvalRulelist( "CSE_BlastInternalGains"   )  endif  }
+;
+;	"Set cseTOP:heatDsTDbO"       cseTOP:heatDsTDbO		= {	CA13ClimateZoneDesignDay:HtgDesign( "ClimateZone", Proj:CliZnNum )  }
+;	"Set cseTOP:coolDsDay_x"      cseTOP:coolDsDay_x	= {	"DD1"  }   ; trailing '_x' in property name causes output string to NOT be enclosed in double quotes
+;
+;	; SAC 5/1/14 - added logic to prevent output of ventAvail_x when CFIClVent not selected @ the project level (mainly to turn off for Std design run - GC #298)
+;   "Set cseTOP:ventAvail_x"      cseTOP:ventAvail_x	= {	if (SumAll( HVACSys:CFIClVentFlow ) > 1 .AND. Proj:UnitClVentOption == 3)
+;																				then  "FANVENTAVAIL ? RSYSOAV : WholeBuilding "		; turns off window ventilation during cooling mode, but leaves it on in case of overheating in heating mode.  Only the OAV system runs in cooling mode.
+;																				else  UNDEFINED  endif  }   ; SAC 8/26/13 - OAV
+END
+;*************************************************************************
+
+
+;*************************************************************************
+;*************************************************************************
+RULELIST "CSE_SimulationCleanUp_Com" 1 0 0 1
+;   Rules which are executed immediately following a CSE simulation
+;*************************************************************************
+;*************************************************************************
+
+	"Delete all cseTOP components"					Proj:Action = {	DeleteAllComps( cseTOP )  }
+	"Delete all cseDESCOND components"				Proj:Action = {	DeleteAllComps( cseDESCOND )  }     ; SAC 10/10/22
+	"Delete all cseMETER components"					Proj:Action = {	DeleteAllComps( cseMETER )  }
+
+; removed rules not related to DHW
+;	"Delete all CSE Cons-related components"		Proj:Action = {	EvalRulelist( "CSE_Cleanup_Cons" )  }
+;
+;	"Delete all cseZONE components"					Proj:Action = {	DeleteAllComps( cseZONE )  }
+;
+;	"Delete all CSE Cons-related components"		Proj:Action = {	EvalRulelist( "CSE_Cleanup_Surfaces" )  }
+;
+;	"Delete all cseRSYS components"					Proj:Action = {	DeleteAllComps( cseRSYS )  }
+;	"Blast all cseIZXFER components"					Proj:Action	= {	DeleteAllComps( cseIZXFER )  }
+
+	"Delete all CSE Cons-related components"		Proj:Action = {	EvalRulelist( "CSE_Cleanup_DHW" )  }
+
+  ; Blast meter & export components used to track electric and fuel use
+	"Blast site-wide Elec meter"			Proj:CSE_ElecMETER			= {	if (LocalCompAssigned( CSE_ElecMETER        )) then  DeleteComp()  else  UNCHANGED  endif  }
+	"Blast site-wide Elec2 meter"			Proj:CSE_Elec2METER			= {	if (LocalCompAssigned( CSE_Elec2METER       )) then  DeleteComp()  else  UNCHANGED  endif  }    ; SAC 04/13/22 (Com tic #3366)
+	"Blast site-wide NatGas meter"		Proj:CSE_NatGasMETER			= {	if (LocalCompAssigned( CSE_NatGasMETER      )) then  DeleteComp()  else  UNCHANGED  endif  }
+	"Blast site-wide <other> meter"		Proj:CSE_OtherFuelMETER		= {	if (LocalCompAssigned( CSE_OtherFuelMETER   )) then  DeleteComp()  else  UNCHANGED  endif  }
+	"Blast site-wide Elec export"			Proj:CSE_ElecEXPORT			= {	if (LocalCompAssigned( CSE_ElecEXPORT       )) then  DeleteComp()  else  UNCHANGED  endif  }
+	"Blast site-wide Elec2 export"		Proj:CSE_Elec2EXPORT			= {	if (LocalCompAssigned( CSE_Elec2EXPORT      )) then  DeleteComp()  else  UNCHANGED  endif  }    ; SAC 04/13/22 (Com tic #3366)
+	"Blast site-wide NatGas export"		Proj:CSE_NatGasEXPORT		= {	if (LocalCompAssigned( CSE_NatGasEXPORT     )) then  DeleteComp()  else  UNCHANGED  endif  }
+	"Blast site-wide <other> export"		Proj:CSE_OtherFuelEXPORT	= {	if (LocalCompAssigned( CSE_OtherFuelEXPORT  )) then  DeleteComp()  else  UNCHANGED  endif  }
+END
+
+
+; SAC 1/15/15 - added rulelists to setup cseTOP properties that govern simulation speed/accuracy
+;*************************************************************************
+RULELIST "CSE_SimSpeedOption_Compliance_Com" 1 0 0 1                                          ; SAC 4/29/15 - values replaced 4/29/15 from BAW
+   "Set (speed = Compliance) cseTOP:nSubSteps"     cseTOP:nSubSteps     = {    20        }		;    30        }
+   "Set (speed = Compliance) cseTOP:wuDays"        cseTOP:wuDays        = {    30        }		;    30        }
+   "Set (speed = Compliance) cseTOP:awTrigSlr"     cseTOP:awTrigSlr     = {     0.1      }		;     0.05     }
+   "Set (speed = Compliance) cseTOP:anTolAbs"      cseTOP:anTolAbs      = {     0.005    }		;     0.00125  }
+   "Set (speed = Compliance) cseTOP:anTolRel"      cseTOP:anTolRel      = {     0.0005   }		;     0.0001   }
+   "Set (speed = Compliance) cseTOP:auszTol"       cseTOP:auszTol       = {     0.01     }		;     0.005    }
+   "Set (speed = Compliance) cseTOP:awTrigT"       cseTOP:awTrigT       = {     3        }		;     1        }
+   "Set (speed = Compliance) cseTOP:awTrigH"       cseTOP:awTrigH       = {     0.3      }		;     0.1      }
+END
+; removed rules not related to DHW
+;;*************************************************************************  Quick modified by BW 2/4/15 to Rev 3g
+;RULELIST "CSE_SimSpeedOption_Quick" 1 0 0 1
+;   "Set (speed = Quick) cseTOP:nSubSteps"          cseTOP:nSubSteps     = {    6         }
+;   "Set (speed = Quick) cseTOP:wuDays"             cseTOP:wuDays        = {    15        }
+;   "Set (speed = Quick) cseTOP:awTrigSlr"          cseTOP:awTrigSlr     = {     0.3      }
+;   "Set (speed = Quick) cseTOP:anTolAbs"           cseTOP:anTolAbs      = {     0.03     }
+;   "Set (speed = Quick) cseTOP:anTolRel"           cseTOP:anTolRel      = {     0.003    }
+;   "Set (speed = Quick) cseTOP:auszTol"            cseTOP:auszTol       = {     0.05     }
+;   "Set (speed = Quick) cseTOP:awTrigT"            cseTOP:awTrigT       = {    15.       }
+;   "Set (speed = Quick) cseTOP:awTrigH"            cseTOP:awTrigH       = {     1.       }
+;END
+;;*************************************************************************  Custom modified by BW 2/4/15 to Rev C53
+;RULELIST "Default_SimSpeedOption" 0 0 0 0																																										; SAC 4/29/15 - replaced old Custom w/ previous Compliance settings
+;   "Default (speed = Custom) Proj:CSE_nSubSteps"   Proj:CSE_nSubSteps   = {  if (IfValidAnd( SimSpeedOption = 2 )==0) then  UNDEFINED  else    30        endif  }		;      20        endif  }
+;   "Default (speed = Custom) Proj:CSE_wuDays"      Proj:CSE_wuDays      = {  if (IfValidAnd( SimSpeedOption = 2 )==0) then  UNDEFINED  else    30        endif  }		;      30        endif  }
+;   "Default (speed = Custom) Proj:CSE_AWTrigSlr"   Proj:CSE_AWTrigSlr   = {  if (IfValidAnd( SimSpeedOption = 2 )==0) then  UNDEFINED  else     0.05     endif  }		;       0.1      endif  }
+;   "Default (speed = Custom) Proj:CSE_ANTolAbs"    Proj:CSE_ANTolAbs    = {  if (IfValidAnd( SimSpeedOption = 2 )==0) then  UNDEFINED  else     0.00125  endif  }		;       0.005    endif  }
+;   "Default (speed = Custom) Proj:CSE_ANTolRel"    Proj:CSE_ANTolRel    = {  if (IfValidAnd( SimSpeedOption = 2 )==0) then  UNDEFINED  else     0.0001   endif  }		;       0.0005   endif  }
+;   "Default (speed = Custom) Proj:CSE_auszTol"     Proj:CSE_auszTol     = {  if (IfValidAnd( SimSpeedOption = 2 )==0) then  UNDEFINED  else     0.005    endif  }		;       0.01     endif  }
+;   "Default (speed = Custom) Proj:CSE_AWTrigT"     Proj:CSE_AWTrigT     = {  if (IfValidAnd( SimSpeedOption = 2 )==0) then  UNDEFINED  else     1        endif  }		;       3        endif  }
+;   "Default (speed = Custom) Proj:CSE_AWTrigH"     Proj:CSE_AWTrigH     = {  if (IfValidAnd( SimSpeedOption = 2 )==0) then  UNDEFINED  else     0.1      endif  }		;       0.3      endif  }
+;END
+;RULELIST "CSE_SimSpeedOption_Custom" 1 0 0 1
+;   "Set (speed = Custom) cseTOP:nSubSteps"         cseTOP:nSubSteps     = {  Proj:CSE_nSubSteps  }
+;   "Set (speed = Custom) cseTOP:wuDays"            cseTOP:wuDays        = {  Proj:CSE_wuDays     }
+;   "Set (speed = Custom) cseTOP:awTrigSlr"         cseTOP:awTrigSlr     = {  Proj:CSE_AWTrigSlr  }
+;   "Set (speed = Custom) cseTOP:anTolAbs"          cseTOP:anTolAbs      = {  Proj:CSE_ANTolAbs   }
+;   "Set (speed = Custom) cseTOP:anTolRel"          cseTOP:anTolRel      = {  Proj:CSE_ANTolRel   }
+;   "Set (speed = Custom) cseTOP:auszTol"           cseTOP:auszTol       = {  Proj:CSE_auszTol    }
+;   "Set (speed = Custom) cseTOP:awTrigT"           cseTOP:awTrigT       = {  Proj:CSE_AWTrigT    }
+;   "Set (speed = Custom) cseTOP:awTrigH"           cseTOP:awTrigH       = {  Proj:CSE_AWTrigH    }
+;END
+;;*************************************************************************
+
+
+
+; Com-Specific ResDHW setup - SAC 03/01/22
+;*************************************************************************
+RULELIST "CSE_SimulationPrep_DHW_MFam_wsDayUse_Com" 1 0 0 1
+;   Rules to setup DHWSYS objects using new (2016 and later) DHW use & gains mechanism
+;*************************************************************************
+   "Set Proj:DHWDUShuffleNum (MFam)"      Proj:DHWDUShuffleNum =     ; SAC 02/23/21
+      {  if (IfValidAnd( MFamDHWDUShuffleNum >= 1)) then  MFamDHWDUShuffleNum
+         else  0  endif  }
+;	"Create DwellUnitDHW children for each DwellUnit"	DwellUnit:Action	= {	if (LocalCompAssigned( DwellUnitTypeRef ) < 1 .OR. Count < 1 .OR.
+;																											 LocalCompAssigned( DwellUnitTypeRef:DHWSysRef[1] ) < 1) then  UNCHANGED
+;																										else	CreateChildren( DwellUnitDHW, Count, Name + " DU" )  endif  }
+;																					;					else	CreateChildren( DwellUnitDHW, Count, Name + " DU", "Setup_DwellUnitDHW", 1 )  endif  }
+; SAC 9/17/16 - removed condition "IfValidAnd( ResDHWSysRef:CentralDHW > 0 )" preventing creation of DwellUnitDHW for spaces served by central DHW systems
+   ; added logic to prevent Res DHW simulation for spaces of non-res SpcFunc - SAC 04/30/21 (tic #3242)
+; remove all MFamRes DwellUnitDHW creation, leaving only Hotel/Motel - SAC 03/01/22
+;  	"Create Studio DwellUnitDHW children for each Spc"		Spc:Action	= {	if (SpcFunc != "High-Rise Residential Living Spaces" .OR.
+;                                                                                 HaveResDHW < 0.5 .OR. IfValidAnd( DwellingUnitTypeArea[1] > 0 )==0 .OR.
+;  																																	  IfValidAnd( DwellingUnitTypeCnt[ 1] > 0 )==0) then  UNCHANGED
+;  																									else	  CreateChildren( DwellUnitDHW, DwellingUnitTypeCnt[ 1] * Mult, Name + " DU0", "Setup_DwellUnitDHW_Studio_Com" )  endif  }
+;  	"Create 1-Bedrm DwellUnitDHW children for each Spc"	Spc:Action	= {	if ((SpcFunc != "High-Rise Residential Living Spaces" .AND.
+;                                                                                  SpcFunc != "Hotel/Motel Guest Room") .OR.
+	"Create 1-Bedrm DwellUnitDHW children for each Spc"	Spc:Action	= {	if (SpcFunc != "Hotel/Motel Guest Room" .OR.
+                                                                               HaveResDHW < 0.5 .OR. IfValidAnd( DwellingUnitTypeArea[2] > 0 )==0 .OR.
+																																	  IfValidAnd( DwellingUnitTypeCnt[ 2] > 0 )==0) then  UNCHANGED
+																									else	  CreateChildren( DwellUnitDHW, DwellingUnitTypeCnt[ 2] * Mult, Name + " DU1", "Setup_DwellUnitDHW_1Bedroom_Com" )  endif  }
+;  	"Create 2-Bedrm DwellUnitDHW children for each Spc"	Spc:Action	= {	if (SpcFunc != "High-Rise Residential Living Spaces" .OR.
+;                                                                                 HaveResDHW < 0.5 .OR. IfValidAnd( DwellingUnitTypeArea[3] > 0 )==0 .OR.
+;  																																	  IfValidAnd( DwellingUnitTypeCnt[ 3] > 0 )==0) then  UNCHANGED
+;  																									else	  CreateChildren( DwellUnitDHW, DwellingUnitTypeCnt[ 3] * Mult, Name + " DU2", "Setup_DwellUnitDHW_2Bedroom_Com" )  endif  }
+;  	"Create 3-Bedrm DwellUnitDHW children for each Spc"	Spc:Action	= {	if (SpcFunc != "High-Rise Residential Living Spaces" .OR.
+;                                                                                 HaveResDHW < 0.5 .OR. IfValidAnd( DwellingUnitTypeArea[4] > 0 )==0 .OR.
+;  																																	  IfValidAnd( DwellingUnitTypeCnt[ 4] > 0 )==0) then  UNCHANGED
+;  																									else	  CreateChildren( DwellUnitDHW, DwellingUnitTypeCnt[ 4] * Mult, Name + " DU3", "Setup_DwellUnitDHW_3Bedroom_Com" )  endif  }
+;  	"Create 4-Bedrm DwellUnitDHW children for each Spc"	Spc:Action	= {	if (SpcFunc != "High-Rise Residential Living Spaces" .OR.
+;                                                                                 HaveResDHW < 0.5 .OR. IfValidAnd( DwellingUnitTypeArea[5] > 0 )==0 .OR.
+;  																																	  IfValidAnd( DwellingUnitTypeCnt[ 5] > 0 )==0) then  UNCHANGED
+;  																									else	  CreateChildren( DwellUnitDHW, DwellingUnitTypeCnt[ 5] * Mult, Name + " DU4", "Setup_DwellUnitDHW_4Bedroom_Com" )  endif  }
+;  	"Create 5-Bedrm DwellUnitDHW children for each Spc"	Spc:Action	= {	if (SpcFunc != "High-Rise Residential Living Spaces" .OR.
+;                                                                                 HaveResDHW < 0.5 .OR. IfValidAnd( DwellingUnitTypeArea[6] > 0 )==0 .OR.
+;  																																	  IfValidAnd( DwellingUnitTypeCnt[ 6] > 0 )==0) then  UNCHANGED
+;  																									else	  CreateChildren( DwellUnitDHW, DwellingUnitTypeCnt[ 6] * Mult, Name + " DU5", "Setup_DwellUnitDHW_5Bedroom_Com" )  endif  }
+
+	"Create a CSE DHWSYS for each DwellUnitDHW"				DwellUnitDHW:cseDHWSYSRef								=
+      {	if (ParentComponentType() != "Spc") then  UNCHANGED
+         else  CreateComp( cseDHWSYS, "dhwsys-" + substr( Name, 0, 47 ) )  endif  }
+	"Set DwellUnitDHW:cseDHWSYSRef:SourceDwellUnitType"	DwellUnitDHW:cseDHWSYSRef:SourceSpc					=
+      {	if (ParentComponentType() != "Spc") then  UNCHANGED
+         else  Parent( Name )  endif  }
+; SAC 5/11/16 - DISALLOW multiple ResDHWSys objects per DwellUnitType
+	"Set DwellUnitDHW:cseDHWSYSRef:SourceDHWSys"				DwellUnitDHW:cseDHWSYSRef:SourceDHWSys				=
+      {	if (ParentComponentType() != "Spc") then  UNCHANGED
+         else  ParentRef( ResDHWSysRef:Name )  endif  }
+	"Set DwellUnitDHW:cseDHWSYSRef:SourceDwellUnitDHW"		DwellUnitDHW:cseDHWSYSRef:SourceDwellUnitDHW		=
+      {	if (ParentComponentType() != "Spc") then  UNCHANGED
+         else  Name  endif  }
+
+	"Set DwellUnitDHW:cseDHWSYSRef:wsCentralDHWSYS"			DwellUnitDHW:cseDHWSYSRef:wsCentralDHWSYS			=
+      {	if (ParentComponentType() != "Spc") then  UNCHANGED
+         else  if (IfValidAnd( cseDHWSYSRef:SourceDHWSys:CentralDHW > 0.5 ))
+			      then	cseDHWSYSRef:SourceDHWSys:cseDHWSYSRef
+			      else	UNDEFINED  endif  endif  }
+END
+
+;*************************************************************************
+; remove all MFamRes DwellUnitDHW creation, leaving only Hotel/Motel - SAC 03/01/22
+;  RULELIST "Setup_DwellUnitDHW_Studio_Com" 1 0 0 0
+;  	"Set DwellUnitDHW:NumBedrooms_Init"	DwellUnitDHW:NumBedrooms_Init	= {	0  }	; SAC 5/30/16 - added .._Init properties to ensure DHWProfileLetter set properly
+;  	"Set DwellUnitDHW:Area"					DwellUnitDHW:Area					= {	Parent( DwellingUnitTypeArea[1] )  }
+;  	"Set DwellUnitDHW:Mult"					DwellUnitDHW:Mult					= {	if (Proj:CSE_DHWUseMthd == "Old (via wsUse)") then  Parent( DwellingUnitTypeCnt[1] ) * Parent( Mult )  else  UNDEFINED  endif  }
+;  	"Set DwellUnitDHW:UsePerDay"			DwellUnitDHW:UsePerDay			= {	if (Proj:CSE_DHWUseMthd == "Old (via wsUse)") then  Parent( DwellingUnit1GalPerDay )  else  UNDEFINED  endif  }
+;     "Set DwellUnitDHW:CompactFactor"    DwellUnitDHW:CompactFactor    = {
+;           if (IfValidAnd( Proj:EngyCodeYearNum >= 2019 ) .AND. ParentCompAssigned( ResSpcDHWFeaturesRef[1] ))
+;           then  if (IfValidAnd( ResSpcDHWFeaturesRef[1]:CompactFactor > 0 ))
+;                 then  ResSpcDHWFeaturesRef[1]:CompactFactor
+;                 else  UNDEFINED  endif
+;           else  UNDEFINED  endif  }  ; SAC 1/24/19 - added to model 2019+ compact distribution
+;     "Set DwellUnitDHW:ResSpcDHWFeaturesRef"   DwellUnitDHW:ResSpcDHWFeaturesRef  = {
+;           if (IfValidAnd( Proj:EngyCodeYearNum >= 2019 ) .AND. ParentCompAssigned( ResSpcDHWFeaturesRef[1] ))
+;           then  Parent( ResSpcDHWFeaturesRef[1] )
+;           else  UNDEFINED  endif  }  ; SAC 1/24/19 - added to model 2019+ DWHR
+;  ;   "Set load-sharing DwellUnitDHW-2 DUTypeDWHRIndex"  DwellUnitDHW:LoadShareDUDHWRef[1]:DUTypeDWHRIndex  = {
+;  ;      if (IfValidAnd( DwellUnitTypeRef:NumDWHRSysDevices[2] > 0 )) then  2  else  UNDEFINED  endif  }   ; SAC 1/7/19
+;  	"Setup DwellUnitDHW objects"			DwellUnitDHW:Action				= {	EvalRulelist( "Setup_DwellUnitDHW_Com", 1 )  }
+;  END
+; mods throughout following rulelist to accommodate hotel/motel guest room settings - SAC 04/30/21 (tic #3242)
+RULELIST "Setup_DwellUnitDHW_1Bedroom_Com" 1 0 0 0
+	"Set DwellUnitDHW:NumBedrooms_Init"	DwellUnitDHW:NumBedrooms_Init	= {	1  }
+	"Set DwellUnitDHW:Area"					DwellUnitDHW:Area					= {	Parent( DwellingUnitTypeArea[2] )  }
+	"Set DwellUnitDHW:Mult"					DwellUnitDHW:Mult					= {	if (Proj:CSE_DHWUseMthd == "Old (via wsUse)") then  Parent( DwellingUnitTypeCnt[2] ) * Parent( Mult )  else  UNDEFINED  endif  }
+	"Set DwellUnitDHW:UsePerDay"			DwellUnitDHW:UsePerDay			= {	if (Proj:CSE_DHWUseMthd == "Old (via wsUse)") then  Parent( DwellingUnit2GalPerDay )  else  UNDEFINED  endif  }
+   "Set DwellUnitDHW:CompactFactor"    DwellUnitDHW:CompactFactor    = {
+         if (IfValidAnd( Proj:EngyCodeYearNum >= 2019 ))
+         then  if (SpcFunc == "High-Rise Residential Living Spaces" .AND. ParentCompAssigned( ResSpcDHWFeaturesRef[2] ))
+               then  if (IfValidAnd( ResSpcDHWFeaturesRef[2]:CompactFactor > 0 ))
+                     then  ResSpcDHWFeaturesRef[2]:CompactFactor
+                     else  UNDEFINED  endif
+               else if (SpcFunc == "Hotel/Motel Guest Room" .AND. ParentCompAssigned( GuestRmResSpcDHWFeaturesRef ))
+               then  if (IfValidAnd( GuestRmResSpcDHWFeaturesRef:CompactFactor > 0 ))
+                     then  GuestRmResSpcDHWFeaturesRef:CompactFactor
+                     else  UNDEFINED  endif
+               else  UNDEFINED  endif endif
+         else  UNDEFINED  endif  }  ; SAC 1/24/19 - added to model 2019+ compact distribution
+   "Set DwellUnitDHW:ResSpcDHWFeaturesRef"   DwellUnitDHW:ResSpcDHWFeaturesRef  = {
+         if (IfValidAnd( Proj:EngyCodeYearNum >= 2019 ))
+         then  if (SpcFunc == "High-Rise Residential Living Spaces" .AND. ParentCompAssigned( ResSpcDHWFeaturesRef[2] ))
+               then  Parent( ResSpcDHWFeaturesRef[2] )
+               else if (SpcFunc == "Hotel/Motel Guest Room" .AND. ParentCompAssigned( GuestRmResSpcDHWFeaturesRef ))
+               then  Parent( GuestRmResSpcDHWFeaturesRef )
+               else  UNDEFINED  endif endif
+         else  UNDEFINED  endif  }  ; SAC 1/24/19 - added to model 2019+ DWHR
+;   "Set load-sharing DwellUnitDHW-2 DUTypeDWHRIndex"  DwellUnitDHW:LoadShareDUDHWRef[1]:DUTypeDWHRIndex  = {
+;      if (IfValidAnd( DwellUnitTypeRef:NumDWHRSysDevices[2] > 0 )) then  2  else  UNDEFINED  endif  }   ; SAC 1/7/19
+	"Setup DwellUnitDHW objects"			DwellUnitDHW:Action				= {	EvalRulelist( "Setup_DwellUnitDHW_Com", 1 )  }
+END
+; remove all MFamRes DwellUnitDHW creation, leaving only Hotel/Motel - SAC 03/01/22
+;  RULELIST "Setup_DwellUnitDHW_2Bedroom_Com" 1 0 0 0
+;  	"Set DwellUnitDHW:NumBedrooms_Init"	DwellUnitDHW:NumBedrooms_Init	= {	2  }
+;  	"Set DwellUnitDHW:Area"					DwellUnitDHW:Area					= {	Parent( DwellingUnitTypeArea[3] )  }
+;  	"Set DwellUnitDHW:Mult"					DwellUnitDHW:Mult					= {	if (Proj:CSE_DHWUseMthd == "Old (via wsUse)") then  Parent( DwellingUnitTypeCnt[3] ) * Parent( Mult )  else  UNDEFINED  endif  }
+;  	"Set DwellUnitDHW:UsePerDay"			DwellUnitDHW:UsePerDay			= {	if (Proj:CSE_DHWUseMthd == "Old (via wsUse)") then  Parent( DwellingUnit3GalPerDay )  else  UNDEFINED  endif  }
+;     "Set DwellUnitDHW:CompactFactor"    DwellUnitDHW:CompactFactor    = {
+;           if (IfValidAnd( Proj:EngyCodeYearNum >= 2019 ) .AND. ParentCompAssigned( ResSpcDHWFeaturesRef[3] ))
+;           then  if (IfValidAnd( ResSpcDHWFeaturesRef[3]:CompactFactor > 0 ))
+;                 then  ResSpcDHWFeaturesRef[3]:CompactFactor
+;                 else  UNDEFINED  endif
+;           else  UNDEFINED  endif  }  ; SAC 1/24/19 - added to model 2019+ compact distribution
+;     "Set DwellUnitDHW:ResSpcDHWFeaturesRef"   DwellUnitDHW:ResSpcDHWFeaturesRef  = {
+;           if (IfValidAnd( Proj:EngyCodeYearNum >= 2019 ) .AND. ParentCompAssigned( ResSpcDHWFeaturesRef[3] ))
+;           then  Parent( ResSpcDHWFeaturesRef[3] )
+;           else  UNDEFINED  endif  }  ; SAC 1/24/19 - added to model 2019+ DWHR
+;  ;   "Set load-sharing DwellUnitDHW-2 DUTypeDWHRIndex"  DwellUnitDHW:LoadShareDUDHWRef[1]:DUTypeDWHRIndex  = {
+;  ;      if (IfValidAnd( DwellUnitTypeRef:NumDWHRSysDevices[2] > 0 )) then  2  else  UNDEFINED  endif  }   ; SAC 1/7/19
+;  	"Setup DwellUnitDHW objects"			DwellUnitDHW:Action				= {	EvalRulelist( "Setup_DwellUnitDHW_Com", 1 )  }
+;  END
+;  RULELIST "Setup_DwellUnitDHW_3Bedroom_Com" 1 0 0 0
+;  	"Set DwellUnitDHW:NumBedrooms_Init"	DwellUnitDHW:NumBedrooms_Init	= {	3  }
+;  	"Set DwellUnitDHW:Area"					DwellUnitDHW:Area					= {	Parent( DwellingUnitTypeArea[4] )  }
+;  	"Set DwellUnitDHW:Mult"					DwellUnitDHW:Mult					= {	if (Proj:CSE_DHWUseMthd == "Old (via wsUse)") then  Parent( DwellingUnitTypeCnt[4] ) * Parent( Mult )  else  UNDEFINED  endif  }
+;  	"Set DwellUnitDHW:UsePerDay"			DwellUnitDHW:UsePerDay			= {	if (Proj:CSE_DHWUseMthd == "Old (via wsUse)") then  Parent( DwellingUnit4GalPerDay )  else  UNDEFINED  endif  }
+;     "Set DwellUnitDHW:CompactFactor"    DwellUnitDHW:CompactFactor    = {
+;           if (IfValidAnd( Proj:EngyCodeYearNum >= 2019 ) .AND. ParentCompAssigned( ResSpcDHWFeaturesRef[4] ))
+;           then  if (IfValidAnd( ResSpcDHWFeaturesRef[4]:CompactFactor > 0 ))
+;                 then  ResSpcDHWFeaturesRef[4]:CompactFactor
+;                 else  UNDEFINED  endif
+;           else  UNDEFINED  endif  }  ; SAC 1/24/19 - added to model 2019+ compact distribution
+;     "Set DwellUnitDHW:ResSpcDHWFeaturesRef"   DwellUnitDHW:ResSpcDHWFeaturesRef  = {
+;           if (IfValidAnd( Proj:EngyCodeYearNum >= 2019 ) .AND. ParentCompAssigned( ResSpcDHWFeaturesRef[4] ))
+;           then  Parent( ResSpcDHWFeaturesRef[4] )
+;           else  UNDEFINED  endif  }  ; SAC 1/24/19 - added to model 2019+ DWHR
+;  ;   "Set load-sharing DwellUnitDHW-2 DUTypeDWHRIndex"  DwellUnitDHW:LoadShareDUDHWRef[1]:DUTypeDWHRIndex  = {
+;  ;      if (IfValidAnd( DwellUnitTypeRef:NumDWHRSysDevices[2] > 0 )) then  2  else  UNDEFINED  endif  }   ; SAC 1/7/19
+;  	"Setup DwellUnitDHW objects"			DwellUnitDHW:Action				= {	EvalRulelist( "Setup_DwellUnitDHW_Com", 1 )  }
+;  END
+;  RULELIST "Setup_DwellUnitDHW_4Bedroom_Com" 1 0 0 0
+;  	"Set DwellUnitDHW:NumBedrooms_Init"	DwellUnitDHW:NumBedrooms_Init	= {	4  }
+;  	"Set DwellUnitDHW:Area"					DwellUnitDHW:Area					= {	Parent( DwellingUnitTypeArea[5] )  }
+;  	"Set DwellUnitDHW:Mult"					DwellUnitDHW:Mult					= {	if (Proj:CSE_DHWUseMthd == "Old (via wsUse)") then  Parent( DwellingUnitTypeCnt[5] ) * Parent( Mult )  else  UNDEFINED  endif  }
+;  	"Set DwellUnitDHW:UsePerDay"			DwellUnitDHW:UsePerDay			= {	if (Proj:CSE_DHWUseMthd == "Old (via wsUse)") then  Parent( DwellingUnit5GalPerDay )  else  UNDEFINED  endif  }
+;     "Set DwellUnitDHW:CompactFactor"    DwellUnitDHW:CompactFactor    = {
+;           if (IfValidAnd( Proj:EngyCodeYearNum >= 2019 ) .AND. ParentCompAssigned( ResSpcDHWFeaturesRef[5] ))
+;           then  if (IfValidAnd( ResSpcDHWFeaturesRef[5]:CompactFactor > 0 ))
+;                 then  ResSpcDHWFeaturesRef[5]:CompactFactor
+;                 else  UNDEFINED  endif
+;           else  UNDEFINED  endif  }  ; SAC 1/24/19 - added to model 2019+ compact distribution
+;     "Set DwellUnitDHW:ResSpcDHWFeaturesRef"   DwellUnitDHW:ResSpcDHWFeaturesRef  = {
+;           if (IfValidAnd( Proj:EngyCodeYearNum >= 2019 ) .AND. ParentCompAssigned( ResSpcDHWFeaturesRef[5] ))
+;           then  Parent( ResSpcDHWFeaturesRef[5] )
+;           else  UNDEFINED  endif  }  ; SAC 1/24/19 - added to model 2019+ DWHR
+;  ;   "Set load-sharing DwellUnitDHW-2 DUTypeDWHRIndex"  DwellUnitDHW:LoadShareDUDHWRef[1]:DUTypeDWHRIndex  = {
+;  ;      if (IfValidAnd( DwellUnitTypeRef:NumDWHRSysDevices[2] > 0 )) then  2  else  UNDEFINED  endif  }   ; SAC 1/7/19
+;  	"Setup DwellUnitDHW objects"			DwellUnitDHW:Action				= {	EvalRulelist( "Setup_DwellUnitDHW_Com", 1 )  }
+;  END
+;  RULELIST "Setup_DwellUnitDHW_5Bedroom_Com" 1 0 0 0
+;  	"Set DwellUnitDHW:NumBedrooms_Init"	DwellUnitDHW:NumBedrooms_Init	= {	5  }
+;  	"Set DwellUnitDHW:Area"					DwellUnitDHW:Area					= {	Parent( DwellingUnitTypeArea[6] )  }
+;  	"Set DwellUnitDHW:Mult"					DwellUnitDHW:Mult					= {	if (Proj:CSE_DHWUseMthd == "Old (via wsUse)") then  Parent( DwellingUnitTypeCnt[6] ) * Parent( Mult )  else  UNDEFINED  endif  }
+;  	"Set DwellUnitDHW:UsePerDay"			DwellUnitDHW:UsePerDay			= {	if (Proj:CSE_DHWUseMthd == "Old (via wsUse)") then  Parent( DwellingUnit6GalPerDay )  else  UNDEFINED  endif  }
+;     "Set DwellUnitDHW:CompactFactor"    DwellUnitDHW:CompactFactor    = {
+;           if (IfValidAnd( Proj:EngyCodeYearNum >= 2019 ) .AND. ParentCompAssigned( ResSpcDHWFeaturesRef[6] ))
+;           then  if (IfValidAnd( ResSpcDHWFeaturesRef[6]:CompactFactor > 0 ))
+;                 then  ResSpcDHWFeaturesRef[6]:CompactFactor
+;                 else  UNDEFINED  endif
+;           else  UNDEFINED  endif  }  ; SAC 1/24/19 - added to model 2019+ compact distribution
+;     "Set DwellUnitDHW:ResSpcDHWFeaturesRef"   DwellUnitDHW:ResSpcDHWFeaturesRef  = {
+;           if (IfValidAnd( Proj:EngyCodeYearNum >= 2019 ) .AND. ParentCompAssigned( ResSpcDHWFeaturesRef[6] ))
+;           then  Parent( ResSpcDHWFeaturesRef[6] )
+;           else  UNDEFINED  endif  }  ; SAC 1/24/19 - added to model 2019+ DWHR
+;  ;   "Set load-sharing DwellUnitDHW-2 DUTypeDWHRIndex"  DwellUnitDHW:LoadShareDUDHWRef[1]:DUTypeDWHRIndex  = {
+;  ;      if (IfValidAnd( DwellUnitTypeRef:NumDWHRSysDevices[2] > 0 )) then  2  else  UNDEFINED  endif  }   ; SAC 1/7/19
+;  	"Setup DwellUnitDHW objects"			DwellUnitDHW:Action				= {	EvalRulelist( "Setup_DwellUnitDHW_Com", 1 )  }
+;  END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "Setup_DwellUnitDHW_Com" 1 0 0 0
+;   Rules to setup newly created DwellUnitDHW objects
+;	"Set DwellUnitDHW:DwellUnitTypeRef"		DwellUnitDHW:DwellUnitTypeRef		= {	Parent( DwellUnitTypeRef )  }
+;	"Set DwellUnitDHW:NumBedrooms"			DwellUnitDHW:NumBedrooms			= {	if (     IfValidAnd( DwellUnitTypeRef:NumBedrooms > 4.5 )) then  5
+;																											else if (IfValidAnd( DwellUnitTypeRef:NumBedrooms > 3.5 )) then  4
+;																											else if (IfValidAnd( DwellUnitTypeRef:NumBedrooms > 2.5 )) then  3
+;																											else if (IfValidAnd( DwellUnitTypeRef:NumBedrooms > 1.5 )) then  2
+;																											else if (IfValidAnd( DwellUnitTypeRef:NumBedrooms > 0.5 )) then  1
+;																											else	0  endif endif endif endif endif  }
+	"Set DwellUnitDHW:NumBedrooms"			DwellUnitDHW:NumBedrooms			= {	NumBedrooms_Init  }
+
+   "Set DwellUnitDHW:NumDHWSchShuffles - # draw sched shuffles by # bedrooms"    DwellUnitDHW:NumDHWSchShuffles =       ; SAC 02/25/21
+      {  if (     NumBedrooms >= 4) then  10
+         else if (NumBedrooms == 3) then  20
+         else                             50   endif endif  }
+
+;	"Set DwellUnitDHW:DHWProfileLetter"		DwellUnitDHW:DHWProfileLetter		= {	switch ( mod( CountOccurrences( DwellUnitDHW:NumBedrooms, NumBedrooms ), 5 ) )
+;																												case  1 :  "a"
+;																												case  2 :  "b"
+;																												case  3 :  "c"
+;																												case  4 :  "d"
+;																												default :  "e"
+;																											endswitch  }
+; SAC 1/24/19 - switch from 5 to 10 MFam DHW draw profile shufflings
+   ; SAC 4/29/19 - restored use of 5 MFam DHW draw profile shufflings for PRE-2019 analysis
+	"Set DwellUnitDHW:DHWProfileLetter"		DwellUnitDHW:DHWProfileLetter		=        ; updated for new DHWDU.txt w/ many more shufflings - SAC 02/25/21
+   {  if (IfValidAnd( Proj:EngyCodeYearNum >= 2019 ))
+      then  if (                    mod( (CountOccurrences( DwellUnitDHW:NumBedrooms, NumBedrooms ) + Proj:DHWDUShuffleNum), NumDHWSchShuffles ) > 0)
+            then  Format( "%02.0f", mod( (CountOccurrences( DwellUnitDHW:NumBedrooms, NumBedrooms ) + Proj:DHWDUShuffleNum), NumDHWSchShuffles ) )
+            else  Format( "%02.0f", NumDHWSchShuffles )  endif
+      else  switch ( mod( CountOccurrences( DwellUnitDHW:NumBedrooms, NumBedrooms ), 5 ) )
+               case  1 :  "a"       case  2 :  "b"       case  3 :  "c"
+               case  4 :  "d"       default :  "e"
+            endswitch  endif  }
+   ; prior >= 2019 logic
+   ;   then  switch ( mod( CountOccurrences( DwellUnitDHW:NumBedrooms, NumBedrooms ), 10 ) )
+   ;            case  1 :  "a"       case  2 :  "b"       case  3 :  "c"
+   ;            case  4 :  "d"       case  5 :  "e"       case  6 :  "f"
+   ;            case  7 :  "g"       case  8 :  "h"       case  9 :  "i"
+   ;            default :  "j"
+   ;         endswitch
+;	"Set DwellUnitDHW:CSEDayUseName"			DwellUnitDHW:CSEDayUseName			= {	Format( "DHW%.0fBR", NumBedrooms )  }								; PRIOR to MFam central DHW fixes ~5/12/16
+;	"Set DwellUnitDHW:CSEDayUseName"			DwellUnitDHW:CSEDayUseName			= {	Format( "DHW%.0fBR%s", NumBedrooms, DHWProfileLetter )  }	; PRIOR to MFam central DHW fixes ~5/12/16
+	"Set DwellUnitDHW:CSEDayUseName"			DwellUnitDHW:CSEDayUseName			= {	Format( "DHWMF%.0fBR%s", NumBedrooms, DHWProfileLetter )  }	; revised DHWDU w/ more shufflings - SAC 02/25/21
+END
+
+
+;*************************************************************************  - SAC 1/24/19  ; ported from older Com ruleset - SAC 03/11/22
+RULELIST "Setup_cseDHWHEATREC_NRes" 1 0 0 1
+	; cseDHWHEATREC setup
+	   ; SAC 4/29/19 - updates for consistency w/ latest Res rules (tic #2553)
+   "Create Child cseDHWHEATREC - 1"    cseDHWSYS:ChildcseDHWHEATRECs[1]  = {
+      if (LocalCompAssigned( SourceDwellUnitDHW:ResSpcDHWFeaturesRef ) < 1) then  UNCHANGED
+      else if (IfValidAnd( SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysRef[1]:CSARatedEff > 0 ) .AND.
+               IfValidAnd( SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysShowers[1] > 0 ) .AND.
+               ( (IfValidAnd( SourceDwellUnitDHW:ResSpcDHWFeaturesRef:AllowShowerDWHR > 0 ) .AND. IfValidAnd( SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysTakeCold[1] > 0 )) .OR.
+                 IfValidAnd( SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysFeedHeater[1] > 0 )))
+      then  CreateComp( cseDHWHEATREC, "dwhrsys1-" + substr( Name, 0, 44 ) )
+      else  UNCHANGED  endif endif  }
+
+   "Set cseDHWSYS:ChildcseDHWHEATRECs[1]:SourceDWHRSys"  cseDHWSYS:ChildcseDHWHEATRECs[1]:SourceDWHRSys  = {
+      SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysRef[1]  }
+;   "Set cseDHWSYS:ChildcseDHWHEATRECs[1]:wrConfig"       cseDHWSYS:ChildcseDHWHEATRECs[1]:wrConfig    = {
+;      switch (SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysConfig[1])
+;         case  "Equal Flow"             : "Equal"    
+;         case  "Unequal - Water Heater" : "UnequalWH"
+;         case  "Unequal - Shower"       : "UnequalFX"
+;         default  : UNDEFINED
+;      endswitch  }
+; SAC 4/29/19 - removed wrConfig, replaced wrFxServed w/ wrCountFXDrain and added wrCountFXCold & wrFeedsWH (tic #2553)
+   "Set cseDHWSYS:ChildcseDHWHEATRECs[1]:wrCountFXDrain"     cseDHWSYS:ChildcseDHWHEATRECs[1]:wrCountFXDrain  = {
+      SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysShowers[1]  }
+   "Set cseDHWSYS:ChildcseDHWHEATRECs[1]:wrCountFXCold"      cseDHWSYS:ChildcseDHWHEATRECs[1]:wrCountFXCold   = {
+      if (SourceDwellUnitDHW:ResSpcDHWFeaturesRef:AllowShowerDWHR < 1) then  UNCHANGED
+      else  SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysTakeCold[1]  endif  }
+   "Set cseDHWSYS:ChildcseDHWHEATRECs[1]:wrFeedsWH"          cseDHWSYS:ChildcseDHWHEATRECs[1]:wrFeedsWH       = {
+      if (SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysFeedHeater[1] != 0) then  "Yes"  else  "No"  endif  }
+
+   "Create Child cseDHWHEATREC - 2"    cseDHWSYS:ChildcseDHWHEATRECs[2]  = {
+      if (LocalCompAssigned( SourceDwellUnitDHW:ResSpcDHWFeaturesRef ) < 1) then  UNCHANGED
+      else if (IfValidAnd( SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysRef[2]:CSARatedEff > 0 ) .AND.
+               IfValidAnd( SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysShowers[2] > 0 ) .AND.
+               ( (IfValidAnd( SourceDwellUnitDHW:ResSpcDHWFeaturesRef:AllowShowerDWHR > 0 ) .AND. IfValidAnd( SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysTakeCold[2] > 0 )) .OR.
+                 IfValidAnd( SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysFeedHeater[2] > 0 )))
+      then  CreateComp( cseDHWHEATREC, "dwhrsys2-" + substr( Name, 0, 44 ) )
+      else  UNCHANGED  endif endif  }
+   "Set cseDHWSYS:ChildcseDHWHEATRECs[2]:SourceDWHRSys"  cseDHWSYS:ChildcseDHWHEATRECs[2]:SourceDWHRSys  = {
+      SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysRef[2]  }
+;   "Set cseDHWSYS:ChildcseDHWHEATRECs[2]:wrConfig"       cseDHWSYS:ChildcseDHWHEATRECs[2]:wrConfig    = {
+;      switch (SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysConfig[2])
+;         case  "Equal Flow"             : "Equal"    
+;         case  "Unequal - Water Heater" : "UnequalWH"
+;         case  "Unequal - Shower"       : "UnequalFX"
+;         default  : UNDEFINED
+;      endswitch  }
+; SAC 4/29/19 - removed wrConfig, replaced wrFxServed w/ wrCountFXDrain and added wrCountFXCold & wrFeedsWH (tic #2553)
+   "Set cseDHWSYS:ChildcseDHWHEATRECs[2]:wrCountFXDrain"     cseDHWSYS:ChildcseDHWHEATRECs[2]:wrCountFXDrain  = {
+      SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysShowers[2]  }
+   "Set cseDHWSYS:ChildcseDHWHEATRECs[2]:wrCountFXCold"      cseDHWSYS:ChildcseDHWHEATRECs[2]:wrCountFXCold   = {
+      if (SourceDwellUnitDHW:ResSpcDHWFeaturesRef:AllowShowerDWHR < 1) then  UNCHANGED
+      else  SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysTakeCold[2]  endif  }
+   "Set cseDHWSYS:ChildcseDHWHEATRECs[2]:wrFeedsWH"          cseDHWSYS:ChildcseDHWHEATRECs[2]:wrFeedsWH       = {
+      if (SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysFeedHeater[2] != 0) then  "Yes"  else  "No"  endif  }
+
+   "Create Child cseDHWHEATREC - 3"    cseDHWSYS:ChildcseDHWHEATRECs[3]  = {
+      if (LocalCompAssigned( SourceDwellUnitDHW:ResSpcDHWFeaturesRef ) < 1) then  UNCHANGED
+      else if (IfValidAnd( SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysRef[3]:CSARatedEff > 0 ) .AND.
+               IfValidAnd( SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysShowers[3] > 0 ) .AND.
+               ( (IfValidAnd( SourceDwellUnitDHW:ResSpcDHWFeaturesRef:AllowShowerDWHR > 0 ) .AND. IfValidAnd( SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysTakeCold[3] > 0 )) .OR.
+                 IfValidAnd( SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysFeedHeater[3] > 0 )))
+      then  CreateComp( cseDHWHEATREC, "dwhrsys3-" + substr( Name, 0, 44 ) )
+      else  UNCHANGED  endif endif  }
+   "Set cseDHWSYS:ChildcseDHWHEATRECs[3]:SourceDWHRSys"  cseDHWSYS:ChildcseDHWHEATRECs[3]:SourceDWHRSys  = {
+      SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysRef[3]  }
+;   "Set cseDHWSYS:ChildcseDHWHEATRECs[3]:wrConfig"       cseDHWSYS:ChildcseDHWHEATRECs[3]:wrConfig    = {
+;      switch (SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysConfig[3])
+;         case  "Equal Flow"             : "Equal"    
+;         case  "Unequal - Water Heater" : "UnequalWH"
+;         case  "Unequal - Shower"       : "UnequalFX"
+;         default  : UNDEFINED
+;      endswitch  }
+; SAC 4/29/19 - removed wrConfig, replaced wrFxServed w/ wrCountFXDrain and added wrCountFXCold & wrFeedsWH (tic #2553)
+   "Set cseDHWSYS:ChildcseDHWHEATRECs[3]:wrCountFXDrain"     cseDHWSYS:ChildcseDHWHEATRECs[3]:wrCountFXDrain  = {
+      SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysShowers[3]  }
+   "Set cseDHWSYS:ChildcseDHWHEATRECs[3]:wrCountFXCold"      cseDHWSYS:ChildcseDHWHEATRECs[3]:wrCountFXCold   = {
+      if (SourceDwellUnitDHW:ResSpcDHWFeaturesRef:AllowShowerDWHR < 1) then  UNCHANGED
+      else  SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysTakeCold[3]  endif  }
+   "Set cseDHWSYS:ChildcseDHWHEATRECs[3]:wrFeedsWH"          cseDHWSYS:ChildcseDHWHEATRECs[3]:wrFeedsWH       = {
+      if (SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysFeedHeater[3] != 0) then  "Yes"  else  "No"  endif  }
+
+   "Create Child cseDHWHEATREC - 4"    cseDHWSYS:ChildcseDHWHEATRECs[4]  = {
+      if (LocalCompAssigned( SourceDwellUnitDHW:ResSpcDHWFeaturesRef ) < 1) then  UNCHANGED
+      else if (IfValidAnd( SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysRef[4]:CSARatedEff > 0 ) .AND.
+               IfValidAnd( SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysShowers[4] > 0 ) .AND.
+               ( (IfValidAnd( SourceDwellUnitDHW:ResSpcDHWFeaturesRef:AllowShowerDWHR > 0 ) .AND. IfValidAnd( SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysTakeCold[4] > 0 )) .OR.
+                 IfValidAnd( SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysFeedHeater[4] > 0 )))
+      then  CreateComp( cseDHWHEATREC, "dwhrsys4-" + substr( Name, 0, 44 ) )
+      else  UNCHANGED  endif endif  }
+   "Set cseDHWSYS:ChildcseDHWHEATRECs[4]:SourceDWHRSys"  cseDHWSYS:ChildcseDHWHEATRECs[4]:SourceDWHRSys  = {
+      SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysRef[4]  }
+;   "Set cseDHWSYS:ChildcseDHWHEATRECs[4]:wrConfig"       cseDHWSYS:ChildcseDHWHEATRECs[4]:wrConfig    = {
+;      switch (SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysConfig[4])
+;         case  "Equal Flow"             : "Equal"    
+;         case  "Unequal - Water Heater" : "UnequalWH"
+;         case  "Unequal - Shower"       : "UnequalFX"
+;         default  : UNDEFINED
+;      endswitch  }
+; SAC 4/29/19 - removed wrConfig, replaced wrFxServed w/ wrCountFXDrain and added wrCountFXCold & wrFeedsWH (tic #2553)
+   "Set cseDHWSYS:ChildcseDHWHEATRECs[4]:wrCountFXDrain"     cseDHWSYS:ChildcseDHWHEATRECs[4]:wrCountFXDrain  = {
+      SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysShowers[4]  }
+   "Set cseDHWSYS:ChildcseDHWHEATRECs[4]:wrCountFXCold"      cseDHWSYS:ChildcseDHWHEATRECs[4]:wrCountFXCold   = {
+      if (SourceDwellUnitDHW:ResSpcDHWFeaturesRef:AllowShowerDWHR < 1) then  UNCHANGED
+      else  SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysTakeCold[4]  endif  }
+   "Set cseDHWSYS:ChildcseDHWHEATRECs[4]:wrFeedsWH"          cseDHWSYS:ChildcseDHWHEATRECs[4]:wrFeedsWH       = {
+      if (SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysFeedHeater[4] != 0) then  "Yes"  else  "No"  endif  }
+
+   "Create Child cseDHWHEATREC - 5"    cseDHWSYS:ChildcseDHWHEATRECs[5]  = {
+      if (LocalCompAssigned( SourceDwellUnitDHW:ResSpcDHWFeaturesRef ) < 1) then  UNCHANGED
+      else if (IfValidAnd( SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysRef[5]:CSARatedEff > 0 ) .AND.
+               IfValidAnd( SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysShowers[5] > 0 ) .AND.
+               ( (IfValidAnd( SourceDwellUnitDHW:ResSpcDHWFeaturesRef:AllowShowerDWHR > 0 ) .AND. IfValidAnd( SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysTakeCold[5] > 0 )) .OR.
+                 IfValidAnd( SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysFeedHeater[5] > 0 )))
+      then  CreateComp( cseDHWHEATREC, "dwhrsys5-" + substr( Name, 0, 44 ) )
+      else  UNCHANGED  endif endif  }
+   "Set cseDHWSYS:ChildcseDHWHEATRECs[5]:SourceDWHRSys"  cseDHWSYS:ChildcseDHWHEATRECs[5]:SourceDWHRSys  = {
+      SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysRef[5]  }
+;   "Set cseDHWSYS:ChildcseDHWHEATRECs[5]:wrConfig"       cseDHWSYS:ChildcseDHWHEATRECs[5]:wrConfig    = {
+;      switch (SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysConfig[5])
+;         case  "Equal Flow"             : "Equal"    
+;         case  "Unequal - Water Heater" : "UnequalWH"
+;         case  "Unequal - Shower"       : "UnequalFX"
+;         default  : UNDEFINED
+;      endswitch  }
+; SAC 4/29/19 - removed wrConfig, replaced wrFxServed w/ wrCountFXDrain and added wrCountFXCold & wrFeedsWH (tic #2553)
+   "Set cseDHWSYS:ChildcseDHWHEATRECs[5]:wrCountFXDrain"     cseDHWSYS:ChildcseDHWHEATRECs[5]:wrCountFXDrain  = {
+      SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysShowers[5]  }
+   "Set cseDHWSYS:ChildcseDHWHEATRECs[5]:wrCountFXCold"      cseDHWSYS:ChildcseDHWHEATRECs[5]:wrCountFXCold   = {
+      if (SourceDwellUnitDHW:ResSpcDHWFeaturesRef:AllowShowerDWHR < 1) then  UNCHANGED
+      else  SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysTakeCold[5]  endif  }
+   "Set cseDHWSYS:ChildcseDHWHEATRECs[5]:wrFeedsWH"          cseDHWSYS:ChildcseDHWHEATRECs[5]:wrFeedsWH       = {
+      if (SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysFeedHeater[5] != 0) then  "Yes"  else  "No"  endif  }
+
+   "Create Child cseDHWHEATREC - 6"    cseDHWSYS:ChildcseDHWHEATRECs[6]  = {
+      if (LocalCompAssigned( SourceDwellUnitDHW:ResSpcDHWFeaturesRef ) < 1) then  UNCHANGED
+      else if (IfValidAnd( SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysRef[6]:CSARatedEff > 0 ) .AND.
+               IfValidAnd( SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysShowers[6] > 0 ) .AND.
+               ( (IfValidAnd( SourceDwellUnitDHW:ResSpcDHWFeaturesRef:AllowShowerDWHR > 0 ) .AND. IfValidAnd( SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysTakeCold[6] > 0 )) .OR.
+                 IfValidAnd( SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysFeedHeater[6] > 0 )))
+      then  CreateComp( cseDHWHEATREC, "dwhrsys6-" + substr( Name, 0, 44 ) )
+      else  UNCHANGED  endif endif  }
+   "Set cseDHWSYS:ChildcseDHWHEATRECs[6]:SourceDWHRSys"  cseDHWSYS:ChildcseDHWHEATRECs[6]:SourceDWHRSys  = {
+      SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysRef[6]  }
+;   "Set cseDHWSYS:ChildcseDHWHEATRECs[6]:wrConfig"       cseDHWSYS:ChildcseDHWHEATRECs[6]:wrConfig    = {
+;      switch (SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysConfig[6])
+;         case  "Equal Flow"             : "Equal"    
+;         case  "Unequal - Water Heater" : "UnequalWH"
+;         case  "Unequal - Shower"       : "UnequalFX"
+;         default  : UNDEFINED
+;      endswitch  }
+; SAC 4/29/19 - removed wrConfig, replaced wrFxServed w/ wrCountFXDrain and added wrCountFXCold & wrFeedsWH (tic #2553)
+   "Set cseDHWSYS:ChildcseDHWHEATRECs[6]:wrCountFXDrain"     cseDHWSYS:ChildcseDHWHEATRECs[6]:wrCountFXDrain  = {
+      SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysShowers[6]  }
+   "Set cseDHWSYS:ChildcseDHWHEATRECs[6]:wrCountFXCold"      cseDHWSYS:ChildcseDHWHEATRECs[6]:wrCountFXCold   = {
+      if (SourceDwellUnitDHW:ResSpcDHWFeaturesRef:AllowShowerDWHR < 1) then  UNCHANGED
+      else  SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysTakeCold[6]  endif  }
+   "Set cseDHWSYS:ChildcseDHWHEATRECs[6]:wrFeedsWH"          cseDHWSYS:ChildcseDHWHEATRECs[6]:wrFeedsWH       = {
+      if (SourceDwellUnitDHW:ResSpcDHWFeaturesRef:ResDWHRSysFeedHeater[6] != 0) then  "Yes"  else  "No"  endif  }
+END
+;*************************************************************************
+
+;*************************************************************************  SAC 03/11/22
+RULELIST "ForceDefault_ShowerDrainHeatRecov_NRes" 1 0 0 1
+   "Blast Spc:GuestRmResSpcDHWFeaturesRef:ResDWHRSysRef[1]"    Spc:GuestRmResSpcDHWFeaturesRef:ResDWHRSysRef[1]  = {  UNDEFINED  }
+   "Blast Spc:GuestRmResSpcDHWFeaturesRef:ResDWHRSysRef[2]"    Spc:GuestRmResSpcDHWFeaturesRef:ResDWHRSysRef[2]  = {  UNDEFINED  }
+   "Blast Spc:GuestRmResSpcDHWFeaturesRef:ResDWHRSysRef[3]"    Spc:GuestRmResSpcDHWFeaturesRef:ResDWHRSysRef[3]  = {  UNDEFINED  }
+   "Blast Spc:GuestRmResSpcDHWFeaturesRef:ResDWHRSysRef[4]"    Spc:GuestRmResSpcDHWFeaturesRef:ResDWHRSysRef[4]  = {  UNDEFINED  }
+   "Blast Spc:GuestRmResSpcDHWFeaturesRef:ResDWHRSysRef[5]"    Spc:GuestRmResSpcDHWFeaturesRef:ResDWHRSysRef[5]  = {  UNDEFINED  }
+   "Blast Spc:GuestRmResSpcDHWFeaturesRef:ResDWHRSysRef[6]"    Spc:GuestRmResSpcDHWFeaturesRef:ResDWHRSysRef[6]  = {  UNDEFINED  }
+END
+;*************************************************************************
+
+
+;*************************************************************************  SAC 03/15/22
+RULELIST "CSE_SimulationPrep_LoadMeters" 1 0 0 1
+   "Delete any Sch object that was created previously for Load Passing"       Sch:Action =   ; SAC 03/19/22
+      {  if (IfValidAnd( LdPassingOnly > 0 )) then  DeleteComp()
+         else  UNCHANGED  endif  }
+   "Delete any ProcLd object that was created previously for Load Passing"    ProcLd:Action =
+      {  if (IfValidAnd( LdPassingOnly > 0 )) then  DeleteComp()
+         else  UNCHANGED  endif  }
+
+   "call rulelist to setup cseLOADMETER for each applicable FluidSys"   FluidSys:Action =
+      {  if (IfValidAnd( CSELoadPassing > 0 ))
+         then  EvalRulelist( "CSE_SimulationPrep_LoadMeters_FluidSys", 1 )
+         else  UNCHANGED  endif  }
+   "call rulelist to setup CSE_LoadPassingExport* if needed"   Proj:Action =
+      {  if (SumAll( FluidSys:CSELoadMeterIdx ) > 0)
+         then  EvalRulelist( "CSE_SimulationPrep_LoadMeters_Export" )
+         else  UNCHANGED  endif  }
+; moved call to evaluate to end of ANNUAL transform, so that done before SDD XML file - SAC 03/19/22
+;   "call rulelist to setup ProcLds for each applicable FluidSys"   FluidSys:Action =   ; SAC 03/19/22
+;      {  if (IfValidAnd( CSELoadPassing > 0 ))
+;         then  EvalRulelist( "CSE_SimulationPrep_LoadMeters_FluidSys_ProcLoads", 1 )
+;         else  UNCHANGED  endif  }
+END
+;*************************************************************************
+RULELIST "CSE_SimulationPrep_LoadMeters_FluidSys" 1 0 0 1
+;   "Set FluidSys:CSELoadMeterIdx"   FluidSys:CSELoadMeterIdx =
+;      {  ComponentCount( cseLOADMETER ) + 1  }
+   "Set FluidSys:CSE_LoadMeter"     FluidSys:CSE_LoadMeter =
+      {  CreateComp( cseLOADMETER, Format( "LdMtr%g", CSELoadMeterIdx ) )  }
+END
+;*************************************************************************  SAC 03/19/22
+RULELIST "CSE_SimulationPrep_LoadMeters_FluidSys_ProcLoads" 1 0 0 1
+   "Create load passing ProcLd"     FluidSys:CSE_LoadPassingProcLdRef[1] =
+      {  CreateComp( ProcLd, Format( "%s-ProcLd1", Name ) )  }
+   "Set FluidSys:CSE_LoadPassingProcLdRef[1]:Parent"        FluidSys:CSE_LoadPassingProcLdRef[1]:Parent    = {  Name   }
+   "Set FluidSys:CSE_LoadPassingProcLdRef[1]:PkFlowRt"      FluidSys:CSE_LoadPassingProcLdRef[1]:PkFlowRt  = {  15852  }
+   "Set FluidSys:CSE_LoadPassingProcLdRef[1]:LdPassingOnly" FluidSys:CSE_LoadPassingProcLdRef[1]:LdPassingOnly = {  1  }
+
+   "Create load passing ProcLd LdSchRef"     FluidSys:CSE_LoadPassingProcLdRef[1]:LdSchRef = {  CreateComp( Sch, Format( "%s-ProcLd1-LdSch", Name ) )  }
+   "Set FluidSys:CSE_LoadPassingProcLdRef[1]:LdSchRef:Parent"           FluidSys:CSE_LoadPassingProcLdRef[1]:LdSchRef:Parent      = {  Proj:Name  }
+   "Set FluidSys:CSE_LoadPassingProcLdRef[1]:LdSchRef:Type"             FluidSys:CSE_LoadPassingProcLdRef[1]:LdSchRef:Type        = {  "File"  }
+;   "Set FluidSys:CSE_LoadPassingProcLdRef[1]:LdSchRef:SchFileName"      FluidSys:CSE_LoadPassingProcLdRef[1]:LdSchRef:SchFileName = {  Proj:ProcessingPath + Proj:CSE_LoadPassingExportFile:xfFileName  }
+   "Set FluidSys:CSE_LoadPassingProcLdRef[1]:LdSchRef:SchFileName"      FluidSys:CSE_LoadPassingProcLdRef[1]:LdSchRef:SchFileName = {  Proj:ProcessingPath + Proj:CSE_LoadPassingExportFileName  }
+;   "Set FluidSys:CSE_LoadPassingProcLdRef[1]:LdSchRef:SchFileName"      FluidSys:CSE_LoadPassingProcLdRef[1]:LdSchRef:SchFileName = {  "../../" + Proj:CSE_LoadPassingExportFileName  }
+   "Set FluidSys:CSE_LoadPassingProcLdRef[1]:LdSchRef:ColIdx"           FluidSys:CSE_LoadPassingProcLdRef[1]:LdSchRef:ColIdx      = {  3 + ((CSELoadMeterIdx-1) * 7) + 6  }
+   "Set FluidSys:CSE_LoadPassingProcLdRef[1]:LdSchRef:RowsToSkipAtTop"  FluidSys:CSE_LoadPassingProcLdRef[1]:LdSchRef:RowsToSkipAtTop  = {  4        }
+   "Set FluidSys:CSE_LoadPassingProcLdRef[1]:LdSchRef:ColSeparator"     FluidSys:CSE_LoadPassingProcLdRef[1]:LdSchRef:ColSeparator     = {  "Comma"  }
+   "Set FluidSys:CSE_LoadPassingProcLdRef[1]:LdSchRef:InterpToTimestep" FluidSys:CSE_LoadPassingProcLdRef[1]:LdSchRef:InterpToTimestep = {  "Yes"    }
+   "Set FluidSys:CSE_LoadPassingProcLdRef[1]:LdSchRef:MinutesPerRow"    FluidSys:CSE_LoadPassingProcLdRef[1]:LdSchRef:MinutesPerRow    = {  60       }
+   "Set FluidSys:CSE_LoadPassingProcLdRef[1]:LdSchRef:LdPassingOnly"    FluidSys:CSE_LoadPassingProcLdRef[1]:LdSchRef:LdPassingOnly    = {  1        }
+
+   "Create load passing ProcLd FlowFracSchRef"   FluidSys:CSE_LoadPassingProcLdRef[1]:FlowFracSchRef = {  CreateComp( Sch, Format( "%s-ProcLd1-FlwSch", Name ) )  }
+   "Set FluidSys:CSE_LoadPassingProcLdRef[1]:FlowFracSchRef:Parent"           FluidSys:CSE_LoadPassingProcLdRef[1]:FlowFracSchRef:Parent      = {  Proj:Name  }
+   "Set FluidSys:CSE_LoadPassingProcLdRef[1]:FlowFracSchRef:Type"             FluidSys:CSE_LoadPassingProcLdRef[1]:FlowFracSchRef:Type        = {  "File"  }
+;   "Set FluidSys:CSE_LoadPassingProcLdRef[1]:FlowFracSchRef:SchFileName"      FluidSys:CSE_LoadPassingProcLdRef[1]:FlowFracSchRef:SchFileName = {  Proj:ProcessingPath + Proj:CSE_LoadPassingExportFile:xfFileName  }
+   "Set FluidSys:CSE_LoadPassingProcLdRef[1]:FlowFracSchRef:SchFileName"      FluidSys:CSE_LoadPassingProcLdRef[1]:FlowFracSchRef:SchFileName = {  Proj:ProcessingPath + Proj:CSE_LoadPassingExportFileName  }
+;   "Set FluidSys:CSE_LoadPassingProcLdRef[1]:FlowFracSchRef:SchFileName"      FluidSys:CSE_LoadPassingProcLdRef[1]:FlowFracSchRef:SchFileName = {  "../../" + Proj:CSE_LoadPassingExportFileName  }
+   "Set FluidSys:CSE_LoadPassingProcLdRef[1]:FlowFracSchRef:ColIdx"           FluidSys:CSE_LoadPassingProcLdRef[1]:FlowFracSchRef:ColIdx      = {  3 + ((CSELoadMeterIdx-1) * 7) + 7  }
+   "Set FluidSys:CSE_LoadPassingProcLdRef[1]:FlowFracSchRef:RowsToSkipAtTop"  FluidSys:CSE_LoadPassingProcLdRef[1]:FlowFracSchRef:RowsToSkipAtTop  = {  4        }
+   "Set FluidSys:CSE_LoadPassingProcLdRef[1]:FlowFracSchRef:ColSeparator"     FluidSys:CSE_LoadPassingProcLdRef[1]:FlowFracSchRef:ColSeparator     = {  "Comma"  }
+   "Set FluidSys:CSE_LoadPassingProcLdRef[1]:FlowFracSchRef:InterpToTimestep" FluidSys:CSE_LoadPassingProcLdRef[1]:FlowFracSchRef:InterpToTimestep = {  "Yes"    }
+   "Set FluidSys:CSE_LoadPassingProcLdRef[1]:FlowFracSchRef:MinutesPerRow"    FluidSys:CSE_LoadPassingProcLdRef[1]:FlowFracSchRef:MinutesPerRow    = {  60       }
+   "Set FluidSys:CSE_LoadPassingProcLdRef[1]:FlowFracSchRef:LdPassingOnly"    FluidSys:CSE_LoadPassingProcLdRef[1]:FlowFracSchRef:LdPassingOnly    = {  1        }
+END
+;*************************************************************************  SAC 03/18/22
+RULELIST "CSE_SimulationPrep_LoadMeters_Export" 1 0 0 1
+   "Create Proj:CSE_LoadPassingExportFile"            Proj:CSE_LoadPassingExportFile  = {   CreateComp( cseEXPORTFILE, "xf-ldPass" )  }
+   "Set Proj:CSE_LoadPassingExportFile:xfFileName"    Proj:CSE_LoadPassingExportFile:xfFileName  =
+      {  CSE_LoadPassingExportFileName  }
+   ;   {  ValidOr( ModelFile, "LoadPass" ) + " - " + ValidOr( RunAbbrev, "" ) + "-CSE-PlantLds.csv"  }
+;"dbg" Proj:Action = { PostMessageToLog( "CSE_LoadPassingExportFile '%s' created -> %s", CSE_LoadPassingExportFile:Name, CSE_LoadPassingExportFile:xfFileName ) }
+
+   "Create Proj:CSE_LoadPassingExport"             Proj:CSE_LoadPassingExport  = {   CreateComp( cseEXPORT, "x-ldPass" )  }
+   "Set Proj:CSE_LoadPassingExport:exExportfile"   Proj:CSE_LoadPassingExport:exExportfile  = {  CSE_LoadPassingExportFile:Name  }
+   "Set Proj:CSE_LoadPassingExport:exType"         Proj:CSE_LoadPassingExport:exType      = {  "UDT"   }
+   "Set Proj:CSE_LoadPassingExport:exFreq"         Proj:CSE_LoadPassingExport:exFreq      = {  "HOUR"  }
+	"Set Proj:CSE_LoadPassingExport:exDayBeg_x"     Proj:CSE_LoadPassingExport:exDayBeg_x  = {  "Jan 1"   }
+	"Set Proj:CSE_LoadPassingExport:exDayEnd_x"     Proj:CSE_LoadPassingExport:exDayEnd_x  = {  "Dec 31"  }
+;   "Set Proj:CSE_LoadPassingExport:exHeader"       Proj:CSE_LoadPassingExport:exHeader    = {  "COLUMNSONLY"    }
+;   "Set Proj:CSE_LoadPassingExport:exHeader"       Proj:CSE_LoadPassingExport:exHeader    = {  "YESIFNEW"    }
+;   "Set Proj:CSE_LoadPassingExport:exFooter"       Proj:CSE_LoadPassingExport:exFooter    = {  "NO"     }
+
+   "Create Proj:CSE_LoadPassingExportCol[1]"         Proj:CSE_LoadPassingExportCol[1]  = {  CreateComp( cseEXPORTCOL, "xc1-LdPass-Mo" )  }
+   "Set Proj:CSE_LoadPassingExportCol[1]:Parent"     Proj:CSE_LoadPassingExportCol[1]:Parent    = {  CSE_LoadPassingExport:Name  }
+   "Set Proj:CSE_LoadPassingExportCol[1]:colhead"    Proj:CSE_LoadPassingExportCol[1]:colhead   = {  "Month"  }
+   "Set Proj:CSE_LoadPassingExportCol[1]:colVal_x"   Proj:CSE_LoadPassingExportCol[1]:colVal_x  = {  "$Month"  }
+
+   "Create Proj:CSE_LoadPassingExportCol[2]"         Proj:CSE_LoadPassingExportCol[2]  = {  CreateComp( cseEXPORTCOL, "xc2-LdPass-Day" )  }
+   "Set Proj:CSE_LoadPassingExportCol[2]:Parent"     Proj:CSE_LoadPassingExportCol[2]:Parent    = {  CSE_LoadPassingExport:Name  }
+   "Set Proj:CSE_LoadPassingExportCol[2]:colhead"    Proj:CSE_LoadPassingExportCol[2]:colhead   = {  "Day"  }
+   "Set Proj:CSE_LoadPassingExportCol[2]:colVal_x"   Proj:CSE_LoadPassingExportCol[2]:colVal_x  = {  "$dayofmonth"  }
+
+   "Create Proj:CSE_LoadPassingExportCol[3]"         Proj:CSE_LoadPassingExportCol[3]  = {  CreateComp( cseEXPORTCOL, "xc3-LdPass-Hr" )  }
+   "Set Proj:CSE_LoadPassingExportCol[3]:Parent"     Proj:CSE_LoadPassingExportCol[3]:Parent    = {  CSE_LoadPassingExport:Name  }
+   "Set Proj:CSE_LoadPassingExportCol[3]:colhead"    Proj:CSE_LoadPassingExportCol[3]:colhead   = {  "Hr"  }
+   "Set Proj:CSE_LoadPassingExportCol[3]:colVal_x"   Proj:CSE_LoadPassingExportCol[3]:colVal_x  = {  "$hour"  }
+
+   "call rulelist to create column(s) to export for each FluidSys to achieve CSE Load Passing"  FluidSys:Action =
+      {  if (LocalCompAssigned( CSE_LoadMeter ) > 0)
+         then  EvalRulelist( "CSE_SimulationPrep_LoadMeters_Export_FluidSys", 1 )
+         else  UNCHANGED  endif  }
+END
+;*************************************************************************  SAC 03/18/22
+RULELIST "CSE_SimulationPrep_LoadMeters_Export_FluidSys" 1 0 0 1
+
+   "Create FluidSys:CSE_LoadPassingExportCol[1] - HtgLdBtu" FluidSys:CSE_LoadPassingExportCol[1]  = {  CreateComp( cseEXPORTCOL, "xc-" + substr( Name, 0, 38 ) + "-htgLdB" )  }
+   "Set FluidSys:CSE_LoadPassingExportCol[1]:Parent"        FluidSys:CSE_LoadPassingExportCol[1]:Parent    = {  Proj:CSE_LoadPassingExport:Name  }
+   ;"Set FluidSys:CSE_LoadPassingExportCol[1]:colhead"       FluidSys:CSE_LoadPassingExportCol[1]:colhead   = {  "SysName"  }
+   "Set FluidSys:CSE_LoadPassingExportCol[1]:colhead"       FluidSys:CSE_LoadPassingExportCol[1]:colhead   = {  Name + "-HtgLd (Btu)"  }
+   "Set FluidSys:CSE_LoadPassingExportCol[1]:colVal_x"      FluidSys:CSE_LoadPassingExportCol[1]:colVal_x  = 
+      {  if( Type = "ChilledWater" ) 
+         then Format( "@LOADMETER[%c%s%c].H.qHtg * 0", 34, CSE_LoadMeter:Name, 34 )
+         else Format( "@LOADMETER[%c%s%c].H.qHtg", 34, CSE_LoadMeter:Name, 34 ) endif }
+
+   "Create FluidSys:CSE_LoadPassingExportCol[2] - ClgLdBtu" FluidSys:CSE_LoadPassingExportCol[2]  = {  CreateComp( cseEXPORTCOL, "xc-" + substr( Name, 0, 38 ) + "-clgLdB" )  }
+   "Set FluidSys:CSE_LoadPassingExportCol[2]:Parent"        FluidSys:CSE_LoadPassingExportCol[2]:Parent    = {  Proj:CSE_LoadPassingExport:Name  }
+   "Set FluidSys:CSE_LoadPassingExportCol[2]:colhead"       FluidSys:CSE_LoadPassingExportCol[2]:colhead   = {  "ClgLd (Btu)"  }
+   "Set FluidSys:CSE_LoadPassingExportCol[2]:colVal_x"      FluidSys:CSE_LoadPassingExportCol[2]:colVal_x  = 
+      {  if( Type = "HotWater" ) 
+         then Format( "@LOADMETER[%c%s%c].H.qClg * 0", 34, CSE_LoadMeter:Name, 34 )
+         else Format( "@LOADMETER[%c%s%c].H.qClg", 34, CSE_LoadMeter:Name, 34 ) endif }
+
+   "Create FluidSys:CSE_LoadPassingExportCol[3] - NetLdBtu" FluidSys:CSE_LoadPassingExportCol[3]  = {  CreateComp( cseEXPORTCOL, "xc-" + substr( Name, 0, 38 ) + "-netLdB" )  }
+   "Set FluidSys:CSE_LoadPassingExportCol[3]:Parent"        FluidSys:CSE_LoadPassingExportCol[3]:Parent    = {  Proj:CSE_LoadPassingExport:Name  }
+   "Set FluidSys:CSE_LoadPassingExportCol[3]:colhead"       FluidSys:CSE_LoadPassingExportCol[3]:colhead   = {  "NetLd (Btu)"  }
+   "Set FluidSys:CSE_LoadPassingExportCol[3]:colVal_x"      FluidSys:CSE_LoadPassingExportCol[3]:colVal_x  = 
+      { switch( type )
+        Case "ChilledWater" : Format( "@LOADMETER[%c%s%c].H.qClg", 34, CSE_LoadMeter:Name, 34 )
+        case "HotWater"     : Format( "@LOADMETER[%c%s%c].H.qHtg", 34, CSE_LoadMeter:Name, 34 )
+        default             : Format( "@LOADMETER[%c%s%c].H.qHtg + @LOADMETER[%c%s%c].H.qClg", 34, CSE_LoadMeter:Name, 34, 34, CSE_LoadMeter:Name, 34 )
+        endswitch } 
+
+   "Create FluidSys:CSE_LoadPassingExportCol[4] - DFlwGpm"  FluidSys:CSE_LoadPassingExportCol[4]  = {  CreateComp( cseEXPORTCOL, "xc-" + substr( Name, 0, 35 ) + "-demFlwGPM" )  }
+   "Set FluidSys:CSE_LoadPassingExportCol[4]:Parent"        FluidSys:CSE_LoadPassingExportCol[4]:Parent    = {  Proj:CSE_LoadPassingExport:Name  }
+   "Set FluidSys:CSE_LoadPassingExportCol[4]:colhead"       FluidSys:CSE_LoadPassingExportCol[4]:colhead   = {  "DemFlw (gpm)"  }
+   "Set FluidSys:CSE_LoadPassingExportCol[4]:colVal_x"      FluidSys:CSE_LoadPassingExportCol[4]:colVal_x  = 
+      { switch( type )
+        Case "ChilledWater" : Format( "abs( @LOADMETER[%c%s%c].H.qClg ) / 500.19 / %g", 34, CSE_LoadMeter:Name, 34, ValidOr( DsgnSupWtrDelT, 10 ) )
+        case "HotWater"     : Format( "abs( @LOADMETER[%c%s%c].H.qHtg ) / 500.19 / %g", 34, CSE_LoadMeter:Name, 34, ValidOr( DsgnSupWtrDelT, 10 ) )
+        default             : Format( "abs( @LOADMETER[%c%s%c].H.qHtg + @LOADMETER[%c%s%c].H.qClg ) / 500.19 / %g", 34, CSE_LoadMeter:Name, 34, 34, CSE_LoadMeter:Name, 34, ValidOr( DsgnSupWtrDelT, 10 ) )
+        endswitch } 
+   
+   "Create FluidSys:CSE_LoadPassingExportCol[5] - AFlwGpm"  FluidSys:CSE_LoadPassingExportCol[5]  = {  CreateComp( cseEXPORTCOL, "xc-" + substr( Name, 0, 35 ) + "-actFlwGPM" )  }
+   "Set FluidSys:CSE_LoadPassingExportCol[5]:Parent"        FluidSys:CSE_LoadPassingExportCol[5]:Parent    = {  Proj:CSE_LoadPassingExport:Name  }
+   "Set FluidSys:CSE_LoadPassingExportCol[5]:colhead"       FluidSys:CSE_LoadPassingExportCol[5]:colhead   = {  "ActualFlw (gpm)"  }
+   "Set FluidSys:CSE_LoadPassingExportCol[5]:colVal_x"      FluidSys:CSE_LoadPassingExportCol[5]:colVal_x  =
+      {  if (IfValidAnd( DemandSidePumpSpdCtrl = "VariableSpeed" ))
+         then switch( type )
+              case "ChilledWater" : Format( "abs( @LOADMETER[%c%s%c].H.qClg ) / 500.19 / %g", 34, CSE_LoadMeter:Name, 34, ValidOr( DsgnSupWtrDelT, 10 ) )
+              case "HotWater"     : Format( "abs( @LOADMETER[%c%s%c].H.qHtg ) / 500.19 / %g", 34, CSE_LoadMeter:Name, 34, ValidOr( DsgnSupWtrDelT, 10 ) )
+              default             : Format( "abs( @LOADMETER[%c%s%c].H.qHtg + @LOADMETER[%c%s%c].H.qClg ) / 500.19 / %g", 34, CSE_LoadMeter:Name, 34, 34, CSE_LoadMeter:Name, 34, ValidOr( DsgnSupWtrDelT, 10 ) )
+              endswitch
+         else  Format( "%g", ValidOr( DemandSidePumpFlowCap, 100 ) )
+         endif  }
+
+   "Create FluidSys:CSE_LoadPassingExportCol[6] - NetLdW"   FluidSys:CSE_LoadPassingExportCol[6]  = {  CreateComp( cseEXPORTCOL, "xc-" + substr( Name, 0, 38 ) + "-netLdW" )  }
+   "Set FluidSys:CSE_LoadPassingExportCol[6]:Parent"        FluidSys:CSE_LoadPassingExportCol[6]:Parent    = {  Proj:CSE_LoadPassingExport:Name  }
+   "Set FluidSys:CSE_LoadPassingExportCol[6]:colhead"       FluidSys:CSE_LoadPassingExportCol[6]:colhead   = {  "NetLd (W)"  }
+   "Set FluidSys:CSE_LoadPassingExportCol[6]:colVal_x"      FluidSys:CSE_LoadPassingExportCol[6]:colVal_x  = 
+      { switch( type )
+        case "ChilledWater" : Format( "(@LOADMETER[%c%s%c].H.qClg) / 3.412", 34, CSE_LoadMeter:Name, 34 ) 
+        case "HotWater"     : Format( "(@LOADMETER[%c%s%c].H.qHtg) / 3.412", 34, CSE_LoadMeter:Name, 34 ) 
+        default             : Format( "(@LOADMETER[%c%s%c].H.qHtg + @LOADMETER[%c%s%c].H.qClg) / 3.412", 34, CSE_LoadMeter:Name, 34, 34, CSE_LoadMeter:Name, 34 ) 
+        endswitch }
+
+   "Create FluidSys:CSE_LoadPassingExportCol[7] - FlwFrac"  FluidSys:CSE_LoadPassingExportCol[7]  = {  CreateComp( cseEXPORTCOL, "xc-" + substr( Name, 0, 37 ) + "-flwFrac" )  }
+   "Set FluidSys:CSE_LoadPassingExportCol[7]:Parent"        FluidSys:CSE_LoadPassingExportCol[7]:Parent    = {  Proj:CSE_LoadPassingExport:Name  }
+   "Set FluidSys:CSE_LoadPassingExportCol[7]:colhead"       FluidSys:CSE_LoadPassingExportCol[7]:colhead   = {  "FlowFrac"  }
+   "Set FluidSys:CSE_LoadPassingExportCol[7]:colVal_x"      FluidSys:CSE_LoadPassingExportCol[7]:colVal_x  =
+      {  if (IfValidAnd( DemandSidePumpSpdCtrl = "VariableSpeed" ))
+         then switch( Type )
+              case "ChilledWater" : Format( "abs( @LOADMETER[%c%s%c].H.qClg ) / 500.19 / %g / 15852", 34, CSE_LoadMeter:Name, 34, ValidOr( DsgnSupWtrDelT, 10 ) )
+              case "HotWater"     : Format( "abs( @LOADMETER[%c%s%c].H.qHtg ) / 500.19 / %g / 15852", 34, CSE_LoadMeter:Name, 34, ValidOr( DsgnSupWtrDelT, 10 ) )
+              default             : Format( "abs( @LOADMETER[%c%s%c].H.qHtg + @LOADMETER[%c%s%c].H.qClg ) / 500.19 / %g / 15852", 34, CSE_LoadMeter:Name, 34, 34, CSE_LoadMeter:Name, 34, ValidOr( DsgnSupWtrDelT, 10 ) )
+              endswitch
+         else switch( Type )
+              case "ChilledWater" : Format( "select( (@LOADMETER[%c%s%c].H.qClg) == 0, 0, default %g / 15852 )", 34, CSE_LoadMeter:Name, 34, ValidOr( DemandSidePumpFlowCap, 100 ) )
+              case "HotWater"     : Format( "select( (@LOADMETER[%c%s%c].H.qHtg) == 0, 0, default %g / 15852 )", 34, CSE_LoadMeter:Name, 34, ValidOr( DemandSidePumpFlowCap, 100 ) )
+              default             : Format( "select( (@LOADMETER[%c%s%c].H.qHtg + @LOADMETER[%c%s%c].H.qClg) == 0, 0, default %g / 15852 )", 34, CSE_LoadMeter:Name, 34, 34, CSE_LoadMeter:Name, 34, ValidOr( DemandSidePumpFlowCap, 100 ) )
+              endswitch
+         endif  }
+         ; was:  else  Format( "%g / 15852", ValidOr( DemandSidePumpFlowCap, 100 ) )
+
+END
+;*************************************************************************
+
+
+
+;*************************************************************************
+;*************************************************************************
+
+ENDFILE

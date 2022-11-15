@@ -1,0 +1,470 @@
+// Space - Function   (extracted from Space-General.rule)
+//
+// -------------------------------------------------------------------------
+//  Copyright (c) 2014-2020, California Energy Commission
+//  All rights reserved.
+//  Redistribution and use in source and binary forms, with or without
+//  modification, are permitted provided that the following conditions are
+//  met:
+// 
+//    * Redistributions of source code must retain the above copyright
+//  notice, this list of conditions and the following disclaimer.
+//    * Redistributions in binary form must reproduce the above copyright
+//  notice, this list of conditions and the following disclaimer in
+//  the documentation and/or other materials provided with the
+//  distribution.
+//    * Neither the name of the California Energy Commission nor the names of its
+//  contributors may be used to endorse or promote products
+//  derived from this software without specific prior written
+//  permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+//  IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+//  TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION
+//  BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+//  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+//  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+//  BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+//  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+//  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// -------------------------------------------------------------------------
+//  
+
+//  This rule file addresses intermediate Space properties used for reporting and 
+//  to deriving values for other propeties.
+
+
+// No longer used
+;RULE Spc:SpcCompleteBldgFunc
+;  DESCRIPTION
+;    "The method for selecting baseline lighting and other loads for a space"  
+;  REFERENCE 
+;    NACM Section 5.4.3
+;  INPUTCLASS
+;    NotInput
+;DEFAULT
+;    if( Building:FuncClassMthd = "CompleteBuildingMethod")
+;    then Bldg:CompleteBldgFunc
+;    else UNDEFINED
+;    endif
+;ENDRULE
+
+
+// ********** Conditioning Type ***************************************************
+RULE Spc:CondgType
+  DESCRIPTION
+    "The conditioning type designation for the Space."  
+  HELP
+    ""  
+  REFERENCE 
+    NACM Section 5.3.1    
+  INPUTCLASS
+    Required
+//OPTION         
+//  DirectlyConditioned
+//  IndirectlyConditioned
+//  Unconditioned
+//  Plenum
+  CHECKCODE
+    if( PrkgGarArea > 0 .AND. CondgType != "Unconditioned" )
+    then 
+      PostError("Space '%s' is a parking garage space, but has Conditioning Type =
+                 '%s'. Revise to 'Unconditioned' for compliance analysis.", Name, CondgType)
+    else UNCHANGED
+    endif
+ENDRULE
+// -----------------------------------------------------------------------------
+RULE NEW Spc:IsCond
+  DATATYPE
+    Integer
+  LONGFORM
+    IsConditioned
+  DESCRIPTION
+    "A flag that indicates if the space is either 'DirectlyConditioned' or
+     IndirectlyConditioned'."  
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( CondgType = "DirectlyConditioned" .OR.
+        CondgType = "IndirectlyConditioned" )
+    then 1
+    else 0
+    endif
+ENDRULE
+
+
+// ********** Space Function ***************************************************
+// Space Functions:  Each building space is assigned one space function.  
+// Design internal loads and other space function input assumptions, including 
+// the assigned schedule group described above, are defined in Appendix 5.4A. 
+// The schedule group and the schedule values for each space function are prescribed 
+// for compliance analysis, with the exception of the following space functions:
+//      Corridors, Restrooms, Stairs, and Support Areas
+//      Electrical, Mechanical, Telephone Rooms
+//      Laundry
+//      Lobby, Main Entry
+//      Locker/Dressing Room
+//      Waiting Area
+// These space functions are common to many different building types, and therefore, 
+// the user can assign any of the available schedule groups defined in Appendix 5.4B.  
+// This mitigates the issue of conflicting schedule profiles if these common functions 
+// are combined into a single thermal zone or served by the same HVAC system as 
+// surrounding zones. In the event the user does not assign a schedule group to 
+// these common space types, default assumptions are defined in the Appendix 5.4B. 
+// -----------------------------------------------------------------------------
+RULE Spc:SpcFunc 
+  DESCRIPTION
+    "The area category occupancy type from Nonresidential Appendix 5.4A"  
+  HELP
+    ""  
+  REFERENCE 
+    NACM Section 2.3.3
+    NACM Section 5.4.1
+    Appendix 5.4A
+  INPUTCLASS
+    Compulsory
+// OPTION list defined in BEMEnums.txt to facilitate Building:FuncClassMthd & CompleteBldgFunc dependencies
+  DEFAULT
+    if( CondgType = "Plenum" ) 
+    then // Is Plenum
+     "Unoccupied-Exclude from Gross Floor Area"
+    else if( LocalCompAssigned( SpcFuncDefaultsRef ) )
+    then // SpcFuncDef is assigned, use the SpcFunc defined for that.
+      SpcFuncDefaultsRef:SpcFunc
+    else if( HVACStatus = "Unknown" ) 
+    then // If HVAC is unknown (core and shell), default to Unleased Tenant Area 
+      "Unleased Tenant Area"
+    else "All other"
+    endif endif endif 
+  CHECKCODE : T24N_2016
+    if( LocalStatus( SpcFunc ) = 0 .OR. SpcFunc = "- specify -"  )
+    then
+      PostError("SpaceFunction (SpcFunc) not defined for space '%s'. This is a
+                 is a required input", Name)   
+    else if( SpcFunc = "Transportation Function" )
+    then 
+      PostError("For space '%s', the SpaceFunction (SpcFunc) '%s' is not valid for 
+                 2016 compliance.  Please select a valid space function.", Name, SpcFunc) 
+    else UNCHANGED
+    endif endif
+  CHECKCODE : T24N_2013
+    if( LocalStatus( SpcFunc ) = 0 .OR. SpcFunc = "- specify -"  )
+    then
+      PostError("SpaceFunction (SpcFunc) not defined for space '%s'. This is a
+                 is a required input", Name)   
+    else if( SpcFunc = "Transportation Function, Concourse & Baggage" .OR.
+             SpcFunc = "Transportation Function, Ticketing" )
+    then 
+      PostError("For space '%s', the SpaceFunction (SpcFunc) '%s' is not valid for 
+                 2013 compliance.  Please select a valid SpcFunc.", Name, SpcFunc) 
+    else UNCHANGED
+    endif endif
+  CHECKCODE : T24N
+    if( LocalStatus( SpcFunc ) = 0 .OR. SpcFunc = "- specify -"  )
+    then
+      PostError("SpaceFunction (SpcFunc) not defined for space '%s'. This is a
+                 is a required input", Name)   
+    else
+    if( SpcFunc = "_Invalid from 2016 - Corridors, Restrooms, Stairs, and Support Areas" .OR.
+        SpcFunc = "_Invalid from 2016 - Police Station and Fire Station" .OR.
+        SpcFunc = "_Invalid from 2016 - Housing, Public and Common Areas: Multi-family, Dormitory" .OR.
+        SpcFunc = "_Invalid from 2016 - Housing, Public and Common Areas: Senior Housing" )
+    then
+      PostError("The SpaceFunction (SpcFunc) for space '%s' was set to '%s' for backward compatibility
+                 purposes. Please select a valid 2019 SpcFunc for this space.", Name, SpcFunc)   
+    else UNCHANGED
+    endif endif
+  CHECKCODE : S901G
+    if( LocalStatus( SpcFunc ) = 0 .OR. SpcFunc = "- specify -"  )
+    then
+      PostError("Space Function not defined for Spc: %s. Space Function
+                 is a required input", Name)   
+    else UNCHANGED
+    endif
+ENDRULE
+
+RULE Spc:SpcFuncDefaultsRef
+  DESCRIPTION
+    "Reference to a SpaceFunctionDefaults object for the Space."  
+  HELP
+    "SpaceFunctionDefaults allow spaces to be assigned the same common attributes (internal loads,
+     schedules, etc) by referencing a single default definition for space inputs."
+  INPUTCLASS
+    Optional
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE Spc:SpcFuncIdx
+  RULESETS
+    T24N
+  DESCRIPTION
+    "A Unique Index Associated with each space function, primarily for reporting
+     purposes."  
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( Bldg:FuncClassMthd == "CompleteBuildingMethod" )
+    then UNDEFINED   ; Complete Building Method Not Currently Defined
+    else
+    if( LocalStatus( SpcFunc ) > 0 .AND. SpcFunc != "- specify -" )
+    then SpaceFunctionData:SpcFuncIdx( "FuncType",Spc:SpcFunc )
+    else UNDEFINED
+    endif endif
+  SIZING
+    SpcFuncIdx
+  ANNUAL
+    SpcFuncIdx
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW Spc:HasNoInternalLds
+  DATATYPE
+    Integer
+  LONGFORM
+    HasNoInternalLoads
+  DESCRIPTION
+    "A flag that indicates whether the space has no internal loads/schedules for
+     reference in other rules. 1 indicates there should not be internal loads, 
+     0 indicates the space can have internal loads."
+  INPUTCLASS
+    NotInput
+  DEFAULT : S901G ECBC
+    if( LocalStatus(SpcFunc) = 0 )
+    then 0
+    else 
+    if( SpcFunc = "Unoccupied-Include in Gross Floor Area" .OR.
+        SpcFunc = "Unoccupied-Exclude from Gross Floor Area" .OR.
+	      SpcFunc = "Attic or Crawlspace (Naturally or Mechanically Ventilated)" .OR.
+	      SpcFunc = "Attic or Crawlspace (Not Ventilated)" .OR.
+        SpcFunc = "- specify -" .OR.
+        CondgType = "Plenum" )
+    then 1
+    else 0
+    endif endif
+  DEFAULT
+    if( LocalStatus(SpcFunc) = 0 )
+    then 0
+    else 
+    if( SpcFunc = "Unoccupied-Include in Gross Floor Area" .OR.
+        SpcFunc = "Unoccupied-Exclude from Gross Floor Area" .OR.
+        SpcFunc = "- specify -" .OR.
+        CondgType = "Plenum" )
+    then 1
+    else 0
+    endif endif
+ENDRULE
+
+
+// ********** Occupancy Classification *****************************************
+RULE Spc:OccClass
+  DESCRIPTION
+    "The occupancy classification of the space." 
+  INPUTCLASS
+    Prescribed
+  OPTION
+    Nonresidential
+    Residential
+  DEFAULT : T24N
+    if( SpcFunc = "High-Rise Residential Living Spaces" .OR.
+        SpcFunc = "Hotel/Motel Guest Room" )
+    then "Residential"
+    else "Nonresidential"
+    endif
+  DEFAULT : S901G ECBC
+    if( SpcFunc = "Courthouse/Police Station/Penitentiary - Confinement Cells" .OR.
+        SpcFunc = "Dormitory - Living Quarters" .OR.
+        SpcFunc = "Fire Stations - Sleeping Quarters" .OR.
+        SpcFunc = "Hospital - Nursery" .OR.
+        SpcFunc = "Hospital - Patient Room" .OR.
+        SpcFunc = "Hotel/Highway Lodging - Hotel Guest Rooms" .OR.
+        SpcFunc = "Hotel/Highway Lodging - Highway Lodging Guest Rooms" .OR.
+        SpcFunc = "Multifamily - Dwelling/Sleeping Units" )
+    then "Residential"
+    else "Nonresidential"
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW Spc:IsRes
+  DATATYPE
+    Integer
+  LONGFORM
+    IsResidential
+  DESCRIPTION
+    "An integer that indicates if the space is residential." 
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( OccClass = "Residential" )
+    then 1
+    else 0
+    endif
+ENDRULE
+// -----------------------------------------------------------------------------
+RULE NEW Spc:IsNonRes
+  DATATYPE
+    Integer
+  LONGFORM
+    IsNonresidential
+  DESCRIPTION
+    "An integer that indicates if the space is nonresidential (1)." 
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( OccClass = "Nonresidential" )
+    then 1
+    else 0
+    endif
+ENDRULE
+
+
+// ------------ Story multiplier ---------------------------  
+// Moved from Building-General to set Spc:Mult before being referenced below in this file
+RULE Story:Mult
+  DESCRIPTION
+    "Story multiplier"  
+  HELP
+    "This property is user specified for quickly multiplying the spaces and 
+     related thermal zones on each building floors.
+
+     The following SDD modeling rules for Multipliers must be followed: 
+     - All spaces that are combined into a thermal zone must have the same Multiplier
+     - Spaces that are combined into a thermal zone cannot span multiple stories
+     - All ThermalZones that are served by the same HVAC system must have the same Multiplier"  
+  REFERENCE 
+    NACM Section 2.3.1
+    NACM Section 5.3
+  INPUTCLASS
+    Default
+  MINIMUM 
+    1
+  REPORTPRECISION
+    0
+  DEFAULT 
+    1
+  SIZING
+    Mult
+  ANNUAL
+    Mult
+ENDRULE
+; SAC 09/16/21 (MFam)
+RULE ResZnGrp:Mult
+  DESCRIPTION
+    "ResZnGrp multiplier"  
+  INPUTCLASS
+    Default
+  MINIMUM 
+    1
+  REPORTPRECISION
+    0
+  DEFAULT 
+    1
+ENDRULE
+RULE ResZnGrp:NumStories
+  DESCRIPTION
+    "ResZnGrp number of stories"  
+  INPUTCLASS
+    Default
+  MINIMUM 
+    1
+  REPORTPRECISION
+    0
+  DEFAULT 
+    1
+ENDRULE
+
+; Update space multiplier
+// -----------------------------------------------------------------------------
+RULE Spc:Mult
+  DESCRIPTION
+    "Space multiplier"  
+  INPUTCLASS
+    NotInput
+  REPORTPRECISION
+    0
+  DEFAULT 
+    Story:Mult
+ENDRULE
+
+// ------------ Identify floor area by OccClass ------------------------------- moved from Space-General.rule - SAC 03/23/21
+RULE NEW Spc:IsHighRiseRes
+  DATATYPE
+    Integer
+  LONGFORM
+    IsHighRiseResidential
+  DESCRIPTION
+    "Whether the space is a high-rise residential living unit." 
+  INPUTCLASS
+    NotInput
+  DEFAULT 
+    if( SpcFunc = "High-Rise Residential Living Spaces" )
+    then 1
+    else 0
+    endif
+ENDRULE
+
+// ----------------------------------------------------------------------------- moved from Space-General.rule - SAC 03/23/21
+RULE NEW Spc:IsHotelMotelGuestRm
+  DATATYPE
+    Integer
+  LONGFORM
+    IsHotelMotelGuestRoom
+  DESCRIPTION
+    "Whether the space is a hotel/motel guest room." 
+  INPUTCLASS
+    NotInput
+  DEFAULT 
+    if( SpcFunc = "Hotel/Motel Guest Room" )
+    then 1
+    else 0
+    endif
+ENDRULE
+
+// ----------------------------------------------------------------------------- moved from Space-General.rule - SAC 03/23/21
+RULE Spc:HotelMotelGuestRmCnt
+  DESCRIPTION
+    "This is the number of hotel/motel units in a modeled
+     space."
+  INPUTCLASS
+    CondRequired
+  DEFAULT
+    if( IsHotelMotelGuestRm )
+    then 1 // would prefer default of 0 here, but that would cause change in analysis for past models
+    else UNDEFINED
+    endif
+  CHECKCODE
+    if( IsHotelMotelGuestRm > 0 .AND. IfValidAnd( HotelMotelGuestRmCnt > 0 ) = 0 )
+    then 
+      PostError("The number of guest rooms for space '%s' must be greater than 
+                 zero. Enter the number of guest rooms.", Name)
+    else UNCHANGED
+    endif
+  SIZING
+    HotelMotelGuestRmCnt 
+  ANNUAL
+    HotelMotelGuestRmCnt
+ENDRULE
+
+// ----------------------------------------------------------------------------- moved from Space-General.rule - SAC 03/23/21
+RULE NEW Spc:HotelMotelGuestRmCntWithMult
+  LONGFORM
+    HotelMotelGuestRoomCountWithMultiplier
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  DESCRIPTION
+    "This is the number of hotel/motel units in a modeled
+     space including the space multiplier."
+  DEFAULT
+    if( IsHotelMotelGuestRm > 0 )
+    then HotelMotelGuestRmCnt * Mult
+    else 0 
+    endif
+  SIZING
+    HotelMotelGuestRmCntWithMult
+  ANNUAL
+    HotelMotelGuestRmCntWithMult
+ENDRULE

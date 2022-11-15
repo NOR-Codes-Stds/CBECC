@@ -1,0 +1,2326 @@
+// Schedules
+//
+// -------------------------------------------------------------------------
+//  Copyright (c) 2012-2017, California Energy Commission
+//  All rights reserved.
+//  Redistribution and use in source and binary forms, with or without
+//  modification, are permitted provided that the following conditions are
+//  met:
+// 
+//    * Redistributions of source code must retain the above copyright
+//  notice, this list of conditions and the following disclaimer.
+//    * Redistributions in binary form must reproduce the above copyright
+//  notice, this list of conditions and the following disclaimer in
+//  the documentation and/or other materials provided with the
+//  distribution.
+//    * Neither the name of the California Energy Commission nor the names of its
+//  contributors may be used to endorse or promote products
+//  derived from this software without specific prior written
+//  permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+//  IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+//  TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION
+//  BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+//  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+//  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+//  BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+//  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+//  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// -------------------------------------------------------------------------
+//  
+
+// 
+// The main objects in the SDD are:
+//     SchDay  (no rules to date??)
+//     
+//     
+//             
+// -------------------------------------------------------------------------
+// Updates:            
+// -------------------------------------------------------------------------
+
+; Notes
+; Res vs Non-Res meter output to CSV is disabled for 2022 ( see hourly results in SQL )
+; Load Passing -> Not allow custom meters; only create meters for FluidSys that serves ResCentral systems
+; SimResZnInEnergyPlus -> Not allow custom meters; create meters for all components simulated in E+
+; Otherwise -> allow custom meters; create meters for all components simulated in E+
+
+RULE NEW
+Proj:AllowMeterCust
+  DESCRIPTION
+    "whether or not to allow 'Custom' Meters" 
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput 
+  DEFAULT
+    if( IfValidAnd ( SimResZnInEnergyPlus > 0 ) .OR. SumAll( ResCentralHtgClgSys:CSELoadPassing ) > 0 ) then 0 else 1 endif
+ENDRULE
+
+RULE NEW Proj:MeterCust
+  DESCRIPTION
+    "Flag that turns on EnergyPlus custom meter report, which will be written to a CSV file" 
+  DATATYPE
+    Integer
+  INPUTCLASS
+    Default
+  DEFAULT
+    0
+  ANNUAL_PROPOSED
+    if( AllowMeterCust = 0 ) then 0 else UNCHANGED endif
+  ANNUAL_BASELINE
+    0
+ENDRULE
+
+RULE Proj:Meter
+  DESCRIPTION
+    "Flag indicating whether EnergyPlus meter report will be written to a CSV file"
+  INPUTCLASS : T24N_2019
+    Default
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    0
+  ANNUAL : T24N_2019
+    UNCHANGED
+  ANNUAL
+    0 ; disabled for 2022
+ENDRULE
+
+RULE NEW Proj:DefaultMeterAll
+  DESCRIPTION
+    "Assign default meters to all components"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( Meter > 0 .OR. IfValidAnd ( SimResZnInEnergyPlus > 0 ) .OR. ( MeterCust > 0 .AND. AllowMeterCust > 0 ) ) then 1 else 0 endif
+ENDRULE
+
+// --------------- Defaulting MeterRef ---------------------------------
+RULE NEW Spc:MFamAreaForMeter
+  DESCRIPTION
+    "Multifamily area for meter assignment"
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( SumRevRef( ResZn:SpcRef, ResZn:Area) > 0 .OR. SumRevRef( ResOtherZn:SpcRef, ResOtherZn:Area) > 0 )
+    then CondFlrAreaWithMult
+    else 0
+    endif
+ENDRULE
+
+RULE NEW Spc:NonResAreaForMeter
+  DESCRIPTION
+    "Non-residential area for meter assignment"
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( MFamAreaForMeter = 0 )
+    then CondFlrAreaWithMult
+    else 0
+    endif
+ENDRULE
+
+RULE Spc:ElecMeterRef
+  DEFAULT
+    if( Proj:DefaultMeterAll > 0 )
+    then if( MFamAreaForMeter > 0 )
+         then RuleLibrary( Meter, "ResElecMeter" )
+         else RuleLibrary( Meter, "NonResElecMeter" )
+         endif
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( Proj:DefaultMeterAll > 0 )
+    then if( Proj:MeterCust > 0 )
+         then UNCHANGED
+         else if( MFamAreaForMeter > 0 )
+         then RuleLibrary( Meter, "ResElecMeter" )
+         else RuleLibrary( Meter, "NonResElecMeter" )
+         endif endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE Spc:GasMeterRef
+  DEFAULT
+    if( Proj:DefaultMeterAll > 0 )
+    then if( MFamAreaForMeter > 0 )
+         then RuleLibrary( Meter, "ResGasMeter" )
+         else RuleLibrary( Meter, "NonResGasMeter" )
+         endif
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( Proj:DefaultMeterAll > 0 )
+    then if( Proj:MeterCust > 0 )
+         then UNCHANGED
+         else if( MFamAreaForMeter > 0 )
+         then RuleLibrary( Meter, "ResGasMeter" )
+         else RuleLibrary( Meter, "NonResGasMeter" )
+         endif endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW ThrmlZn:MFamAreaForMeter
+  DESCRIPTION
+    "Multifamily area for meter assignment"
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    SumRevRef( Spc:ThrmlZnRef, Spc:MFamAreaForMeter )
+ENDRULE
+
+RULE NEW ThrmlZn:NonResAreaForMeter
+  DESCRIPTION
+    "Non-residential area for meter assignment"
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    SumRevRef( Spc:ThrmlZnRef, Spc:NonResAreaForMeter )
+ENDRULE
+
+RULE ThrmlZn:ElecMeterRef
+  DEFAULT
+    if( Proj:DefaultMeterAll > 0 .AND. LocalCompAssigned( SpcWithMaxAreaRef ) )
+    then SpcWithMaxAreaRef:ElecMeterRef
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( Proj:DefaultMeterAll > 0 .AND. LocalCompAssigned( SpcWithMaxAreaRef ) )
+    then if( Proj:MeterCust > 0 )
+         then UNCHANGED
+         else SpcWithMaxAreaRef:ElecMeterRef
+         endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE ThrmlZn:GasMeterRef
+  DEFAULT
+    if(  Proj:DefaultMeterAll > 0 .AND. LocalCompAssigned( SpcWithMaxAreaRef ) )
+    then SpcWithMaxAreaRef:GasMeterRef
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( Proj:DefaultMeterAll > 0 .AND. LocalCompAssigned( SpcWithMaxAreaRef ) )
+    then if( Proj:MeterCust > 0 )
+         then UNCHANGED
+         else SpcWithMaxAreaRef:GasMeterRef
+         endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE ZnSys:ElecMeterRef
+  DEFAULT
+    if( Proj:DefaultMeterAll > 0 .AND. LocalCompAssigned( CtrlZnRef ) )
+    then CtrlZnRef:ElecMeterRef
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( Proj:DefaultMeterAll > 0 .AND. LocalCompAssigned( CtrlZnRef ) )
+    then if( Proj:MeterCust > 0 )
+         then UNCHANGED
+         else CtrlZnRef:ElecMeterRef
+         endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE ZnSys:GasMeterRef
+  DEFAULT
+    if( Proj:DefaultMeterAll > 0 .AND. LocalCompAssigned( CtrlZnRef ) )
+    then CtrlZnRef:GasMeterRef
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( Proj:DefaultMeterAll > 0 .AND. LocalCompAssigned( CtrlZnRef ) )
+    then if( Proj:MeterCust > 0 )
+         then UNCHANGED
+         else CtrlZnRef:GasMeterRef
+         endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW ZnSys:MFamAreaForMeter
+  DESCRIPTION
+    "Multifamily area served by the zone system"
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( LocalCompAssigned( CtrlZnRef ) )
+    then CtrlZnRef:MFamAreaForMeter
+    else 0
+    endif
+  ANNUAL
+    if( LocalCompAssigned( CtrlZnRef ) )
+    then CtrlZnRef:MFamAreaForMeter
+    else 0
+    endif
+ENDRULE
+
+RULE NEW ZnSys:NonResAreaForMeter
+  DESCRIPTION
+    "Non-residential area served by the zone system"
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( LocalCompAssigned( CtrlZnRef ) )
+    then CtrlZnRef:NonResAreaForMeter
+    else 0
+    endif
+  ANNUAL
+    if( LocalCompAssigned( CtrlZnRef ) )
+    then CtrlZnRef:NonResAreaForMeter
+    else 0
+    endif
+ENDRULE
+
+RULE TrmlUnit:ElecMeterRef
+  DEFAULT
+    if( Proj:DefaultMeterAll > 0 .AND. LocalCompAssigned( ZnServedRef ) .AND. ServesThrmlZn )
+    then ZnServedRef:ElecMeterRef
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( Proj:DefaultMeterAll > 0 .AND. LocalCompAssigned( ZnServedRef ) .AND. ServesThrmlZn )
+    then if( Proj:MeterCust > 0 )
+         then UNCHANGED
+         else ZnServedRef:ElecMeterRef
+         endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE TrmlUnit:GasMeterRef
+  DEFAULT
+    if( Proj:DefaultMeterAll > 0 .AND. LocalCompAssigned( ZnServedRef ) .AND. ServesThrmlZn )
+    then ZnServedRef:GasMeterRef
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( Proj:DefaultMeterAll > 0 .AND. LocalCompAssigned( ZnServedRef ) .AND. ServesThrmlZn )
+    then if( Proj:MeterCust > 0 )
+         then UNCHANGED
+         else ZnServedRef:GasMeterRef
+         endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW AirSys:MFamAreaForMeter
+  DESCRIPTION
+    "Multifamily area served by the air system"
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    SumChildren( TrmlUnit:ZnServedRef:MFamAreaForMeter )
+  ANNUAL
+    SumChildren( TrmlUnit:ZnServedRef:MFamAreaForMeter )    
+ENDRULE
+
+RULE NEW AirSys:NonResAreaForMeter
+  DESCRIPTION
+    "Non-residential area served by the air system"
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    SumChildren( TrmlUnit:ZnServedRef:NonResAreaForMeter )
+  ANNUAL
+    SumChildren( TrmlUnit:ZnServedRef:NonResAreaForMeter )
+ENDRULE
+
+RULE AirSys:ElecMeterRef
+  DEFAULT
+    if( Proj:DefaultMeterAll > 0 .AND. IsMultiZnSys > 0 )
+    then if( LocalCompAssigned( PropVentOnlyThrmlZnRef ) )
+      then PropVentOnlyThrmlZnRef:ElecMeterRef
+      else if( MFamAreaForMeter > 0 .AND. NonResAreaForMeter = 0 )
+      then RuleLibrary( Meter, "ResElecMeter" )
+      else if( MFamAreaForMeter = 0 .AND. NonResAreaForMeter > 0 )
+      then RuleLibrary( Meter, "NonResElecMeter" )
+      else RuleLibrary( Meter, "MixedElecMeter" )
+      endif endif endif
+    else if( Proj:DefaultMeterAll > 0 .AND. LocalCompAssigned( CtrlZnRef ) )
+         then CtrlZnRef:ElecMeterRef
+         else UNDEFINED
+         endif
+    endif
+  ANNUAL
+    if( Proj:DefaultMeterAll > 0 )
+    then if( Proj:MeterCust > 0 )
+         then UNCHANGED     
+         else if( IsMultiZnSys > 0 )
+         then if( LocalCompAssigned( PropVentOnlyThrmlZnRef ) )
+              then PropVentOnlyThrmlZnRef:ElecMeterRef
+              else if( MFamAreaForMeter = 0 .AND. NonResAreaForMeter > 0 )
+              then RuleLibrary( Meter, "NonResElecMeter" )
+              else CreateComp( Meter, Local( Name ) + "-ElecMeter", "SetAsElecMeter" ) 
+              endif endif
+         else CtrlZnRef:ElecMeterRef
+         endif endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE AirSys:GasMeterRef
+  DEFAULT
+    if( Proj:DefaultMeterAll > 0 .AND. IsMultiZnSys > 0 )
+    then if( LocalCompAssigned( PropVentOnlyThrmlZnRef ) )
+      then PropVentOnlyThrmlZnRef:GasMeterRef
+      else if( MFamAreaForMeter > 0 .AND. NonResAreaForMeter = 0 )
+      then RuleLibrary( Meter, "ResGasMeter" )
+      else if( MFamAreaForMeter = 0 .AND. NonResAreaForMeter > 0 )
+      then RuleLibrary( Meter, "NonResGasMeter" )
+      else RuleLibrary( Meter, "MixedGasMeter" )
+      endif endif endif
+    else if( Proj:DefaultMeterAll > 0 .AND. LocalCompAssigned( CtrlZnRef ) )
+         then CtrlZnRef:GasMeterRef
+         else UNDEFINED
+         endif
+    endif
+  ANNUAL
+    if( Proj:DefaultMeterAll > 0 )
+    then if( Proj:MeterCust > 0 )
+         then UNCHANGED
+         else if( IsMultiZnSys > 0 )
+         then if( LocalCompAssigned( PropVentOnlyThrmlZnRef ) )
+              then PropVentOnlyThrmlZnRef:ElecMeterRef
+              else if( MFamAreaForMeter = 0 .AND. NonResAreaForMeter > 0 )
+              then RuleLibrary( Meter, "NonResGasMeter" )
+              else CreateComp( Meter, Local( Name ) + "-GasMeter", "SetAsGasMeter" ) 
+              endif endif
+         else CtrlZnRef:ElecMeterRef
+         endif endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE HtRcvry:ElecMeterRef
+  DEFAULT
+    if( Proj:DefaultMeterAll > 0 )
+    then AirSys:ElecMeterRef
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( Proj:DefaultMeterAll > 0 )
+    then if( Proj:MeterCust > 0 )
+         then UNCHANGED
+         else AirSys:ElecMeterRef
+         endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE EvapClr:ElecMeterRef
+  DEFAULT
+    if( Proj:DefaultMeterAll > 0 )
+    then AirSys:ElecMeterRef
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( Proj:DefaultMeterAll > 0 )
+    then if( Proj:MeterCust > 0 )
+         then UNCHANGED
+         else AirSys:ElecMeterRef
+         endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE CoilClg:ElecMeterRef
+  DEFAULT
+    if( Proj:DefaultMeterAll > 0 )
+    then switch( ParentComponentType() )
+          case "ZnSys"    :  ZnSys:ElecMeterRef
+          case "AirSys"   :  AirSys:ElecMeterRef
+          case "AirSeg"   :  AirSys:ElecMeterRef
+          case "TrmlUnit" :  TrmlUnit:ElecMeterRef
+          default         :  UNDEFINED
+        endswitch
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( Proj:DefaultMeterAll > 0 )
+    then if( Proj:MeterCust > 0 )
+         then UNCHANGED
+         else switch( ParentComponentType() )
+               case "ZnSys"    :  ZnSys:ElecMeterRef
+               case "AirSys"   :  AirSys:ElecMeterRef
+               case "AirSeg"   :  AirSys:ElecMeterRef
+               case "TrmlUnit" :  TrmlUnit:ElecMeterRef
+               default         :  UNDEFINED
+              endswitch
+         endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW CoilClg:MFamAreaForMeter
+  DESCRIPTION
+    "Multifamily area served by the coil"
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    switch( ParentComponentType() )
+      case "ZnSys"    :  ZnSys:MFamAreaForMeter
+      case "AirSys"   :  AirSys:MFamAreaForMeter
+      case "AirSeg"   :  AirSys:MFamAreaForMeter
+      case "TrmlUnit" :  UNDEFINED
+      default         :  UNDEFINED
+    endswitch    
+  ANNUAL
+    switch( ParentComponentType() )
+      case "ZnSys"    :  ZnSys:MFamAreaForMeter
+      case "AirSys"   :  AirSys:MFamAreaForMeter
+      case "AirSeg"   :  AirSys:MFamAreaForMeter
+      case "TrmlUnit" :  UNDEFINED
+      default         :  UNDEFINED
+    endswitch
+ENDRULE
+
+RULE NEW CoilClg:NonResAreaForMeter
+  DESCRIPTION
+    "Non-residential area served by the coil"
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    switch( ParentComponentType() )
+      case "ZnSys"    :  ZnSys:NonResAreaForMeter
+      case "AirSys"   :  AirSys:NonResAreaForMeter
+      case "AirSeg"   :  AirSys:NonResAreaForMeter
+      case "TrmlUnit" :  UNDEFINED
+      default         :  UNDEFINED
+    endswitch
+  ANNUAL
+    switch( ParentComponentType() )
+      case "ZnSys"    :  ZnSys:NonResAreaForMeter
+      case "AirSys"   :  AirSys:NonResAreaForMeter
+      case "AirSeg"   :  AirSys:NonResAreaForMeter
+      case "TrmlUnit" :  UNDEFINED
+      default         :  UNDEFINED
+    endswitch
+ENDRULE
+
+RULE CoilHtg:ElecMeterRef
+  DEFAULT
+    if( Proj:DefaultMeterAll > 0 )
+    then switch( ParentComponentType() )
+          case "ZnSys"    :  ZnSys:ElecMeterRef
+          case "AirSys"   :  AirSys:ElecMeterRef
+          case "AirSeg"   :  AirSys:ElecMeterRef
+          case "TrmlUnit" :  TrmlUnit:ElecMeterRef
+          default         :  UNDEFINED
+        endswitch
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( Proj:DefaultMeterAll > 0 )
+    then if( Proj:MeterCust > 0 )
+         then UNCHANGED
+         else switch( ParentComponentType() )
+               case "ZnSys"    :  ZnSys:ElecMeterRef
+               case "AirSys"   :  AirSys:ElecMeterRef
+               case "AirSeg"   :  AirSys:ElecMeterRef
+               case "TrmlUnit" :  TrmlUnit:ElecMeterRef
+               default         :  UNDEFINED
+              endswitch
+         endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE CoilHtg:GasMeterRef
+  DEFAULT
+    if( Proj:DefaultMeterAll > 0 )
+    then switch( ParentComponentType() )
+          case "ZnSys"    :  ZnSys:GasMeterRef
+          case "AirSys"   :  AirSys:GasMeterRef
+          case "AirSeg"   :  AirSys:GasMeterRef
+          case "TrmlUnit" :  TrmlUnit:GasMeterRef
+          default         :  UNDEFINED
+        endswitch
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( Proj:DefaultMeterAll > 0 )
+    then if( Proj:MeterCust > 0 )
+         then UNCHANGED
+         else switch( ParentComponentType() )
+               case "ZnSys"    :  ZnSys:GasMeterRef
+               case "AirSys"   :  AirSys:GasMeterRef
+               case "AirSeg"   :  AirSys:GasMeterRef
+               case "TrmlUnit" :  TrmlUnit:GasMeterRef
+               default         :  UNDEFINED
+              endswitch
+         endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW CoilHtg:MFamAreaForMeter
+  DESCRIPTION
+    "Multifamily area served by the coil"
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    switch( ParentComponentType() )
+      case "ZnSys"    :  ZnSys:MFamAreaForMeter
+      case "AirSys"   :  AirSys:MFamAreaForMeter
+      case "AirSeg"   :  AirSys:MFamAreaForMeter
+      case "TrmlUnit" :  UNDEFINED
+      default         :  UNDEFINED
+    endswitch
+  ANNUAL
+    switch( ParentComponentType() )
+      case "ZnSys"    :  ZnSys:MFamAreaForMeter
+      case "AirSys"   :  AirSys:MFamAreaForMeter
+      case "AirSeg"   :  AirSys:MFamAreaForMeter
+      case "TrmlUnit" :  UNDEFINED
+      default         :  UNDEFINED
+    endswitch
+ENDRULE
+
+RULE NEW CoilHtg:NonResAreaForMeter
+  DESCRIPTION
+    "Non-residential area served by the coil"
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    switch( ParentComponentType() )
+      case "ZnSys"    :  ZnSys:NonResAreaForMeter
+      case "AirSys"   :  AirSys:NonResAreaForMeter
+      case "AirSeg"   :  AirSys:NonResAreaForMeter
+      case "TrmlUnit" :  UNDEFINED
+      default         :  UNDEFINED
+    endswitch
+  ANNUAL
+    switch( ParentComponentType() )
+      case "ZnSys"    :  ZnSys:NonResAreaForMeter
+      case "AirSys"   :  AirSys:NonResAreaForMeter
+      case "AirSeg"   :  AirSys:NonResAreaForMeter
+      case "TrmlUnit" :  UNDEFINED
+      default         :  UNDEFINED
+    endswitch
+ENDRULE
+
+RULE Fan:ElecMeterRef
+  DEFAULT
+    if( Proj:DefaultMeterAll > 0 )
+    then switch( ParentComponentType() )
+          case "ZnSys"    :  ZnSys:ElecMeterRef
+          case "AirSys"   :  AirSys:ElecMeterRef
+          case "AirSeg"   :  AirSys:ElecMeterRef
+          case "TrmlUnit" :  TrmlUnit:ElecMeterRef
+          default         :  UNDEFINED
+        endswitch
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( Proj:DefaultMeterAll > 0 )
+    then if( Proj:MeterCust > 0 )
+         then UNCHANGED
+         else switch( ParentComponentType() )
+               case "ZnSys"    :  ZnSys:ElecMeterRef
+               case "AirSys"   :  AirSys:ElecMeterRef
+               case "AirSeg"   :  AirSys:ElecMeterRef
+               case "TrmlUnit" :  TrmlUnit:ElecMeterRef
+               default         :  UNDEFINED
+              endswitch
+         endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW Fan:IsExhFan
+  DESCRIPTION
+    "Is exhaust fan"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( SysType = "Exhaust" )
+    then 1
+    else 0
+    endif
+ENDRULE
+
+RULE NEW Fan:MFamAreaForMeter
+  DESCRIPTION
+    "Multifamily area served by the fan"
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    switch( ParentComponentType() )
+      case "ZnSys"    :  ZnSys:MFamAreaForMeter
+      case "AirSys"   :  AirSys:MFamAreaForMeter
+      case "AirSeg"   :  AirSys:MFamAreaForMeter
+      case "TrmlUnit" :  UNDEFINED
+      default         :  UNDEFINED
+    endswitch
+ENDRULE
+
+RULE NEW Fan:NonResAreaForMeter
+  DESCRIPTION
+    "Non-residential area served by the fan"
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    switch( ParentComponentType() )
+      case "ZnSys"    :  ZnSys:NonResAreaForMeter
+      case "AirSys"   :  AirSys:NonResAreaForMeter
+      case "AirSeg"   :  AirSys:NonResAreaForMeter
+      case "TrmlUnit" :  UNDEFINED
+      default         :  UNDEFINED
+    endswitch
+ENDRULE
+
+RULE NEW VRFSys:MFamAreaForMeter
+  DESCRIPTION
+    "Multifamily area served by the VRF system"
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    SumRevRef( ZnSys:VRFSysRef, ZnSys:MFamAreaForMeter )
+  ANNUAL
+    SumRevRef( ZnSys:VRFSysRef, ZnSys:MFamAreaForMeter )
+ENDRULE
+
+RULE NEW VRFSys:NonResAreaForMeter
+  DESCRIPTION
+    "Non-residential area served by the VRF system"
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    SumRevRef( ZnSys:VRFSysRef, ZnSys:NonResAreaForMeter )
+  ANNUAL
+    SumRevRef( ZnSys:VRFSysRef, ZnSys:NonResAreaForMeter )
+ENDRULE
+
+RULE VRFSys:ElecMeterRef
+  DEFAULT
+    if( Proj:DefaultMeterAll > 0 )
+    then if( MFamAreaForMeter > 0 .AND. NonResAreaForMeter = 0 )
+         then RuleLibrary( Meter, "ResElecMeter" )
+           else if( MFamAreaForMeter = 0 .AND. NonResAreaForMeter > 0 )
+           then RuleLibrary( Meter, "NonResElecMeter" )
+           else RuleLibrary( Meter, "MixedElecMeter" )
+         endif endif
+    else UNDEFINED
+    endif  
+  ANNUAL
+    if( Proj:DefaultMeterAll > 0 )
+    then if( Proj:MeterCust > 0 )
+         then UNCHANGED
+         else if( MFamAreaForMeter = 0 .AND. NonResAreaForMeter > 0 )
+         then RuleLibrary( Meter, "NonResElecMeter" )
+         else CreateComp( Meter, Local( Name ) + "-ElecMeter", "SetAsElecMeter" ) 
+         endif endif
+    else UNDEFINED 
+    endif
+ENDRULE
+
+RULE NEW FluidSeg:MFamAreaForMeter
+  DESCRIPTION
+    "Multifamily area served by the fluid segment"
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( FluidSys:Type = "ServiceHotWater" .AND. ( Type = "PrimarySupply" .OR. Type = "SecondarySupply" ) )
+    then SumRevRef( Spc:SHWFluidSegRef, Spc:MFamAreaForMeter )
+    else if( Type = "PrimarySupply" .OR. Type = "SecondarySupply" )
+    then Max( SumRevRef( CoilClg:FluidSegInRef, CoilClg:MFamAreaForMeter ), SumRevRef( CoilHtg:FluidSegInRef, CoilHtg:MFamAreaForMeter ) )
+    else UNDEFINED
+    endif endif
+  ANNUAL
+    if( FluidSys:Type = "ServiceHotWater" .AND. ( Type = "PrimarySupply" .OR. Type = "SecondarySupply" ) )
+    then SumRevRef( Spc:SHWFluidSegRef, Spc:MFamAreaForMeter )
+    else if( Type = "PrimarySupply" .OR. Type = "SecondarySupply" )
+    then Max( SumRevRef( CoilClg:FluidSegInRef, CoilClg:MFamAreaForMeter ), SumRevRef( CoilHtg:FluidSegInRef, CoilHtg:MFamAreaForMeter ) )
+    else UNDEFINED
+    endif endif
+ENDRULE
+
+RULE NEW FluidSeg:NonResAreaForMeter
+  DESCRIPTION
+    "Non-residential area served by the fluid segment"
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( FluidSys:Type = "ServiceHotWater" .AND. ( Type = "PrimarySupply" .OR. Type = "SecondarySupply" ) )
+    then SumRevRef( Spc:SHWFluidSegRef, Spc:NonResAreaForMeter )
+    else if( Type = "PrimarySupply" .OR. Type = "SecondarySupply" )
+    then Max( SumRevRef( CoilClg:FluidSegInRef, CoilClg:NonResAreaForMeter ), SumRevRef( CoilHtg:FluidSegInRef, CoilHtg:NonResAreaForMeter ) )
+    else UNDEFINED
+    endif endif
+  ANNUAL
+    if( FluidSys:Type = "ServiceHotWater" .AND. ( Type = "PrimarySupply" .OR. Type = "SecondarySupply" ) )
+    then SumRevRef( Spc:SHWFluidSegRef, Spc:NonResAreaForMeter )
+    else if( Type = "PrimarySupply" .OR. Type = "SecondarySupply" )
+    then Max( SumRevRef( CoilClg:FluidSegInRef, CoilClg:NonResAreaForMeter ), SumRevRef( CoilHtg:FluidSegInRef, CoilHtg:NonResAreaForMeter ) )
+    else UNDEFINED
+    endif endif
+ENDRULE
+
+RULE NEW FluidSys:MFamAreaForMeter
+  DESCRIPTION
+    "Multifamily area served by the fluid system"
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( ( SumChildren( FluidSeg:MFamAreaForMeter ) + SumChildren( FluidSeg:NonResAreaForMeter ) ) = 0 .AND. Type = "CondenserWater" )
+    then SumRevRef( FluidSys:CWSysRef, FluidSys:MFamAreaForMeter ) +
+         SumRevRef( ResCentralHtgClgSys:HWFluidSysRef, ResCentralHtgClgSys:FloorAreaServed) +
+         SumRevRef( ResCentralHtgClgSys:ChWFluidSysRef, ResCentralHtgClgSys:FloorAreaServed) +
+         SumRevRef( ResCentralHtgClgSys:CWFluidSysRef, ResCentralHtgClgSys:FloorAreaServed)
+    else SumChildren( FluidSeg:MFamAreaForMeter ) +
+         SumRevRef( ResCentralHtgClgSys:HWFluidSysRef, ResCentralHtgClgSys:FloorAreaServed) +
+         SumRevRef( ResCentralHtgClgSys:ChWFluidSysRef, ResCentralHtgClgSys:FloorAreaServed) +
+         SumRevRef( ResCentralHtgClgSys:CWFluidSysRef, ResCentralHtgClgSys:FloorAreaServed)
+    endif
+  ANNUAL
+    if( ( SumChildren( FluidSeg:MFamAreaForMeter ) + SumChildren( FluidSeg:NonResAreaForMeter ) ) = 0 .AND. Type = "CondenserWater" )
+    then SumRevRef( FluidSys:CWSysRef, FluidSys:MFamAreaForMeter ) +
+         SumRevRef( ResCentralHtgClgSys:HWFluidSysRef, ResCentralHtgClgSys:FloorAreaServed) +
+         SumRevRef( ResCentralHtgClgSys:ChWFluidSysRef, ResCentralHtgClgSys:FloorAreaServed) +
+         SumRevRef( ResCentralHtgClgSys:CWFluidSysRef, ResCentralHtgClgSys:FloorAreaServed)
+    else SumChildren( FluidSeg:MFamAreaForMeter ) +
+         SumRevRef( ResCentralHtgClgSys:HWFluidSysRef, ResCentralHtgClgSys:FloorAreaServed) +
+         SumRevRef( ResCentralHtgClgSys:ChWFluidSysRef, ResCentralHtgClgSys:FloorAreaServed) +
+         SumRevRef( ResCentralHtgClgSys:CWFluidSysRef, ResCentralHtgClgSys:FloorAreaServed)
+    endif
+ENDRULE
+
+RULE NEW FluidSys:NonResAreaForMeter
+  DESCRIPTION
+    "Non-residential area served by the fluid system"
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( ( SumChildren( FluidSeg:MFamAreaForMeter ) + SumChildren( FluidSeg:NonResAreaForMeter ) ) = 0 .AND. Type = "CondenserWater" )
+    then SumRevRef( FluidSys:CWSysRef, FluidSys:NonResAreaForMeter )
+    else SumChildren( FluidSeg:NonResAreaForMeter )
+    endif
+  ANNUAL
+    if( ( SumChildren( FluidSeg:MFamAreaForMeter ) + SumChildren( FluidSeg:NonResAreaForMeter ) ) = 0 .AND. Type = "CondenserWater" )
+    then SumRevRef( FluidSys:CWSysRef, FluidSys:NonResAreaForMeter )
+    else SumChildren( FluidSeg:NonResAreaForMeter )
+    endif
+ENDRULE
+
+RULE FluidSys:ElecMeterRef
+  DEFAULT
+    if( Proj:DefaultMeterAll > 0 )
+    then if( MFamAreaForMeter > 0 .AND. NonResAreaForMeter = 0 )
+         then RuleLibrary( Meter, "ResElecMeter" )
+         else if( MFamAreaForMeter = 0 .AND. NonResAreaForMeter > 0 )
+         then RuleLibrary( Meter, "NonResElecMeter" )    
+         else RuleLibrary( Meter, "MixedElecMeter" )
+         endif endif
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( IfValidAnd( CSELoadPassing > 0 ) )
+    then CreateComp( Meter, Local( Name ) + "-ElecMeter", "SetAsElecMeter" ) 
+    else if( Proj:DefaultMeterAll > 0 )
+    then if( Proj:MeterCust > 0 )
+         then UNCHANGED
+         else if( MFamAreaForMeter = 0 .AND. NonResAreaForMeter > 0 )
+         then RuleLibrary( Meter, "NonResElecMeter" )    
+         else CreateComp( Meter, Local( Name ) + "-ElecMeter", "SetAsElecMeter" ) 
+         endif endif
+    else UNDEFINED
+    endif endif
+ENDRULE
+
+RULE FluidSys:GasMeterRef
+  DEFAULT
+    if( Proj:DefaultMeterAll > 0 )
+    then if( MFamAreaForMeter > 0 .AND. NonResAreaForMeter = 0 )
+         then RuleLibrary( Meter, "ResGasMeter" )
+         else if( MFamAreaForMeter = 0 .AND. NonResAreaForMeter > 0 )
+         then RuleLibrary( Meter, "NonResGasMeter" )    
+         else RuleLibrary( Meter, "MixedGasMeter" )
+         endif endif
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( IfValidAnd( CSELoadPassing > 0 ) )
+    then CreateComp( Meter, Local( Name ) + "-GasMeter", "SetAsGasMeter" )
+    else if( Proj:DefaultMeterAll > 0 )
+    then if( Proj:MeterCust > 0 )
+         then UNCHANGED
+         else if( MFamAreaForMeter = 0 .AND. NonResAreaForMeter > 0 )
+         then RuleLibrary( Meter, "NonResGasMeter" )    
+         else CreateComp( Meter, Local( Name ) + "-GasMeter", "SetAsGasMeter" )
+         endif endif
+    else UNDEFINED
+    endif endif
+ENDRULE
+
+RULE Blr:ElecMeterRef
+  DEFAULT
+    if( Proj:DefaultMeterAll > 0 )
+    then FluidSys:ElecMeterRef
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( Proj:MeterCust > 0 )
+    then UNCHANGED
+    else if( Proj:DefaultMeterAll > 0 .OR. FluidSys:CSELoadPassing > 0 )
+    then FluidSys:ElecMeterRef
+    else UNDEFINED
+    endif endif
+ENDRULE
+
+RULE Blr:GasMeterRef
+  DEFAULT
+    if( Proj:DefaultMeterAll > 0 )
+    then FluidSys:GasMeterRef
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( Proj:MeterCust > 0 )
+    then UNCHANGED
+    else if( Proj:DefaultMeterAll > 0 .OR. FluidSys:CSELoadPassing > 0 )
+    then FluidSys:GasMeterRef
+    else UNDEFINED
+    endif endif
+ENDRULE
+
+RULE Chlr:ElecMeterRef
+  DEFAULT
+    if( Proj:DefaultMeterAll > 0 )
+    then FluidSys:ElecMeterRef
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( Proj:MeterCust > 0 )
+    then UNCHANGED
+    else if( Proj:DefaultMeterAll > 0 .OR. FluidSys:CSELoadPassing > 0 )
+    then FluidSys:ElecMeterRef
+    else UNDEFINED
+    endif endif
+ENDRULE
+
+RULE HtRej:ElecMeterRef
+  DEFAULT
+    if( Proj:DefaultMeterAll > 0 )
+    then FluidSys:ElecMeterRef
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( Proj:MeterCust > 0 )
+    then UNCHANGED
+    else if( Proj:DefaultMeterAll > 0 .OR. FluidSys:CSELoadPassing > 0 )
+    then FluidSys:ElecMeterRef
+    else UNDEFINED
+    endif endif
+ENDRULE
+
+RULE WtrHtr:ElecMeterRef
+  DEFAULT
+    if( Proj:DefaultMeterAll > 0 )
+    then FluidSys:ElecMeterRef
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( Proj:MeterCust > 0 )
+    then UNCHANGED
+    else if( Proj:DefaultMeterAll > 0 .OR. IfValidAnd( FluidSys:CSELoadPassing > 0 ) )
+    then FluidSys:ElecMeterRef
+    else UNDEFINED
+    endif endif
+ENDRULE
+
+RULE WtrHtr:GasMeterRef
+  DEFAULT
+    if( Proj:DefaultMeterAll > 0 )
+    then FluidSys:GasMeterRef
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( Proj:MeterCust > 0 )
+    then UNCHANGED
+    else if( Proj:DefaultMeterAll > 0 .OR. IfValidAnd( FluidSys:CSELoadPassing > 0 ) )
+    then FluidSys:GasMeterRef
+    else UNDEFINED
+    endif endif
+ENDRULE
+
+RULE Pump:ElecMeterRef
+  DEFAULT
+    if( Proj:DefaultMeterAll > 0 )
+    then FluidSys:ElecMeterRef
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( Proj:MeterCust > 0 )
+    then UNCHANGED
+    else if( Proj:DefaultMeterAll > 0 .OR. FluidSys:CSELoadPassing > 0 )
+    then FluidSys:ElecMeterRef
+    else UNDEFINED
+    endif endif
+ENDRULE
+// ---- Intermediate property the applicable key name / meter variable ------
+// ------------------------------ Lights ------------------------------------
+RULE NEW Spc:MeterElec_LtgReg
+  DESCRIPTION
+    "Intermediate property the applicable key name / output variable"
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( LocalCompAssigned( ElecMeterRef ) .AND. IfValidAnd( IntLPDRegSim > 0 ) )
+    then Format( "%s Regulated Lights, Lights Electricity Energy,", Name)
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW Spc:MeterElec_LtgNonReg
+  DESCRIPTION
+    "Intermediate property the applicable key name / output variable"
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( LocalCompAssigned( ElecMeterRef ) .AND. IfValidAnd( IntLPDNonRegSim > 0 ) )
+    then Format( "%s Non-Regulated Lights, Lights Electricity Energy,", Name)
+    else UNDEFINED
+    endif
+ENDRULE
+// ------------------------------ Process ------------------------------------
+RULE NEW Spc:MeterElec_Recpt
+  DESCRIPTION
+    "Intermediate property the applicable key name / output variable"
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( LocalCompAssigned( ElecMeterRef ) .AND. IfValidAnd( RecptPwrDens > 0 ) )
+    then Format( "%s Recepticle Loads, Electric Equipment Electricity Energy,", Name)
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW Spc:MeterElec_ProcElec
+  DESCRIPTION
+    "Intermediate property the applicable key name / output variable"
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( LocalCompAssigned( ElecMeterRef ) .AND. IfValidAnd( ProcElecPwrDens > 0 ) )
+    then Format( "%s Process Electric Loads, Electric Equipment Electricity Energy,", Name)
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW Spc:MeterElec_RfrgElec
+  DESCRIPTION
+    "Intermediate property the applicable key name / output variable"
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( LocalCompAssigned( ElecMeterRef ) .AND. IfValidAnd( CommRfrgEPD > 0 ) )
+    then Format( "%s Refrigeration Loads, Electric Equipment Electricity Energy,", Name)
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW Spc:MeterElec_ElevElec
+  DESCRIPTION
+    "Intermediate property the applicable key name / output variable"
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( LocalCompAssigned( ElecMeterRef ) .AND. IfValidAnd( ElevCnt > 0 ) )
+    then Format( "%s Elevator, Electric Equipment Electricity Energy,", Name)
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW Spc:MeterElec_EscalElec
+  DESCRIPTION
+    "Intermediate property the applicable key name / output variable"
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( LocalCompAssigned( ElecMeterRef ) .AND. IfValidAnd( EscalCnt > 0 ) )
+    then Format( "%s Escalator, Electric Equipment Electricity Energy,", Name)
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW Spc:MeterGas_EqpGas
+  DESCRIPTION
+    "Intermediate property the applicable key name / output variable"
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( LocalCompAssigned( GasMeterRef ) .AND. IfValidAnd( GasEqpPwrDens > 0 ) )
+    then Format( "%s Gas Equipment Loads, Gas Equipment NaturalGas Energy,", Name)
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW Spc:MeterGas_ProcGas
+  DESCRIPTION
+    "Intermediate property the applicable key name / output variable"
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( LocalCompAssigned( GasMeterRef ) .AND. IfValidAnd( ProcGasPwrDens > 0 ) )
+    then Format( "%s Gas Loads, Gas Equipment NaturalGas Energy,", Name)
+    else UNDEFINED
+    endif
+ENDRULE
+
+// -------------------------------- Fan --------------------------------------
+
+RULE NEW Fan:MeterElec_Fan
+  DESCRIPTION
+    "Intermediate property the applicable key name / output variable"
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( LocalCompAssigned( ElecMeterRef ) .AND. IfValidAnd( FlowCapSim > 0 ) )
+    then Format( "%s, Fan Electricity Energy,", Name)
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW ThrmlZn:MeterElec_Fan
+  DESCRIPTION
+    "Intermediate property the applicable key name / output variable"
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( LocalCompAssigned( ElecMeterRef ) .AND. IfValidAnd( ExhFlowSim > 0 ) )
+    then Format( "%s, Fan Electricity Energy,", ExhFanName)
+    else UNDEFINED
+    endif
+ENDRULE
+
+// ------------------------------ Heating ------------------------------------
+
+RULE NEW CoilHtg:MeterElec_Htg
+  DESCRIPTION
+    "Intermediate property the applicable key name / output variable"
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( LocalCompAssigned( ElecMeterRef ) .AND. IfValidAnd( CapTotGrossRtdSim > 0 ) )
+    then if( Parent( Type ) = "Baseboard" .AND. Type = "Resistance" )
+         then Format( "%s, Baseboard Electricity Energy,", ZnSys:Name)
+         else if( Parent( Type ) = "Radiant" .AND. Type = "Resistance" )
+         then Format( "%s, Zone Radiant HVAC Electricity Energy,", ZnSys:Name)
+         else if( Type = "Resistance" .OR. (Type = "HeatPump" .AND. CndsrType = "WaterSource" ) .OR. Type = "Furnace" )
+         then Format( "%s, Heating Coil Electricity Energy,", Name)
+         else if( Type = "HeatPump" )
+         then Format( "%s, Heating Coil Electricity Energy,\n
+                       %s, Heating Coil Defrost Electricity Energy,\n
+                       %s, Heating Coil Crankcase Heater Electricity Energy,", Name, "  " + Name, "  " + Name)
+         else if( Type = "VRF" )
+         then Format( "%s, Zone VRF Air Terminal Heating Electricity Energy,", ZnSys:Name)
+         else UNDEFINED
+         endif endif endif endif endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW VRFSys:MeterElec_Htg
+  DESCRIPTION
+    "Intermediate property the applicable key name / output variable"
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( LocalCompAssigned( ElecMeterRef ) .AND. IfValidAnd( HtgCapNetRtd > 0 ) )
+    then Format( "%s, VRF Heat Pump Heating Electricity Energy,\n
+                  %s, VRF Heat Pump Defrost Electricity Energy,", Name, "  " + Name)
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW CoilHtg:MeterGas_Htg
+  DESCRIPTION
+    "Intermediate property the applicable key name / output variable"
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( LocalCompAssigned( GasMeterRef ) .AND. IfValidAnd( CapTotGrossRtdSim > 0 ) .AND. Type = "Furnace")
+    then Format( "%s, Heating Coil NaturalGas Energy,\n
+                  %s, Heating Coil Ancillary NaturalGas Energy,", Name, "  " + Name)
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW Blr:MeterElec_Htg
+  DESCRIPTION
+    "Intermediate property the applicable key name / output variable"
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( LocalCompAssigned( ElecMeterRef ) .AND. IfValidAnd( CapRtdSim > 0 ) )
+    then if( FuelSrc = "Electric" )
+         then Format( "%s, Boiler Electricity Energy,\n
+                       %s, Boiler Ancillary Electricity Energy,", Name, "  " + Name)
+         else Format( "%s, Boiler Ancillary Electricity Energy,", Name) 
+         endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW Blr:MeterGas_Htg
+  DESCRIPTION
+    "Intermediate property the applicable key name / output variable"
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( LocalCompAssigned( GasMeterRef ) .AND. IfValidAnd( CapRtdSim > 0 ) .AND. FuelSrc = "Gas")
+    then Format( "%s, Boiler NaturalGas Energy,", Name)
+    else UNDEFINED
+    endif
+ENDRULE
+
+// ------------------------------ Cooling ------------------------------------
+
+RULE NEW CoilClg:MeterElec_Clg
+  DESCRIPTION
+    "Intermediate property the applicable key name / output variable"
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( LocalCompAssigned( ElecMeterRef ) .AND. IfValidAnd( CapTotGrossRtd > 0 ) )
+    then if( Type = "DirectExpansion" )
+         then Format( "%s, Cooling Coil Electricity Energy,", Name)
+         else if( Type = "VRF" )
+         then Format( "%s, Zone VRF Air Terminal Cooling Electricity Energy,", ZnSys:Name)
+         else UNDEFINED
+         endif endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW EvapClr:MeterElec_Clg
+  DESCRIPTION
+    "Intermediate property the applicable key name / output variable"
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( LocalCompAssigned( ElecMeterRef ) .AND. IfValidAnd( Eff > 0 ) )
+    then Format( "%s, Evaporative Cooler Electricity Energy,", Name)
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW VRFSys:MeterElec_Clg
+  DESCRIPTION
+    "Intermediate property the applicable key name / output variable"
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( LocalCompAssigned( ElecMeterRef ) .AND. IfValidAnd( ClgCapNetRtd > 0 ) )
+    then Format( "%s, VRF Heat Pump Cooling Electricity Energy,\n
+                  %s, VRF Heat Pump Crankcase Heater Electricity Energy,", Name, "  " + Name)
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW Chlr:MeterElec_Clg
+  DESCRIPTION
+    "Intermediate property the applicable key name / output variable"
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( LocalCompAssigned( ElecMeterRef ) .AND. IfValidAnd( CapRtdSim > 0 ) )
+    then Format( "%s, Chiller Electricity Energy,", Name)
+    else UNDEFINED
+    endif
+ENDRULE
+
+// ------------------------ Cooling Tower ------------------------------------
+
+RULE NEW HtRej:MeterElec_Clg
+  DESCRIPTION
+    "Intermediate property the applicable key name / output variable"
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( LocalCompAssigned( ElecMeterRef ) .AND. IfValidAnd( CapRtdSim > 0 ) )
+    then Format( "%s, Cooling Tower Fan Electricity Energy,", Name)
+    else UNDEFINED
+    endif
+ENDRULE
+
+// ------------------------ Water Heating ------------------------------------
+
+RULE NEW WtrHtr:MeterElec_Htg
+  DESCRIPTION
+    "Intermediate property the applicable key name / output variable"
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( LocalCompAssigned( ElecMeterRef ) .AND. IfValidAnd( CapRtdSim > 0 ) .AND. FuelSrc = "Electricity")
+    then if( Type = "Conventional" )
+         then Format( "%s, Water Heater Electricity Energy,\n
+                       %s, Water Heater Off Cycle Parasitic Electricity Energy,\n
+                       %s, Water Heater On Cycle Parasitic Electricity Energy,", Name, "  " + Name, "  " + Name)
+         else Format( "%s Storage Tank, Water Heater Electricity Energy,\n
+                       %s Storage Tank, Water Heater Off Cycle Parasitic Electricity Energy,\n
+                       %s Storage Tank, Water Heater On Cycle Parasitic Electricity Energy,\n
+                       %s, Water Heater Off Cycle Ancillary Electricity Energy,\n
+                       %s, Water Heater On Cycle Ancillary Electricity Energy,\n
+                       %s Heating Coil, Cooling Coil Crankcase Heater Electricity Energy,\n
+                       %s Heating Coil, Cooling Coil Water Heating Electricity Energy,\n
+                       %s Fan, Fan Electricity Energy,"
+                       , Name, "  " + Name, "  " + Name, "  " + Name, "  " + Name, "  " + Name, "  " + Name, "  " + Name)
+         endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW WtrHtr:MeterGas_Htg
+  DESCRIPTION
+    "Intermediate property the applicable key name / output variable"
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( LocalCompAssigned( GasMeterRef ) .AND. IfValidAnd( CapRtdSim > 0 ) .AND. FuelSrc = "Gas")
+    then Format( "%s, Water Heater NaturalGas Energy,\n
+                  %s, Water Heater Off Cycle Parasitic NaturalGas Energy,\n
+                  %s, Water Heater On Cycle Parasitic NaturalGas Energy,", Name, "  " + Name, "  " + Name)
+    else UNDEFINED
+    endif
+ENDRULE
+
+// ------------------------------- Pumps -------------------------------------
+RULE NEW Pump:MeterElec_Pump
+  DESCRIPTION
+    "Intermediate property the applicable key name / output variable"
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( LocalCompAssigned( ElecMeterRef ) .AND. IfValidAnd( FlowCapSim > 0 ) )
+    then Format( "%s, Pump Electricity Energy,", Name)
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW FluidSys:HasOSPump
+  DESCRIPTION
+    "Fluid system has OpenStudio created pump"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( Type = "ServiceHotWater" .AND. ( SumChildren( WtrHtr:PumpCnt ) + SumChildren( FluidSeg:PumpCnt ) ) = 0 )
+    then 1
+    else 0
+    endif
+ENDRULE
+
+RULE NEW FluidSys:MeterElec_Pump
+  DESCRIPTION
+    "Intermediate property the applicable key name / output variable"
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( LocalCompAssigned( ElecMeterRef ) .AND. HasOSPump = 1 )
+    then Format( "%s Pump, Pump Electricity Energy,", Name)
+    else UNDEFINED
+    endif
+ENDRULE
+
+// --------------------------- Heat Recovery ---------------------------------
+
+RULE NEW HtRcvry:MeterElec_HtRcvry
+  DESCRIPTION
+    "Intermediate property the applicable key name / output variable"
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( LocalCompAssigned( ElecMeterRef ) .AND. IfValidAnd( HtRcvry:SupFlowRtd > 0) )
+    then Format( "%s, Heat Exchanger Electricity Energy,", Name)
+    else UNDEFINED
+    endif
+ENDRULE
+
+// ---------------------------------------------------------------------------
+// ---------------------------- Meter Flags ----------------------------------
+// ------------------------------ Lights ------------------------------------
+RULE NEW Spc:CompLPDRegSim
+  DESCRIPTION
+    "Total regulated connected lighting power density for comploiance
+     interior lighting systems in a Space, including the loads for lamps and 
+     ballasts." 
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( IntLtgRegEndUseCat = "ComplianceLtg" )
+    then IntLPDRegSim
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Spc:OtherLPDRegSim
+  DESCRIPTION
+    "Total regulated connected lighting power density for non-comploiance
+     interior lighting systems in a Space, including the loads for lamps and 
+     ballasts." 
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( IntLtgRegEndUseCat = "NonComplianceLtg" )
+    then IntLPDRegSim
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Spc:CompLPDNonRegSim
+  DESCRIPTION
+    "Total non-regulated connected lighting power density for comploiance
+     interior lighting systems in a Space, including the loads for lamps and 
+     ballasts." 
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( IntLtgNonRegEndUseCat = "ComplianceLtg" )
+    then IntLPDNonRegSim
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Spc:OtherLPDNonRegSim
+  DESCRIPTION
+    "Total non-regulated connected lighting power density for non-comploiance
+     interior lighting systems in a Space, including the loads for lamps and 
+     ballasts." 
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( IntLtgNonRegEndUseCat = "NonComplianceLtg" )
+    then IntLPDNonRegSim
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Meter:HasCompLtgReg
+  DESCRIPTION
+    "Meter is connected to compliance regulated lighting"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( Type = "Electricity" .AND. SumRevRef( Spc:ElecMeterRef, Spc:CompLPDRegSim ) > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+  
+RULE NEW Meter:HasCompLtgNonReg
+  DESCRIPTION
+    "Meter is connected to compliance non-regulated lighting"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( Type = "Electricity" .AND. SumRevRef( Spc:ElecMeterRef, Spc:CompLPDNonRegSim ) > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Meter:HasCompLtg
+  DESCRIPTION
+    "Meter is connected to compliance interior lighting"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( HasCompLtgReg > 0 .OR. HasCompLtgNonReg > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Meter:HasOtherLtgReg
+  DESCRIPTION
+    "Meter is connected to non-compliance regulated lighting"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( Type = "Electricity" .AND. SumRevRef( Spc:ElecMeterRef, Spc:OtherLPDRegSim ) > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+  
+RULE NEW Meter:HasOtherLtgNonReg
+  DESCRIPTION
+    "Meter is connected to non-compliance non-regulated lighting"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( Type = "Electricity" .AND. SumRevRef( Spc:ElecMeterRef, Spc:OtherLPDNonRegSim ) > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Meter:HasOtherLtg
+  DESCRIPTION
+    "Meter is connected to non-compliance lighting"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( HasOtherLtgReg > 0 .OR. HasOtherLtgNonReg > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+// ------------------------------ Process ------------------------------------
+RULE NEW Meter:HasRecpt
+  DESCRIPTION
+    "Meter is connected to receptacles"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( Type = "Electricity" .AND. SumRevRef( Spc:ElecMeterRef, Spc:RecptPwrDens ) > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+  
+RULE NEW Meter:HasProcElec
+  DESCRIPTION
+    "Meter is connected to process electric"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( Type = "Electricity" .AND. SumRevRef( Spc:ElecMeterRef, Spc:ProcElecPwrDens ) > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Meter:HasRfrgElec
+  DESCRIPTION
+    "Meter is connected to refrigeration"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( Type = "Electricity" .AND. SumRevRef( Spc:ElecMeterRef, Spc:CommRfrgEPD ) > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Meter:HasElev
+  DESCRIPTION
+    "Meter is connected to elevator"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( Type = "Electricity" .AND. SumRevRef( Spc:ElecMeterRef, Spc:ElevCnt ) > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Meter:HasEscal
+  DESCRIPTION
+    "Meter is connected to escalator"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( Type = "Electricity" .AND. SumRevRef( Spc:ElecMeterRef, Spc:EscalCnt ) > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Meter:HasIntEqpElec
+  DESCRIPTION
+    "Meter is connected to electric equipments"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( HasRfrgElec > 0 .OR. HasProcElec > 0 .OR. HasElev > 0 .OR. HasEscal > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+
+RULE NEW Meter:HasEqpGas
+  DESCRIPTION
+    "Meter is connected to gas equipments"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( Type = "NaturalGas" .AND. SumRevRef( Spc:GasMeterRef, Spc:GasEqpPwrDens ) > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Meter:HasProcGas
+  DESCRIPTION
+    "Meter is connected to process gas"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( Type = "NaturalGas" .AND. SumRevRef( Spc:GasMeterRef, Spc:ProcGasPwrDens ) > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+//RULE NEW Meter:HasIntEqpGas
+//  DESCRIPTION
+//    "Meter is connected to gas equipments"
+//  DATATYPE
+//    Integer
+//  INPUTCLASS
+//    NotInput
+//  ANNUAL
+//    if( HasEqpGas > 0 .OR. HasProcGas > 0 )
+//    then 1
+//    else 0
+//    endif 
+//ENDRULE
+// -------------------------------- Fan --------------------------------------
+RULE NEW Fan:IsSysFan
+  DESCRIPTION
+    "is not Exhaust/VentilationOnly fan"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( LocalCompAssigned( ElecMeterRef ) .AND. IfValidAnd( FlowCapSim > 0 ) )
+    then if( ParentComponentType() = "ZnSys" )
+         then if( ZnSys:Type = "Exhaust" .OR. ZnSys:Type = "VentilationOnly" )
+              then 0
+              else 1
+              endif
+         else if( AirSys:Type = "Exhaust" )
+              then 0
+              else 1
+              endif
+         endif
+    else 0
+    endif
+ENDRULE
+
+RULE NEW ThrmlZn:HasGenExhFan
+  DESCRIPTION
+    "Thermal zone has general exhaust fan"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( ExhFanEndUseCat = "General" .AND. IfValidAnd( ExhFlowSim > 0 ) )
+    then 1
+    else 0
+    endif
+ENDRULE
+
+RULE NEW ThrmlZn:HasProcMtr
+  DESCRIPTION
+    "Thermal zone has process motors"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( ExhFanEndUseCat = "ProcessMotors" .AND. IfValidAnd( ExhFlowSim > 0 ) )
+    then 1
+    else 0
+    endif
+ENDRULE
+
+RULE NEW Meter:HasSysFan
+  DESCRIPTION
+    "Meter is connected to ZnSys/AirSys fans"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( SumRevRef( Fan:ElecMeterRef, Fan:IsSysFan ) > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Meter:HasGenExhFan
+  DESCRIPTION
+    "Meter is connected to general zone exhaust fans"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( SumRevRef( ThrmlZn:ElecMeterRef, ThrmlZn:HasGenExhFan ) > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Meter:HasFan
+  DESCRIPTION
+    "Meter is connected to fans"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( HasSysFan > 0 .OR. HasGenExhFan > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Meter:HasProcMtr
+  DESCRIPTION
+    "Meter is connected to process motors"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( SumRevRef( ThrmlZn:ElecMeterRef, ThrmlZn:HasProcMtr ) > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+// ------------------------------ Heating ------------------------------------
+RULE NEW CoilHtg:IsElecHtg
+  DESCRIPTION
+    "Heating coil is electric"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( ( FuelSrc = "Electric" .OR. Type = "VRF" .OR. Type = "Furnace") .AND. CapTotGrossRtdSim > 0 ) ; include gas furnace electric energy
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW CoilHtg:IsGasHtg
+  DESCRIPTION
+    "Heating coil is natural gas"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( FuelSrc = "Gas" .AND. CapTotGrossRtdSim > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Blr:IsGasBlr
+  DESCRIPTION
+    "Is gas boiler"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( CapRtdSim > 0 .AND. FuelSrc = "Gas" )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Meter:HasCoilHtgElec
+  DESCRIPTION
+    "Meter is connected to electric heating coils"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( Type = "Electricity" .AND. SumRevRef( CoilHtg:ElecMeterRef, CoilHtg:IsElecHtg ) > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Meter:HasCoilHtgGas
+  DESCRIPTION
+    "Meter is connected to gas heating coils"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( Type = "NaturalGas" .AND. SumRevRef( CoilHtg:GasMeterRef, CoilHtg:IsGasHtg ) > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Meter:HasHtgVRF
+  DESCRIPTION
+    "Meter is connected to VRF heating"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( SumRevRef( VRFSys:ElecMeterRef, VRFSys:HtgCapNetRtd ) > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Meter:HasBlr
+  DESCRIPTION
+    "Meter is connected to boiler"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( Type = "Electricity" .AND. SumRevRef( Blr:ElecMeterRef, Blr:CapRtdSim ) > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Meter:HasBlrGas
+  DESCRIPTION
+    "Meter is connected to gas boiler"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( Type = "NaturalGas" .AND. SumRevRef( Blr:GasMeterRef, Blr:IsGasBlr ) > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Meter:HasHtgElec
+  DESCRIPTION
+    "Meter is connected to electric heating"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( Type = "Electricity" .AND. 
+        ( HasCoilHtgElec = 1 .OR. HasHtgVRF = 1 .OR. HasBlr = 1 ) )
+    then 1
+    else 0
+    endif 
+ENDRULE
+  
+RULE NEW Meter:HasHtgGas
+  DESCRIPTION
+    "Meter is connected to gas heating"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( Type = "NaturalGas" .AND. 
+        ( HasCoilHtgGas .OR. HasBlrGas ) )
+    then 1
+    else 0
+    endif 
+ENDRULE
+// ------------------------------ Cooling ------------------------------------
+RULE NEW CoilClg:IsElecClg
+  DESCRIPTION
+    "Cooling coil is electric"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( ( Type = "DirectExpansion" .OR. Type = "VRF" ) .AND. CapTotGrossRtdSim > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Meter:HasCoilClgElec
+  DESCRIPTION
+    "Meter is connected to electric cooling coils"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( SumRevRef( CoilClg:ElecMeterRef, CoilClg:IsElecClg ) > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Meter:HasEvapClr
+  DESCRIPTION
+    "Meter is connected to evaporative cooler"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( SumRevRef( EvapClr:ElecMeterRef, EvapClr:Eff ) > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Meter:HasClgVRF
+  DESCRIPTION
+    "Meter is connected to VRF heating"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( SumRevRef( VRFSys:ElecMeterRef, VRFSys:ClgCapNetRtd ) > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Meter:HasChlr
+  DESCRIPTION
+    "Meter is connected to chiller"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( SumRevRef( Chlr:ElecMeterRef, Chlr:CapRtdSim ) > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Meter:HasClgElec
+  DESCRIPTION
+    "Meter is connected to central cooling system"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( HasCoilClgElec > 0 .OR. HasEvapClr > 0 .OR. HasClgVRF > 0 .OR. HasChlr > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+// --------------------------- Cooling Tower ---------------------------------
+
+RULE NEW Meter:HasHtRej
+  DESCRIPTION
+    "Meter is connected to cooling tower"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( SumRevRef( HtRej:ElecMeterRef, HtRej:CapRtdSim ) > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+// ---------------------------- Water Heating ----------------------------------
+RULE NEW WtrHtr:IsElecWtrHtr
+  DESCRIPTION
+    "Is electric water heater"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( IfValidAnd( CapRtdSim > 0 ) .AND. FuelSrc = "Electricity" )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW WtrHtr:IsGasWtrHtr
+  DESCRIPTION
+    "Is gas water heater"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( IfValidAnd( CapRtdSim > 0 ) .AND. FuelSrc = "Gas" )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Meter:HasWtrHtrElec
+  DESCRIPTION
+    "Meter is connected to electric water heater"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( Type = "Electricity" .AND. SumRevRef( WtrHtr:ElecMeterRef, WtrHtr:IsElecWtrHtr ) > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Meter:HasWtrHtrGas
+  DESCRIPTION
+    "Meter is connected to gas water heater"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( Type = "NaturalGas" .AND. SumRevRef( WtrHtr:GasMeterRef, WtrHtr:IsGasWtrHtr ) > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+// -------------------------------- Pump --------------------------------------
+RULE NEW Meter:HasUserPump
+  DESCRIPTION
+    "Meter is connected to pump created by user"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( SumRevRef( Pump:ElecMeterRef, Pump:FlowCapSim ) > 0)
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Meter:HasOSPump
+  DESCRIPTION
+    "Meter is connected to pump created by OpenStudio"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( SumRevRef( FluidSys:ElecMeterRef, FluidSys:HasOSPump ) > 0)
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+RULE NEW Meter:HasPump
+  DESCRIPTION
+    "Meter is connected to pump created by OpenStudio"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( HasUserPump > 0 .OR. HasOSPump > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+// --------------------------- Heat Recovery ---------------------------------
+
+RULE NEW Meter:HasHtRcvry
+  DESCRIPTION
+    "Meter is connected to heat recovery unit"
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( SumRevRef( HtRcvry:ElecMeterRef, HtRcvry:SupFlowRtdSim ) > 0 )
+    then 1
+    else 0
+    endif 
+ENDRULE
+
+// -------------------- UI Dialog Tab Control -------------------------
+// ---- show meter tab when EnableResearchMode > 0 .AND. Proj:MeterCust > 0 ----
+RULE Spc:NumUIDialogTabs
+  DEFAULT
+    if( Proj:MeterCust > 0 )
+    then 8
+    else 7
+    endif
+ENDRULE
+
+RULE ThrmlZn:NumUIDialogTabs
+  DEFAULT
+    if( Proj:MeterCust > 0 )
+    then 5
+    else 4
+    endif
+ENDRULE
+
+RULE ZnSys:NumUIDialogTabs
+  DEFAULT
+    if( Proj:MeterCust > 0 )
+    then 5
+    else 4
+    endif
+ENDRULE
+
+RULE AirSys:NumUIDialogTabs
+  DEFAULT
+    if( Proj:MeterCust > 0 )
+    then 6
+    else 5
+    endif
+ENDRULE
+
+RULE VRFSys:NumUIDialogTabs
+  DEFAULT
+    if( Proj:MeterCust > 0 )
+    then 4
+    else 3
+    endif
+ENDRULE
+
+RULE EvapClr:NumUIDialogTabs
+  DEFAULT
+    if( Proj:MeterCust > 0 )
+    then 2
+    else 1
+    endif
+ENDRULE
+
+RULE CoilHtg:NumUIDialogTabs
+  DEFAULT
+    if( Proj:MeterCust > 0 )
+    then 3
+    else 2
+    endif
+ENDRULE
+
+RULE CoilClg:NumUIDialogTabs
+  DEFAULT
+    if( Proj:MeterCust > 0 )
+    then 3
+    else 2
+    endif
+ENDRULE
+
+RULE Fan:NumUIDialogTabs
+  DEFAULT
+    if( Proj:MeterCust > 0 )
+    then 2
+    else 1
+    endif
+ENDRULE
+
+RULE TrmlUnit:NumUIDialogTabs
+  DEFAULT
+    if( Proj:MeterCust > 0 )
+    then 2
+    else 1
+    endif
+ENDRULE
+
+RULE HtRcvry:NumUIDialogTabs
+  DEFAULT
+    if( Proj:MeterCust > 0 )
+    then 2
+    else 1
+    endif
+ENDRULE
+
+RULE FluidSys:NumUIDialogTabs
+  DEFAULT
+    if( Proj:MeterCust > 0 )
+    then 4
+    else 3
+    endif
+ENDRULE
+
+RULE Chlr:NumUIDialogTabs
+  DEFAULT
+    if( Proj:MeterCust > 0 )
+    then 2
+    else 1
+    endif
+ENDRULE
+
+RULE Blr:NumUIDialogTabs
+  DEFAULT
+    if( Proj:MeterCust > 0 )
+    then 2
+    else 1
+    endif
+ENDRULE
+
+RULE HtRej:NumUIDialogTabs
+  DEFAULT
+    if( Proj:MeterCust > 0 )
+    then 2
+    else 1
+    endif
+ENDRULE
+
+RULE WtrHtr:NumUIDialogTabs
+  DEFAULT
+    if( Proj:MeterCust > 0 )
+    then 2
+    else 1
+    endif
+ENDRULE
+
+RULE Pump:NumUIDialogTabs
+  DEFAULT
+    if( Proj:MeterCust > 0 )
+    then 2
+    else 1
+    endif
+ENDRULE
+

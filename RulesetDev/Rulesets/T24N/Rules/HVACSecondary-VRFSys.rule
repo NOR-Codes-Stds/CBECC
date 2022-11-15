@@ -1,0 +1,2259 @@
+// VariableRefrigerantFlowSystem - General
+//
+// -------------------------------------------------------------------------
+//  Copyright (c) 2012, California Energy Commission
+//  All rights reserved.
+//  Redistribution and use in source and binary forms, with or without
+//  modification, are permitted provided that the following conditions are
+//  met:
+// 
+//    * Redistributions of source code must retain the above copyright
+//  notice, this list of conditions and the following disclaimer.
+//    * Redistributions in binary form must reproduce the above copyright
+//  notice, this list of conditions and the following disclaimer in
+//  the documentation and/or other materials provided with the
+//  distribution.
+//    * Neither the name of the California Energy Commission nor the names of its
+//  contributors may be used to endorse or promote products
+//  derived from this software without specific prior written
+//  permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+//  IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+//  TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION
+//  BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+//  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+//  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+//  BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+//  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+//  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// -------------------------------------------------------------------------
+
+
+// Indicate whether CHECKCODE rules should be bypassed
+RULE NEW VRFSys:BypassCheckCode
+  DATATYPE
+    Integer
+  DESCRIPTION
+    "A flag that indicates CHECKCODE rules should be bypassed for the VRF system."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( Proj:IsNoMech > 0 .OR. ( Proj:IsNoAddMech > 0 .AND. 
+        ( IfValidAnd( IsNew > 0 ) .OR. IfValidAnd( IsAltered > 0 ) ) ) )
+    then 1 // CompType does not include Mechanical, system will be purged
+    else
+    if( IfValidAnd( IsExisting > 0 ) )
+    then 1 // Is an existing system
+    else
+    if( SumRevRef( ZnSys:VRFSysRef, ZnSys:BypassCheckCode ) > 0 )
+    then 1 // VRF system connected to a zone that is eligible for bypass
+    else 0
+    endif endif endif
+ENDRULE
+
+RULE ZnSys:VRFSysRef
+  DESCRIPTION
+    "The name of the VRFSystem outdoor unit that the VRF ZnSys is connected to."
+  INPUTCLASS : T24N_2016
+    Prescribed
+  INPUTCLASS
+    CondRequired
+  CHECKSIM
+    if( IfValidAnd( ZnSys:Type = "VRF" ) )
+    then if( LocalCompAssigned( VRFSysRef ) = 0 )
+      then PostError( "Zone System '%s' has no VRF System (outdoor unit)
+                       defined.  An VRF System assignment is required.",
+                       Name )
+      else UNCHANGED
+      endif
+    else UNCHANGED
+    endif
+ENDRULE
+
+// *************************** VRFSys Object ***********************************
+// ---------- Description ------------------------------------------------------
+RULE VRFSys:Desc
+  DESCRIPTION
+    "An optional string description of the VRFSystem."
+  INPUTCLASS : T24N_2016
+    Prescribed
+  INPUTCLASS
+    Optional
+ENDRULE
+
+
+// ---------- System Type ------------------------------------------------------
+RULE VRFSys:HtRcvry
+  DESCRIPTION
+    "Identifies whether the VRFSystem has heat recovery"
+  INPUTCLASS : T24N_2016
+    Prescribed
+  INPUTCLASS
+    Default
+  OPTION
+    Yes
+    No
+  DEFAULT
+    "No"
+  CHECKSIM
+    if( HtRcvry = "Yes" .AND. IsMFamSys = 1 )
+    then PostWarning( "VRF system '%s' serves multifamily space(s) and has heat recovery, but
+                      this is currently not supported. Heat recovery won't be simulated.", Name)
+    else UNCHANGED
+    endif
+ENDRULE
+
+RULE VRFSys:FuelType
+  DESCRIPTION
+    "Identifies the fuel type of the VRF System."
+  INPUTCLASS 
+    NotInput
+  OPTION
+    Electricity
+  DEFAULT
+    "Electricity"
+ENDRULE
+
+RULE VRFSys:CndsrType
+  DESCRIPTION
+    "Identifies the condenser type of the VRF System."
+  INPUTCLASS 
+    NotInput
+  OPTION
+    AirCooled
+    ;EvaporativelyCooled
+    ;WaterCooled
+  DEFAULT
+    "AirCooled"
+ENDRULE
+
+RULE VRFSys:Cnt
+  DESCRIPTION
+    "The number of identical VRF outdoor units represented by the VRFSystem object."
+  INPUTCLASS : T24N_2016
+    Prescribed
+  INPUTCLASS
+    Default
+  DEFAULT
+    1
+ENDRULE
+
+// ---------- Status ----------------------------------------------------------*
+RULE VRFSys:Status
+  DESCRIPTION
+    "The status of the system or component, used for additions and alterations."
+  HELP
+    "The following criteria should be used to determine the status of the system:
+
+
+     New:      The system and all of it's components are completely 'New'.
+
+
+     Existing: All of the system components (Fans, Coils, OutsideAirControl, etc),
+               not including TerminalUnits with cooling coils, are 'Existing'. 
+               If the system has a mix of 'Existing' and 'New' TerminalUnits, 
+               and the system's cooling capacity and/or efficiency has not changed,
+               the system should be classified as 'Existing'.
+
+
+     Altered:  The system is 'Existing', but some components (other than only
+               TerminalUnits) have been modified or replaced such that the cooling
+               capacity and/or cooling efficiency of the system, or in the case
+               of chilled water coils, the cooling capacity and/or efficiency 
+               of the plant, has changed."
+  INPUTCLASS : T24N_2016
+    Prescribed
+  INPUTCLASS
+    Default
+  OPTION
+    New
+    Existing 
+    Altered
+  DEFAULT
+// Status defined from top-down
+    if( Proj:IsAlt = 1 )
+    then "Existing"
+    else "New"
+    endif
+  CHECKCODE
+    if( ( Proj:IsNewMech .AND. Status != "New" ) .OR.
+        ( Proj:IsAlt = 0 .AND. Status = "Altered" ) )
+    then
+      PostWarning("VRF System '%s' has a Status of '%s', but Compliance Type is '%s'.
+                   The status of the system will be changed to 'New' for compliance
+                   analysis.", Name, Status, Proj:CompType)
+    else UNCHANGED
+    endif
+  SIZING
+    u:Status
+; Rules copied from AirSys
+;    if( IfValidAnd( BaseSysNum > 0 ) .OR. Proj:IsNewMech )
+;    then "New"
+;    else u:Status
+;    endif
+  ANNUAL
+    z:Status
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW VRFSys:IsExisting
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( Status = "Existing" .AND. Proj:IsAddOrAlt ) then 1 else 0 endif
+  SIZING
+    if( Status = "Existing" .AND. Proj:IsAddOrAlt ) then 1 else 0 endif
+  ANNUAL
+    z:IsExisting
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW VRFSys:IsAltered
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( Status = "Altered" .AND. Proj:IsAlt ) then 1 else 0 endif
+  SIZING
+    if( Status = "Altered" .AND. Proj:IsAlt ) then 1 else 0 endif
+  ANNUAL
+    z:IsAltered
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW VRFSys:IsNew
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( Status = "New" .OR. Proj:IsNewMech )
+    then 1
+    else if( ( IsAltered + IsExisting ) = 0 )
+    then 1
+    else 0
+    endif endif
+  SIZING : T24N
+    if( Status = "New" .OR. Proj:IsNewMech )
+    then 1
+    else if( ( IsAltered + IsExisting ) = 0 )
+    then 1
+    else 0
+    endif endif
+  SIZING : S901G ECBC
+    if( Status = "New" .AND. IfValidAnd( NotEnclosedSys = 1 ) = 0 ) then 1 else 0 endif
+  ANNUAL
+    z:IsNew
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE NEW VRFSys:IsCondgSys
+  DATATYPE
+    Integer
+  LONGFORM
+    IsConditioningSystem
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( SumRevRef( ZnSys:VRFSysRef, ZnSys:IsCondgSys ) > 0 )
+    then 1
+    else 0
+    endif
+ENDRULE
+
+RULE NEW VRFSys:NotEnclosedSys
+  RULESETS
+    S901G ECBC
+  DATATYPE
+    Integer
+  LONGFORM
+    NotEnclosedSystem
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( SumRevRef( ZnSys:VRFSysRef, ZnSys:NotEnclosedSys ) > 0 )
+    then 1
+    else 0
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+RULE VRFSys:IsHlthCareSys
+  DESCRIPTION
+    "A flag that indicates if the VRF system serves ZnSys that are all classified as 
+     a 'health care' system for compliance."
+  HELP
+    ""
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N_2016 S901G
+    0 
+  DEFAULT : T24N
+    if( SumRevRef( ZnSys:VRFSysRef, ZnSys:IsHlthCareSys ) = CountRefs( ZnSys:VRFSysRef ) )
+    then 1
+    else 0
+    endif
+  CHECKCODE : T24N_2016 S901G
+    UNCHANGED
+  CHECKCODE : T24N
+    if( SumRevRef( ZnSys:VRFSysRef, ZnSys:IsHlthCareSys ) > 0 .AND.
+        IsHlthCareSys = 0 )
+    then
+      PostError("VRFSystem '%s' serves a combination of healthcare and non-healthcare 
+                 zones. This is not allowed for compliance.", Name)
+    else UNCHANGED
+    endif 
+ENDRULE
+
+RULE NEW VRFSys:IsMFamSys
+  DESCRIPTION
+    "A flag that indicates if the VRF system serves ResZn or ResOtherZn."
+  INPUTCLASS
+    NotInput
+  DATATYPE
+    Integer
+  DEFAULT
+    if( SumRevRef( ResHVACSys:VRFSysRef, ResHVACSys:SumCentralClgCap ) +
+        SumRevRef( DwellUnitType:VRFSysRef, DwellUnitType:SumCentralClgCap ) +
+        SumRevRef( ResHVACSys:VRFSysRef, ResHVACSys:SumCentralClgCap ) +
+        SumRevRef( DwellUnitType:VRFSysRef, DwellUnitType:SumCentralClgCap ) > 0 )
+    then 1
+    else 0
+    endif
+  CHECKSIM
+    if( ( SumRevRef( ZnSys:VRFSysRef, ZnSys:VRFNetClgCap ) + 
+          SumRevRef( ZnSys:VRFSysRef, ZnSys:VRFNetHtgCap ) ) > 0 .AND.
+        ( SumRevRef( ResHVACSys:VRFSysRef, ResHVACSys:SumCentralClgCap ) +
+          SumRevRef( DwellUnitType:VRFSysRef, DwellUnitType:SumCentralClgCap ) +
+          SumRevRef( ResHVACSys:VRFSysRef, ResHVACSys:SumCentralClgCap ) +
+          SumRevRef( DwellUnitType:VRFSysRef, DwellUnitType:SumCentralClgCap ) ) > 0 )
+    then PostError("VRF system '%s' serves both multifamily space(s) and non-residential space(s).
+                    This is currently not supported.", Name)
+    else UNCHANGED
+    endif
+ENDRULE
+
+
+// ---------- Capacities ------------------------------------------------------*
+
+RULE NEW VRFSys:CombRat
+  DATATYPE
+    Float
+  LONGFORM
+    CombinationRatio
+  DESCRIPTION
+    "The ratio of indoor unit total rated capacity to outdoor unit rated capapcity."
+  HELP
+    "This property provides default sizing when using Project level Automatic Hard 
+     Sizing (Proj:AutoHardSize = 1).
+     Outdoor unit is typically sized to peak coincident sum of indoor unit capaicty, 
+     however non-concident sum of indoor unit capaicty should be no greater than 150% 
+     of outdoor unit capapcity."
+  INPUTCLASS : T24N_2016
+    Prescribed
+  INPUTCLASS
+    Default
+  DEFAULT
+    1.33
+ENDRULE
+
+; added to tweak how VRFSys:NonCoincidentClgCapSum & NonCoincidentHtgCapSum are summed to prevent double counting after ResZn HVAC creation - SAC 10/16/22
+RULE NEW Proj:ResZnHVACSysCreated
+  DATATYPE
+    Integer
+  LONGFORM
+    ResidentialZoneHVACSystemsCreated
+  INPUTCLASS
+    NotInput
+  SIZING
+    1
+  ANNUAL
+    1
+ENDRULE
+
+RULE NEW VRFSys:NonCoincidentClgCapSum
+  DATATYPE
+    Float
+  LONGFORM
+    NonCoincidentCoolingCapacitySum
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (IfValidAnd( Proj:ResZnHVACSysCreated > 0 ))
+    then  SumRevRef( ZnSys:VRFSysRef, ZnSys:VRFNetClgCap ) + 
+          SumRevRef( ResHVACSys:VRFSysRef, ResHVACSys:SumCentralClgCap )
+    else  SumRevRef( ZnSys:VRFSysRef, ZnSys:VRFNetClgCap ) + 
+          SumRevRef( ResHVACSys:VRFSysRef, ResHVACSys:SumCentralClgCap ) +
+          SumRevRef( DwellUnitType:VRFSysRef, DwellUnitType:SumCentralClgCap )
+    endif
+  SIZING
+    SumRevRef( ZnSys:VRFSysRef, ZnSys:VRFNetClgCap ) + 
+    SumRevRef( ResHVACSys:VRFSysRef, ResHVACSys:SumCentralClgCap )
+ENDRULE
+
+RULE NEW VRFSys:NonCoincidentHtgCapSum
+  DATATYPE
+    Float
+  LONGFORM
+    NonCoincidentHeatingCapacitySum
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (IfValidAnd( Proj:ResZnHVACSysCreated > 0 ))
+    then  SumRevRef( ZnSys:VRFSysRef, ZnSys:VRFNetHtgCap ) + 
+          SumRevRef( ResHVACSys:VRFSysRef, ResHVACSys:SumCentralHtgCap )
+    else  SumRevRef( ZnSys:VRFSysRef, ZnSys:VRFNetHtgCap ) + 
+          SumRevRef( ResHVACSys:VRFSysRef, ResHVACSys:SumCentralHtgCap ) +
+          SumRevRef( DwellUnitType:VRFSysRef, DwellUnitType:SumCentralHtgCap )
+    endif
+  SIZING
+    SumRevRef( ZnSys:VRFSysRef, ZnSys:VRFNetHtgCap ) + 
+    SumRevRef( ResHVACSys:VRFSysRef, ResHVACSys:SumCentralHtgCap )
+ENDRULE
+
+// outdoor unit is typically sized to peak coincident sum of indoor unit capaicty, however
+// non-concident sum of indoor unit capaicty should be no greater than 150% of outdoor unit capapcity
+// Rules also ensure that ClgCapNetRtd <= HtgCapNetRtd <= 1.2*ClgCapNetRtd
+RULE VRFSys:ClgCapNetRtd
+  DESCRIPTION
+    "The net total cooling capacity of the VRF system at AHRI conditions."
+  INPUTCLASS : T24N_2016
+    Prescribed
+  INPUTCLASS
+    Required
+  DEFAULT
+    if( Proj:AutoHardSize = 1 )
+    then // For PROPOSED AutoHardSizing only
+      if( Proj:IsStdModel > 0 .AND. Proj:ModelName != "" )
+      then UNCHANGED // TableSizing is used, see Project-TableSizing rules - not yet implemented for VRF
+      else if( IfValidAnd( NonCoincidentClgCapSum > 0 ) .OR. 
+               IfValidAnd( NonCoincidentHtgCapSum > 0 ) )
+      then // Calculate capacity based on AutoHardSized Indoor units
+        if( (1.20 * NonCoincidentClgCapSum) >= NonCoincidentHtgCapSum )
+        then NonCoincidentClgCapSum / CombRat / Cnt
+        else NonCoincidentHtgCapSum / 1.1 / CombRat / Cnt
+        endif
+      else UNDEFINED
+      endif endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE VRFSys:HtgCapNetRtd
+  DESCRIPTION
+    "The net total heating capacity of the VRF system at AHRI conditions."
+  INPUTCLASS : T24N_2016
+    Prescribed
+  INPUTCLASS
+    Required
+  DEFAULT
+    if( Proj:AutoHardSize = 1 )
+    then // For PROPOSED AutoHardSizing only
+      if( Proj:IsStdModel > 0 .AND. Proj:ModelName != "" )
+      then UNCHANGED // TableSizing is used, see Project-TableSizing rules - not yet implemented for VRF
+      else if( IfValidAnd( NonCoincidentClgCapSum > 0 ) .OR. 
+               IfValidAnd( NonCoincidentHtgCapSum > 0 ) )
+      then // Calculate capacity based on AutoHardSized Indoor units
+        if( NonCoincidentHtgCapSum >= NonCoincidentClgCapSum )
+        then NonCoincidentHtgCapSum / CombRat / Cnt
+        else 1.1 * NonCoincidentClgCapSum / CombRat / Cnt
+        endif
+      else UNDEFINED
+      endif endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW VRFSys:ClgCombRat
+  DATATYPE
+    Float
+  LONGFORM
+    CoolingCombinationRatio
+  DESCRIPTION
+    "The ratio of indoor unit total rated cooling capacity to outdoor unit rated cooling capapcity."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( ClgCapNetRtd > 0 ) .AND.
+        IfValidAnd( NonCoincidentClgCapSum > 0 ) )
+    then NonCoincidentClgCapSum / ( ClgCapNetRtd * Cnt )
+    else 0
+    endif
+  CHECKSIM
+    if( IfValidAnd( ClgCombRat > 1.5 ) )
+    then if( IsMFamSys > 0 ) // CSE doesn't model multiple IU to one OU. Using this check to ensure CombRat is in a reasonable range.
+         then PostError( "For VRF System '%s', the total attached indoor unit cooling 
+                          capacity is greater than 150% of the outdoor unit cooling
+                          capacity.  Increase the outdoor unit cooling capacity to 
+                          make sure it covers the peak load.", Name)
+         else PostWarning( "For VRF System '%s', the total attached indoor unit cooling 
+                           capacity is greater than 150% of the outdoor unit cooling
+                           capacity.  Increasing the outdoor unit cooling capacity is 
+                           recommended.", Name)
+         endif
+    else UNCHANGED
+    endif
+ENDRULE
+
+RULE NEW VRFSys:HtgCombRat
+  DATATYPE
+    Float
+  LONGFORM
+    HeatingCombinationRatio
+  DESCRIPTION
+    "The ratio of indoor unit total rated heating capacity to outdoor unit rated heating capapcity."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( HtgCapNetRtd > 0 ) .AND.
+        IfValidAnd( NonCoincidentHtgCapSum > 0 ) )
+    then NonCoincidentHtgCapSum / ( HtgCapNetRtd * Cnt )
+    else 0
+    endif
+  CHECKSIM
+    if( IfValidAnd( HtgCombRat > 1.5 ) )
+    then if( IsMFamSys > 0 ) // CSE doesn't model multiple IU to one OU. Using this check to ensure CombRat is in a reasonable range.
+         then PostError( "For VRF System '%s', the total attached indoor unit heating 
+                          capacity is greater than 150% of the outdoor unit heating
+                          capacity.  Increase the outdoor unit heating capacity to 
+                          make sure it covers the peak load.", Name)
+         else PostWarning( "For VRF System '%s', the total attached indoor unit heating 
+                           capacity is greater than 150% of the outdoor unit heating
+                           capacity.  Increasing the outdoor unit heating capacity is 
+                           recommended.", Name)
+         endif
+    else UNCHANGED
+    endif
+ENDRULE
+
+RULE NEW VRFSys:FanHtRtd
+  DATATYPE
+    Float
+  LONGFORM
+    FanHeatRated
+  DESCRIPTION
+    "The heat generated by the terminal unit fans and fan motors
+     (if fan motor is in air stream) at AHRI rated conditions."
+  HELP
+    "Fan heat at rated conditions is the difference between the gross and
+     net capacities at AHRI rated conditions. If gross cpacity is not known, the
+     fan heat can be estimated using the assumptions of 400cfm/ton and 0.365 W/cfm."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( LocalStatus( ClgCapNetRtd ) > 0 )
+    then ( ClgCapNetRtd / ( 1 - Proj:FanHtCoeff ) ) * Proj:FanHtCoeff
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE VRFSys:ClgCapGrossRtd
+  DESCRIPTION
+    "The net total cooling capacity of the VRF system at AHRI conditions."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( LocalStatus( ClgCapNetRtd ) > 0 .AND.
+        LocalStatus( FanHtRtd ) > 0 )
+    then ClgCapNetRtd + FanHtRtd
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE VRFSys:HtgCapGrossRtd
+  DESCRIPTION
+    "The net total heating capacity of the VRF system at AHRI conditions."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( LocalStatus( HtgCapNetRtd ) > 0 .AND.
+        LocalStatus( FanHtRtd ) > 0 )
+    then HtgCapNetRtd - FanHtRtd
+    else UNDEFINED
+    endif
+ENDRULE
+
+// For simulation
+RULE VRFSys:ClgCapGrossRtdSim
+  DESCRIPTION
+    "The net total cooling capacity of the VRF system at AHRI conditions,
+     for simulation."
+  INPUTCLASS
+    NotInput
+  SIZING
+    ValidOr( ClgCapGrossRtd, 0 ) * Cnt 
+ENDRULE
+
+RULE VRFSys:HtgCapGrossRtdSim
+  DESCRIPTION
+    "The net total heating capacity of the VRF system at AHRI conditions,
+     for simulation."
+  INPUTCLASS
+    NotInput
+  SIZING
+    ValidOr( HtgCapGrossRtd, 0 ) * Cnt 
+ENDRULE
+
+// Will need to populate if using E+ Autosizing Algorithms
+;RULE VRFSys:HtgToClgSizingRat
+;  DESCRIPTION
+;    "Used to determine Heating Capaicty when using EnergyPlus Autosizing algorithms. "
+;  HELP
+;    ""
+;  INPUTCLASS
+;    Default
+;  DEFAULT
+;    1
+;;  CHECKCODE - to add later
+;ENDRULE
+
+// ---------- Efficiencies ----------------------------------------------------*
+// Determine code minimum SEER/EER/IEER for VRF
+RULE NEW VRFSys:CodeMinSEER
+  DATATYPE
+    Float
+  LONGFORM
+    CodeMinimumSEER
+  INPUTCLASS
+    NotInput
+  UNITS 
+    Btu/h-W
+  REPORTPRECISION
+    1
+  DEFAULT
+    if( IfValidAnd( ClgCapNetRtd > 0 ) )
+    then
+      if( IfValidAnd( ClgCapNetRtd < 65000 ) )
+      then 13 // SEER rated
+      else 0
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW VRFSys:CodeMinEER
+  DATATYPE
+    Float
+  LONGFORM
+    CodeMinimumEER
+  INPUTCLASS
+    NotInput
+  UNITS 
+    Btu/h-W
+  REPORTPRECISION
+    1
+  DEFAULT
+    if( IfValidAnd( ClgCapNetRtd > 0 ) )
+    then
+      if( IfValidAnd( ClgCapNetRtd < 65000 ) )
+      then // SEER rated
+        0
+      else
+      if( IfValidAnd( HtgCapNetRtd > 0 ) )
+      then // Is VRF HP
+        UnitaryACHPMinEffReq:EER(
+          "StandardsVersion", Proj:StdsVersion,
+          "Category", "VRF",
+          "SubCategory", "HP",
+          "CondenserType", "Air",
+          "SizeCategory", ClgCapNetRtd)
+      else // Is VRF AC
+        UnitaryACHPMinEffReq:EER(
+          "StandardsVersion", Proj:StdsVersion,
+          "Category", "VRF",
+          "SubCategory", "AC",
+          "CondenserType", "Air",
+          "SizeCategory", ClgCapNetRtd)
+      endif endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW VRFSys:CodeMinIEER
+  DATATYPE
+    Float
+  LONGFORM
+    CodeMinimumIEER
+  INPUTCLASS
+    NotInput
+  UNITS 
+    Btu/h-W
+  REPORTPRECISION
+    1
+  DEFAULT
+    if( IfValidAnd( ClgCapNetRtd > 0 ) )
+    then
+      if( IfValidAnd( ClgCapNetRtd < 65000 ) )
+      then // SEER rated
+        0
+      else
+      if( IfValidAnd( HtgCapNetRtd > 0 ) )
+      then // Is VRF HP
+        UnitaryACHPMinEffReq:IEER(
+          "StandardsVersion", Proj:StdsVersion,
+          "Category", "VRF",
+          "SubCategory", "HP",
+          "CondenserType", "Air",
+          "SizeCategory", ClgCapNetRtd)
+      else // Is VRF AC
+        UnitaryACHPMinEffReq:IEER(
+          "StandardsVersion", Proj:StdsVersion,
+          "Category", "VRF",
+          "SubCategory", "AC",
+          "CondenserType", "Air",
+          "SizeCategory", ClgCapNetRtd)
+      endif endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE VRFSys:SEER
+  DESCRIPTION
+    "The cooling SEER of the VRF system at AHRI conditions."
+  INPUTCLASS : T24N_2016
+    Prescribed
+  INPUTCLASS
+    CondRequired
+  COMMONMINIMUM
+    9
+  COMMONMAXIMUM
+    16  
+  UNITS 
+    Btu/h-W
+  REPORTPRECISION
+    1
+  DEFAULT
+    if( IfValidAnd( ClgCapNetRtd > 0 ) .AND.
+        Proj:AutoEffInput = 1 )
+    then 
+      if( IfValidAnd( CodeMinSEER > 0 ) )
+      then CodeMinSEER
+      else UNDEFINED
+      endif
+    else UNDEFINED
+    endif
+  CHECKCODE : T24N
+    if( ( BypassMinEffCheck > 0 .OR. BypassCheckCode = 1 )  
+        .OR. 
+        ( BypassCheckCode = 2 .AND. BypassMinEffCheck > 0 ) )
+    then // Is a non-healthcare system w/ BypassMinEff or CheckCode applicable
+         // Or a new healthcare system w/ BypassMinEff checked
+      UNCHANGED
+    else
+    if( IfValidAnd( CodeMinSEER > 0 ) .AND. 
+        IfValidAnd( SEER > 0 ) = 0 )
+    then
+      PostError("VRF system '%s' must be specified with AHRI rated SEER", Name)
+    else 
+    if( IfValidAnd( CodeMinSEER > 0 ) .AND.
+        IfValidAnd( SEER < CodeMinSEER ) )
+    then 
+      PostError("SEER of VRF system '%s' is less than the code minimum required efficiency 
+                 of SEER-%.1f. Select the bypass of efficiency check
+                 if this is not applicable.", Name, CodeMinSEER)
+    else UNCHANGED 
+    endif endif endif
+ENDRULE
+
+RULE VRFSys:EER
+  DESCRIPTION
+    "The cooling EER @ 95F of the VRF system at AHRI conditions. This value 
+     includes the condenser fan energy."
+  INPUTCLASS : T24N_2016
+    Prescribed
+  INPUTCLASS
+    CondRequired
+  COMMONMINIMUM
+    9
+  COMMONMAXIMUM
+    16  
+  UNITS 
+    Btu/h-W
+  REPORTPRECISION
+    1
+  DEFAULT
+    if( IfValidAnd( ClgCapNetRtd > 0 ) .AND.
+        Proj:AutoEffInput = 1 )
+    then 
+      if( IfValidAnd( CodeMinEER > 0 ) )
+      then // Default to CodeMinEER
+        CodeMinEER
+      else 
+        10 // General punitive default
+      endif
+    else UNDEFINED
+    endif
+  CHECKCODE : T24N
+    if( ( BypassMinEffCheck > 0 .OR. BypassCheckCode = 1 )  
+        .OR. 
+        ( BypassCheckCode = 2 .AND. BypassMinEffCheck > 0 ) )
+    then // Is a non-healthcare system w/ BypassMinEff or CheckCode applicable
+         // Or a new healthcare system w/ BypassMinEff checked
+      UNCHANGED
+    else
+    if( ( IfValidAnd( CodeMinEER > 0 ) .OR. IfValidAnd( CodeMinSEER > 0 ) ) .AND. 
+        IfValidAnd( EER > 0 ) = 0 )
+    then
+      PostError("VRF system '%s' must be specified with AHRI rated EER, 
+                 even if cooling capacity is <65kBtu/hr.", Name)
+    else 
+    if( IfValidAnd( CodeMinEER > 0 ) .AND.
+        IfValidAnd( EER < CodeMinEER ) )
+    then
+      PostError("EER of VRF system '%s' is less than the code minimum required efficiency 
+                 of EER-%.1f. Select the bypass of efficiency check
+                 if this is not applicable.", Name, CodeMinSEER)
+    else UNCHANGED 
+    endif endif endif
+ENDRULE
+
+RULE NEW VRFSys:ClgRndFact
+  DATATYPE
+    Float
+  LONGFORM
+    EERRoundingFactor
+  DESCRIPTION
+    "The smallest factor of the rounded VRF System efficiency per the applicable
+     AHRI testing standard."
+  INPUTCLASS
+    NotInput
+  SIZING
+    if( IfValidAnd( ClgCapNetRtd < 65000 ) )
+    then 0.05 // SEER
+    else 0.01 // EER
+    endif
+ENDRULE
+
+RULE NEW VRFSys:SEERRnd
+  DATATYPE
+    Float
+  LONGFORM
+    EERRound
+  DESCRIPTION
+    "Rounded VRF System SEER, based on AHRI test procedure."
+  INPUTCLASS
+    NotInput
+  UNITS 
+    Btu/h-W
+  SIZING
+    if( IfValidAnd( ClgRndFact > 0 ) .AND.
+        IfValidAnd( SEER > 0 ) )
+    then
+      int( ( SEER / ClgRndFact ) + 0.5 ) * ClgRndFact
+    else
+      UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW VRFSys:EERRnd
+  DATATYPE
+    Float
+  LONGFORM
+    EERRound
+  DESCRIPTION
+    "Rounded VRF System EER, based on AHRI test procedure."
+  INPUTCLASS
+    NotInput
+  UNITS 
+    Btu/h-W
+  SIZING
+    if( IfValidAnd( ClgRndFact > 0 ) .AND.
+        IfValidAnd( EER > 0 ) )
+    then
+      int( ( EER / ClgRndFact ) + 0.5 ) * ClgRndFact
+    else
+      UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW VRFSys:EERAdj
+  DATATYPE
+    Float
+  LONGFORM
+    EERAdjusted
+  DESCRIPTION
+    "The cooling efficiency of a VRF cooling system at AHRI 
+     rated conditions, adjusted to remove fan energy.
+
+
+      EERAdj = ( Net capacity (Btu/hr) + Fan heat (Btu/hr) ) /
+                 ( Rated power (W) - fan power (W) )"
+  INPUTCLASS
+    NotInput
+  UNITS 
+    Btu/h-W
+  SIZING
+    // Calculated in DEFAULT rules for CHECKCODE rule 
+    if( IfValidAnd( ClgCapGrossRtd > 0 ) .AND.
+        IfValidAnd( EERRnd > 0 ) .AND.
+        IfValidAnd( ClgCapNetRtd > 0 ) )
+    then
+      ClgCapGrossRtd /  
+      ( ( ClgCapNetRtd / EERRnd ) - ( FanHtRtd / 3.412 ) )
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE VRFSys:ClgEIR
+  DESCRIPTION
+    "The gross cooling EIR of the VRF system at AHRI conditions (kW/kW).  This value 
+     includes the condenser fan energy"
+  INPUTCLASS
+    NotInput
+  UNITS 
+    W/W
+  SIZING
+    if( IfValidAnd( EERAdj > 0 ) )
+    then 1 / ( EERAdj / 3.413 )
+    else UNDEFINED
+    endif
+ENDRULE
+
+// Determine code minimum HSPF/COP for VRF
+RULE NEW VRFSys:CodeMinHSPF
+  DATATYPE
+    Float
+  LONGFORM
+    CodeMinimumHSPF
+  INPUTCLASS
+    NotInput
+  UNITS 
+    Btu/h-W
+  REPORTPRECISION
+    1
+  DEFAULT
+    if( IfValidAnd( ClgCapNetRtd > 0 ) )
+    then
+      if( IfValidAnd( ClgCapNetRtd < 65000 ) )
+      then 7.7 // HSPF rated
+      else 0
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW VRFSys:CodeMinCOP
+  DATATYPE
+    Float
+  LONGFORM
+    CodeMinimumCOP
+  INPUTCLASS
+    NotInput
+  UNITS 
+    W/W
+  REPORTPRECISION
+    1
+  DEFAULT
+    if( IfValidAnd( ClgCapNetRtd > 0 ) .AND. 
+        IfValidAnd( HtgCapNetRtd > 0 ) )
+    then // Is HP VRF
+      if( IfValidAnd( ClgCapNetRtd < 65000 ) )
+      then // HSPF rated
+        0
+      else 
+        UnitaryACHPMinEffReq:COP47(
+          "StandardsVersion", Proj:StdsVersion,
+          "Category", "VRF",
+          "SubCategory", "HP",
+          "CondenserType", "Air",
+          "SizeCategory", ClgCapNetRtd)
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE VRFSys:HSPF
+  DESCRIPTION
+    "The heating HSPF of the VRF system at AHRI conditions."
+  INPUTCLASS : T24N_2016
+    Prescribed
+  INPUTCLASS
+    CondRequired
+  COMMONMINIMUM
+    7
+  COMMONMAXIMUM
+    15  
+  UNITS 
+    Btu/h-W
+  REPORTPRECISION
+    1
+  DEFAULT
+    if( IfValidAnd( ClgCapNetRtd > 0 ) .AND. 
+        IfValidAnd( HtgCapNetRtd > 0 ) .AND.
+        Proj:AutoEffInput = 1 )
+    then 
+      if( IfValidAnd( CodeMinHSPF > 0 ) )
+      then CodeMinHSPF
+      else UNDEFINED
+      endif
+    else UNDEFINED
+    endif
+  CHECKCODE : T24N
+    if( ( BypassMinEffCheck > 0 .OR. BypassCheckCode = 1 ) 
+        .OR. 
+        ( BypassCheckCode = 2 .AND. BypassMinEffCheck > 0 ) )
+    then 
+      UNCHANGED
+    else
+    if( IfValidAnd( CodeMinHSPF > 0 ) .AND. 
+        IfValidAnd( HSPF > 0 ) = 0 )
+    then
+      PostError("VRF system '%s' must be specified with AHRI rated HSPF.", Name )
+    else 
+    if( IfValidAnd( CodeMinHSPF > 0 ) .AND.
+        IfValidAnd( HSPF < CodeMinHSPF ) )
+    then 
+      PostError("HSPF of  VRF system '%s' is less than the code minimum required 
+                 efficiency of HSPF-%.1f. Select the bypass of efficiency
+                 check at the coil if this is not applicable.",
+                 Name, CodeMinHSPF )
+    else UNCHANGED 
+    endif endif endif
+ENDRULE
+
+RULE VRFSys:COP
+  DESCRIPTION
+    "The heating COP @ 47F of the VRF system at AHRI conditions. This value 
+     includes the condenser fan energy"
+  INPUTCLASS : T24N_2016
+    Prescribed
+  INPUTCLASS
+    CondRequired
+  COMMONMINIMUM
+    2
+  COMMONMAXIMUM
+    5  
+  UNITS 
+    W/W
+  REPORTPRECISION
+    1
+  DEFAULT
+    if( IfValidAnd( ClgCapNetRtd > 0 ) .AND. 
+        IfValidAnd( HtgCapNetRtd > 0 ) .AND.
+        Proj:AutoEffInput = 1 )
+    then 
+      if( IfValidAnd( CodeMinCOP > 0 ) )
+      then // Default to CodeMinCOP
+        CodeMinCOP
+      else 
+        3.0 // General punitive default
+      endif
+    else UNDEFINED
+    endif
+  CHECKCODE : T24N
+    if( ( BypassMinEffCheck > 0 .OR. BypassCheckCode = 1 ) 
+        .OR. 
+        ( BypassCheckCode = 2 .AND. BypassMinEffCheck > 0 ) )
+    then 
+      UNCHANGED
+    else
+    if( ( IfValidAnd( CodeMinCOP > 0 ) .OR. IfValidAnd( CodeMinHSPF > 0 ) ) .AND. 
+        IfValidAnd( COP > 0 ) = 0 )
+    then
+      PostError("VRF system '%s' must be specified with AHRI rated COP, 
+                 even if cooling capacity is <65kBtu/hr.", Name )
+    else 
+    if( IfValidAnd( CodeMinCOP > 0 ) .AND. 
+        IfValidAnd( COP < CodeMinCOP ) )
+    then 
+      PostError("COP of  VRF system '%s' is less than the code minimum required 
+                 efficiency of COP-%.1f. Select the bypass of efficiency
+                 check at the coil if this is not applicable.",
+                 Name, CodeMinCOP)
+    else UNCHANGED 
+    endif endif endif
+ENDRULE
+
+RULE NEW VRFSys:HtgRndFact
+  DATATYPE
+    Float
+  LONGFORM
+    HeatingRoundingFactor
+  DESCRIPTION
+    "The smallest factor of the rounded VRFSystem efficiency per the applicable
+     AHRI testing standard."
+  INPUTCLASS
+    NotInput
+  SIZING
+    if( IfValidAnd( ClgCapNetRtd < 65000 ) )
+    then 0.05 // HSPF
+    else 0.01 // COP
+    endif
+ENDRULE
+
+RULE NEW VRFSys:HSPFRnd
+  DATATYPE
+    Float
+  LONGFORM
+    HSPFRound
+  DESCRIPTION
+    "Round VRFSys HSPF value based on AHRI testing standard"
+  INPUTCLASS
+    NotInput
+  UNITS
+    Btu/h-W
+  SIZING
+    if( IfValidAnd( HtgRndFact > 0 ) .AND.
+        IfValidAnd( HSPF > 0 ) )
+    then
+      int( ( HSPF / HtgRndFact ) + 0.5 ) * HtgRndFact
+    else
+      UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW VRFSys:COPRnd
+  DATATYPE
+    Float
+  LONGFORM
+    COPRound
+  DESCRIPTION
+    "Round VRFSys COP value based on AHRI testing standard"
+  INPUTCLASS
+    NotInput
+  UNITS
+    W/W
+  SIZING
+    if( IfValidAnd( HtgRndFact > 0 ) .AND.
+        IfValidAnd( COP > 0 ) )
+    then
+      int( ( COP / HtgRndFact ) + 0.5 ) * HtgRndFact
+    else
+      UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW VRFSys:COPAdj
+  DATATYPE
+    Float
+  LONGFORM
+    COPAdjusted
+  DESCRIPTION
+    "The heating efficiency of a VRF heating system at AHRI 
+     rated conditions, adjusted to remove fan energy.
+
+
+         HtPumpCOPAdj = ( Net capacity (Btu/hr) - Fan heat (Btu/hr) ) /
+                        ( Rated power (W) - fan power (W) )"
+  INPUTCLASS
+    NotInput
+  UNITS
+    W/W
+  SIZING
+    // Calculated in DEFAULT rules for CHECKCODE rule 
+    if( IfValidAnd( HtgCapGrossRtd > 0 ) .AND.
+        IfValidAnd( COPRnd > 0 ) .AND.
+        IfValidAnd( HtgCapNetRtd > 0 ) )
+    then
+        ( HtgCapGrossRtd / 3.412 ) / ; CapTotGrossRtd = CapTotNetRtd - FanHtRtd
+        ( ( HtgCapNetRtd / ( COPRnd * 3.412 ) ) - ( FanHtRtd / 3.412 ) )
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE VRFSys:HtgEIR
+  DESCRIPTION
+    "The gross Heating EIR of the VRF system at AHRI conditions (kW/kW).  This value 
+     includes the condenser fan energy"
+  INPUTCLASS
+    NotInput
+  UNITS
+    W/W
+  SIZING
+    if( IfValidAnd( COPAdj > 0 ) )
+    then 1 / COPAdj
+    else UNDEFINED
+    endif
+ENDRULE
+
+// ********** Bypass Minimum Efficincy Check ***********************************
+RULE NEW VRFSys:IsLessThanMinEff
+  LONGFORM
+    IsLessThanMinimumEfficiency
+  DATATYPE
+    Integer
+  DESCRIPTION
+    "A flag to indicate if the user specified VRF effciency is less than the 
+     minimum required by code"
+  INPUTCLASS 
+    NotInput
+  DEFAULT 
+    if( IfValidAnd( EER < CodeMinEER ) .OR.
+        IfValidAnd( SEER < CodeMinSEER ) .OR.
+        IfValidAnd( COP < CodeMinCOP ) .OR.
+        IfValidAnd( HSPF < CodeMinHSPF ) )
+    then 1
+    else 0 
+    endif
+ENDRULE
+
+RULE VRFSys:BypassMinEffCheck
+  DESCRIPTION
+    "A boolean (0/1) flag to indicate whether the minimum efficiency checks for
+     the VRF system are bypassed."
+  HELP
+    "Selecting this option (value = 1 ) triggers an Exceptional Condition to 
+     be shown on the compliance report, and requires code reviewers to manually
+     check that the equipment meets the minimum efficiency requirements for the
+     applicable equipment category in the Standards. This option should only be
+     selected in the following circustances:
+
+     1) The equipment category of the system in the proposed design is not
+        supported in CBECC-Com by the combinations of Type/SubType
+
+     2) The equipment was manufactured prior to a change in equipment efficiency
+        Standards and does not meet current efficiency requirements, but it is
+        still legal to install."
+  INPUTCLASS
+    Default  
+  DEFAULT
+    0
+ENDRULE
+
+// ---------- Control Params ----------------------------------------------------
+RULE VRFSys:CtrlPriority
+  DESCRIPTION
+    "The method used to determine whether the outdoor unit is in heating or 
+     cooling. "
+  INPUTCLASS : T24N_2016
+    Prescribed
+  INPUTCLASS
+    Default
+  OPTION
+    MasterThermostatPriority
+    LoadPriority
+  DEFAULT
+    if( IsMFamSys = 0 ) 
+    then "MasterThermostatPriority"
+    else "LoadPriority"
+    endif
+  CHECKSIM
+    if( IfValidAnd( CtrlPriority = "MasterThermostatPriority" ) .AND.
+        IfValidAnd( IsMFamSys > 0 ) )
+    then PostError( "In VRF System '%s', Control Priority is set to 'MasterThermostatPriority' 
+                  but the system serves multifamily space(s). This is currently not supported.", Name )
+    else if( IfValidAnd( CtrlPriority = "MasterThermostatPriority" ) .AND.
+             LocalCompAssigned( CtrlZnRef ) = 0 )
+    then PostError( "In VRF System '%s', Control Priority is set to 'MasterThermostatPriority' 
+                  but the Master Control Zone has not been specified.  Master 
+                  Control must be specified.", Name )
+    else UNCHANGED
+    endif endif
+ENDRULE
+
+RULE VRFSys:CtrlZnRef
+  DESCRIPTION
+    "The zone used to determine whether the outdoor unit is in heating or 
+     cooling. "
+  HELP
+    "Used for Control Priority = MasterThermostatPriority"
+  INPUTCLASS : T24N_2016
+    Prescribed
+  INPUTCLASS
+    CondRequired
+ENDRULE
+
+RULE VRFSys:AvailSchRef
+  DESCRIPTION
+    "The name of the schedule that determines when the VRF System system is
+    available to provide heating or cooling."
+  HELP
+    "The name of the schedule that determines when the VRF system is
+    available to provide heating or cooling.  The system is not necessarily providing
+    heating/cooling at all times it is available, but if it is not available, no
+    heating/cooling will be provided."
+  INPUTCLASS
+    Prescribed
+  SIZING
+    RuleLibrary(Schedule,("On"))
+  ANNUAL
+    z:AvailSchRef
+ENDRULE
+
+// ---------- Compressor Performance ------------------------------------------*
+RULE VRFSys:PLRMin
+  DESCRIPTION
+    "The minimum operating part-load ratio (PLR) of the heat pump. When the 
+     heat pump operates at a PLR below this value, the heat pump’s compressor
+     will cycle to meet the cooling or heating demand. Above this value, the
+     heat pump’s compressor operates the entire time step to meet the
+     cooling or heating demand." 
+  INPUTCLASS : T24N_2016
+    Prescribed
+  INPUTCLASS
+    Default
+  MINIMUM
+    0.25
+  MAXIMUM
+    1.0
+  DEFAULT
+    0.25
+  CHECKCODE
+    if( PLRMin < 0.25 )
+    then
+      PostWarning("VRFSys '%s' PLRMin is less than %.2f; it will be reset this
+                   value for compliance analysis.", Name, 0.25) 
+    else UNCHANGED
+    endif
+  SIZING
+    Max( 0.25, PLRMin )
+ENDRULE
+
+RULE VRFSys:IndoorTypeRtd
+  DESCRIPTION
+    "Whether the VRF System rated efficiency and capacity are calculated 
+     assuming 'Ducted' or 'Non-Ducted' indoor units."
+  INPUTCLASS : T24N_2016
+    Prescribed
+  INPUTCLASS
+    Default
+  OPTION
+    Ducted
+    NonDucted
+  DEFAULT
+    "Ducted"
+ENDRULE
+
+RULE VRFSys:ClgCprsrLockoutTempLow
+  DESCRIPTION
+    "The OADB temperature below which cooling is not enabled."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    14
+ENDRULE
+
+RULE VRFSys:ClgCprsrLockoutTempHi
+  DESCRIPTION
+    "The OADB temperature above which cooling is not enabled."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    122
+ENDRULE
+
+RULE VRFSys:HtgCprsrLockoutTempLow
+  DESCRIPTION
+    "The OADB temperature below which heating is not enabled."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    -13
+ENDRULE
+
+RULE VRFSys:HtgCprsrLockoutTempHi
+  DESCRIPTION
+    ""
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    70 // Was 61F, the E+ default. Increased per Ticket 3203
+ENDRULE
+
+RULE VRFSys:HtRcvryCprsrLockoutTempLow
+  DESCRIPTION
+    ""
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    MAX( ClgCprsrLockoutTempLow, 
+         HtgCprsrLockoutTempLow )
+ENDRULE
+
+RULE VRFSys:HtRcvryCprsrLockoutTempHi
+  DESCRIPTION
+    ""
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    MIN( ClgCprsrLockoutTempHi, 
+         HtgCprsrLockoutTempHi )
+ENDRULE
+
+// ---------- Heat Recovery ----------------------------------------------------
+
+RULE VRFSys:HtRcvryInitialClgCapFrac
+  DESCRIPTION
+    ""
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( IfValidAnd( HtRcvry = "Yes" ) )
+    then 0.5
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE VRFSys:HtRcvryInitialClgEngyFrac
+  DESCRIPTION
+    ""
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( IfValidAnd( HtRcvry = "Yes" ) )
+    then 1
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE VRFSys:HtRcvryInitialClgTimeCnst
+  DESCRIPTION
+    ""
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( IfValidAnd( HtRcvry = "Yes" ) )
+    then 0.083
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE VRFSys:HtRcvryInitialHtgCapFrac
+  DESCRIPTION
+    ""
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( IfValidAnd( HtRcvry = "Yes" ) )
+    then 0.5
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE VRFSys:HtRcvryInitialHtgEngyFrac
+  DESCRIPTION
+    ""
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( IfValidAnd( HtRcvry = "Yes" ) )
+    then 1
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE VRFSys:HtRcvryInitialHtgTimeCnst
+  DESCRIPTION
+    ""
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( IfValidAnd( HtRcvry = "Yes" ) )
+    then 0.083
+    else UNDEFINED
+    endif
+ENDRULE
+
+// ---------- Defrost ----------------------------------------------------------
+RULE VRFSys:DefHtSrc
+  DESCRIPTION
+    ""
+  INPUTCLASS : T24N_2016
+    Prescribed
+  INPUTCLASS
+    Default
+  OPTION
+    HotGas
+    Electric
+  DEFAULT
+    "HotGas"
+ENDRULE
+
+RULE VRFSys:DefCtrl 
+  DESCRIPTION
+    ""
+  INPUTCLASS
+    NotInput
+  OPTION
+    OnDemand
+    TimedCycle
+  DEFAULT
+    "OnDemand"
+ENDRULE
+
+RULE VRFSys:DefTimeFrac
+  DESCRIPTION
+    "Duration of defrost mode operation - used only for 'timed cycle' defrost 
+     control"
+  INPUTCLASS 
+    NotInput
+  UNITS
+    hour
+  MINIMUM
+    0
+  MAXIMUM
+    1
+  DEFAULT
+    if( IfValidAnd( DefCtrl = "TimedCycle" ) )
+    then 3.5/60   ; 3.5 minutes, EnergyPlus Default
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE VRFSys:DefCtrlTemp
+  DESCRIPTION
+    "Maximum Outdoor Dry-bulb Temperature for Defrost Operation"
+  INPUTCLASS : T24N_2016
+    Prescribed
+  INPUTCLASS
+    Default
+  DEFAULT
+    40
+ENDRULE
+
+RULE VRFSys:DefHtrCap
+  DESCRIPTION
+    "Resistive defrost heater capacity in Watts."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    //  undefined to be translated to 'autosize' by OS Translator
+    UNDEFINED
+ENDRULE
+
+RULE VRFSys:DefHtrCapSim
+  DESCRIPTION
+    "Resistive defrost heater capacity in Watts."
+  INPUTCLASS
+    NotInput
+  SIZING
+    ValidOr( DefHtrCap, 0 ) * Cnt
+ENDRULE
+
+// ---------- CrankCase Heater ------------------------------------------------*
+
+RULE VRFSys:CprsrCrankcaseHtrCap
+  DESCRIPTION
+    "The crankcase heater power, per compressor."
+  INPUTCLASS : T24N_2016
+    Prescribed
+  INPUTCLASS
+    Default
+  UNITS
+    W/Compressor
+  DEFAULT
+    0
+ENDRULE
+
+RULE VRFSys:CprsrCrankcaseHtrCapSim
+  DESCRIPTION
+    "The crankcase heater power, per compressor, for simulation."
+  INPUTCLASS
+    NotInput
+  UNITS
+    W
+  SIZING
+    ValidOr( CprsrCrankcaseHtrCap, 0 ) * Cnt
+ENDRULE
+
+RULE VRFSys:CprsrQty
+  DESCRIPTION
+    ""
+  INPUTCLASS : T24N_2016
+    Prescribed
+  INPUTCLASS
+    Default
+  DEFAULT
+    1
+ENDRULE
+
+RULE VRFSys:CrankcaseCtrlTemp
+  DESCRIPTION
+    ""
+  INPUTCLASS : T24N_2016
+    Prescribed
+  INPUTCLASS
+    Default
+  DEFAULT
+    32
+ENDRULE
+
+// ---------- Piping Loss ------------------------------------------------------
+
+RULE VRFSys:EquivalentPipeLen
+  DESCRIPTION
+    "The equivalent pipe length in feet between the farthest terminal 
+     unit and the heat pump condenser."
+  HELP
+    ""
+  INPUTCLASS : T24N_2016
+    Prescribed
+  INPUTCLASS
+    Default
+  MINIMUM
+    10
+  DEFAULT
+    48
+ENDRULE
+
+RULE VRFSys:MaxDeltaHgt
+  DESCRIPTION
+    "The vertical pipe height in feet between the highest or lowest 
+     terminal unit and the Outdoor Unit."
+  HELP
+    ""
+  INPUTCLASS : T24N_2016
+    Prescribed
+  INPUTCLASS
+    Default
+  DEFAULT
+    11
+ENDRULE
+
+RULE VRFSys:ClgPipeLoss_fPipeHgtCoeff
+  DESCRIPTION
+    "Pipe loss as a function of vertical distance between outdoor unit and indoor unit"
+  INPUTCLASS : T24N_2016
+    Prescribed
+  INPUTCLASS
+    Default
+  DEFAULT
+    -0.00019231   ; Coefficient provided by FSEC:  -0.01/52 meters
+ENDRULE
+
+RULE VRFSys:HtgPipeLoss_fPipeHgtCoeff
+  DESCRIPTION
+    "Pipe loss as a function of vertical distance between outdoor unit and indoor unit"
+  INPUTCLASS : T24N_2016
+    Prescribed
+  INPUTCLASS
+    Default
+  DEFAULT
+    -0.00019231   ; Coefficient provided by FSEC:  -0.01/52 meters
+ENDRULE
+
+// ---------- Curves ----------------------------------------------------------*
+
+RULE VRFSys:DefEIR_fTempCrvRef
+  DESCRIPTION
+    "Normalized curve that varies XXX as a function of YYY."
+  INPUTCLASS
+    Prescribed  
+  SIZING
+    if( IfValidAnd( DefHtSrc = "HotGas" ) ) 
+    then RuleLibrary(CrvDblQuad, "VRFSysDefEIRRatio_fToadbTwbSI")
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:DefEIR_fTempCrvRef
+ENDRULE
+
+// ---------- Cooling ----------------------------------------------------------
+RULE VRFSys:ClgCap_fTempLowCrvRef
+  DESCRIPTION
+    "Normalized curve that varies XXX as a function of YYY."
+  INPUTCLASS
+    Prescribed  
+  SIZING
+    if( IfValidAnd( ClgCapNetRtd > 0 ) ) 
+    then RuleLibrary(CrvDblQuad, "EPDef-VRFSysClgQRatio_fTwbToadbLowSI")
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:ClgCap_fTempLowCrvRef
+ENDRULE
+
+RULE VRFSys:ClgCapBndry_fTempCrvRef
+  DESCRIPTION
+    "Normalized curve that varies XXX as a function of YYY."
+  INPUTCLASS
+    Prescribed  
+  SIZING
+    if( IfValidAnd( ClgCapNetRtd > 0 ) ) 
+    then RuleLibrary(CrvCubic, "EPDef-VRFSysClgCapBdry_fTwbSI")
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:ClgCapBndry_fTempCrvRef
+ENDRULE
+
+RULE VRFSys:ClgCap_fTempHiCrvRef
+  DESCRIPTION
+    "Normalized curve that varies XXX as a function of YYY."
+  INPUTCLASS
+    Prescribed  
+  SIZING
+    if( IfValidAnd( ClgCapNetRtd > 0 ) ) 
+    then RuleLibrary(CrvDblQuad, "EPDef-VRFSysClgQRatio_fTwbToadbHiSI")
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:ClgCap_fTempHiCrvRef
+ENDRULE
+
+RULE VRFSys:ClgEIR_fTempLowCrvRef
+  DESCRIPTION
+    "Normalized curve that varies XXX as a function of YYY."
+  INPUTCLASS
+    Prescribed  
+  SIZING
+    if( IfValidAnd( ClgCapNetRtd > 0 ) ) 
+    then RuleLibrary(CrvDblQuad, "EPDef-VRFSysClgEIRRatio_fTwbToadbLowSI")
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:ClgEIR_fTempLowCrvRef
+ENDRULE
+
+RULE VRFSys:ClgEIRBndry_fTempCrvRef
+  DESCRIPTION
+    "Normalized curve that varies XXX as a function of YYY."
+  INPUTCLASS
+    Prescribed  
+  SIZING
+    if( IfValidAnd( ClgCapNetRtd > 0 ) ) 
+    then RuleLibrary(CrvCubic, "EPDef-VRFSysClgEIRBdry_fTwbSI")
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:ClgEIRBndry_fTempCrvRef
+ENDRULE
+
+RULE VRFSys:ClgEIR_fTempHiCrvRef
+  DESCRIPTION
+    "Normalized curve that varies XXX as a function of YYY."
+  INPUTCLASS
+    Prescribed  
+  SIZING
+    if( IfValidAnd( ClgCapNetRtd > 0 ) ) 
+    then RuleLibrary(CrvDblQuad, "EPDef-VRFSysClgEIRRatio_fTwbToadbHiSI")
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:ClgEIR_fTempHiCrvRef
+ENDRULE
+
+RULE VRFSys:ClgEIR_fPLRLowCrvRef
+  DESCRIPTION
+    "Normalized curve that varies XXX as a function of YYY."
+  INPUTCLASS
+    Prescribed  
+  SIZING
+    if( IfValidAnd( ClgCapNetRtd > 0 ) ) 
+    then RuleLibrary(CrvCubic, "EPDef-VRFSysClgEIRRatio_fPLRLowSI")
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:ClgEIR_fPLRLowCrvRef
+ENDRULE
+
+RULE VRFSys:ClgEIR_fPLRHiCrvRef
+  DESCRIPTION
+    "Normalized curve that varies XXX as a function of YYY."
+  INPUTCLASS
+    Prescribed  
+  SIZING
+    if( IfValidAnd( ClgCapNetRtd > 0 ) ) 
+    then RuleLibrary(CrvQuad, "EPDef-VRFSysClgEIRRatio_fPLRHiSI")
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:ClgEIR_fPLRHiCrvRef
+ENDRULE
+
+RULE VRFSys:ClgCap_fCombRatCrvRef
+  DESCRIPTION
+    "Normalized curve that varies XXX as a function of YYY."
+  INPUTCLASS
+    Prescribed  
+  SIZING
+    if( IfValidAnd( ClgCapNetRtd > 0 ) ) 
+    then RuleLibrary(CrvLin, "EPDef-VRFSysClgQRatio_fCombRat")
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:ClgCap_fCombRatCrvRef
+ENDRULE
+
+RULE VRFSys:ClgEIR_fCyclingRatCrvRef
+  DESCRIPTION
+    "Normalized curve that varies XXX as a function of YYY."
+  INPUTCLASS
+    Prescribed  
+  SIZING
+    if( IfValidAnd( ClgCapNetRtd > 0 ) ) 
+    then RuleLibrary(CrvQuad, "EPDef-VRFSysClgEIRRatio_fCycRatSI")
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:ClgEIR_fCyclingRatCrvRef
+ENDRULE
+
+RULE VRFSys:HtRcvryClgCap_fTempCrvRef
+  DESCRIPTION
+    "Normalized curve that varies XXX as a function of YYY."
+  INPUTCLASS
+    Prescribed  
+  SIZING
+    if( IfValidAnd( ClgCapNetRtd > 0 ) ) 
+    then RuleLibrary(CrvDblQuad, "VRFSysHtRcvryClgQRatio_fTwbToadbSI")
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:HtRcvryClgCap_fTempCrvRef
+ENDRULE
+
+RULE VRFSys:HtRcvryClgEIR_fTempCrvRef
+  DESCRIPTION
+    "Normalized curve that varies XXX as a function of YYY."
+  INPUTCLASS
+    Prescribed  
+  SIZING
+    if( IfValidAnd( ClgCapNetRtd > 0 ) ) 
+    then RuleLibrary(CrvDblQuad, "VRFSysHtRcvryClgEIRRatio_fTwbToadbSI")
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:HtRcvryClgEIR_fTempCrvRef
+ENDRULE
+
+RULE VRFSys:ClgPipeLoss_fPipeLenCrvRef
+  DESCRIPTION
+    "Normalized curve that varies XXX as a function of YYY."
+  INPUTCLASS
+    Prescribed  
+  SIZING
+    if( IfValidAnd( ClgCapNetRtd > 0 ) ) 
+    then RuleLibrary(CrvDblQuad, "EPDef-VRFSysClgPipeLoss_fLenRatioSI")
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:ClgPipeLoss_fPipeLenCrvRef
+ENDRULE
+
+// ---------- Heating ----------------------------------------------------------
+
+RULE VRFSys:HtgCrvOutdoorTempType
+  DESCRIPTION
+    ""
+  INPUTCLASS
+    Prescribed  
+  OPTION
+    WetBulb
+    DryBulb
+  SIZING
+    if( IfValidAnd( HtgCapNetRtd > 0 ) ) 
+    then "DryBulb"
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( IfValidAnd( HtgCapNetRtd > 0 ) ) 
+    then "DryBulb"
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE VRFSys:HtgCap_fTempLowCrvRef
+  DESCRIPTION
+    "Normalized curve that varies XXX as a function of YYY."
+  INPUTCLASS
+    Prescribed  
+  SIZING
+    if( IfValidAnd( HtgCapNetRtd > 0 ) ) 
+    then RuleLibrary(CrvDblQuad, "EPDef-VRFSysHtgQRatio_fTdbToadbLowSI")
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:HtgCap_fTempLowCrvRef
+ENDRULE
+
+RULE VRFSys:HtgCapBndry_fTempCrvRef
+  DESCRIPTION
+    "Normalized curve that varies XXX as a function of YYY."
+  INPUTCLASS
+    Prescribed  
+  SIZING
+    if( IfValidAnd( HtgCapNetRtd > 0 ) ) 
+    then RuleLibrary(CrvCubic, "EPDef-VRFSysHtgCapBdry_fTdbSI")
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:HtgCapBndry_fTempCrvRef
+ENDRULE
+
+RULE VRFSys:HtgCap_fTempHiCrvRef
+  DESCRIPTION
+    "Normalized curve that varies XXX as a function of YYY."
+  INPUTCLASS
+    Prescribed  
+  SIZING
+    if( IfValidAnd( HtgCapNetRtd > 0 ) ) 
+    then RuleLibrary(CrvDblQuad, "EPDef-VRFSysHtgQRatio_fTdbToadbHiSI")
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:HtgCap_fTempHiCrvRef
+ENDRULE
+
+RULE VRFSys:HtgEIR_fTempLowCrvRef
+  DESCRIPTION
+    "Normalized curve that varies XXX as a function of YYY."
+  INPUTCLASS
+    Prescribed  
+  SIZING
+    if( IfValidAnd( HtgCapNetRtd > 0 ) ) 
+    then RuleLibrary(CrvDblQuad, "EPDef-VRFSysHtgEIRRatio_fTdbToadbLowSI")
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:HtgEIR_fTempLowCrvRef
+ENDRULE
+
+RULE VRFSys:HtgEIRBndry_fTempCrvRef
+  DESCRIPTION
+    "Normalized curve that varies XXX as a function of YYY."
+  INPUTCLASS
+    Prescribed  
+  SIZING
+    if( IfValidAnd( HtgCapNetRtd > 0 ) ) 
+    then RuleLibrary(CrvCubic, "EPDef-VRFSysHtgEIRBdry_fTdbSI")
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:HtgEIRBndry_fTempCrvRef
+ENDRULE
+
+RULE VRFSys:HtgEIR_fTempHiCrvRef
+  DESCRIPTION
+    "Normalized curve that varies XXX as a function of YYY."
+  INPUTCLASS
+    Prescribed  
+  SIZING
+    if( IfValidAnd( HtgCapNetRtd > 0 ) ) 
+    then RuleLibrary(CrvDblQuad, "EPDef-VRFSysHtgEIRRatio_fTdbToadbHiSI")
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:HtgEIR_fTempHiCrvRef
+ENDRULE
+
+RULE VRFSys:HtgEIR_fPLRLowCrvRef
+  DESCRIPTION
+    "Normalized curve that varies XXX as a function of YYY."
+  INPUTCLASS
+    Prescribed  
+  SIZING
+    if( IfValidAnd( HtgCapNetRtd > 0 ) ) 
+    then RuleLibrary(CrvCubic, "EPDef-VRFSysHtgEIRRatio_fPLRLowSI")
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:HtgEIR_fPLRLowCrvRef
+ENDRULE
+
+RULE VRFSys:HtgEIR_fPLRHiCrvRef
+  DESCRIPTION
+    "Normalized curve that varies XXX as a function of YYY."
+  INPUTCLASS
+    Prescribed  
+  SIZING
+    if( IfValidAnd( HtgCapNetRtd > 0 ) ) 
+    then RuleLibrary(CrvQuad, "EPDef-VRFSysHtgEIRRatio_fPLRHiSI")
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:HtgEIR_fPLRHiCrvRef
+ENDRULE
+
+RULE VRFSys:HtgCap_fCombRatCrvRef
+  DESCRIPTION
+    "Normalized curve that varies XXX as a function of YYY."
+  INPUTCLASS
+    Prescribed  
+  SIZING
+    if( IfValidAnd( HtgCapNetRtd > 0 ) ) 
+    then RuleLibrary(CrvLin, "EPDef-VRFSysHtgQRatio_fCombRat")
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:HtgCap_fCombRatCrvRef
+ENDRULE
+
+RULE VRFSys:HtgEIR_fCyclingRatCrvRef
+  DESCRIPTION
+    "Normalized curve that varies XXX as a function of YYY."
+  INPUTCLASS
+    Prescribed  
+  SIZING
+    if( IfValidAnd( HtgCapNetRtd > 0 ) ) 
+    then RuleLibrary(CrvCubic, "EPDef-VRFSysHtgEIRRatio_fCycRatSI")
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:HtgEIR_fCyclingRatCrvRef
+ENDRULE
+
+RULE VRFSys:HtRcvryHtgCap_fTempCrvRef
+  DESCRIPTION
+    "Normalized curve that varies XXX as a function of YYY."
+  INPUTCLASS
+    Prescribed  
+  SIZING
+    if( IfValidAnd( HtgCapNetRtd > 0 ) ) 
+    then RuleLibrary(CrvDblQuad, "VRFSysHtRcvryHtgQRatio_fTdbToadbSI")
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:HtRcvryHtgCap_fTempCrvRef
+ENDRULE
+
+RULE VRFSys:HtRcvryHtgEIR_fTempCrvRef
+  DESCRIPTION
+    "Normalized curve that varies XXX as a function of YYY."
+  INPUTCLASS
+    Prescribed  
+  SIZING
+    if( IfValidAnd( HtgCapNetRtd > 0 ) ) 
+    then RuleLibrary(CrvDblQuad, "VRFSysHtRcvryHtgEIRRatio_fTdbToadbSI")
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:HtRcvryHtgEIR_fTempCrvRef
+ENDRULE
+
+RULE VRFSys:HtgPipeLoss_fPipeLenCrvRef
+  DESCRIPTION
+    "Normalized curve that varies XXX as a function of YYY."
+  INPUTCLASS
+    Prescribed  
+  SIZING
+    if( IfValidAnd( HtgCapNetRtd > 0 ) ) 
+    then RuleLibrary(CrvDblQuad, "EPDef-VRFSysHtgPipeLoss_fLenRatioSI")
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:HtgPipeLoss_fPipeLenCrvRef
+ENDRULE
+
+// *********************** ZnSys, Type:VRF Object ******************************
+; properties specific to ZnSys of Type = VRF
+
+// ---------- Indoor Unit Type -------------------------------------------------
+RULE ZnSys:IndoorType
+  DESCRIPTION
+    "Whether the VRF Indoor Unit is 'Ducted' or 'Non-Ducted'."
+  INPUTCLASS : T24N_2016
+    Prescribed
+  INPUTCLASS
+    Default
+  OPTION
+    Ducted
+    NonDucted
+  DEFAULT
+    "Ducted"
+ENDRULE
+
+// ---------- Auxillary Power --------------------------------------------------
+
+RULE ZnSys:AuxPwrOff
+  DESCRIPTION
+    "The parasitic electrical energy use of the zone terminal unit when the
+     terminal unit coil(s) are not operating."
+  HELP
+    ""
+  INPUTCLASS : T24N_2016
+    Prescribed
+  INPUTCLASS
+    Default
+  DEFAULT
+    if( IfValidAnd( Type = "VRF" ) )
+    then 0
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE ZnSys:AuxPwrOn
+  DESCRIPTION
+    "The parasitic electrical energy use of the zone terminal unit when either
+     terminal unit coil is operating."
+  HELP
+    ""
+  INPUTCLASS : T24N_2016
+    Prescribed
+  INPUTCLASS
+    Default
+  DEFAULT
+    if( IfValidAnd( Type = "VRF" ) )
+    then AuxPwrOff
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE ZnSys:AuxPwrOffSim
+  DESCRIPTION
+    "The parasitic electrical energy use of the zone terminal unit when the
+     terminal unit coil(s) are not operating, for simulation."
+  HELP
+    ""
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( LocalStatus( AuxPwrOff ) > 0 )
+    then AuxPwrOff * Cnt
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE ZnSys:AuxPwrOnSim
+  DESCRIPTION
+    "The parasitic electrical energy use of the zone terminal unit when either
+     terminal unit coil is operating, for simulation."
+  HELP
+    ""
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( LocalStatus( AuxPwrOn ) > 0 )
+    then AuxPwrOn * Cnt
+    else UNDEFINED
+    endif
+ENDRULE
+
+
+// *********************** Additional PERF1 reporting rules ******************
+// Ticket 3389: Updated to report SEER/HSPF if applicable
+
+RULE VRFSys:ClgEffUnitRpt
+  DESCRIPTION
+    "A text string for reporting the cooling efficiency unit of VRF system."
+  INPUTCLASS 
+    NotInput
+  ANNUAL
+    if( IfValidAnd( SEER > 0 ) .AND.
+        IfValidAnd( CodeMinSEER > 0 ) )
+    then
+      "SEER/EER"
+    else
+    if( IfValidAnd( EER > 0 ) )
+    then
+     "EER"
+    else 
+      "NA"
+    endif endif
+ENDRULE
+
+RULE VRFSys:ClgEffRpt
+  DESCRIPTION
+    "A text string for reporting the cooling efficiency of VRF system."
+  INPUTCLASS 
+    NotInput
+  ANNUAL
+    if( IfValidAnd( ClgEffUnitRpt != "NA" ) )
+    then 
+      if( IfValidAnd( ClgEffUnitRpt = "SEER/EER" ) )
+      then
+        Format( FltToStr( SEERRnd, 2 ) ) + " / " +
+        Format( FltToStr( EERRnd, 2 ) )
+     else
+      if( IfValidAnd( ClgEffUnitRpt = "EER" ) )
+      then
+        Format( FltToStr( EERRnd, 2 ) )
+      else 
+        "NA"
+      endif endif
+    else 
+      "NA"
+    endif
+ENDRULE
+
+RULE VRFSys:HtgEffUnitRpt
+  DESCRIPTION
+    "A text string for reporting the heating efficiency unit of VRF system."
+  INPUTCLASS 
+    NotInput
+  ANNUAL
+    if( IfValidAnd( HSPF > 0 ) .AND.
+        IfValidAnd( CodeMinHSPF > 0 ) )
+    then
+      "HSPF"
+    else
+    if( IfValidAnd( COP > 0 ) )
+    then
+     "COP"
+    else 
+      "NA"
+    endif endif
+ENDRULE
+
+RULE VRFSys:HtgEffRpt
+  DESCRIPTION
+    "A text string for reporting the heating efficiency of VRF system."
+  INPUTCLASS 
+    NotInput
+  ANNUAL
+    if( IfValidAnd( HtgEffUnitRpt != "NA" ) )
+    then 
+      if( IfValidAnd( HtgEffUnitRpt = "HSPF" ) )
+      then
+        Format( FltToStr( HSPFRnd, 2 ) )
+      else
+      if( IfValidAnd( HtgEffUnitRpt = "COP" ) )
+      then
+        Format( FltToStr( COPRnd, 2 ) )
+      else 
+        "NA"
+      endif endif
+    else "NA"
+    endif
+ENDRULE
+
+// =============================================================================
+RULE NEW VRFSys:WinInterlockRptFlag
+  DATATYPE
+    Integer
+  LONGFORM
+    WindowInterlockReportFlag
+  DESCRIPTION
+    ""  
+  HELP
+    ""  
+  INPUTCLASS
+    NotInput 
+  ANNUAL
+    if ( MaxRevRef( ZnSys:VRFSysRef, ZnSys:WinInterlockRptFlag ) = 0 )
+    then 0
+    else if ( MaxRevRef( ZnSys:VRFSysRef, ZnSys:WinInterlockRptFlag ) > 0 )
+    then 1
+    else -1
+    endif endif 
+ENDRULE
+
+
+// =============================================================================
+RULE VRFSys:OperableWinInterlockRpt
+  DESCRIPTION
+    ""
+  INPUTCLASS 
+    NotInput
+  ANNUAL
+    if ( WinInterlockRptFlag = 0 )
+    then "NA"
+    else if ( WinInterlockRptFlag > 0 )
+    then "Yes"
+    else "No"
+    endif endif 
+ENDRULE
+
+// =======================VRF System Heat Recovery Reporting=====================
+RULE VRFSys:SysCtrlRpt
+  DESCRIPTION
+    "A text string describing the vrf system controls for reporting"
+  INPUTCLASS 
+    NotInput
+  ANNUAL_PROPOSED
+    if( LocalStatus( HtRcvry ) > 0 ) then
+       if( HtRcvry = "Yes" ) then 
+       "Heat Recovery"
+       else "NA"
+       endif
+    else
+      "NA" 
+    endif
+ENDRULE
+

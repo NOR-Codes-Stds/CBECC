@@ -1,0 +1,822 @@
+// ThermalZone - Zone Exhaust
+//
+// -------------------------------------------------------------------------
+//  Copyright (c) 2014-2017, California Energy Commission
+//  All rights reserved.
+//  Redistribution and use in source and binary forms, with or without
+//  modification, are permitted provided that the following conditions are
+//  met:
+// 
+//    * Redistributions of source code must retain the above copyright
+//  notice, this list of conditions and the following disclaimer.
+//    * Redistributions in binary form must reproduce the above copyright
+//  notice, this list of conditions and the following disclaimer in
+//  the documentation and/or other materials provided with the
+//  distribution.
+//    * Neither the name of the California Energy Commission nor the names of its
+//  contributors may be used to endorse or promote products
+//  derived from this software without specific prior written
+//  permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+//  IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+//  TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION
+//  BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+//  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+//  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+//  BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+//  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+//  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// -------------------------------------------------------------------------
+//  
+
+
+// Exhaust system reference
+RULE ThrmlZn:ExhSysRef
+  DESCRIPTION
+    "The name of the air or zone system that exhausts air from the ThermalZone."
+  INPUTCLASS
+    Optional
+  DEFAULT
+    if( IfValidAnd( ExhFlow > 0 ) .AND.
+        LocalCompAssigned( VentSysRef ) )
+    then
+      if( IfValidAnd( VentSysRef:Type = "Exhaust" ) .OR.
+          ( IfValidAnd( VentSysRef:Type = "VentilationOnly" ) .AND. 
+            IfValidAnd( VentSysRef:ExhSysType = "ExhaustOnly" ) ) .OR.
+          ( IfValidAnd( VentSysRef:IsAllOA > 0 ) .AND. 
+            ( IfValidAnd( VentSysRef:ExhFanCap >= ExhFlow ) .OR.
+              IfValidAnd( VentSysRef:RetFanCap >= ExhFlow ) ) ) )
+      then // VentSys is a) Exhaust, b) VentOnly and not SupplyOnly, or 
+         //c) zone has ExhFlow and DOAS is 100% OA w/ ret fan
+        VentSysRef
+      else UNCHANGED
+      endif
+    else UNCHANGED
+    endif
+  CHECKCODE : T24N_2016
+    if( IsNewExh > 0 .AND. LocalCompAssigned( ExhSysRef ) = 0 .AND.
+        ( LabArea + PrkgGarArea + CommKitArea ) > 0 .AND. HasUnknownHVAC = 0 )
+    then // Only post error if IsNewMech or space has new HVAC system in existing building
+      PostError("ThermalZone '%s' has space functions that classify it as a
+                 Laboratory, ParkingGarage (enclosed), or CommericalKitchen zone,
+                 but no exhaust system has been specified.", Name)
+    else
+    if( VentSrc = "Forced" .AND. 
+        LocalCompAssigned( VentSysRef ) .AND. 
+        LocalCompAssigned( ExhSysRef ) )
+    then
+      if( PropVentSysIsExh > 0 .AND. IfValidAnd( VentSysRef != ExhSysRef ) )
+      then 
+        PostError("ThermalZone '%s' has a ventilation system that is Type = 'Exhaust',
+                   but a separate exhaust system is specified. This is not supported.
+                   Either both the ventilation system and exhaust system must be
+                   the same system, or the ventilation system must not be
+                   Type = 'Exhaust'.", Name )
+      else if( IsRes > 0 .AND. IfValidAnd( PropVentSysIsExh = 0 ) )
+      then
+        PostWarning("ThermalZone '%s' is a residential space which has both a mechanical
+                   ventilation system as well as an exhaust system defined. Intermittent 
+                   exhaust systems in residential spaces should not be modeled for 
+                   compliance. If an exhaust system is modeled in addition to the ventilation
+                   system, the exhaust fans will only be simualted in the proposed design,
+                   resulting in excess fan power in the proposde design.", Name )      
+      else UNCHANGED
+      endif endif
+    else UNCHANGED
+    endif endif
+  CHECKCODE
+    if( ( Proj:IsNoMech = 0 .AND. Proj:IsNoAddMech = 0 ) .AND. 
+        LocalCompAssigned( ExhSysRef ) = 0 .AND. 
+        HasUnknownHVAC = 0 )
+    then // Scope includes Mechanical compliance and there is no ExhSys defined
+         // Ticket 3200: Fixed to look at Proj:NoMech props since there is no ExhSys spec'd
+      if( ( LabArea + PrkgGarArea + CommKitArea ) > 0 )
+      then // Only post error if IsNewMech or space has new HVAC system in existing building
+        PostError("ThermalZone '%s' has space functions that classify it as a
+                   Laboratory, ParkingGarage (enclosed), or CommericalKitchen zone,
+                   but no exhaust system has been specified. 
+                   If this is a PartialMechanical compliance project, check the HasUnknownHVAC box.", Name)
+      else
+      if( CodeExhFlow > 0 )
+      then
+        PostError("ThermalZone '%s' has a code-minimum exhaust flow required,
+                   but no exhaust system has been specified.", Name)
+      else
+      if( ExhFlow > 0 )
+      then
+        PostError("ThermalZone '%s' has a design exhaust flow,
+                   but no exhaust system has been specified.", Name)
+      else UNCHANGED
+      endif endif endif
+    else
+    if( VentSrc = "Forced" .AND. 
+        LocalCompAssigned( VentSysRef ) .AND. 
+        LocalCompAssigned( ExhSysRef ) )
+    then
+      if( PropVentSysIsExh > 0 .AND. IfValidAnd( VentSysRef != ExhSysRef ) )
+      then 
+        PostError("ThermalZone '%s' has a ventilation system that is Type = 'Exhaust' or
+                   'VentilationOnly' as well as another, unique exhaust system specified. 
+                   This is not supported. Either both the ventilation system and exhaust
+                   system must be the same system, or the ventilation system must not be
+                   Type = 'Exhaust' or 'VentilationOnly'.", Name )
+      else
+      if( IsRes > 0 .AND. IfValidAnd( PropVentSysIsExh = 0 ) )
+      then
+        PostWarning("ThermalZone '%s' is a residential space which has both a mechanical
+                   ventilation system as well as an exhaust system defined. Intermittent 
+                   exhaust systems in residential spaces should not be modeled for 
+                   compliance. If an exhaust system is modeled in addition to the ventilation
+                   system, the exhaust fans will only be simulated in the proposed design,
+                   resulting in excess fan power in the proposde design.", Name )    
+      else UNCHANGED
+      endif endif 
+    else
+    if( LocalCompAssigned( ExhSysRef ) .AND. ExhFlow <= 0  )
+    then // See Ticket 2921
+      PostError("ThermalZone '%s' has an exhaust system specified,
+                 but has no exhaust flow.", Name)
+    else
+    if( Type = "Unconditioned" .AND. 
+        LocalCompAssigned( ExhSysRef ) = 0 .AND. 
+        CodeExhFlow > 0 .AND.
+        HasUnknownHVAC = 0 )
+    then // Ticket 3200
+      PostError("ThermalZone '%s' has a code-minimum exhaust flow required,
+                   but no exhaust system has been specified.", Name)
+    else UNCHANGED
+    endif endif endif endif
+  SIZING
+    if( IfValidAnd( VentSysRef:Type = "VentilationOnly" ) )
+    then VentSysRef
+    else UNCHANGED
+    endif
+ENDRULE
+
+// Minimum exhaust flow rate
+RULE NEW ThrmlZn:CodeExhFlow
+  DATATYPE
+    Float
+  LONGFORM
+    CodeExhaustFlow
+  DESCRIPTION
+    "The code minimum exhaust air flow, in cfm, for the ThermalZone." 
+  INPUTCLASS 
+    NotInput
+  UNITS
+    cfm
+  REPORTPRECISION
+    0
+  DEFAULT
+    if( VentStd = "Other" )
+    then SumRevRef( Spc:ThrmlZnRef, Spc:CodeOtherExhFlow )  
+    else SumRevRef( Spc:ThrmlZnRef, Spc:CodeExhFlow )  
+    endif
+  SIZING
+    if( VentStd = "Other" )
+    then SumRevRef( Spc:ThrmlZnRef, Spc:CodeOtherExhFlow )  
+    else SumRevRef( Spc:ThrmlZnRef, Spc:CodeExhFlow )  
+    endif 
+  ANNUAL
+    if( VentStd = "Other" )
+    then SumRevRef( Spc:ThrmlZnRef, Spc:CodeOtherExhFlow )  
+    else SumRevRef( Spc:ThrmlZnRef, Spc:CodeExhFlow )  
+    endif      
+ENDRULE
+
+RULE NEW ThrmlZn:CodeExhFlowSim
+  DATATYPE
+    Float
+  LONGFORM
+    CodeExhaustFlowSimulated
+  DESCRIPTION
+    "The code minimum exhaust air flow, in cfm, for the ThermalZone, for simulation."    
+  INPUTCLASS 
+    NotInput
+  UNITS
+    cfm
+  DEFAULT
+    if( CodeExhFlow > 0 )
+    then CodeExhFlow * Mult
+    else 0
+    endif
+  SIZING
+    if( CodeExhFlow > 0 )
+    then CodeExhFlow * Mult
+    else 0
+    endif
+  ANNUAL
+    z:CodeExhFlowSim 
+ENDRULE
+
+// Design exhaust flow rates
+RULE ThrmlZn:ExhFlow
+  DESCRIPTION
+    "The design exhaust air flow rate, in cfm, for the ThermalZone."
+  HELP
+    "This is calculated by summing the exhaust flow rates defined at the Space,
+     and shown here for reference."
+  INPUTCLASS 
+    NotInput
+  UNITS
+    cfm
+  DEFAULT : T24N_2016
+    SumRevRef( Spc:ThrmlZnRef, Spc:ExhFlow )
+  DEFAULT
+    // Populate exhaust with vent flow if VentSysRef is exhaust
+    if( PropVentSysIsExh > 1 )
+    then // Max of vent or exh flow
+      Max( SumRevRef( Spc:ThrmlZnRef, Spc:VentFlow ), 
+           SumRevRef( Spc:ThrmlZnRef, Spc:ExhFlow ) )
+    else SumRevRef( Spc:ThrmlZnRef, Spc:ExhFlow )
+    endif
+  CHECKCODE : T24N_2016
+    if( CodeVentFlow > 0 .AND. 
+        VentFlow < ExhFlow * ( 1 - Proj:ExhTolMinLimNonRes ) .AND.
+        IfValidAnd( StoryRef:VentExhBalRat < ( 1 - Proj:ExhTolMinLimNonRes ) ) )
+    then 
+      PostWarning("ThermalZone '%s' design ventilation air flow is less than the
+                  design exhaust air flow.", Name)
+    else UNCHANGED
+    endif
+  CHECKCODE 
+    if( ( Proj:IsNoMech = 0 .AND. Proj:IsNoAddMech = 0 ) .AND. 
+         HasUnknownHVAC = 0 )
+    then // Scope includes Mechanical compliance
+      if( CodeVentFlow > 0 .AND. 
+          PropVentSysIsExh = 1 .AND.
+          VentFlow < ExhFlow * ( 1 - Proj:ExhTolMinLimNonRes ) .AND.
+          IfValidAnd( StoryRef:VentExhBalRat < ( 1 -Proj:ExhTolMinLimNonRes ) ) )
+      then 
+        PostWarning("ThermalZone '%s' design ventilation air flow is less than the
+                    design exhaust air flow. If the Story exhaust-to-ventilation
+                    balance is < %.2f, then infiltration to the zone is modeled.", 
+                    Name, 1 - Proj:ExhTolMinLimNonRes)
+      else UNCHANGED
+      endif
+    else UNCHANGED
+    endif
+  SIZING_PROPOSED
+    if( PropVentSysIsExh > 1 .OR. 
+        ( BaseSysNum > 0 .AND. BaseVentSysIsExh > 1 ) )
+    then
+      Max( SumRevRef( Spc:ThrmlZnRef, Spc:VentFlow ), 
+           SumRevRef( Spc:ThrmlZnRef, Spc:ExhFlow ) )
+    else SumRevRef( Spc:ThrmlZnRef, Spc:ExhFlow )
+    endif
+  SIZING_BASELINE
+    if( BaseVentSysIsExh > 1 )
+    then
+      Max( SumRevRef( Spc:ThrmlZnRef, Spc:VentFlow ), 
+           SumRevRef( Spc:ThrmlZnRef, Spc:ExhFlow ) )
+    else SumRevRef( Spc:ThrmlZnRef, Spc:ExhFlow )
+    endif    
+  ANNUAL
+    z:ExhFlow 
+ENDRULE
+
+RULE New ThrmlZn:ExhFlowWithMult
+  DATATYPE
+    Float
+  LONGFORM 
+    ExhaustFlowWithMultiplier
+  INPUTCLASS 
+    NotInput
+  UNITS
+    cfm
+  DEFAULT
+    ExhFlow * Mult  
+  SIZING
+    ExhFlow * Mult   
+  ANNUAL
+    ExhFlow * Mult
+ENDRULE
+
+// Primarily for labs, MinExhFlow, and MinExhACH
+RULE ThrmlZn:MinExhFlow
+  DESCRIPTION
+    "The design minimum exhaust air flow rate for the ThermalZone."
+  INPUTCLASS 
+    NotInput
+  UNITS
+    cfm
+  DEFAULT
+    SumRevRef( Spc:ThrmlZnRef, Spc:PropMinExhFlow )
+  SIZING
+    SumRevRef( Spc:ThrmlZnRef, Spc:PropMinExhFlow )      
+  ANNUAL
+    z:MinExhFlow 
+ENDRULE
+
+RULE NEW ThrmlZn:MinExhACH
+  DATATYPE
+    Float
+  LONGFORM
+    MinimumExhaustAirChangesPerHour
+  DESCRIPTION
+    "The design minimum exhaust air flow, in ACH, for the ThermalZone."
+  INPUTCLASS 
+    NotInput
+  UNITS
+    ACH
+  DEFAULT
+    if( IfValidAnd( Vol > 0 ) )
+    then MinExhFlow * 60 / Vol
+    else 0
+    endif
+  SIZING
+    if( IfValidAnd( Vol > 0 ) )
+    then MinExhFlow * 60 / Vol
+    else 0
+    endif    
+  ANNUAL
+    z:MinExhACH
+ENDRULE
+
+RULE NEW ThrmlZn:MinExhFlowWithMult
+  DATATYPE
+    Float
+  LONGFORM
+    MinimumExhaustFlowWithMultiplier
+  DESCRIPTION
+    "The design minimum exhaust air flow rate for the ThermalZone,
+     including zone multiplier."
+  INPUTCLASS 
+    NotInput
+  UNITS
+    cfm
+  DEFAULT
+    MinExhFlow * Mult
+  SIZING
+    MinExhFlow * Mult    
+  ANNUAL
+    z:MinExhFlowWithMult
+ENDRULE
+
+// Exhaust source
+RULE ThrmlZn:ExhSrc
+  DESCRIPTION
+    "The source of exhaust make-up air."
+  HELP
+    "The ExhaustSource defines where make-up air for the exhaust systems comes
+     from. Currently, 'VentilationSystem', 'TransferFromAdjacentZones', and 
+     'BothVentilationAndTransfer' result in the same behavior; exhaust make-up 
+     air is assumed to be provided in the user's design to the local zone by
+     the ventilation system, or from adjacent zones by transfer openings. 
+     These options do not change the user's model or impact the simulation. 
+
+     'DirectOutsideAir' indicates a louver or other means of allowing untempered, 
+     outside air to enter from the exterior to make-up for the exhaust.
+     This results in the equivalent amount of exahust air to be infiltrated into the
+     zone in the simulation. 'DirectOutsideAir' is the default for zones that require
+     outside air ventilation and use an exhaust fan as the VentilationSystem, or 
+     if the zone is not directly or indirectly conditioned."
+  INPUTCLASS 
+    Default
+  OPTION
+    None
+    VentilationSystem
+    TransferFromAdjacentZones
+    BothVentilationAndTransfer
+    DirectOutsideAir
+  DEFAULT
+    if( ExhFlow > 0 .OR. IfValidAnd( PropVentSysIsExh > 0 ) )
+    then
+      if( CondgStatus = 0 )
+      then "DirectOutsideAir"
+      else
+      if( VentFlow > 0 .AND. IfValidAnd( PropVentSysIsExh > 0 ) )
+      then "DirectOutsideAir"
+      else
+      if( VentFlow > ExhFlow )
+      then "VentilationSystem"
+      else "TransferFromAdjacentZones"
+      endif endif endif
+    else "None"
+    endif
+// Old rules prior to 2019.2.0
+;   if( ExhFlow > 0 .OR. IfValidAnd( PropVentSysIsExh > 0 ) )
+;   then 
+;     if( PropVentSysIsExh < 2 )
+;     then // General exhaust system
+;       if( VentFlow >= ExhFlow * ( 1 - Proj:ExhTolMinLimNonRes ) )
+;       then // Ventilation provided to zone is sufficient make-up
+;         "VentilationSystem"
+;       else 
+;       if( VentFlow > 0 )
+;       then // Ventilation is provided, but insufficient make-up 
+;         "BothVentilationAndTransfer"
+;       else // Assume adjacent zones have sufficient make-up
+;         "TransferFromAdjacentZones" 
+;       endif endif
+;     else 
+;     if( PropVentSysIsExh < 3 )
+;     then // Res exhaust ventilation
+;       if( IfValidAnd( VentSysRef:Type = "Exhaust" ) .OR.
+;           IfValidAnd( VentSysRef:ExhSysType = "Exhaust" ) )
+;       then "DirectOutsideAir"
+;       else
+;       if( IfValidAnd( HighRiseResPropVentSysIsBalanced > 0 ) )
+;       then "VentilationSystem"
+;       else "None"
+;       endif endif
+;     else "DirectOutsideAir"
+;     endif endif
+;   else "None"
+;   endif
+; SIZING
+;   if( BaseSysNum > 0 .AND.
+;       ( ExhFlow > 0 .OR. PropVentSysIsExh > 0 ) )
+;   then 
+;     if( PropVentSysIsExh = 2  )
+;     then // Res exhaust ventilation, switch to DirectOutsideAir
+;       "DirectOutsideAir"
+;     else UNCHANGED
+;     endif
+;   else UNCHANGED
+;   endif
+  SIZING_PROPOSED
+    if( ( ExhFlow > 0 .OR. PropVentSysIsExh > 0 ) .OR.
+        ( BaseSysNum > 0 .AND. BaseVentSysIsExh > 0 ) )
+    then
+      if( VentFlow > 0 .AND. 
+          ( PropVentSysIsExh > 0 .OR. BaseVentSysIsExh > 0 ) )
+      then // VentFlow is defined and therefore direct make-up air should be provided
+        "DirectOutsideAir"
+      else ExhSrc
+      endif
+    else ExhSrc
+    endif
+  SIZING_BASELINE
+    if( ExhFlow > 0 .AND. 
+        BaseVentSysIsExh > 0 )
+    then zp:ExhSrc
+    else "None"
+    endif
+ENDRULE
+
+// For zone level calculation of hood density
+RULE NEW ThrmlZn:LabFumeHoodLen
+  DATATYPE
+    Float
+  LONGFORM
+    LabFumeHoodLength
+  DESCRIPTION
+    "For laboratroy zones, the total horizontal length of laboratory fume 
+     hoods ( with vertical or horizontal sashes ) in the ThermalZone."
+  INPUTCLASS 
+    NotInput
+  UNITS
+    ft
+  DEFAULT : T24N_2016
+    UNDEFINED
+  DEFAULT
+    if( LabArea > 0 )
+    then SumRevRef( Spc:ThrmlZnRef, Spc:LabFumeHoodLen )
+    else 0
+    endif
+ENDRULE
+
+RULE NEW ThrmlZn:LabFumeHoodLenWithMult
+  DATATYPE
+    Float
+  LONGFORM
+    LabFumeHoodLengthWithMultiplier
+  DESCRIPTION
+    "For laboratroy zones, the total horizontal length of laboratory fume 
+     hoods ( with vertical or horizontal sashes ) in the ThermalZone,
+     including zone multiplier."
+  INPUTCLASS 
+    NotInput
+  UNITS
+    ft
+  DEFAULT : T24N_2016
+    UNDEFINED
+  DEFAULT
+    if( LabArea > 0 )
+    then LabFumeHoodLen * Mult
+    else 0
+    endif
+ENDRULE
+
+RULE ThrmlZn:LabFumeHoodDens
+  DESCRIPTION
+    "For laboratory zones, the total horizontal length of laboratory fume 
+     hoods ( with vertical or horizontal sashes ) per 10,000 ft3 of zone volume."
+  INPUTCLASS 
+    NotInput
+  UNITS
+    ft
+  DEFAULT : T24N_2016
+    UNDEFINED
+  DEFAULT
+    if( LabArea > 0 .AND. LocalCompAssigned( ExhSysRef ) )
+    then ExhSysRef:LabFumeHoodDens
+    else 0
+    endif
+ENDRULE
+
+RULE NEW ThrmlZn:LabFumeHoodVertSashExhFlow
+  DATATYPE
+    Float
+  LONGFORM
+    LaboratoryFumeHoodVerticalSashExhaustFlow
+  DESCRIPTION
+    "The total design exhaust air flow of all laboratory fume hoods with
+     vertical sashes in the ThermalZone."
+  INPUTCLASS 
+    NotInput
+  UNITS
+    cfm
+  DEFAULT : T24N_2016
+    UNDEFINED
+  DEFAULT
+    if( LabArea > 0 )
+    then SumRevRef( Spc:ThrmlZnRef, Spc:LabFumeHoodVertSashExhFlow )
+    else 0
+    endif
+ENDRULE
+
+RULE NEW ThrmlZn:LabFumeHoodVertAutoSashExhFlow
+  DATATYPE
+    Float
+  LONGFORM
+    LaboratoryFumeHoodVerticalAutomaticSashExhaustFlow
+  DESCRIPTION
+    "The design exhaust air flow rate of vertical sash fumehoods times the 
+     fraction of flow that have automatic sash controls in the ThermalZone."
+  INPUTCLASS 
+    NotInput
+  UNITS
+    cfm
+  DEFAULT : T24N_2016
+    UNDEFINED
+  DEFAULT
+    if( LabArea > 0 )
+    then SumRevRef( Spc:ThrmlZnRef, Spc:LabFumeHoodVertAutoSashExhFlow )
+    else 0
+    endif
+ENDRULE
+
+RULE NEW ThrmlZn:LabOtherExhFlow
+  DATATYPE
+    Float
+  LONGFORM
+    LaboratoryOtherExhaustFlow
+  DESCRIPTION
+    "The total design exhaust air flow of all other laboratory exhaust 
+     devices, in the ThermalZone."
+  HELP
+    "This total includes the flow of all other devices, such as hoods with
+     horizontal sashes, snorkels, cabinets etc, but excludes the flow of 
+     fume hoods with vertical sashes."
+  INPUTCLASS 
+    NotInput
+  UNITS
+    cfm
+  DEFAULT : T24N_2016
+    UNDEFINED
+  DEFAULT
+    if( LabArea > 0 )
+    then SumRevRef( Spc:ThrmlZnRef, Spc:LabOtherExhFlow )
+    else 0
+    endif
+ENDRULE
+
+RULE NEW ThrmlZn:LabFumeHoodVertAutoSashCtrlFrac
+  DATATYPE
+    Float
+  LONGFORM
+    LaboratoryFumeHoodVerticalAutomaticSashControlFraction
+  DESCRIPTION
+    "The fraction of vertical sash fume hood exhaust flow that is 
+     is controlled with via automatic sash controls."
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N_2016
+    UNDEFINED
+  DEFAULT
+    if( LabArea > 0 .AND. LabFumeHoodVertSashExhFlow > 0 )
+    then
+      LabFumeHoodVertAutoSashExhFlow /
+      LabFumeHoodVertSashExhFlow
+    else 0
+    endif
+ENDRULE
+
+RULE NEW ThrmlZn:LabExhFlowAutoSashCtrlFrac
+  DATATYPE
+    Float
+  LONGFORM
+    LaboratoryExhaustFlowAutomaticSashControlFraction
+  DESCRIPTION
+    "For laboratory zones, the proposed total laboratory exhaust flow
+     that is controlled with automatic sash controls."
+  HELP
+    "This value is used for calculating the proposed VAV exhaust schedules
+     used for simulation."
+  INPUTCLASS
+    NotInput
+  SIZING : T24N_2016
+    UNDEFINED
+  SIZING
+    if( ExhFlow > 0 .AND. LabArea > 0 .AND. LabFumeHoodVertSashExhFlow > 0 )
+    then
+      if( HasUnknownHVAC > 0 )
+      then // Assume all vertical sash hoods have automatic controls
+        LabFumeHoodVertSashExhFlow / ExhFlow
+      else
+      if( BaseSysNum > 0 )
+      then // Baseline
+        if( IsLabFumeHoodIntensive > 0 )
+        then // Is a fumehood intensive laboratory, 
+             // all vertical sash hoods have automatic controls
+          LabFumeHoodVertSashExhFlow / ExhFlow
+        else // No automatic sash controls in baseline
+          0
+        endif
+      else // Proposed
+        LabFumeHoodVertAutoSashExhFlow / ExhFlow
+      endif endif
+    else 0
+    endif
+ENDRULE
+
+
+// For simulation. Minimum exhaust flow is determined by the schedules
+RULE ThrmlZn:ExhFlowSim
+  DESCRIPTION
+    "The design exhaust air flow rate for the ThermalZone, for simulation."    
+  INPUTCLASS 
+    NotInput
+  UNITS
+    cfm
+  DEFAULT
+    if( ExhFlow > 0 )
+    then ExhFlow * Mult
+    else UNDEFINED
+    endif
+  SIZING_PROPOSED
+    if( ExhFlow > 0 )
+     then
+      if( HasUnknownHVAC > 0 )
+      then ExhFlow * Mult
+      else
+      if( LocalCompAssigned( ExhSysRef ) .AND. 
+          LocalCompAssigned( VentSysRef) )
+      then
+        if( IfValidAnd( VentSysRef:IsExhSys = 0 ) .AND.
+            IfValidAnd( ExhSysRef:Name = VentSysRef:Name ) )
+        then // Vent and Exh are the same system (i.e. DOAS) and it is not 
+             // an ExhSys. Remove ExhFlowSim so the flow is not double-counted
+          UNDEFINED
+        else
+          ExhFlow * Mult
+        endif
+      else
+      if( LocalCompAssigned( ExhSysRef ) )
+      then
+        if( IfValidAnd( ExhSysRef:IsExhSys > 0 ) )
+        then ExhFlow * Mult
+        else UNDEFINED
+        endif
+      else UNDEFINED
+      endif endif endif
+    else UNDEFINED
+    endif
+  SIZING_BASELINE
+    if( ExhFlow > 0 )
+    then ExhFlow * Mult
+    else UNDEFINED
+    endif
+  ANNUAL
+    z:ExhFlowSim 
+ENDRULE
+
+// Summary values
+// Normalized to ACH
+RULE NEW ThrmlZn:DsgnExhACH
+  DATATYPE
+    Float
+  LONGFORM
+    DesignExhaustAirChangesPerHour
+  DESCRIPTION
+    "The design exhaust air flow rate, in ACH, for the ThermalZone."
+  HELP
+     "This is a normalized value. It is the Total Exhaust multiplied
+      by 60 divided by the thermal zone volume."
+  INPUTCLASS 
+    NotInput
+  UNITS
+    ACH
+  DEFAULT
+    if( Vol > 0 ) 
+    then ExhFlow * 60 / Vol
+    else 0
+    endif
+  CHECKCODE : T24N_2016
+    if( LabArea > 0 )
+    then 
+      if( DsgnExhACH <= 2.000001 )
+      then
+        PostWarning("ThermalZone '%s' is a Laboratory zone, but the design
+                     exhaust air flow is <= 2 ACH.", Name )
+      else UNCHANGED
+      endif
+    else UNCHANGED
+    endif
+  SIZING
+    if( Vol > 0 ) 
+    then ExhFlow * 60 / Vol
+    else 0
+    endif
+  ANNUAL
+    z:DsgnExhACH
+ENDRULE
+
+RULE NEW ThrmlZn:CodeDsgnExhACH
+  DATATYPE
+    Float
+  LONGFORM
+    CodeDesignExhaustAirChangesPerHour
+  DESCRIPTION
+    "The code minimum exhaust air flow rate, in ACH, for the ThermalZone."
+  HELP
+     "This is a normalized value. It is the Total Exhaust multiplied
+      by 60 divided by the thermal zone volume."
+  INPUTCLASS 
+    NotInput
+  UNITS
+    ACH
+  DEFAULT
+    if( Vol > 0 ) 
+    then CodeExhFlow * 60 / Vol
+    else 0
+    endif
+  SIZING
+    if( Vol > 0 ) 
+    then CodeExhFlow * 60 / Vol
+    else 0
+    endif
+  ANNUAL
+    z:CodeDsgnExhACH
+ENDRULE
+// Normalized to floor area
+RULE NEW ThrmlZn:DsgnExhPerArea
+  DATATYPE
+    Float
+  LONGFORM
+    DesignExhaustPerArea
+  DESCRIPTION
+    "The design exhaust air flow rate, in cfm/ft2, for the ThermalZone."
+  HELP
+     "This value is a normalized value. It is the Total Exhaust divided
+      by the thermal zone area."
+  INPUTCLASS 
+    NotInput
+  UNITS
+    cfm/ft2
+  DEFAULT
+    if( FlrArea > 0 ) 
+    then ExhFlow / FlrArea
+    else 0
+    endif
+  SIZING
+    if( FlrArea > 0 ) 
+    then ExhFlow / FlrArea
+    else 0
+    endif
+  ANNUAL
+    z:DsgnExhPerArea
+ENDRULE
+
+RULE NEW ThrmlZn:CodeDsgnExhPerArea
+  DATATYPE
+    Float
+  LONGFORM
+    CodeDsgnExhaustPerArea
+  DESCRIPTION
+    "The code minimum exhaust air flow rate, in cfm/ft2, for the ThermalZone."
+  HELP
+     "This is a normalized value. It is the Total Exhaust divided
+      by the thermal zone area."
+  INPUTCLASS 
+    NotInput
+  UNITS
+    cfm/ft2
+  DEFAULT
+    if( FlrArea > 0 ) 
+    then CodeExhFlow / FlrArea
+    else 0
+    endif
+  SIZING
+    if( FlrArea > 0 ) 
+    then CodeExhFlow / FlrArea
+    else 0
+    endif
+  ANNUAL
+    z:CodeDsgnExhPerArea
+ENDRULE

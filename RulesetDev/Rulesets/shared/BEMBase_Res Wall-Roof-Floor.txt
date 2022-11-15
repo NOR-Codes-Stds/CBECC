@@ -1,0 +1,754 @@
+;------------------------------------------------------------------------------------------------
+;  Record Formats:
+;     Header => Record Contents
+;     ----------------------------
+;        -1  => End of file
+;
+;         0  => New Class, where:
+;                   Short Name, Long Name,
+;                   Template (default component naming template), which can include the
+;                     following 'jey' fields:
+;                            <p3n> - name of great-grand-parent component
+;                            <p3i> - the 1-based component index of the great-grand-parent component
+;                            <p2n> - name of grand-parent component
+;                            <p2c> - the 1-based index of the grand parent of the new component
+;                                    taking into account only child components of the grand parent
+;                                    class for the current great-grand-parent
+;                            <p2i> - the 1-based component index of the grand-parent component
+;                            <pn>  - name of parent component
+;                            <pc>  - the 1-based index of the parent of the new component taking
+;                                    into account only child components of the parent class for
+;                                    the current grand-parent
+;                            <pi>  - the 1-based component index of the parent component
+;                            <c>   - the 1-based index of this new component taking into account
+;                                    only child components of THIS class for the current parent
+;                            <i>   - the 1-based index of this component taking into account all
+;                                    components of this class throughout the entire building model
+;                   MD = Maximum defineable, MR = Maximum references, AC = Auto-create,
+;                   P1-P15 (-P20 for format ver >= 1007) = Parent class names, 
+;                   MC = Max Children of this type per Parent,
+;                   MS = Max Comps each BDB Comp can be split into for Simulation,
+;                   bP = Purge Comps of this type before Simulations,
+;                   CF = Copy Flag to facilitate the copy of primary wizard components (and a
+;                     subset of their children),
+;                   SR = WriteAsSingleRecord flag (0/1) to facilitate tighter IBD & XML file
+;                     writing (writes entire component to single record of written file as
+;                     opposed to namee record, 1 record per property & terminator)
+;                     (0=> write component as multi-line / 1=> write comp to single line)
+;                   IN = XMLIgnoreName flag (0/1) to cause XML files written by BEMProc to
+;                     ignore (not write) the component names for components of that class 
+;                     (0=> write component names / 1=> don't write names)
+;                   as of format version 1008:
+;                       PN = number of Previous Class Names (0 is default)
+;                       (for each PN - character string containing that name)
+;                   HI = Topic help ID
+;
+;         1  => New Property Type, where:
+;                   Short Name, VType = Variable type, NV = Number of values (array),
+;                   WA = XMLWriteArrayIndices flag (0/1) to cause XML files written by
+;                     BEMProc to include array indices for the attribute values,
+;                     such as "<ATTRIBUTE index="3">VALUE</ATTRIBUTE>"
+;                   SP = WriteSimulationProperty flag (0/1/2) which determines the condition
+;                     in which the property is written to IBD or XML files written by BEMProc
+;                     for the purpose of export to simulation engine:
+;                       0 => Never write to simulation export 
+;                       1 => Write to sim export whenever defined (be it default, library...)
+;                       2 => Write to sim export only if USER defined (or UsrDflt, UsrLib)
+;                       Note: Enum selections w/ numeric values <= 0 will NOT be written to Sim exports
+;                   US = UserSpecification - classification of this property in terms of being
+;                     specified by the user:
+;                       Comp / Compulsory   : User MUST provide input (during object creation).    <<-- only temporary - should be ported to UI Screen definitions (and then switched to Req)
+;                       Req  / Required     : User MUST provide input.
+;                       CReq / CondRequired : User MUST provide input IF they apply to the
+;                                             proposed design.
+;                       Opt  / Optional     : User MAY provide input if they apply to the
+;                                             proposed design.
+;                       Def  / Default      : Defaulted by rules if not user specified.
+;                       Pres / Prescribed   : Not enterable by user (except when in 'Research' mode)
+;                       NInp / NotInput     : Either prescribed by the energy code, or is an
+;                                             intermediate/calculated parameter.
+;                   UL = Units label, UT = Use when displaying tree controls,
+;                as of format version 1004:
+;                   NO = Number of compatible referenced object class name, type value and type property name entries to follow
+;                   and for each NO (up to 5 for now):
+;                      OC = Class name of compatible object assignment,
+;                      CV = Value for determining which components of type OC can be assigned to this property type,
+;                      CP = Property type whose value determines which OC components can be assigned to this property type,
+;                   HI = Item help ID, LName = Long name
+;
+;         2  => BEMBase Include File reference, where:
+;                   Only data here is the name of the BEMBase include file to import Class(es)/Property(s) from
+;                   (can list full path or no/relative path in relation to this main file or 'shared' BEMBase/rule paths)
+;
+;                   Key to special Units Label characters:   Degrees -> °
+;                                                            Squared -> ²
+;                                                            Cubed   -> ³
+;
+;------------------------------------------------------------------------------------------------
+
+
+;------------------------------------------------------------------------------------------------
+;  The following integer value represents the format version of this file.  The format version
+;  must be >= 1001, where 1001 indicates the original format and all subsequent values correspond
+;  to revisions of the original format.
+;     >= 1008  =>  For each Class: Add class PreviousNames (# followed by that number of strings)
+;     >= 1007  =>  For each Class: Increased the # of (possible) parent types from 15 to 20
+;     >= 1006  =>  For each Property: an additional trailing character string to specify notes
+;                     describing when the property may be required input vs. not (based on data set
+;                     to other BEMBase properties
+;     >= 1005  =>  For each Property: the specification of UserSpecification (US) (as described above
+;                     in "1" records describing object properties)
+;     >= 1004  =>  For each Property: the ability to specify MULTIPLE (up to 5) combinations of
+;                     compatible referenced object class name, type value and type property fields.
+;                     Previous formats included one set of these data in each record, regardless of
+;                     whether the property was of type BEMP_Obj.  Now, non-BEMP_Obj properties should
+;                     have an 'NO' of 0 and BEMP_Obj properties should include an 'NO' of 1-5,
+;                     followed by that specified # of sets of compatible referenced object class
+;                     name, type value and type property fields.
+;     >= 1003  =>  For each Property: Addition of WriteSimulationPropertyFlag (SP) flag (0/1/2)
+;                     which determines the condition in which the property is written to IBD or
+;                     XML files written by BEMProc for the purpose of export to simulation engine:
+;                       0 => Never write to simulation export 
+;                       1 => Write to sim export whenever defined (be it default, library...)
+;                       2 => Write to sim export only if USER defined (or UsrDflt, UsrLib)
+;     >= 1002  =>  For each Class: Addition of DefaultNameTemplate (Template) field which is a 
+;                     string that defines the scheme used to produce default component names.
+;                     See listing above under Class / Template for 'key' fieldinfo.
+;                  For each Class: Increased the # of possible parent types from 5 to 15
+;                  For each Class: Addition of Component Copy Flag (CF) field by class to
+;                     facilitate the copy of primary wizard components (and a subset of their
+;                     children) (SAC 6/6/03)
+;                  For each Class: Addition of WriteAsSingleRecord (SR) flag (0/1) to facilitate
+;                     tighter IBD & XML file writing (writes entire component to single record of
+;                     written file as opposed to namee record, 1 record per property & terminator)
+;                     (0=> write component as multi-line / 1=> write comp to single line)
+;                  For each Class: Addition of XMLIgnoreName (IN) flag (0/1) to cause XML files
+;                     written by BEMProc to IGNORE (not write) the component names for components
+;                     of that class (0=> write component names / 1=> don't write names)
+;                  For each Property: Addition of XMLWriteArrayIndices (WA) flag (0/1) to cause
+;                     XML files written by BEMProc to include array indices for the attribute
+;                     values, such as "<ATTRIBUTE index="3">VALUE</ATTRIBUTE>"
+;------------------------------------------------------------------------------------------------
+1008
+;------------------------------------------------------------------------------------------------
+
+
+;------------------------------------------------------------------------------------------------
+;                   LName                       Template                    MD  MR  AC   Parent1   P2           P3           P4  P5  P6  P7  P8  P9  P10 P11 P12 P13 P14 P15 P16 P17 P18 P19 P20  MC  MS  bP  CF  SR  IN  PN   PN1        PN2               HI 
+;                  ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+0,  "ResExtWall",  "ResidentialExteriorWall",  "Res Ext Wall <pi>-<i>",      0,  0,  0, "ResZn",  "ResGarage", "ResOtherZn", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",  -1,  1,  0,  0,  0,  0,  2, "ExtWall", "Exterior Wall",  6000
+;
+;                                 VType     NV  WA  SP    US    UL                UT  NO  OC         CV  CP              HI    LName                  
+;                                ----------------------------------------------------------------------------------------------
+;	mjb-10/22/13	mods for E+A+A	
+1,           "Status",            BEMP_Sym,  1,  0,  0,   Def,  "",                 0,  0,                        3008, "Status",  ""                                      
+1,           "IsVerified", 	  BEMP_Int,  1,  0,  0,   Def,  "",                 0,   0,                       3008, "existing wall conditions will be HERS verified",  ""
+1,           "Orientation",       BEMP_Sym,  1,  0,  0,   Def,  "",                 0,  0,                        6005, "Wall orientation",  ""    
+1,           "OrientationValue",  BEMP_Flt,  1,  0,  0,   Def,  "deg",              0,  0,                        6005, "Wall orientation value (in relation to parent Zone azimuth)",  ""    
+1,           "Azimuth",           BEMP_Flt,  1,  0,  0,  NInp,  "deg",              0,  0,                        6005, "Actual (true) wall azimuth",  ""    
+1,           "TrueOrientationIdx",BEMP_Int,  1,  0,  0,  NInp,  "",                 0,  0,                        6005, "Index of wall's actual orientation (1-N, 2-E, 3-S, 4-W)",  ""     ; SAC 7/12/20
+1,           "Area",              BEMP_Flt,  1,  0,  0,  Comp,  "ft2",              0,  0,                        6010, "Wall area",  "" 
+1,           "ZoneArea",          BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,  0,                        6010, "Wall area in conditioned zones",  "" 
+1,           "Construction",      BEMP_Obj,  1,  0,  0,  Comp,  "",                 0,  2, "Cons",  0, "CanAssignTo", "ConsAssm",  1, "CompatibleSurfType",   6012, "Construction assembly",  "" 
+;	mjb-10/22/13	mods for E+A+A	
+1,           "exConstruction",    BEMP_Obj,  1,  0,  0,   Opt,  "",                 0,  2, "Cons",  0, "CanAssignTo", "ConsAssm",  1, "CompatibleSurfType",   3208, "existing construction for this (altered) wall object",  "" 
+; 1,         "CavityRValue",      BEMP_Sym,  1,  0,  0,  Pres,  "",                 0,  0,                        6005, "Wall cavity R-value",  ""    
+; 1,         "SheathingVRValue",  BEMP_Sym,  1,  0,  0,  Pres,  "",                 0,  0,                        6005, "Wall shething R-value",  ""    
+; 1,         "FrameType",         BEMP_Sym,  1,  0,  0,  Pres,  "",                 0,  0,                        6005, "Wall frame type",  ""    
+; 1,         "FrameSpacing",      BEMP_Sym,  1,  0,  0,  Pres,  "",                 0,  0,                        6005, "Wall frame spacing",  ""    
+1,           "ShowException",     BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag indicating whether or not to show Exception",  ""  ; SAC 5/18/18 - tic #798
+1,           "IsWoodFrmdWallExt", BEMP_Int,  1,  0,  0,  Pres,  "",                 0,   0,                       3008, "whether or not this is a wood-framed wall extension of an existing wall (Section 150.2(a)1A)",  ""  ; SAC 4/30/18 - tic #798
+1,           "Exception",         BEMP_Sym,  1,  0,  0,   Opt,  "",                 0,   0,                       3008, "exterior wall exception: none, Wall Extension or Existing Wall w/ Siding",  ""  ; SAC 5/18/18 - replacement for IsWoodFrmdWallExt (tic #798)
+1,           "ExceptionRpt",      BEMP_Str,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "exterior wall exception: n/a, none, Extension or Ex. w/ Siding (for CF1R report)",  ""  ; SAC 5/19/18 - tic #798
+1,           "Tilt",              BEMP_Flt,  1,  0,  0,   Def,  "deg",              0,  0,                        6025, "Wall tilt (60 < wall < 180, 90-vertical, 180-floor, 0-ceiling)",  "" 
+1,           "Absorptivity",      BEMP_Flt,  1,  0,  0,  Pres,  "",                 0,  0,                        6015, "Absorptivity",  ""
+1,           "FrameSURFACE",      BEMP_Obj,  1,  0,  0,  NInp,  "",                 0,  1, "cseSURFACE",  0, "",  7010, "CSE SURFACE component to model Frame portion of wall",  "" 
+1,           "CavitySURFACE",     BEMP_Obj,  1,  0,  0,  NInp,  "",                 0,  1, "cseSURFACE",  0, "",  7010, "CSE SURFACE component to model Cavity portion of wall",  "" 
+1,           "ChildAreaSum",      BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,  0,                        6010, "Sum of child window & door areas",  "" 
+1,           "NetWallArea",       BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,  0,                        6010, "Wall area minus sum of child window & door area",  "" 
+1,           "FramingFactor",     BEMP_Flt,  1,  0,  0,  NInp,  "frac",             0,  0,                        6010, "Fraction of gross wall area that includes frame",  "" 
+
+			; AirNet calced (ExtWall)
+1,           "WinVentArea",       BEMP_Flt,  1,  0,  0,  Pres,  "ft2",              0,  0,                        3020, "Window vent area (operable window open area)",  "" 
+
+			; SAC 11/5/12 - added to support attic edge modeling
+; 1,           "AtcEdg_TopLength",  BEMP_Flt,  1,  0,  0,  Pres,  "ft",               0,   0,                       3008, "length of top edge of wall (estimate)",  ""
+			; SAC 12/26/12 - added to sum window area across all conditioned Zones & facilitate standard design wall/window/door replacement
+1,           "TotWinArea",        BEMP_Flt,  4,  1,  0,  Pres,  "ft2",              0,   0,                       3008, "total child window area (incl. window multipliers) (1-Total, 2-New/Altered (not add), 3-Existing, 4-Additions)",  ""
+1,           "ParentType",        BEMP_Int,  1,  0,  0,  Pres,  "",                 0,   0,                       3008, "1=>Conditioned Zone / 2=>Garage",  ""
+1,           "AreaByWallType",    BEMP_Flt,  5,  1,  0,  Pres,  "ft2",              0,   0,                       3008, "total exterior wall area by construction type (1-wood frm / 2-steel frm / 3-conc/CMU)",  ""
+1,        "TotWinAreaByWallType", BEMP_Flt,  5,  1,  0,  Pres,  "ft2",           0,   0,                       3008, "Total child window area by wall construction type (1-wood frm / 2-steel frm / 3-conc/CMU)",  ""
+1,        "NewWinAreaByWallType", BEMP_Flt,  5,  1,  0,  Pres,  "ft2",           0,   0,                       3008, "New child window area by wall construction type (1-wood frm / 2-steel frm / 3-conc/CMU)",  ""
+1,           "DoorAreaByWallType",BEMP_Flt,  5,  1,  0,  Pres,  "ft2",              0,   0,                       3008, "child door area by wall construction type (1-wood frm / 2-steel frm / 3-conc/CMU)",  ""
+1,           "TotDoorArea",       BEMP_Flt,  1,  0,  0,  Pres,  "ft2",              0,   0,                       3008, "total child door area",  ""
+1,           "IsStdCondZoneWall", BEMP_Int,  1,  0,  0,  Pres,  "",                 0,   0,                       3008, "",  ""
+1,           "StdWindow",         BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,   1, "ResWin",  0, "",     3208, "",  ""    
+1,           "StdDoor",           BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,   1, "ResDr", 0, "",       3208, "",  ""    
+			; SAC 6/10/13 - added to support summary reports of user/prop/std models
+1,           "RptTotWinArea",     BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,   0,                       3008, "total child window area (incl. window multipliers)",  ""
+;	mjb-10/22/13	mods for E+A+A	
+1,           "TotAltWinArea",     BEMP_Flt,  1,  0,  0,  Pres,  "ft2",              0,   0,                       3008, "total child Altered window area (incl. window multipliers)",  ""
+1,           "AWFWallsArea",      BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,   0,                       3008, "total AWF wall area (for children of conditioned zones only - used for SpeclFtr reporting)",  ""	; SAC 5/2/16
+1,           "MetalFrmArea",      BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,   0,                       3008, "total metal frame wall area (for children of conditioned zones only - used for SpeclFtr reporting)",  ""	; SAC 6/2/16
+1,           "SIPArea",           BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,   0,                       3008, "total SIP assembly area (for children of conditioned zones only - used for SpeclFtr reporting)",  ""	; SAC 6/2/16
+1,           "AltConsUValue",     BEMP_Flt,  1,  0,  0,  NInp,  "Btu/h-ft2-°F",     0,  0,                        6005, "Altered Wall Construction Uvalue",  ""    
+1,           "IsNew", 		  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall is New",  ""
+1,           "IsAltered", 	  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall is Altered",  ""
+1,           "IsExisting", 	  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall is Existing",  ""
+1,           "ParentIsNewZone",   BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall's parent is a New Zone",  ""
+1,           "ParentNotNewZone",  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall's parent is NOT a New Zone",  ""
+1,           "ParentIsCond",      BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall's parent is a Conditioned Zone (needed for any parent of Win or Skylt)",  ""  ; SAC 5/19/20 (tic #1221)
+1,           "QIIDegraded",       BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall's insulation is to be modeled as degraded (due to QII)",  ""  ; SAC 5/18/18 - tic #798
+1,           "QIINotDegraded",    BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall's insulation is not to be modeled as degraded (due to QII)",  ""
+			; SAC 2/20/15 - for EAA addition window areas
+1,           "IsEAAAddZoneChild", BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "indication that this surface is a child of an E+A+A Addition Zone",  ""
+; SAC 5/12/18 - removed HPXML object types to enable CF1R-XML
+;			; SAC 1/22/16 - object assignments facilitating HPXML export
+;1,           "HPWall",            BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "hpxWall",       1, "",  8006, "HPXML Wall object",  ""    
+;1,           "HPInsulation",      BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "hpxInsulation", 1, "",  8006, "HPXML Insulation object",  ""    
+;1,           "HPLayer_Cav",       BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "hpxLayer",      1, "",  8006, "HPXML Layer object (cavity insulation)",  ""    
+;1,           "HPLayer_Cont",      BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "hpxLayer",      1, "",  8006, "HPXML Layer object (continuous insulation)",  ""    
+;1,           "HPStuds",           BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "hpxStuds",      1, "",  8006, "HPXML Studs object",  ""    
+         ; SAC 1/29/17 - added to facilitate whole model generation
+1,           "Windows",           BEMP_Obj,  4,  0,  0,  NInp,  "",                 0,  1, "ResWin",  0, "",         3208, "Child Window(s) of this wall (auto-generated)",  "" 
+         ; SAC 3/7/18 - added to facilitate population of CF1R opaque surfaces table
+1,           "CF1R_OpqSrfRow",    BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cf1rtblRowOpaqueSurface",   1, "",  8006, "CF1R Opaque Surfaces Table Row object",  ""    
+         ; RJH 4/22/19 - added to facilitate population of CF1R existing opaque surfaces table
+1,           "CF1R_OpqSrfExistingRow",    BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cf1rtblRowOpaqueSurfaceExisting",   1, "",  8006, "CF1R Existing Opaque Surfaces Table Row object",  ""    
+
+1,           "ExtWallRef"         BEMP_Obj,  1,  0,  0,  NInp,  "",                 0,  1, "ExtWall",  0, "",       3008, "Create an ExtWall if the parent ResZn/ResOtherZn need to be simulated in EnergyPlus",  ""           
+;------------------------------------------------------------------------------------------------
+
+
+;------------------------------------------------------------------------------------------------
+;                   LName                       Template                   MD  MR  AC   Parent1    P2           P3           P4  P5  P6  P7  P8  P9  P10 P11 P12 P13 P14 P15 P16 P17 P18 P19 P20  MC  MS  bP  CF  SR  IN  PN   PN1        PN2               HI 
+;                  ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+0,  "ResIntWall",  "ResidentialInteriorWall",  "Res Int Wall <pi>-<i>",     0,  0,  0, "ResZn",   "ResGarage", "ResOtherZn", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",  -1,  1,  0,  0,  0,  0,  2, "IntWall", "Interior Wall",  6600
+;
+;                                 VType    NV  WA  SP    US    UL                UT  NO  OC         CV  CP              HI    LName                  
+;                                ----------------------------------------------------------------------------------------------
+;	mjb-11/27/13	mods for E+A+A	
+1,           "Status",            BEMP_Sym,  1,  0,  0,   Def,  "",                 0,  0,                        3008, "Status",  ""                                      
+1,           "IsVerified", 	  BEMP_Int,  1,  0,  0,   Def,  "",                 0,   0,                       3008, "existing wall conditions will be HERS verified",  ""
+1,           "Area",              BEMP_Flt,  1,  0,  0,  Comp,  "ft2",              0,  0,                        6010, "Wall area",  "" 
+1,           "Construction",      BEMP_Obj,  1,  0,  0,  Comp,  "",                 0,  1, "Cons",  10, "CanAssignTo",  6012, "Construction assembly",  "" 
+;	mjb-11/27/13	mods for E+A+A	
+1,           "exConstruction",    BEMP_Obj,  1,  0,  0,   Opt,  "",                 0,  1, "Cons",  10, "CanAssignTo",  3208, "existing construction for this (altered) wall object",  "" 
+			; retain OutsideDiffUnit for backward compatibility, but add new properties to identify two conditions here, whether or not the space on the other side is to be modeled
+1,           "OutsideDiffUnit",   BEMP_Int,  1,  0,  0,  Pres,  "",                 0,  0,                        3008, "whether or not the zone on the other side of this wall is part of a different dwelling unit",  ""
+1,           "IsPartySurface",    BEMP_Int,  1,  0,  0,   Def,  "",                 0,  0,                        3008, "whether or not the zone on the other side of this wall is part of a different dwelling unit",  ""
+1,           "OtherSideModeled",  BEMP_Int,  1,  0,  0,   Def,  "",                 0,  0,                        6005, "whether or not the zone on the other side of this party surface is included in the model",  ""    
+1,           "PartyEdgeArea",     BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,  0,                        6010, "Wall area that is flagged as 'Party Edge'",  "" 
+1,           "NetWallArea",       BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,  0,                        6010, "Wall area minus sum of child door area",  "" 
+1,           "ChildAreaSum",      BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,  0,                        6010, "Sum of child door areas",  "" 
+
+			; SAC 10/3/13 - '-1' as type value associated w/ 1st object reference class prevents "- none -" from appearing in dropdown lists
+1,           "Outside",           BEMP_Obj,  1,  0,  0,  CReq,  "",                 0,  5, "ResZn", -1, "",  "ResGarage", 0, "",  "ResAttic", 0, "",  "ResOtherZn", 0, "",  "Spc", 0, "",   6012, "The name of the zone (or garage or attic) on the other side of this wall (or none for adiabatic)",  ""   ; switched to CReq - SAC 10/13/22
+1,           "FrameSURFACE",      BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cseSURFACE",  0, "",          7010, "CSE SURFACE component to model Frame portion of wall",  "" 
+1,           "CavitySURFACE",     BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cseSURFACE",  0, "",          7010, "CSE SURFACE component to model Cavity portion of wall",  "" 
+1,           "FramingFactor",     BEMP_Flt,  1,  0,  0,  Pres,  "frac",             0,  0,                        6010, "Fraction of gross wall area that includes frame",  "" 
+1,         "ParCndZnAdjUZnArea",  BEMP_Flt,  1,  0,  0,  Pres,  "ft2",            0,  0,                        6010, "Area of wall between (parent) conditioned Zone & adjacent UncondZones",  "" 
+1,         "ParCndOZnAdjUZnArea", BEMP_Flt,  1,  0,  0,  Pres,  "ft2",            0,  0,                        6010, "Area of wall between (parent) conditioned OtherZone & adjacent UncondZones",  ""   ; SAC 11/30/20
+1,         "ParUZnAdjCndZnArea",  BEMP_Flt,  1,  0,  0,  Pres,  "ft2",            0,  0,                        6010, "Area of wall between (parent) UncondZone & adjacent conditioned Zone",  "" 
+1,         "ParUZnAdjCndOZnArea", BEMP_Flt,  1,  0,  0,  Pres,  "ft2",            0,  0,                        6010, "Area of wall between (parent) UncondZone & adjacent conditioned OtherZone",  ""   ; SAC 11/30/20
+1,           "InterCondZnArea",   BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,  0,                        3004, "Int wall area between two conditioned zones",  ""    
+1,           "InterCondWallHt",   BEMP_Flt,  1,  0,  0,  NInp,  "ft",               0,  0,                        3004, "Height of int wall between two conditioned zones",  ""    
+1,           "AirNetGarIZXFER",   BEMP_Obj,  1,  1,  0,  Pres,  "",                 0,  1, "cseIZXFER", 0, "",    3208, "Name of IZXFER (transfer through walls separating Garage & conditioned Zone)",  ""    
+1,           "AirNetDoorIZXFER",  BEMP_Obj,  2,  1,  0,  Pres,  "",                 0,  1, "cseIZXFER", 0, "",    3208, "Name of IZXFER (transfer through door between adjoining Zones)",  ""    
+1,           "AirNetPrtySrfIZXFER", BEMP_Obj, 2, 1,  0,  Pres,  "",                 0,  1, "cseIZXFER", 0, "",    3208, "Name of IZXFER (transfer through party surface between adjoining Zones (of different dwelling units))",  ""  ; SAC 6/7/13
+1,           "CndUCndAirNetIZXFERs",BEMP_Obj, 2, 1,  0,  Pres,  "",                 0,  1, "cseIZXFER", 0, "",    3008, "cse IZXFER objects for holes in IntWalls between Cond & Uncond Zones",  ""    ; SAC 11/30/20
+			; Internal Mass calcs/elements
+1,           "IMassIZWallArea",   BEMP_Flt,  1,  0,  0,  Pres,  "ft2",              0,  0,                        3008, "Inter-(conditioned)-zone wall area",  ""    
+				; SAC 1/28/13 - added to ensure proper number of surfaces assigned to each Zone & Garage prior to simulation
+1,           "SurfaceCount",      BEMP_Int,  1,  0,  0,  NInp,  "",                 0,  0,                        3008, "constant value of 1 for all standard interior surfaces",  ""
+1,           "IsDemising",        BEMP_Int,  1,  0,  0,  NInp,  "",                 0,  0,                        3008, "flag set to one if this wall separates Conditioned zone from Uncond or garage",  ""
+1,           "DemisingArea",      BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,  0,                        6010, "Demising wall area",  "" 
+;	mjb-11/27/13	mods for E+A+A	
+1,           "AltConsUValue",     BEMP_Flt,  1,  0,  0,  NInp,  "Btu/h-ft2-°F",     0,  0,                        6005, "Altered Wall Construction Uvalue",  ""    
+1,           "IsNew", 		  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall is New",  ""
+1,           "IsAltered", 	  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall is Altered",  ""
+1,           "IsExisting", 	  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall is Existing",  ""
+1,           "ParentIsNewZone",   BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall's parent is a New Zone",  ""
+1,           "ParentNotNewZone",  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall's parent is NOT a New Zone",  ""
+         ; SAC 3/7/18 - added to facilitate population of CF1R opaque surfaces table
+1,           "CF1R_OpqSrfRow",    BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cf1rtblRowOpaqueSurface",   1, "",  8006, "CF1R Opaque Surfaces Table Row object",  ""    
+         ; RJH 4/22/19 - added to facilitate population of CF1R existing opaque surfaces table
+1,           "CF1R_OpqSrfExistingRow",    BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cf1rtblRowOpaqueSurfaceExisting",   1, "",  8006, "CF1R Existing Opaque Surfaces Table Row object",  ""    
+
+1,           "IntWallRef"         BEMP_Obj,  1,  0,  0,  NInp,  "",                 0,  1, "IntWall",  0, "",       3008, "Create an IntWall if the parent ResZn/ResOtherZn need to be simulated in EnergyPlus",  ""           
+;------------------------------------------------------------------------------------------------
+
+
+;	mjb-10/9/13 added true azimuth for summary reports
+;------------------------------------------------------------------------------------------------
+;                     LName                          Template                    MD  MR  AC   Parent1   P2           P3  P4  P5  P6  P7  P8  P9  P10 P11 P12 P13 P14 P15 P16 P17 P18 P19 P20  MC  MS  bP  CF  SR  IN  PN   PN1        PN2                  HI 
+;                    ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+0,  "ResUndgrWall",  "ResidentialUndergroundWall",  "Res Und Wall <pi>-<i>",      0,  0,  0, "ResZn",  "ResOtherZn", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",  -1,  1,  0,  0,  0,  0,  2, "UndWall", "Underground Wall",  6600
+;
+;                                 VType    NV  WA  SP    US    UL                UT  NO  OC         CV  CP              HI    LName                  
+;                                ----------------------------------------------------------------------------------------------
+;	mjb-11/27/13	mods for E+A+A	
+1,           "Status",            BEMP_Sym,  1,  0,  0,   Def,  "",                 0,  0,                        3008, "Status",  ""                                      
+1,           "IsVerified", 	  BEMP_Int,  1,  0,  0,   Def,  "",                 0,   0,                       3008, "existing wall conditions will be HERS verified",  ""
+; 1,         "Orientation",       BEMP_Sym,  1,  0,  0,  Pres,  "",                 0,  0,                        6005, "Wall orientation",  ""    
+; 1,         "OrientationValue",  BEMP_Flt,  1,  0,  0,  Pres,  "deg",              0,  0,                        6005, "Wall orientation value (in relation to parent Zone azimuth)",  ""    
+; 1,         "Azimuth",           BEMP_Flt,  1,  0,  0,  Pres,  "deg",              0,  0,                        6005, "Actual (true) wall azimuth",  ""    
+1,           "DepthBelowGrade",   BEMP_Flt,  1,  0,  0,  Comp,  "ft",               0,  0,                        6010, "Depth of bottom of wall below grade",  "" 
+1,           "Area",              BEMP_Flt,  1,  0,  0,  Comp,  "ft2",              0,  0,                        6010, "Wall area",  "" 
+1,           "ZoneArea",          BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,  0,                        6010, "Wall area in conditioned zones",  "" 
+1,           "Construction",      BEMP_Obj,  1,  0,  0,  Comp,  "",                 0,  1, "Cons",  20, "CanAssignTo",  6012, "Construction assembly",  "" 
+;	mjb-11/27/13	mods for E+A+A	
+1,           "exConstruction",    BEMP_Obj,  1,  0,  0,   Opt,  "",                 0,  1, "Cons",  20, "CanAssignTo",  3208, "existing construction for this (altered) wall object",  "" 
+; 1,         "Tilt",              BEMP_Flt,  1,  0,  0,  Pres,  "deg",              0,  0,                        6025, "Wall tilt (60 < wall < 180, 90-vertical, 180-floor, 0-ceiling)",  "" 
+1,           "FramingFactor",     BEMP_Flt,  1,  0,  0,  Pres,  "frac",             0,  0,                        6010, "Fraction of gross wall area that includes frame",  "" 
+1,           "FrameSURFACE",      BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cseSURFACE",  0, "",  7010, "CSE SURFACE component to model Frame portion of wall",  "" 
+1,           "CavitySURFACE",     BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cseSURFACE",  0, "",  7010, "CSE SURFACE component to model Cavity portion of wall",  "" 
+;	mjb-11/27/13	mods for E+A+A	
+1,           "AltConsUValue",     BEMP_Flt,  1,  0,  0,  NInp,  "Btu/h-ft2-°F",     0,  0,                        6005, "Altered Wall Construction Uvalue",  ""    
+1,           "IsNew", 		  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall is New",  ""
+1,           "IsAltered", 	  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall is Altered",  ""
+1,           "IsExisting", 	  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall is Existing",  ""
+1,           "ParentIsNewZone",   BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall's parent is a New Zone",  ""
+1,           "ParentNotNewZone",  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall's parent is NOT a New Zone",  ""
+         ; SAC 3/7/18 - added to facilitate population of CF1R opaque surfaces table
+1,           "CF1R_OpqSrfRow",    BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cf1rtblRowOpaqueSurface",   1, "",  8006, "CF1R Opaque Surfaces Table Row object",  ""    
+         ; RJH 4/22/19 - added to facilitate population of CF1R existing opaque surfaces table
+1,           "CF1R_OpqSrfExistingRow",    BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cf1rtblRowOpaqueSurfaceExisting",   1, "",  8006, "CF1R Existing Opaque Surfaces Table Row object",  ""    
+;------------------------------------------------------------------------------------------------
+
+
+;	mjb-10/9/13 added true azimuth for summary reports
+;------------------------------------------------------------------------------------------------
+;                            LName                           Template                    MD  MR  AC   Parent1    P2           P3           P4  P5  P6  P7  P8  P9  P10 P11 P12 P13 P14 P15 P16 P17 P18 P19 P20  MC  MS  bP  CF  SR  IN  PN   PN1                 PN2                   HI 
+;                           ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+0,  "ResCathedralCeiling",  "ResidentialCathedralCeiling",  "Res Cath Clg <pi>-<i>",      0,  0,  0, "ResZn",   "ResGarage", "ResOtherZn", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",  -1,  1,  0,  0,  0,  0,  2, "CathedralCeiling", "Cathedral Ceiling",  7000
+;
+;                                 VType    NV  WA  SP    US    UL                UT  NO  OC         CV  CP              HI    LName                  
+;                                ----------------------------------------------------------------------------------------------
+;	mjb-10/31/13	mods for E+A+A	
+1,           "Status",            BEMP_Sym,  1,  0,  0,   Def,  "",                 0,  0,                       3008, "Status",  ""                                      
+1,           "IsVerified",        BEMP_Int,  1,  0,  0,   Def,  "",                 0,  0,                       3008, "existing ceiling conditions will be HERS verified",  ""
+1,           "Area",              BEMP_Flt,  1,  0,  0,  Comp,  "ft2",              0,  0,								6010, "Ceiling area",  "" 
+1,           "ZoneArea",          BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,  0,                       6010, "ceiling area in conditioned zones",  "" 
+1,           "RoofRise",          BEMP_Flt,  1,  0,  0,   Def,  "x in 12",          0,  0,								6010, "Roof rise (inches rise per 12 inches run)",  ""
+1,           "RoofPitch",         BEMP_Flt,  1,  0,  0,  Pres,  "",			          0,  0,								6010, "Roof pitch (inches rise / 12 inches run)",  ""
+1,           "RoofTilt",          BEMP_Flt,  1,  0,  0,  Pres,  "deg",		          0,  0,								6010, "Roof tilt (deg)",  ""    
+1,           "SteepSlope",        BEMP_Int,  1,  0,  0,  Pres,  "",                 0,  0,                       3212, "Steep slope => rise > 2:12",  ""    
+1,           "SteepRoofArea",     BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,  0,                       6010, "ceiling area of steep slope roof (rise > 2:12)",  "" 
+1,           "FlatRoofArea",      BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,  0,                       6010, "ceiling area of flat roof (rise <= 2:12)",  "" 
+1,           "Orientation",       BEMP_Sym,  1,  0,  0,   Def,  "",                 0,  0,								6010, "Wall orientation",  ""    
+1,           "OrientationValue",  BEMP_Flt,  1,  0,  0,   Def,  "deg",              0,  0,								6010, "Wall orientation value (in relation to parent Zone azimuth)",  ""    
+1,           "Azimuth",           BEMP_Flt,  1,  0,  0,  Pres,  "deg",              0,  0,                        6005, "Actual (true) wall azimuth",  ""    
+1,           "Construction",      BEMP_Obj,  1,  0,  0,  Comp,  "",                 0,  2, "Cons",   2, "CanAssignTo", "ConsAssm",  2, "CompatibleSurfType",  6012, "Construction assembly",  "" 
+;	mjb-10/31/13	mods for E+A+A	
+1,           "exConstruction",    BEMP_Obj,  1,  0,  0,   Opt,  "",                 0,  2, "Cons",   2, "CanAssignTo", "ConsAssm",  2, "CompatibleSurfType",  3208, "existing construction for this (altered) ceiling object",  "" 
+1,           "RoofSolReflect",    BEMP_Flt,  1,  0,  0,   Def,  "",                 0,  0,                            3001, "Roof surface solar reflectance",  ""     
+1,           "RoofEmiss",         BEMP_Flt,  1,  0,  0,   Def,  "",                 0,  0,                            6130, "Roof surface exterior long wave (thermal) emittance",  "" 
+1,           "exSolReflect",      BEMP_Flt,  1,  0,  0,  Pres,  "",                 0,   0,                       6005, "Existing roof Reflectance",  ""    
+1,           "exSolEmiss",        BEMP_Flt,  1,  0,  0,  Pres,  "",                 0,   0,                       6005, "Existing roof Emissivity",  ""    
+1,           "ChildAreaSum",      BEMP_Flt,  4,  1,  0,  NInp,  "ft2",              0,  0,								6010, "Sum of child skylight areas (incl. window multipliers) (1-Total, 2-New/Alt (not addition), 3-Existing, 4-Additions)",  "" 
+1,           "NetWallArea",       BEMP_Flt,  1,  0,  0,  Pres,  "ft2",              0,  0,								6010, "Ceiling area minus sum of child skylight area",  "" 
+1,           "FramingFactor",     BEMP_Flt,  1,  0,  0,  NInp,  "frac",             0,  0,								6010, "Fraction of gross ceiling area that includes frame",  "" 
+1,           "StdDesignCeiling",  BEMP_Obj,  1,  0,  0,  NInp,  "",                 0,  1, "CeilingBelowAttic", 0, "",  7010, "CeilingBelowAttic object that will replace this CathedralCeiling in the standard model",  "" 
+1,           "FrameSURFACE",      BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cseSURFACE",  0, "",        7010, "CSE SURFACE component to model Frame portion of ceiling",  "" 
+1,           "CavitySURFACE",     BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cseSURFACE",  0, "",        7010, "CSE SURFACE component to model Cavity portion of ceiling",  "" 
+;	mjb-10/31/13	mods for E+A+A	
+1,           "AltSolReflect",     BEMP_Flt,  1,  0,  0,  Pres,  "",                 0,   0,                       6005, "Altered roof Reflectance",  ""    
+1,           "AltSolEmiss",       BEMP_Flt,  1,  0,  0,  Pres,  "",                 0,   0,                       6005, "Altered roof Emissivity",  ""    
+1,           "AltConsUValue",     BEMP_Flt,  1,  0,  0,  NInp,  "Btu/h-ft2-°F",     0,  0,                        6005, "Altered ceiling Construction Uvalue",  ""    
+1,           "IsNew", 		  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this ceiling is New",  ""
+1,           "IsAltered", 	  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this ceiling is Altered",  ""
+1,           "IsExisting", 	  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this ceiling is Existing",  ""
+1,           "IsAlteredSurface",  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Roof Surface is Altered",  ""
+1,           "ParentIsNewZone",   BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall's parent is a New Zone",  ""
+1,           "ParentNotNewZone",  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall's parent is NOT a New Zone",  ""
+1,           "ParentIsCond",      BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall's parent is a Conditioned Zone (needed for any parent of Win or Skylt)",  ""  ; SAC 5/19/20 (tic #1221)
+			; SAC 2/20/15 - for EAA addition window areas
+1,           "IsEAAAddZoneChild", BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "indication that this surface is a child of an E+A+A Addition Zone",  ""
+1,           "SIPArea",           BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,   0,                       3008, "total SIP assembly area (for children of conditioned zones only - used for SpeclFtr reporting)",  ""	; SAC 6/2/16
+         ; SAC 5/14/18 - mods to handle Existing skylts in Altered CathedralCeilings (tic #843)
+1,           "AltClgExSkyltArea", BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,   0,                       3008, "sum of child Existing Skylt areas when this CathedralCeiling is Altered",  ""
+1,           "ExSkyltCathClgRef", BEMP_Obj,  1,  0,  0,  NInp,  "",                 0,   1, "CathedralCeiling", 0, "",  7010, "CathedralCeiling w/ Status = Existing that will house Existing Skylts (when this CC is Altered)",  "" 
+         ; SAC 3/7/18 - added to facilitate population of CF1R opaque surfaces table
+1,           "CF1R_OpqSrfRow",    BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cf1rtblRowOpaqueSurface",   1, "",  8006, "CF1R Opaque Surfaces Table Row object",  ""    
+1,           "SolReflSpclFtrs",   BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag to facilitate setting of global ResProj:SpeclFeatrs:CoolRoof flag",  ""  ; SAC 4/14/18 - tic #960
+         ; RJH 4/15/18 - added to facilitate population of CF1R Cathedral Ceiling table
+1,           "CF1R_CathedralCeilingRow", BEMP_Obj,  1,  0,  0,  Pres,  "",             0,  1, "cf1rtblRowCathedralCeiling",   1, "",  8006, "CF1R Cathedral Ceiling Table Row object",  ""    
+         ; RJH 5/26/20 - added to facilitate population of CF1R Section_CCeilingVA table per Ticket #1214
+1,           "CF1R_CCeilingExistingRow", BEMP_Obj,  1,  0,  0,  Pres,  "",             0,  1, "cf1rtblRowCCeilingExisting",   1, "",  8006, "CF1R Cathedral Ceiling Existing Table Row object",  ""    
+;------------------------------------------------------------------------------------------------
+
+
+;------------------------------------------------------------------------------------------------
+;                             LName                            Template                          MD  MR  AC   Parent1   P2           P3           P4  P5  P6  P7  P8  P9  P10 P11 P12 P13 P14 P15 P16 P17 P18 P19 P20  MC  MS  bP  CF  SR  IN  PN   PN1                  PN2                       HI 
+;                            --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+0,  "ResCeilingBelowAttic",  "ResidentialCeilingBelowAttic",  "Res Clg (blw attic) <pi>-<i>",     0,  0,  0, "ResZn",  "ResGarage", "ResOtherZn", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",  -1,  1,  0,  0,  0,  0,  2, "CeilingBelowAttic", "Ceiling (below attic)",  7000
+;
+;                                 VType    NV  WA  SP    US    UL                UT  NO  OC         CV  CP              HI    LName                  
+;                                ----------------------------------------------------------------------------------------------
+;	mjb-10/31/13	mods for E+A+A	
+1,           "Status",            BEMP_Sym,  1,  0,  0,   Def,  "",                 0,  0,                        3008, "Status",  ""                                      
+1,           "IsVerified",        BEMP_Int,  1,  0,  0,   Def,  "",                 0,  0,                        3008, "existing ceiling conditions will be HERS verified",  ""
+1,           "Area",              BEMP_Flt,  1,  0,  0,  Comp,  "ft2",              0,  0,                        6010, "Ceiling area",  "" 
+1,           "ZoneArea",          BEMP_Flt,  1,  0,  0,  Pres,  "ft2",              0,  0,                        6010, "Ceiling area in conditioned zones",  "" 
+1,           "Construction",      BEMP_Obj,  1,  0,  0,  Comp,  "",                 0,  1, "Cons",   3, "CanAssignTo",  6012, "Construction assembly",  "" 
+;	mjb-10/31/13	mods for E+A+A	
+1,           "exConstruction",    BEMP_Obj,  1,  0,  0,   Opt,  "",                 0,  1, "Cons",   3, "CanAssignTo",  3208, "existing construction for this (altered) ceiling object",  "" 
+1,           "AtticZone",         BEMP_Obj,  1,  0,  0,   Req,  "",                 0,  1, "ResAttic",    0, "",          6012, "The name of the attic zone above this ceiling",  "" 
+1,           "FrameSURFACE",      BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cseSURFACE",  0, "",          7010, "CSE SURFACE component to model Frame portion of ceiling",  "" 
+1,           "CavitySURFACE",     BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cseSURFACE",  0, "",          7010, "CSE SURFACE component to model Cavity portion of ceiling",  "" 
+; SAC 10/16/14 - moved from Zone to here to accommodate multiple Attics
+1,           "AtticBottom",       BEMP_Flt,  1,  0,  0,  Pres,  "ft",               0,  0,                        3020, "ZoneTopZ for this ceiling (based on parent Zone)",  "" 
+1,           "CSEZnEaveZ",        BEMP_Flt,  1,  0,  0,  Pres,  "ft",               0,  0,                        3020, "ZONE:znEaveZ for parent Zone (or Garage)",  "" 
+1,           "UncondAtticArea",   BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,  0,                        6010, "Unconditioned attic area (above ceiling)",  "" 
+1,           "ClVentableArea",    BEMP_Flt,  1,  0,  0,  Pres,  "ft2",              0,  0,                        3212, "Area adjacent to attic that can be used for cool venting (whole house fan)",  ""    
+1,           "ClVentableVolume",  BEMP_Flt,  1,  0,  0,  Pres,  "ft3",              0,  0,                        3212, "Volume of adjacent attic that can be used for cool venting (whole house fan)",  ""    
+1,           "CeilAirNetIZXFER",  BEMP_Obj,  1,  1,  0,  Pres,  "",                 0,  1, "cseIZXFER", 0, "",    3208, "Name of IZXFER between parent Zone and AtticZone",  ""    
+1,           "AtticBypassIZXFER", BEMP_Obj,  1,  1,  0,  Pres,  "",                 0,  1, "cseIZXFER", 0, "",    3208, "Name of IZXFER (attic bypass diode)",  ""    
+
+			; SAC 11/5/12 - added to support attic edge modeling
+1,           "AtcEdg_Length",     BEMP_Flt,  1,  0,  0,  Pres,  "ft",               0,  0,                                3008, "Attic edge length (estimate)",  ""
+1,           "AtcEdg_WAArea",     BEMP_Flt,  1,  0,  0,  Pres,  "ft2",              0,  0,                                3008, "Attic edge WA area (estimate)",  ""
+1,           "AtcEdg_WBArea",     BEMP_Flt,  1,  0,  0,  Pres,  "ft2",              0,  0,                                3008, "Attic edge WB area (estimate)",  ""
+1,           "AtcEdg_TotArea",    BEMP_Flt,  1,  0,  0,  Pres,  "ft2",              0,  0,                                3008, "Attic edge total area (estimate)",  ""
+1,           "AtcEdg_Msg",        BEMP_Str,  1,  0,  0,  Pres,  "",                 0,  0,                                3008, "",  ""
+1,           "AtcEdg_WAFrameSURFACE",  BEMP_Obj,  1,  0,  0,  Pres,  "",            0,  1, "cseSURFACE",  0, "",          7010, "CSE SURFACE component to model Frame portion of WA portion of attic edge",  "" 
+1,           "AtcEdg_WACavitySURFACE", BEMP_Obj,  1,  0,  0,  Pres,  "",            0,  1, "cseSURFACE",  0, "",          7010, "CSE SURFACE component to model Cavity portion of WA portion of attic edge",  "" 
+1,           "AtcEdg_WBFrameSURFACE",  BEMP_Obj,  1,  0,  0,  Pres,  "",            0,  1, "cseSURFACE",  0, "",          7010, "CSE SURFACE component to model Frame portion of WB portion of attic edge",  "" 
+1,           "AtcEdg_WBCavitySURFACE", BEMP_Obj,  1,  0,  0,  Pres,  "",            0,  1, "cseSURFACE",  0, "",          7010, "CSE SURFACE component to model Cavity portion of WB portion of attic edge",  "" 
+
+; SAC 10/15/14 - moved all attic edge properties from Cons TO here (to accommodate multiple attics)
+			; SAC 11/1/12 - added to support attic edge modeling
+1,           "AtcEdg_ClgCons",      BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "Cons", 3, "CanAssignTo",  6012, "Ceiling below attic construction assembly used to setup WA/WB constructions",  "" 
+1,           "AtcEdg_AtcCons",      BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "Cons", 1, "CanAssignTo",  6012, "Attic construction assembly used to setup WA/WB constructions",  "" 
+1,           "EdgCavityRTot",       BEMP_Flt,  1,  0,  0,  Pres,  "°F-ft2-h/Btu",     0,  0,                       11260, "Cavity total R-value",  ""   ; default to CavityLayer symbol value
+1,           "EdgInsulRValPerInch", BEMP_Flt,  1,  0,  0,  Pres,  "°F-ft2-h/Btu-in",  0,  0,                       11270, "R-Value per Inch",  ""       ; default to ResProj:InsulRValPerInch
+1,           "AtcEdg_Yl",           BEMP_Flt,  1,  0,  0,  Pres,  "",                 0,  0,                       11270, "Yl",  ""
+1,           "AtcEdg_Xl",           BEMP_Flt,  1,  0,  0,  Pres,  "",                 0,  0,                       11270, "Xl",  ""
+1,           "AtcEdg_Ym",           BEMP_Flt,  1,  0,  0,  Pres,  "",                 0,  0,                       11270, "Ym",  ""
+1,           "AtcEdg_InsulDepth",   BEMP_Flt,  1,  0,  0,  Pres,  "ft",               0,  0,                       11270, "Insulation depth",  ""
+1,           "AtcEdg_CalcPath",     BEMP_Sym,  1,  0,  0,  Pres,  "",                 0,  0,                       11170, "Attic edge calculation path (relationship beteween AtcEdg_InsulDepth, Y & Ym)",  "" 
+1,           "AtcEdg_WA",           BEMP_Flt,  1,  0,  0,  Pres,  "",                 0,  0,                       11270, "WA",  ""
+1,           "AtcEdg_WB",           BEMP_Flt,  1,  0,  0,  Pres,  "",                 0,  0,                       11270, "WB",  ""
+1,           "AtcEdg_HA",           BEMP_Flt,  1,  0,  0,  Pres,  "",                 0,  0,                       11270, "HA",  ""
+1,           "AtcEdg_HB",           BEMP_Flt,  1,  0,  0,  Pres,  "",                 0,  0,                       11270, "HB",  ""
+1,           "AtcEdg_HB1",          BEMP_Flt,  1,  0,  0,  Pres,  "",                 0,  0,                       11270, "HB1",  ""
+1,           "AtcEdg_HB2",          BEMP_Flt,  1,  0,  0,  Pres,  "",                 0,  0,                       11270, "HB2",  ""
+1,           "AtcEdg_HB3",          BEMP_Flt,  1,  0,  0,  Pres,  "",                 0,  0,                       11270, "HB3",  ""
+1,           "AtcEdg_ConsMsg",      BEMP_Str,  2,  1,  0,  Pres,  "",                 0,  0,                       11170, "",  "" 
+			; SAC 12/3/12 - define constructions that describe the WA & WB cathedral ceiling constructions
+1,           "AtcEdg_WACons",       BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "Cons", 2, "CanAssignTo",  6012, "Attic edge WA construction assembly",  "" 
+1,           "AtcEdg_WBCons",       BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "Cons", 2, "CanAssignTo",  6012, "Attic edge WB construction assembly",  "" 
+
+;	mjb-10/31/13	mods for E+A+A	; 2/20/14	added flag for CBAs that were CCs in Proposed Design, added UValue from CC
+1,           "AltConsUValue",     BEMP_Flt,  1,  0,  0,  NInp,  "Btu/h-ft2-°F",     0,  0,                        6005, "Altered Wall Construction Uvalue",  ""    
+1,           "IsNew", 		  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Ceiling is New",  ""
+1,           "IsAltered", 	  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Ceiling is Altered",  ""
+1,           "IsExisting", 	  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Ceiling is Existing",  ""
+1,           "ParentIsNewZone",   BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall's parent is a New Zone",  ""
+1,           "ParentNotNewZone",  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall's parent is NOT a New Zone",  ""
+1,           "WasCathCeil", 	  BEMP_Int,  1,  0,  0,  Pres,  "",                 0,   0,                       3008, "flag set if this CBA was a CC in Proposed Design",  ""
+1,           "CathCeilUValue",    BEMP_Flt,  1,  0,  0,  Pres,  "Btu/h-ft2-°F",     0,  0,                        6005, "Construction Uvalue before the sex change operation",  ""    
+1,           "AreaOverCond",      BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,  0,                        6010, "Ceiling area over conditioned zone(s)",  ""	; SAC 5/22/14 
+1,           "AreaOverNewZone",   BEMP_Flt,  1,  0,  0,  Pres,  "ft2",              0,  0,                        6010, "Ceiling area over new conditioned zone(s)",  ""	; EM 2/11/15
+1,           "HighRvalIns",       BEMP_Int,  1,  0,  0,  NInp,  "",                 0,  0,                        6010, "Floor has insulation Rval greater than Std",  ""	; mjb 11/14/14 - needed for Specl Feature reporting 
+
+1,           "AtcAirNetHoleSize",     BEMP_Flt,  1,  1,  0,  NInp,  "ft2",              0,  0,                        3208, "Size of 'hole' specified in attic air net IZXFER",  ""  ; SAC 11/17/16
+1,           "ICQAtticBypassApplies", BEMP_Int,  1,  1,  0,  NInp,  "",             0,  0,                        3208, "Whether or not a QII attic bypass diode reduction applies to this ceiling",  ""    ; SAC 5/14/18 - (tic #775)
+1,           "ICQAtticBypassUAMult",  BEMP_Flt,  1,  1,  0,  NInp,  "",             0,  0,                        3208, "ICQ-dependent multiplier for bypass UA (attic bypass diode)",  ""    ; SAC 5/9/18 - (tic #775)
+
+; SAC 5/12/18 - removed HPXML object types to enable CF1R-XML
+;1,           "HPAttic",	   BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "hpxAttic", 0, "",                6010, "hpxml Attic object",  ""	; EM 1/29/16
+;1,           "HPAtticFloorInsul", BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "hpxAtticFloorInsulation", 0, "", 6010, "hpxml AtticFloorInsulation object",  ""	; EM 1/29/16
+         ; SAC 3/7/18 - added to facilitate population of CF1R opaque surfaces table
+1,           "CF1R_OpqSrfRow",    BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cf1rtblRowOpaqueSurface",   1, "",  8006, "CF1R Opaque Surfaces Table Row object",  ""    
+         ; RJH 4/22/19 - added to facilitate population of CF1R existing opaque surfaces table
+1,           "CF1R_OpqSrfExistingRow",    BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cf1rtblRowOpaqueSurfaceExisting",   1, "",  8006, "CF1R Existing Opaque Surfaces Table Row object",  ""    
+;------------------------------------------------------------------------------------------------
+
+
+;------------------------------------------------------------------------------------------------
+;                      LName                          Template                    MD  MR  AC   Parent1   P2           P3           P4  P5  P6  P7  P8  P9  P10 P11 P12 P13 P14 P15 P16 P17 P18 P19 P20  MC  MS  bP  CF  SR  IN  PN   PN1                PN2                  HI 
+;                     -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+0,  "ResIntCeiling",  "ResidentialInteriorCeiling",  "Res Int Clg <pi>-<i>",       0,  0,  0, "ResZn",  "ResGarage", "ResOtherZn", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",  -1,  1,  0,  0,  0,  0,  2, "InteriorCeiling", "Interior Ceiling",  7000
+; removed parent types to avoid having this show up (though disabled) in child creation lists for zones & garages
+; SAC 9/30/13 - restored to allow for party surfaces in multi-family buildings
+; 0,  "InteriorCeiling",   "Interior Ceiling",  "Int Clg <pi>-<i>",     300,  0,  0, "",   "", "", "", "", "", "", "", "", "", "", "", "", "", "",  -1,  1,  0,  0,  0,  0,   7000
+;
+;                                 VType    NV  WA  SP    US    UL                UT  NO  OC         CV  CP              HI    LName                  
+;                                ----------------------------------------------------------------------------------------------
+1,           "Status",            BEMP_Sym,  1,  0,  0,   Def,  "",                 0,  0,                        										3008, "Status",  ""                                      
+1,           "IsVerified", 	  BEMP_Int,  1,  0,  0,   Def,  "",                 0,  0,                       										3008, "existing ceiling conditions will be HERS verified",  ""
+1,           "Area",              BEMP_Flt,  1,  0,  0,  Comp,  "ft2",              0,  0,                        6010, "Ceiling area",  "" 
+1,           "ZoneArea",          BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,  0,                        6010, "Ceiling area in conditioned zones",  "" 
+1,           "Construction",      BEMP_Obj,  1,  0,  0,  Comp,  "",                 0,  1, "Cons",     6, "CanAssignTo",  6012, "Construction assembly",  "" 
+1,           "exConstruction",    BEMP_Obj,  1,  0,  0,   Opt,  "",                 0,  1, "Cons",  6, "CanAssignTo",  3208, "existing construction for this (altered) ceiling object",  "" 
+;			em 4/9/15 
+1,           "IsPartySurface",    BEMP_Int,  1,  0,  0,   Def,  "",                 0,  0,                        3008, "whether or not the zone on the other side of this floor is part of a different dwelling unit",  ""
+1,           "OtherSideModeled",  BEMP_Int,  1,  0,  0,   Def,  "",                 0,  0,                        6005, "whether or not the zone on the other side of this party surface is included in the model",  ""    
+1,           "PartyEdgeArea",     BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,  0,                        6010, "Floor area that is flagged as 'Party Edge'",  "" 
+
+			; SAC 10/3/13 - '-1' as type value associated w/ 1st object reference class prevents "- none -" from appearing in dropdown lists
+1,           "Outside",           BEMP_Obj,  1,  0,  0,  CReq,  "",                 0,  4, "Zone", -1, "",  "Garage", -1, "",  "OtherZone", 0, "",  "Spc", 0, "",  6012, "This zone or the name of the zone above this ceiling",  ""      ; switched to CReq - SAC 10/13/22
+1,           "OutsideDiffUnit",   BEMP_Int,  1,  0,  0,  Pres,  "",                 0,  0,                                3008, "whether or not the zone on the other side of this ceiling is part of a different dwelling unit",  ""
+1,           "FramingFactor",     BEMP_Flt,  1,  0,  0,  Pres,  "frac",             0,  0,                                6010, "Fraction of gross ceiling area that includes frame",  "" 
+1,           "FrameSURFACE",      BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cseSURFACE",  0, "",          7010, "CSE SURFACE component to model Frame portion of ceiling",  "" 
+1,           "CavitySURFACE",     BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cseSURFACE",  0, "",          7010, "CSE SURFACE component to model Cavity portion of ceiling",  "" 
+1,         "ParUZnAdjCndZnArea",  BEMP_Flt,  1,  0,  0,  Pres,  "ft2",            0,  0,                                6010, "Area of ceiling between (parent) UncondZone & adjacent conditioned Zone",  "" 
+1,         "ParUZnAdjCndOZnArea", BEMP_Flt,  1,  0,  0,  Pres,  "ft2",            0,  0,                                6010, "Area of ceiling between (parent) UncondZone & adjacent conditioned OtherZone",  ""   ; SAC 11/30/20
+1,           "InterCondZnArea",   BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,  0,                                3004, "Int ceiling area between two conditioned zones",  ""    
+1,           "ELA_Floor",         BEMP_Flt,  1,  0,  0,  Pres,  "ft2",              0,  0,                         			3008, "Effective Leakage Area through floor/ceiling separating Garage & conditioned Zone (for AirNet)",  ""
+1,           "AirNetGarIZXFER",   BEMP_Obj,  1,  1,  0,  Pres,  "",                 0,  1, "cseIZXFER", 0, "",    			3208, "Name of IZXFER (transfer through floor/ceiling separating Garage & conditioned Zone)",  ""    
+1,           "AirNetStairIZXFER", BEMP_Obj,  2,  1,  0,  Pres,  "",                 0,  1, "cseIZXFER", 0, "",            3208, "Name of IZXFER (transfer through stairway between adjoining Zones)",  ""    
+1,           "AirNetPrtySrfIZXFER", BEMP_Obj, 1, 1,  0,  Pres,  "",                 0,  1, "cseIZXFER", 0, "",            3208, "Name of IZXFER (transfer through party surface between adjoining Zones (of different dwelling units))",  ""  ; SAC 8/26/14
+				; SAC 1/28/13 - added to ensure proper number of surfaces assigned to each Zone & Garage prior to simulation
+1,           "SurfaceCount",      BEMP_Int,  1,  0,  0,  Pres,  "",                 0,   0,                       3008, "constant value of 1 for all standard interior surfaces",  ""
+1,           "IsDemising",        BEMP_Int,  1,  0,  0,  NInp,  "",                 0,  0,                        3008, "flag set to one if this ceiling separates Conditioned zone from Uncond or garage",  ""
+1,           "DemisingArea",      BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,  0,                        6010, "Demising ceiling area",  "" 
+			; for E+A+A	
+1,           "AltConsUValue",     BEMP_Flt,  1,  0,  0,  NInp,  "Btu/h-ft2-°F",     0,   0,                       6005, "Altered Ceiling Construction Uvalue",  ""    
+1,           "IsNew", 		  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Ceiling is New",  ""
+1,           "IsAltered", 	  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Ceiling is Altered",  ""
+1,           "IsExisting", 	  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Ceiling is Existing",  ""
+1,           "ParentIsNewZone",   BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall's parent is a New Zone",  ""
+1,           "ParentNotNewZone",  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall's parent is NOT a New Zone",  ""
+         ; SAC 3/7/18 - added to facilitate population of CF1R opaque surfaces table
+1,           "CF1R_OpqSrfRow",    BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cf1rtblRowOpaqueSurface",   1, "",  8006, "CF1R Opaque Surfaces Table Row object",  ""    
+         ; RJH 4/22/19 - added to facilitate population of CF1R existing opaque surfaces table
+1,           "CF1R_OpqSrfExistingRow",    BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cf1rtblRowOpaqueSurfaceExisting",   1, "",  8006, "CF1R Existing Opaque Surfaces Table Row object",  ""    
+;------------------------------------------------------------------------------------------------
+
+
+;------------------------------------------------------------------------------------------------
+;                   LName                     Template                   MD  MR  AC   Parent1   P2           P3           P4  P5  P6  P7  P8  P9  P10 P11 P12 P13 P14 P15 P16 P17 P18 P19 P20  MC  MS  bP  CF  SR  IN  PN   PN1          PN2               HI 
+;                  --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+0,  "ResSlabFlr",  "ResidentialSlabFloor",   "Res Slab Flr <pi>-<i>",     0,  0,  0, "ResZn",  "ResGarage", "ResOtherZn", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",  -1,  1,  0,  0,  0,  0,  2, "SlabFloor", "Slab On Grade",  7000
+;
+;                                  VType    NV  WA  SP    US    UL                UT  NO  OC         CV  CP              HI    LName                  
+;                                 ----------------------------------------------------------------------------------------------
+;	mjb-11/27/13	mods for E+A+A	
+1,           "Status",             BEMP_Sym,  1,  0,  0,   Def,  "",                 0,  0,                        3008, "Status",  ""                                      
+1,           "IsVerified", 	   BEMP_Int,  1,  0,  0,   Def,  "",                 0,   0,                       3008, "existing slab floor conditions will be HERS verified",  ""
+1,           "Area",               BEMP_Flt,  1,  0,  0,  Comp,  "ft2",              0,  0,                        6010, "Floor area",  "" 
+1,           "FloorZ",             BEMP_Flt,  1,  0,  0,   Opt,  "ft",               0,  0,                        6010, "Floor elevation (Z)",  ""  ; (not currently used in analysis)
+; 1,           "Construction",     BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "Cons",     7, "CanAssignTo",  6012, "Construction assembly",  "" 
+1,           "Surface",            BEMP_Sym,  1,  0,  0,   Def,  "",                 0,  0,                        6012, "Description of surface (carpeted vs. exposed)",  "" 
+1,           "Perimeter",          BEMP_Flt,  1,  0,  0,  Comp,  "ft",               0,  0,                        6012, "Length of the slab perimeter",  "" 
+1,           "HeatedSlab",         BEMP_Int,  1,  0,  0,   Def,  "",                 0,  0,                        6012, "Whether or not the slab is heated",  "" 
+1,           "EdgeInsulation",     BEMP_Int,  1,  0,  0,   Def,  "",                 0,  0,                        6012, "Whether or not edge insulation is present",  "" 
+1,           "EdgeInsulRValue",    BEMP_Flt,  1,  0,  0,  NInp,  "°F-ft2-h/Btu",     0,  0,                        6012, "Edge insulation R-value",  ""                         ; UNUSED
+1,           "EdgeInsulDepth",     BEMP_Flt,  1,  0,  0,  NInp,  "in",               0,  0,                        6012, "Edge insulation depth (in inches)",  ""               ; UNUSED
+1,           "EdgeInsulOption",    BEMP_Sym,  1,  0,  0,   Def,  "",                 0,  0,                        6012, "Edge insulation R-value & depth (in inches)",  ""
+1,           "HasEdgeInsul",       BEMP_Int,  1,  0,  0,  NInp,  "",                 0,  0,                        6012, "Wether or not this slab has edge insulation",  ""
+;	mjb-11/27/13	mods for E+A+A	
+; 1,           "exConstruction",   BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "Cons", 7, "CanAssignTo",  3208, "existing construction for this (altered) wall object",  "" 
+1,           "exSurface",          BEMP_Sym,  1,  0,  0,   Def,  "",                 0,  0,                        6012, "Description of surface (carpeted vs. exposed)",  "" 
+1,           "exEdgeInsulation",   BEMP_Int,  1,  0,  0,   Def,  "",                 0,  0,                        6012, "Whether or not existing edge insulation is present",  "" 
+1,           "exEdgeInsulOption",  BEMP_Sym,  1,  0,  0,   Def,  "",                 0,  0,                        6012, "Existing Edge insulation R-value & depth (in inches)",  ""
+1,           "exEdgeInsulRValue",  BEMP_Flt,  1,  0,  0,  NInp,  "°F-ft2-h/Btu",     0,  0,                        6012, "Existing Edge insulation R-value",  ""                         ; UNUSED
+1,           "exEdgeInsulDepth",   BEMP_Flt,  1,  0,  0,  NInp,  "in",               0,  0,                        6012, "Existing Edge insulation depth (in inches)",  ""               ; UNUSED
+1,           "CarpetedFrac",       BEMP_Flt,  1,  0,  0,  Pres,  "frac",             0,  0,                        6010, "Fraction of slab area that is carpeted",  "" 
+1,           "CarpetedArea",       BEMP_Flt,  1,  0,  0,  Pres,  "ft2",              0,  0,                        6010, "Carpeted floor area",  "" 
+1,           "ExposedArea",        BEMP_Flt,  1,  0,  0,  Pres,  "ft2",              0,  0,                        6010, "Exposed floor area",  "" 
+1,           "CondZnExposedArea",  BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,  0,                        6010, "Exposed floor area (whose parent is a conditioned zone)",  "" 
+1,           "CondZnArea",         BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,  0,                        6010, "Floor area (whose parent is a conditioned zone)",  "" 
+1,           "PerimCptSURFACE",    BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cseSURFACE",  0, "",  7010, "CSE SURFACE component to model Perimeter carpeted portion of floor",  "" 
+1,           "PerimExpSURFACE",    BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cseSURFACE",  0, "",  7010, "CSE SURFACE component to model Perimeter exposed portion of floor",  "" 
+1,           "InteriorCptSURFACE", BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cseSURFACE",  0, "",  7010, "CSE SURFACE component to model Interior carpeted portion of floor",  "" 
+1,           "InteriorExpSURFACE", BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cseSURFACE",  0, "",  7010, "CSE SURFACE component to model Interior exposed portion of floor",  "" 
+;	mjb-11/27/13	mods for E+A+A	
+1,           "AltEdgeRValue",      BEMP_Flt,  1,  0,  0,  NInp,  "°F-ft2-h/Btu",     0,   0,                       6005, "Altered Slab Edge Insul Rvalue",  ""    
+1,           "AltEdgeDepth",       BEMP_Flt,  1,  0,  0,  NInp,  "in",               0,   0,                       6005, "Altered Slab Edge Insul Depth",  ""    
+1,           "IsNew", 		   BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall is New",  ""
+1,           "IsAltered", 	   BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall is Altered",  ""
+1,           "IsExisting", 	   BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall is Existing",  ""
+         ; RJH 5/1/18 - added to facilitate population of CF1R slab floor table
+1,           "CF1R_SlabFloorRow",    BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cf1rtblRowSlabFloor",   1, "",  8006, "CF1R Slab Floors Table Row object",  ""    
+         ; RJH 4/22/19 - added to facilitate population of CF1R existing slab floor table
+1,           "CF1R_SlabFloorRowExisting",    BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cf1rtblRowSlabFloorExisting",   1, "",  8006, "CF1R Existing Slab Floor Table Row object" ,  ""   
+
+1,           "UndgrFlrRef"        BEMP_Obj,  1,  0,  0,  NInp,  "",                 0,  1, "UndgrFlr",  0, "",       3008, "Create an UndgrFlr if the parent ResZn/ResOtherZn need to be simulated in EnergyPlus",  ""        
+;------------------------------------------------------------------------------------------------
+
+
+;------------------------------------------------------------------------------------------------
+;                  LName                        Template                  MD  MR  AC   Parent1   P2           P3           P4  P5  P6  P7  P8  P9  P10 P11 P12 P13 P14 P15 P16 P17 P18 P19 P20  MC  MS  bP  CF  SR  IN  PN   PN1              PN2                HI 
+;                 ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+0,  "ResExtFlr",  "ResidentialExteriorFloor",  "Res Ext Flr <pi>-<i>",     0,  0,  0, "ResZn",  "ResGarage", "ResOtherZn", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",  -1,  1,  0,  0,  0,  0,  2, "ExteriorFloor", "Exterior Floor",  7000
+;
+;                                 VType    NV  WA  SP    US    UL                UT  NO  OC         CV  CP              HI    LName                  
+;                                ----------------------------------------------------------------------------------------------
+1,           "Type",              BEMP_Sym,  1,  0,  0,  Pres,  "",                 0,  0,                        6012, "Exterior floor type",  "" 
+;	mjb-10/31/13	mods for E+A+A	
+1,           "Status",            BEMP_Sym,  1,  0,  0,   Def,  "",                 0,  0,                        3008, "Status",  ""                                      
+1,           "IsVerified",        BEMP_Int,  1,  0,  0,   Def,  "",                 0,  0,                        3008, "existing floor conditions will be HERS verified",  ""
+1,           "Area",              BEMP_Flt,  1,  0,  0,  Comp,  "ft2",              0,  0,                        6010, "Floor area",  "" 
+1,           "ZoneArea",          BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,  0,                        6010, "floor area in conditioned zones",  "" 
+1,           "FloorZ",            BEMP_Flt,  1,  0,  0,  Comp,  "ft",               0,  0,                        6010, "Floor elevation (Z)",  "" 
+1,           "MinFloorZ",         BEMP_Flt,  1,  0,  0,  Pres,  "ft",               0,  0,                        6010, "Minimum Floor elevation (Z)",  "" 
+1,           "Construction",      BEMP_Obj,  1,  0,  0,  Comp,  "",                 0,  2, "Cons",  5, "CanAssignTo", "ConsAssm",  3, "CompatibleSurfType",  6012, "Construction assembly" ,  ""
+;	mjb-10/31/13	mods for E+A+A	
+1,           "exConstruction",    BEMP_Obj,  1,  0,  0,   Opt,  "",                 0,  2, "Cons",  5, "CanAssignTo", "ConsAssm",  3, "CompatibleSurfType",  3208, "existing construction for this (altered) floor object",  "" 
+1,           "FrameSURFACE",      BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cseSURFACE",  0, "",          7010, "CSE SURFACE component to model Frame portion of floor",  "" 
+1,           "CavitySURFACE",     BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cseSURFACE",  0, "",          7010, "CSE SURFACE component to model Cavity portion of floor",  "" 
+1,           "FramingFactor",     BEMP_Flt,  1,  0,  0,  Pres,  "frac",             0,  0,                        6010, "Fraction of gross floor area that includes frame",  "" 
+; 1,         "AreaAboveExterior", BEMP_Flt,  1,  0,  0,  Pres,  "ft2",              0,  0,                        6010, "area above exterior (not crawl space)",  "" 
+; 1,         "AreaAboveCrawl",    BEMP_Flt,  1,  0,  0,  Pres,  "ft2",              0,  0,                        6010, "area above crawl space",  "" 
+1,           "FloorELA_Ext",      BEMP_Flt,  1,  0,  0,  Pres,  "",                 0,  0,                        6010, "AirNet ELA for exterior floor (not above crawl space)",  "" 
+; 1,         "FloorELA_Crawl",    BEMP_Flt,  1,  0,  0,  Pres,  "",                 0,  0,                        6010, "AirNet ELA for exterior floor above crawl space",  "" 
+1,           "AirNetIZXFER_Ext",  BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cseIZXFER", 0, "",    3208, "Name of ExtFloor IZXFER - exterior",  ""    
+; 1,         "AirNetIZXFER_Crl",  BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cseIZXFER", 0, "",    3208, "Name of ExtFloor IZXFER - over crawl space",  ""    
+;	mjb-10/31/13	mods for E+A+A	
+1,           "AltConsUValue",     BEMP_Flt,  1,  0,  0,  NInp,  "Btu/h-ft2-°F",     0,  0,                        6005, "Altered Wall Construction Uvalue",  ""    
+1,           "IsNew",             BEMP_Int,  1,  0,  0,  Pres,  "",                 0,   0,                       3008, "flag set if this Wall is New",  ""
+1,           "IsAltered",         BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall is Altered",  ""
+1,           "IsExisting", 	  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall is Existing",  ""
+1,           "ParentIsNewZone",   BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall's parent is a New Zone",  ""
+1,           "ParentNotNewZone",  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall's parent is NOT a New Zone",  ""
+1,           "HighRvalIns",       BEMP_Int,  1,  0,  0,  NInp,  "",                 0,  0,                        6010, "Floor has insulation Rval greater than Std",  ""	; mjb 11/14/14 - needed for Specl Feature reporting 
+1,           "SIPArea",           BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,   0,                       3008, "total SIP assembly area (for children of conditioned zones only - used for SpeclFtr reporting)",  ""	; SAC 6/2/16
+         ; SAC 3/7/18 - added to facilitate population of CF1R opaque surfaces table
+1,           "CF1R_OpqSrfRow",    BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cf1rtblRowOpaqueSurface",   1, "",  8006, "CF1R Opaque Surfaces Table Row object",  ""    
+         ; RJH 4/22/19 - added to facilitate population of CF1R existing opaque surfaces table
+1,           "CF1R_OpqSrfExistingRow", BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cf1rtblRowOpaqueSurfaceExisting",   1, "",  8006, "CF1R Existing Opaque Surfaces Table Row object",  ""    
+;------------------------------------------------------------------------------------------------
+
+
+;------------------------------------------------------------------------------------------------
+;                           LName                              Template                       MD  MR  AC   Parent1   P2           P3           P4  P5  P6  P7  P8  P9  P10 P11 P12 P13 P14 P15 P16 P17 P18 P19 P20  MC  MS  bP  CF  SR  IN  PN   PN1               PN2                       HI 
+;                          ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+0,  "ResFlrOverCrawlSpc",  "ResidentialFloorOverCrawlSpace",  "Res Flr Ovr Crwl <pi>-<i>",     0,  0,  0, "ResZn",  "ResGarage", "ResOtherZn", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",  -1,  1,  0,  0,  0,  0,  2, "FloorOverCrawl", "Floor Over Crawlspace",  7000
+;
+;                                 VType    NV  WA  SP    US    UL                UT  NO  OC         CV  CP              HI    LName                  
+;                                ----------------------------------------------------------------------------------------------
+;	mjb-10/31/13	mods for E+A+A	
+1,           "Status",            BEMP_Sym,  1,  0,  0,   Def,  "",                 0,  0,                        3008, "Status",  ""                                      
+1,           "IsVerified", 	  BEMP_Int,  1,  0,  0,   Def,  "",                 0,   0,                       3008, "existing floor conditions will be HERS verified",  ""
+1,           "Area",              BEMP_Flt,  1,  0,  0,  Comp,  "ft2",              0,  0,                        6010, "Floor area",  "" 
+1,           "ZoneArea",          BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,  0,                        6010, "floor area in conditioned zones",  "" 
+1,           "FloorZ",            BEMP_Flt,  1,  0,  0,  Comp,  "ft",               0,  0,                        6010, "Floor elevation (Z)",  "" 
+1,           "MinFloorZ",         BEMP_Flt,  1,  0,  0,  Pres,  "ft",               0,  0,                        6010, "Minimum Floor elevation (Z)",  "" 
+1,           "Construction",      BEMP_Obj,  1,  0,  0,  Comp,  "",                 0,  1, "Cons",  9, "CanAssignTo",  6012, "Construction assembly",  "" 
+;	mjb-10/31/13	mods for E+A+A	
+1,           "exConstruction",    BEMP_Obj,  1,  0,  0,   Opt,  "",                 0,  1, "Cons",  9, "CanAssignTo",  3208, "existing construction for this (altered) floor object",  "" 
+1,           "FrameSURFACE",      BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cseSURFACE",  0, "",          7010, "CSE SURFACE component to model Frame portion of floor",  ""
+1,           "CavitySURFACE",     BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cseSURFACE",  0, "",          7010, "CSE SURFACE component to model Cavity portion of floor",  "" 
+1,           "FramingFactor",     BEMP_Flt,  1,  0,  0,  Pres,  "frac",             0,  0,                        6010, "Fraction of gross floor area that includes frame",  "" 
+
+1,           "FloorELA_Crawl",    BEMP_Flt,  1,  0,  0,  Pres,  "",                 0,  0,                        6010, "AirNet ELA for exterior floor above crawl space",  "" 
+1,           "AirNetIZXFER_Crl",  BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cseIZXFER", 0, "",    3208, "Name of ExtFloor IZXFER - over crawl space",  ""    
+;	mjb-10/31/13	mods for E+A+A	
+1,           "AltConsUValue",     BEMP_Flt,  1,  0,  0,  NInp,  "Btu/h-ft2-°F",     0,  0,                        6005, "Altered floor Construction Uvalue",  ""    
+1,           "IsNew", 		  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this floor is New",  ""
+1,           "IsAltered", 	  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this floor is Altered",  ""
+1,           "IsExisting", 	  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this floor is Existing",  ""
+1,           "ParentIsNewZone",   BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall's parent is a New Zone",  ""
+1,           "ParentNotNewZone",  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall's parent is NOT a New Zone",  ""
+1,           "HighRvalIns",       BEMP_Int,  1,  0,  0,  NInp,  "",                 0,  0,                        6010, "Floor has insulation Rval greater than Std",  ""	; mjb 11/14/14 - needed for Specl Feature reporting 
+1,           "SIPArea",           BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,   0,                       3008, "total SIP assembly area (for children of conditioned zones only - used for SpeclFtr reporting)",  ""	; SAC 6/2/16
+         ; SAC 3/7/18 - added to facilitate population of CF1R opaque surfaces table
+1,           "CF1R_OpqSrfRow",    BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cf1rtblRowOpaqueSurface",   1, "",  8006, "CF1R Opaque Surfaces Table Row object",  ""    
+         ; RJH 4/22/19 - added to facilitate population of CF1R existing opaque surfaces table
+1,           "CF1R_OpqSrfExistingRow", BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cf1rtblRowOpaqueSurfaceExisting",   1, "",  8006, "CF1R Existing Opaque Surfaces Table Row object",  ""    
+;------------------------------------------------------------------------------------------------
+
+
+;------------------------------------------------------------------------------------------------
+;                  LName                        Template                  MD  MR  AC   Parent1   P2           P3  P4  P5  P6  P7  P8  P9  P10 P11 P12 P13 P14 P15 P16 P17 P18 P19 P20  MC  MS  bP  CF  SR  IN  PN   PN1              PN2                HI 
+;                 ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+0,  "ResIntFlr",  "ResidentialInteriorFloor",  "Res Int Flr <pi>-<i>",     0,  0,  0, "ResZn",  "ResOtherZn", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",  -1,  1,  0,  0,  0,  0,  2, "InteriorFloor", "Interior Floor",  7000
+;
+;                                 VType     NV  WA  SP    US    UL                UT  NO   OC         CV  CP             OC2        CV2 CP2    HI    LName                  
+;                                --------------------------------------------------------------------------------------------------------------------
+; 1,           "Type",              BEMP_Sym,  1,  0,  0,  Pres,  "",                 0,  0,                                                     6012, "Exterior floor type",  "" 
+;	mjb-12/3/13	mods for E+A+A	
+1,           "Status",            BEMP_Sym,  1,  0,  0,   Def,  "",                 0,  0,                        										3008, "Status",  ""                                      
+1,           "IsVerified", 	  BEMP_Int,  1,  0,  0,   Def,  "",                 0,  0,                       										3008, "existing floor conditions will be HERS verified",  ""
+1,           "Area",              BEMP_Flt,  1,  0,  0,  Comp,  "ft2",              0,  0,                                                     6010, "Floor area",  "" 
+1,           "ZoneArea",          BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,  0,                        										6010, "floor area in conditioned zones",  "" 
+1,           "FloorZ",            BEMP_Flt,  1,  0,  0,  Comp,  "ft",               0,  0,                                                     6010, "Floor elevation (Z)",  "" 
+1,           "MinFloorZ",         BEMP_Flt,  1,  0,  0,  Pres,  "ft",               0,  0,                        6010, "Minimum Floor elevation (Z)",  "" 
+1,           "Construction",      BEMP_Obj,  1,  0,  0,  Comp,  "",                 0,  1, "Cons",     4, "CanAssignTo",                       6012, "Construction assembly",  "" 
+;			em 4/9/15 
+1,           "IsPartySurface",    BEMP_Int,  1,  0,  0,   Def,  "",                 0,  0,                        3008, "whether or not the zone on the other side of this floor is part of a different dwelling unit",  ""
+1,           "OtherSideModeled",  BEMP_Int,  1,  0,  0,   Def,  "",                 0,  0,                        6005, "whether or not the zone on the other side of this party surface is included in the model",  ""    
+1,           "PartyEdgeArea",     BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,  0,                        6010, "Floor area that is flagged as 'Party Edge'",  "" 
+
+;	mjb-12/3/13	mods for E+A+A	
+1,           "exConstruction",    BEMP_Obj,  1,  0,  0,   Opt,  "",                 0,  1, "Cons",  4, "CanAssignTo",  3208, "existing construction for this (altered) floor object",  "" 
+			; SAC 10/3/13 - '-1' as type value associated w/ 1st object reference class prevents "- none -" from appearing in dropdown lists
+1,           "Outside",           BEMP_Obj,  1,  0,  0,  CReq,  "",                 0,  4, "Zone", -1, "",  "Garage", 0, "",  "OtherZone", 0, "",  "Spc", 0, "",  6012, "This zone or the name of the conditioned zone below this floor",  ""      ; switched to CReq - SAC 10/13/22
+1,           "OutsideDiffUnit",   BEMP_Int,  1,  0,  0,  Pres,  "",                 0,  0,                                                     3008, "whether or not the zone on the other side of this floor is part of a different dwelling unit",  ""
+1,           "FrameSURFACE",      BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cseSURFACE",  0, "",                               7010, "CSE SURFACE component to model Frame portion of floor",  "" 
+1,           "CavitySURFACE",     BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cseSURFACE",  0, "",                               7010, "CSE SURFACE component to model Cavity portion of floor",  "" 
+1,           "FramingFactor",     BEMP_Flt,  1,  0,  0,  Pres,  "frac",             0,  0,                                                     6010, "Fraction of gross floor area that includes frame",  "" 
+1,        "ParCndZnAdjUZnArea",   BEMP_Flt,  1,  0,  0,  Pres,  "ft2",              0,  0,                                                  6010, "Area of floor between (parent) conditioned Zone & adjacent UncondZones",  "" 
+1,        "ParCndOZnAdjUZnArea",  BEMP_Flt,  1,  0,  0,  Pres,  "ft2",              0,  0,                                                  6010, "Area of floor between (parent) conditioned OtherZone & adjacent UncondZones",  ""   ; SAC 11/30/20
+1,        "ParUZnAdjCndZnArea",   BEMP_Flt,  1,  0,  0,  Pres,  "ft2",              0,  0,                                                  6010, "Area of floor between (parent) UncondZone & adjacent conditioned Zone",  "" 
+1,        "ParUZnAdjCndOZnArea",  BEMP_Flt,  1,  0,  0,  Pres,  "ft2",              0,  0,                                                  6010, "Area of floor between (parent) UncondZone & adjacent conditioned OtherZone",  ""   ; SAC 11/30/20
+1,           "InterCondZnArea",   BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,  0,                                                     3004, "Int floor area between two conditioned zones",  ""    
+1,           "ELA_Floor",         BEMP_Flt,  1,  0,  0,  Pres,  "ft2",              0,  0,                         										3008, "Effective Leakage Area through floor/ceiling separating Garage & conditioned Zone (for AirNet)",  ""
+1,           "AirNetGarIZXFER",   BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cseIZXFER", 0, "",    										3208, "Name of IZXFER (transfer through floor/ceiling separating Garage & conditioned Zone)",  ""    
+1,           "AirNetStairIZXFER", BEMP_Obj,  2,  1,  0,  Pres,  "",                 0,  1, "cseIZXFER", 0, "",                                 3208, "Name of IZXFER (transfer through stairway between adjoining Zones)",  ""   
+1,           "AirNetPrtySrfIZXFER", BEMP_Obj, 1, 0,  0,  Pres,  "",                 0,  1, "cseIZXFER", 0, "",                                 3208, "Name of IZXFER (transfer through party surface between adjoining Zones (of different dwelling units))",  ""  ; SAC 6/7/13
+				; SAC 1/28/13 - added to ensure proper number of surfaces assigned to each Zone & Garage prior to simulation
+1,           "SurfaceCount",      BEMP_Int,  1,  0,  0,  NInp,  "",                 0,  0,                        3008, "constant value of 1 for all standard interior surfaces",  ""
+1,           "IsDemising",        BEMP_Int,  1,  0,  0,  NInp,  "",                 0,  0,                        3008, "flag set to one if this wall separates Conditioned zone from Uncond or garage",  ""
+1,           "DemisingArea",      BEMP_Flt,  1,  0,  0,  NInp,  "ft2",              0,  0,                        6010, "Demising floor area",  "" 
+;	mjb-10/31/13	mods for E+A+A	
+1,           "AltConsUValue",     BEMP_Flt,  1,  0,  0,  NInp,  "Btu/h-ft2-°F",     0,  0,                        6005, "Altered floor Construction Uvalue",  ""    
+1,           "IsNew", 		  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this floor is New",  ""
+1,           "IsAltered", 	  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this floor is Altered",  ""
+1,           "IsExisting", 	  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this floor is Existing",  ""
+1,           "ParentIsNewZone",   BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall's parent is a New Zone",  ""
+1,           "ParentNotNewZone",  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall's parent is NOT a New Zone",  ""
+         ; SAC 3/7/18 - added to facilitate population of CF1R opaque surfaces table
+1,           "CF1R_OpqSrfRow",    BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cf1rtblRowOpaqueSurface",   1, "",  8006, "CF1R Opaque Surfaces Table Row object",  ""    
+         ; RJH 4/22/19 - added to facilitate population of CF1R existing opaque surfaces table
+1,           "CF1R_OpqSrfExistingRow", BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cf1rtblRowOpaqueSurfaceExisting",   1, "",  8006, "CF1R Existing Opaque Surfaces Table Row object",  ""    
+;------------------------------------------------------------------------------------------------
+
+
+;------------------------------------------------------------------------------------------------
+;                    LName                           Template                  MD  MR  AC   Parent1   P2           P3  P4  P5  P6  P7  P8  P9  P10 P11 P12 P13 P14 P15 P16 P17 P18 P19 P20  MC  MS  bP  CF  SR  IN  PN   PN1         PN2                   HI 
+;                   -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+0,  "ResUndgrFlr",  "ResidentialUndergroundFloor",  "Res Und Flr <pi>-<i>",     0,  0,  0, "ResZn",  "ResOtherZn", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",  -1,  1,  0,  0,  0,  0,  2, "UndFloor", "Underground Floor",  7000
+;
+;                                 VType    NV  WA  SP    US    UL                UT  NO  OC         CV  CP              HI    LName                  
+;                                ----------------------------------------------------------------------------------------------
+;	mjb-11/27/13	mods for E+A+A	
+1,           "Status",            BEMP_Sym,  1,  0,  0,   Def,  "",                 0,  0,                        3008, "Status",  ""                                      
+1,           "IsVerified", 	  BEMP_Int,  1,  0,  0,   Def,  "",                 0,   0,                       3008, "existing wall conditions will be HERS verified",  ""
+1,           "Area",              BEMP_Flt,  1,  0,  0,  Comp,  "ft2",              0,  0,                        6010, "Floor area",  "" 
+1,           "DepthBelowGrade",   BEMP_Flt,  1,  0,  0,  Comp,  "ft",               0,  0,                        6010, "Depth of floor below grade",  "" 
+1,           "FloorZ",            BEMP_Flt,  1,  0,  0,  Pres,  "ft",               0,  0,                        6010, "Floor elevation (Z)",  ""  ; (not currently used in analysis)
+1,           "Surface",           BEMP_Sym,  1,  0,  0,   Def,  "",                 0,  0,                        6012, "Description of surface (carpeted vs. exposed)",  "" 
+
+; SAC 11/4/14 - NO CONSTRUCTION assignment (similar to slab floors)
+; 1,           "Construction",      BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "Cons",  8, "CanAssignTo",  6012, "Construction assembly",  "" 
+; ;	mjb-11/27/13	mods for E+A+A	
+; 1,           "exConstruction",    BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "Cons",  8, "CanAssignTo",  3208, "existing construction for this (altered) floor object",  "" 
+
+1,           "CarpetedFrac",      BEMP_Flt,  1,  0,  0,  Pres,  "frac",             0,  0,                        6010, "Fraction of slab area that is carpeted",  "" 
+1,           "CarpetedArea",      BEMP_Flt,  1,  0,  0,  Pres,  "ft2",              0,  0,                        6010, "Carpeted floor area",  "" 
+1,           "ExposedArea",       BEMP_Flt,  1,  0,  0,  Pres,  "ft2",              0,  0,                        6010, "Exposed floor area",  "" 
+1,           "CondZnExposedArea", BEMP_Flt,  1,  0,  0,  Pres,  "ft2",              0,  0,                        6010, "Exposed floor area (whose parent is a conditioned zone)",  "" 
+1,           "CondZnArea",        BEMP_Flt,  1,  0,  0,  Pres,  "ft2",              0,  0,                        6010, "Floor area (whose parent is a conditioned zone)",  "" 
+1,           "CptSURFACE",        BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cseSURFACE",  0, "",  7010, "CSE SURFACE component to model Perimeter carpeted portion of floor",  "" 
+1,           "ExpSURFACE",        BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cseSURFACE",  0, "",  7010, "CSE SURFACE component to model Perimeter exposed portion of floor",  "" 
+1,           "FramingFactor",     BEMP_Flt,  1,  0,  0,  Pres,  "frac",             0,  0,                        6010, "Fraction of gross floor area that includes frame",  "" 
+;	mjb-11/27/13	mods for E+A+A	
+1,           "AltConsUValue",     BEMP_Flt,  1,  0,  0,  NInp,  "Btu/h-ft2-°F",     0,  0,                        6005, "Altered Wall Construction Uvalue",  ""    
+1,           "IsNew", 		  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall is New",  ""
+1,           "IsAltered", 	  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall is Altered",  ""
+1,           "IsExisting", 	  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall is Existing",  ""
+1,           "ParentIsNewZone",   BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall's parent is a New Zone",  ""
+1,           "ParentNotNewZone",  BEMP_Int,  1,  0,  0,  NInp,  "",                 0,   0,                       3008, "flag set if this Wall's parent is NOT a New Zone",  ""
+         ; SAC 3/7/18 - added to facilitate population of CF1R opaque surfaces table
+1,           "CF1R_OpqSrfRow",    BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cf1rtblRowOpaqueSurface",   1, "",  8006, "CF1R Opaque Surfaces Table Row object",  ""    
+         ; RJH 5/1/18 - added to facilitate population of CF1R slab floor table
+1,           "CF1R_SlabFloorRow", BEMP_Obj,  1,  0,  0,  Pres,  "",                 0,  1, "cf1rtblRowSlabFloor",   1, "",  8006, "CF1R Slab Floors Table Row object",  ""    
+;------------------------------------------------------------------------------------------------
+
+
+-1 

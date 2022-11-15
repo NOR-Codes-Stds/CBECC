@@ -1,0 +1,1058 @@
+; -------------------------------------------------------------------------
+; Rules pertaining to:   Conversion of CBECC MFam/CSE objects to Com/E+
+; CEC Title-24 Residential Energy Code
+; -------------------------------------------------------------------------
+; Copyright (c) 2012-2021, California Energy Commission
+; Copyright (c) 2012-2014, Wrightsoft Corporation
+; All rights reserved.
+; Redistribution and use in source and binary forms, with or without modification,
+; are permitted provided that the following conditions are met:
+; - Redistributions of source code must retain the above copyright notice, this
+;   list of conditions and the following disclaimer.
+; - Redistributions in binary form must reproduce the above copyright notice, this
+;   list of conditions, the following disclaimer in the documentation and/or other
+;   materials provided with the distribution.
+; - Neither the name of the California Energy Commission nor the names of its
+;   contributors may be used to endorse or promote products derived from this
+;   software without specific prior written permission.
+; DISCLAIMER: THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+; "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+; THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+; NON-INFRINGEMENT ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION,
+; WRIGHTSOFT CORPORATION, ITRON, INC. OR ANY OTHER AUTHOR OR COPYRIGHT HOLDER OF
+; THIS SOFTWARE (COLLECTIVELY, THE "AUTHORS") BE LIABLE FOR ANY DIRECT, INDIRECT,
+; INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+; LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA,
+; OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+; LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
+; OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+; ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.  EACH LICENSEE AND SUBLICENSEE OF THE
+; SOFTWARE AGREES NOT TO ASSERT ANY CLAIM AGAINST ANY OF THE AUTHORS RELATING TO
+; THIS SOFTWARE, WHETHER DUE TO PERFORMANCE ISSUES, TITLE OR INFRINGEMENT ISSUES,
+; STRICT LIABILITY OR OTHERWISE.
+; -------------------------------------------------------------------------
+
+ENUM_PROPERTIES_VALUE   ; ensures retrieval/logic/us of enum properties assume numeric value (alternative is ENUM_PROPERTIES_STRING)
+
+
+
+
+
+;*************************************************************************
+RULELIST  "Transform_ResConsAssm_to_ConsAssm_TESTING" 1 0 1 0
+;   Rules to TEST transformation of ALL fully defaulted ResConsAssm objects
+;   to (layer-by-layer) ConsAssm (and subordinate Mats)
+;*************************************************************************
+
+   "Eval rules to create & populate ConsAssm based on ResConsAssm"   ResConsAssm:Action =
+      {  if (LocalCompAssigned( MatchingConsAssmRef ) > 0) then  UNCHANGED
+         else  EvalRulelist( "Transform_ResConsAssm_to_ConsAssm", 1 )  endif  } 
+
+;   "Eval Transform_ResMat_to_Mat on every Mat object w/ MatchingResMatRef assigned"    Mat:Action  =
+;      {  if (LocalCompAssigned( MatchingResMatRef ) > 0)
+;         then  if (IfValidAnd( ResMatMapping = 1 ))   ; Properties
+;               then  EvalRulelist( "Transform_ResMat_to_Mat_Properties", 1 )
+;               else  UNCHANGED  endif
+;         else  UNCHANGED  endif  }
+
+   "store BEMProc details file for comparison"  Proj:Action = {  StoreBEMProc( "after1 ResConsAssm_to_ConsAssm", 0 )  }
+   "Evaluate normal defaulting rules"     Proj:Action = {  EvalRulelist( "rl_DEFAULT" )  }
+
+   "store BEMProc details file for comparison"  Proj:Action = {  StoreBEMProc( "after2 ResConsAssm_to_ConsAssm", 0 )  }
+
+END
+;*************************************************************************
+
+
+;*************************************************************************
+RULELIST  "Transform_ResConsAssm_to_ConsAssm" 1 0 1 0
+;   Rules to transform a fully defaulted ResConsAssm object (and its assigned ResMats)
+;   to (layer-by-layer) ConsAssm (and subordinate Mats) for simulation in E+
+;*************************************************************************
+
+"dbg" ResConsAssm:Action = { PostMessageToLog( "   processing 'Transform_ResConsAssm_to_ConsAssm' on ResConsAssm '%s'", Name ) }
+
+   "Create ConsAssm matching this ResConsAssm"              ResConsAssm:MatchingConsAssmRef  =
+      {  CreateComp( ConsAssm, Name + "-com" )  }
+   "Set cross-reference from ConsAssm to this ResConsAssm"  ResConsAssm:MatchingConsAssmRef:MatchingResConsAssmRef  = {  Name  }
+
+   ;"Create Mat layer consistent w/ ResConsAssm:(Cavity/Frame)PathMats[*]"  for:#Lyr=(1to10)
+   ;   ResConsAssm:CavityPathMats[#Lyr]:MatchingMatRef  =
+   "Create Mat layer consistent w/ ResConsAssm:(Cavity/Frame)PathMats[*]"  for:#Lyr=(1to10)
+      ResConsAssm:MatchingConsAssmRef:MatRef[#Lyr]  =
+         {  if (NumLayerMats < #Lyr .OR. LocalCompAssigned( CavityPathMats[#Lyr]:MatchingMatRef ) > 0)
+            then  UNCHANGED   ; non-existent layer or already transformed
+            else if ( ( IfValidAnd( NumPaths = 1 ) .AND. LocalCompAssigned( CavityPathMats[#Lyr] ) .AND.
+                        IfValidAnd( FrameCavityLayerMat[1] = #Lyr )==0 .AND.
+                        IfValidAnd( FrameCavityLayerMat[2] = #Lyr )==0 ) .OR.
+                      ( IfValidAnd( NumPaths = 2 ) .AND. IfValidAnd( CavityPathMats[#Lyr] = FramePathMats[#Lyr] ) ) )            
+            then  ; DEFINE MAT BASED ON CavityPathMats[#Lyr]
+                  if (IfValidAnd( CavityPathMats[#Lyr]:Thickness > 0 ))
+                  then  if (IfValidAnd( CavityPathMats[#Lyr]:RValPerInch > 0 ))
+                        then  AssignOrCreateComp( Mat, CavityPathMats[#Lyr]:Name + "-com",
+                                 "CodeCat", "Specify Properties",  "UserRVal", (CavityPathMats[#Lyr]:Thickness * CavityPathMats[#Lyr]:RValPerInch),
+											"UserThrmlCndct", CavityPathMats[#Lyr]:Conductivity, "UserSpecHt", CavityPathMats[#Lyr]:SpecHeat,
+                                 "UserDens",       CavityPathMats[#Lyr]:Density,      "UserThkns",  CavityPathMats[#Lyr]:Thickness )
+                        else if (IfValidAnd( CavityPathMats[#Lyr]:Resistance > 0 ))
+                        then  AssignOrCreateComp( Mat, CavityPathMats[#Lyr]:Name + "-com",
+                                 "CodeCat", "Specify Properties",  "UserRVal", CavityPathMats[#Lyr]:Resistance,
+											"UserThrmlCndct", CavityPathMats[#Lyr]:Conductivity, "UserSpecHt", CavityPathMats[#Lyr]:SpecHeat,
+                                 "UserDens",       CavityPathMats[#Lyr]:Density,      "UserThkns",  CavityPathMats[#Lyr]:Thickness )
+                        else  AssignOrCreateComp( Mat, CavityPathMats[#Lyr]:Name + "-com",
+                                 "CodeCat", "Specify Properties",
+											"UserThrmlCndct", CavityPathMats[#Lyr]:Conductivity, "UserSpecHt", CavityPathMats[#Lyr]:SpecHeat,
+                                 "UserDens",       CavityPathMats[#Lyr]:Density,      "UserThkns",  CavityPathMats[#Lyr]:Thickness )   endif endif
+                  else if (IfValidAnd( Thickness[#Lyr] > 0 ))
+                  then  if (IfValidAnd( CavityPathMats[#Lyr]:RValPerInch > 0 ))
+                        then  AssignOrCreateComp( Mat, Format( "%s-thck%sin-com", CavityPathMats[#Lyr]:Name, FltToStr( Thickness[#Lyr], 1, 1, 0, 1 ) ),
+                                 "CodeCat", "Specify Properties",  "UserRVal", (Thickness[#Lyr] * CavityPathMats[#Lyr]:RValPerInch),
+											"UserThrmlCndct", CavityPathMats[#Lyr]:Conductivity, "UserSpecHt", CavityPathMats[#Lyr]:SpecHeat,
+                                 "UserDens",       CavityPathMats[#Lyr]:Density,      "UserThkns",  Thickness[#Lyr] )
+                        else if (IfValidAnd( CavityPathMats[#Lyr]:Resistance > 0 ))
+                        then  AssignOrCreateComp( Mat, Format( "%s-thck%sin-com", CavityPathMats[#Lyr]:Name, FltToStr( Thickness[#Lyr], 1, 1, 0, 1 ) ),
+                                 "CodeCat", "Specify Properties",  "UserRVal", CavityPathMats[#Lyr]:Resistance,
+											"UserThrmlCndct", CavityPathMats[#Lyr]:Conductivity, "UserSpecHt", CavityPathMats[#Lyr]:SpecHeat,
+                                 "UserDens",       CavityPathMats[#Lyr]:Density,      "UserThkns",  Thickness[#Lyr] )
+                        else  AssignOrCreateComp( Mat, Format( "%s-thck%sin-com", CavityPathMats[#Lyr]:Name, FltToStr( Thickness[#Lyr], 1, 1, 0, 1 ) ),
+                                 "CodeCat", "Specify Properties",
+											"UserThrmlCndct", CavityPathMats[#Lyr]:Conductivity, "UserSpecHt", CavityPathMats[#Lyr]:SpecHeat,
+                                 "UserDens",       CavityPathMats[#Lyr]:Density,      "UserThkns",  Thickness[#Lyr] )   endif endif
+                  else  UNCHANGED  ; error - no thickness defined, either in the ResMat or ResConsAssm[layer]
+                  endif endif
+            else if (IfValidAnd( NumPaths = 2 ) .AND. IfValidAnd( FrameCavityLayerMat[1] = #Lyr ))
+            then  CreateComp( Mat, Name + "-cav/frm1-com" )    ; this layer is combo of cavity & frame layer #1
+            else if (IfValidAnd( NumPaths = 2 ) .AND. IfValidAnd( FrameCavityLayerMat[2] = #Lyr ))
+            then  CreateComp( Mat, Name + "-cav/frm2-com" )    ; this layer is combo of cavity & frame layer #2
+            else if (IfValidAnd( NumPaths = 1 ) .AND. IfValidAnd( FrameCavityLayerMat[1] = #Lyr ))
+            then  CreateComp( Mat, Name + "-ins/fur1-com" )    ; this layer is combo of insulation & furring layer #1
+            else if (IfValidAnd( NumPaths = 1 ) .AND. IfValidAnd( FrameCavityLayerMat[2] = #Lyr ))
+            then  CreateComp( Mat, Name + "-ins/fur2-com" )    ; this layer is combo of insulation & furring layer #2
+            else  UNCHANGED    ; error??
+            endif endif endif endif endif endif  }
+
+   "Set Mat layer ResMatMapping for FrameCavityLayerMat[*]"  for:#Lyr=(1to10)
+      ResConsAssm:MatchingConsAssmRef:MatRef[#Lyr]:ResMatMapping  =
+         {  if (NumLayerMats < #Lyr) then  UNCHANGED 
+            else if (IfValidAnd( NumPaths = 2 ) .AND. IfValidAnd( FrameCavityLayerMat[1] = #Lyr ))
+            then  "FrameCavity1"
+            else if (IfValidAnd( NumPaths = 2 ) .AND. IfValidAnd( FrameCavityLayerMat[2] = #Lyr ))
+            then  "FrameCavity2"
+            else if (IfValidAnd( NumPaths = 1 ) .AND. IfValidAnd( FrameCavityLayerMat[1] = #Lyr ))
+            then  "FurringInsul1"
+            else if (IfValidAnd( NumPaths = 1 ) .AND. IfValidAnd( FrameCavityLayerMat[2] = #Lyr ))
+            then  "FurringInsul2"
+            else  "Properties"
+            endif endif endif endif endif  }
+
+   "Set Mat layer CodeCat for FrameCavityLayerMat[*]"  for:#Lyr=(1to10)
+      ResConsAssm:MatchingConsAssmRef:MatRef[#Lyr]:CodeCat  =
+         {  switch (EnumString( MatchingConsAssmRef:MatRef[#Lyr]:ResMatMapping ))
+               case  "Properties"    :  "Specify Properties"
+               case  "FrameCavity1"  :  "Composite"
+               case  "FrameCavity2"  :  "Composite"
+               case  "FurringInsul1" :  "Composite"      ; ???
+               case  "FurringInsul2" :  "Composite"      ; ???
+               default  :  UNCHANGED  ; error?
+            endswitch  }
+; HOW TO HANDLE CONCRETE constructions w/ wood furring??  Like Composite or some other (non-properties) method?
+
+
+; Concrete Insul/Furring layer
+;	"Set Cons:FrameCavityLayerMat[1]"	Cons:FrameCavityLayerMat[1]	= {	if (Furring2Layer < 1 .AND. (FurringInsul2Layer < 1 .OR. FurringInsul2Layer == 100401 .OR.
+;                                                                                       (FurringInsul2Layer == 900 .AND. IfValidAnd( FurringInsul2LayerRVal > 0 )==0))) then  0
+;																									else if (InsideFinishLayer > 0.1) then  2
+;																									else  1  endif endif  }
+;	"Set Cons:FrameCavityLayerMat[2]"	Cons:FrameCavityLayerMat[2]	= {	if (FurringLayer < 1 .AND. (FurringInsulLayer < 1 .OR. FurringInsulLayer == 100401 .OR.
+;                                                                                      (FurringInsulLayer == 900 .AND. IfValidAnd( FurringInsulLayerRVal > 0 )==0))) then  0
+;																									else if (InsideFinishLayer > 0.1 .AND. FrameCavityLayerMat[1] > 0) then  4
+;																									else if (InsideFinishLayer > 0.1 .OR.  FrameCavityLayerMat[1] > 0) then  3
+;																									else  2  endif endif endif  }
+
+
+
+; RJH experimentation starts HERE
+
+   "Set Mat layer FrmMat for Composite CodeCat materials"  for:#Lyr=(1to10)
+      ResConsAssm:MatchingConsAssmRef:MatRef[#Lyr]:FrmMat  =
+         {  if (MatchingConsAssmRef:MatRef[#Lyr]:CodeCat == 40) 
+            then switch (EnumString(Type)) 
+                    case "Wood Framed Wall"    : "Wood"
+                    case "Wood Framed Ceiling" : "Wood"
+                    case "Wood Framed Floor"   : "Wood"
+                    case "Steel Framed Wall"   : "Steel"
+                    default :  UNCHANGED
+                 endswitch
+            else  UNCHANGED  
+            endif  }
+
+; MFAM TO DO - deal w/ SIPS walls/etc.
+
+   "Set Mat layer FrmConfig for Composite CodeCat materials"  for:#Lyr=(1to10)
+      ResConsAssm:MatchingConsAssmRef:MatRef[#Lyr]:FrmConfig  =
+         {  if (MatchingConsAssmRef:MatRef[#Lyr]:CodeCat == 40) 
+            then if (EnumString(CanAssignTo) == "Exterior Walls" .OR. EnumString(CanAssignTo) == "Interior Walls" .OR. EnumString(CanAssignTo) == "Underground Walls") 
+                 then switch (EnumString(FrameLayer)) 
+                        case "2x4 AWF"            : "WallAWS24inOC"
+                        case "2x6 AWF"            : "WallAWS24inOC"
+                        default : switch (mod( FrameLayer, 100 ))
+                                    case 16 : "Wall16inOC"
+                                    case 24 : "Wall24inOC"
+                                    default : UNCHANGED
+                                  endswitch
+                      endswitch
+                 else if (EnumString(CanAssignTo) == "Attic Roofs" .OR. EnumString(CanAssignTo) == "Cathedral Ceilings" .OR. EnumString(CanAssignTo) == "Ceilings (below attic)" .OR. EnumString(CanAssignTo) == "Interior Ceilings")
+                 then switch (EnumString(FrameLayer)) 
+                        case "2x4 Bottom Chord of Truss @ 24 in. O.C."   : "Roof24inOC"
+                        case "2x4 Top Chord of Roof Truss @ 24 in. O.C." : "Roof24inOC"
+                        default : switch (mod( FrameLayer, 100 ))
+                                    case 16 : "Roof16inOC"
+                                    case 24 : "Roof24inOC"
+                                    default : UNCHANGED
+                                  endswitch
+                      endswitch
+                 else if (EnumString(CanAssignTo) == "Interior Floors" .OR. EnumString(CanAssignTo) == "Exterior Floors" .OR. EnumString(CanAssignTo) == "Floors Over Crawlspace")
+                 then switch (mod( FrameLayer, 100 )) 
+                        case 16 : "Floor16inOC"
+                        case 24 : "Floor24inOC"
+                        default :  UNCHANGED
+                      endswitch
+                 else UNCHANGED
+                 endif endif endif
+            else UNCHANGED  
+            endif  }
+
+   "Set Mat layer FrmDepth for Composite CodeCat materials"  for:#Lyr=(1to10)
+      ResConsAssm:MatchingConsAssmRef:MatRef[#Lyr]:FrmDepth  =
+         {  if (MatchingConsAssmRef:MatRef[#Lyr]:CodeCat == 40) 
+            then switch (EnumString(FrameLayer)) 
+                    case "2x4 AWF" : "3_5In"
+                    case "2x6 AWF" : "5_5In"
+                    case "2x4 Bottom Chord of Truss @ 24 in. O.C."   : "3_5In"
+                    case "2x4 Top Chord of Roof Truss @ 24 in. O.C." : "3_5In"
+                    default : switch (int( FrameLayer / 100 ))
+                                case  4 : "3_5In"
+                                case  6 : "5_5In"
+                                case  8 : "7_25In"
+                                case 10 : "9_25In"
+                                case 12 : "11_25In"
+                                default : UNCHANGED
+                                endswitch
+                 endswitch
+            else UNCHANGED  
+            endif  }
+
+   "Set Mat layer CavityIns for Composite CodeCat materials"  for:#Lyr=(1to10)
+      ResConsAssm:MatchingConsAssmRef:MatRef[#Lyr]:CavityIns  =
+         {  if (MatchingConsAssmRef:MatRef[#Lyr]:CodeCat == 40) 
+            then if (IfValidAnd( CavityLayerRVal > 0 ))
+                 then CavityLayerRVal
+                 else UNCHANGED
+                 endif
+            else UNCHANGED  
+            endif  }
+
+
+
+
+;0, Mat:FrmConfig,  0
+;2,              1,    "Wall16inOC"
+;2,              2,    "Wall24inOC"
+;2,              5,    "Floor16inOC"
+;2,              6,    "Floor24inOC"
+;2,              7,    "Roof16inOC"
+;2,              8,    "Roof24inOC"
+;2,             10,    "WallMetalSingleLayerBatt"
+;2,             11,    "WallMetalDoubleLayerBatt"
+;2,             12,    "RoofMetalScrewDown"
+;2,             13,    "RoofMetalStandingSeam"
+;2,             14,    "RoofMetalStandingSeamFilledCavity"
+;1,    Mat:FrmMat,  -999,  0     ; any other case (wood)
+;2,              0,    "- specify -"
+;2,              1,    "Wall16inOC"
+;2,              2,    "Wall24inOC"
+;2,              3,    "WallAWS24inOC"
+;2,              4,    "WallAWS48inOC"
+;2,              5,    "Floor16inOC"
+;2,              6,    "Floor24inOC"
+;2,              7,    "Roof16inOC"
+;2,              8,    "Roof24inOC"
+;2,              9,    "Roof48inOC"
+
+;0, ResCons:CanAssignTo,  0
+;2,              0,    "Exterior Walls"  
+;2,             10,    "Interior Walls"  
+;2,             20,    "Underground Walls"      ; SAC 2/15/12
+;2,              1,    "Attic Roofs"  
+;2,              2,    "Cathedral Ceilings"  
+;2,              3,    "Ceilings (below attic)"  
+;2,              6,    "Interior Ceilings"        ; SAC 2/15/12 - restored by SAC 9/30/13  
+;2,              4,    "Interior Floors"  
+;2,              5,    "Exterior Floors"  
+;2,              9,    "Floors Over Crawlspace"   ; SAC 3/4/13
+
+
+
+
+
+
+
+
+
+
+
+; RJH experimentation ends HERE
+
+
+;      <Mat>
+;        <Name>Stucco - 7/8 in.</Name>
+;        <RVal>0.18</RVal>
+;        <ThrmlCndct>0.405</ThrmlCndct>
+;        <SpecHt>0.2</SpecHt>
+;        <Dens>115.81</Dens>
+;        <Thkns>0.88</Thkns>
+;      </Mat>
+
+
+;   "Set ResMat->Mat reference to facilitate defaulting"  for:#Lyr=(1to10)
+;      ResConsAssm:CavityPathMats[#Lyr]:MatchingMatRef:MatchingResMatRef  =
+;         {  if (NumLayerMats < #Lyr .OR. LocalCompAssigned( CavityPathMats[#Lyr]:MatchingMatRef ) > 0)
+;            then  UNCHANGED   ; non-existent layer or already transformed
+;            else if (IfValidAnd( CavityPathMats[#Lyr] = FramePathMats[#Lyr] ))
+;            then  CavityPathMats[#Lyr]:MatchingMatRef:Name
+;            else  UNCHANGED 
+;            endif endif  }
+
+
+
+
+;  samples -
+;  
+;  ResConsAssm:
+;  
+;     ResConsAssm   User: "IntWall Cons"  
+;        CanAssignTo = UVal: "Interior Walls"  (10)
+;        Type = UVal: "Wood Framed Wall"  (0)
+;        NumPaths = RVal: 2
+;        MaxNumLayers = RVal: 8
+;        NumLayers = RVal: 5
+;        RoofingLayer = UVal: "Light Roof (Asphalt Shingle)"  (100201)
+;        AbvDeckInsulLayer = UVal: "- no insulation -"  (0)
+;        RoofDeckLayer = UVal: "Wood Siding/sheathing/decking"  (100102)
+;        InsideFinishLayer = UVal: "Gypsum Board"  (100101)
+;        AtticFloorLayer = UVal: "- no attic floor -"  (0)
+;        FloorSurfaceLayer = UVal: "Carpeted"  (100105)
+;        FlrConcreteFillLayer = UVal: "- no concrete fill -"  (0)
+;        FloorDeckLayer = UVal: "Wood Siding/sheathing/decking"  (100102)
+;        SheathInsul2Layer = UVal: "- no sheathing/insul. -"  (0)
+;        MassLayer = UVal: "- none -"  (0)
+;        MassThickness = UVal: "- none -"  (0)
+;        FurringInsul2Layer = UVal: "- no insulation -"  (100401)
+;        FurringInsulLayer = UVal: "- no insulation -"  (100401)
+;        Furring2Layer = UVal: "- none -"  (0)
+;        FurringLayer = UVal: "- none -"  (0)
+;        CavityLayer = UVal: "R 21"  (21)
+;        CavityLayerRVal = RVal: 21
+;        FrameLayer = UVal: "2x6 @ 16 in. O.C."  (616)
+;        SheathInsulLayer = UVal: "- no sheathing/insul. -"  (0)
+;        WallExtFinishLayer = UVal: "- select finish -"  (0)
+;        OtherSideFinishLayer = UVal: "Gypsum Board"  (100101)
+;        FlrExtFinishLayer = UVal: "- select finish -"  (0)
+;        FrameWCanBeInput = RVal: 0
+;        SpecifyFrameW = RVal: 0
+;        FrameWInput = RVal: 0
+;        FlrExtConditions = PDef: "Exterior"  (0)
+;        RadiantBarrier = UVal: 0
+;        RaisedHeelTruss = UVal: 0
+;        RaisedHeelTrussHeight = UVal: 3.5
+;        RoofingType = UVal: "all others"  (0)
+;        OutsdAirFilmR = RVal: 0.68
+;        InsdAirFilmR = RVal: 0.68
+;        UfactorCalcMethod = RVal: "Parallel Path"  (1)
+;        InsideLayerFirst = RVal: 1
+;        MaterialLibItem = PDef: "none"  (0)
+;        CavityPathMats[1] = RVal: "Gypsum Board"
+;        CavityPathMats[2] = RVal: "Ins-R21-D1.5-SH0.2-C0.02183"
+;        CavityPathMats[3] = RVal: "Gypsum Board"
+;        FramePathMats[1] = RVal: "Gypsum Board"
+;        FramePathMats[2] = RVal: "SoftWood"
+;        FramePathMats[3] = RVal: "Gypsum Board"
+;        NumLayerMats = RVal: 3
+;        FrameLayerMapIdx[1] = RVal: 3
+;        FrameLayerMapIdx[2] = RVal: 0
+;        AbvJoistInsLyrMapIdx = RVal: 0
+;        BlwJoistInsLyrMapIdx = RVal: 0
+;        FrameCavityLayerMat[1] = RVal: 2
+;        FrameCavityLayerMat[2] = RVal: 0
+;        LayerPropertyIndex[1] = RVal: 1
+;        LayerPropertyIndex[2] = RVal: 3
+;        LayerPropertyIndex[3] = RVal: 5
+;        LayerPropertyIndex[4] = RVal: 0
+;        LayerPropertyIndex[5] = RVal: 0
+;        FrameLayerSymVal[1] = RVal: 100101
+;        FrameLayerSymVal[2] = RVal: 616
+;        FrameLayerSymVal[3] = RVal: 100101
+;        FrameLayerSymVal[4] = RVal: 0
+;        FrameLayerSymVal[5] = RVal: 0
+;        CavityLayerSymVal[1] = RVal: 100101
+;        CavityLayerSymVal[2] = RVal: 21
+;        CavityLayerSymVal[3] = RVal: 100101
+;        CavityLayerSymVal[4] = RVal: 0
+;        CavityLayerSymVal[5] = RVal: 0
+;        FrameSpacing = RVal: 16
+;        FrmFctrCanBeInput = RVal: 0
+;        SpecifyFrmFctr = RVal: 0
+;        PathFraction[1] = RVal: 0.75
+;        PathFraction[2] = RVal: 0.25
+;        FramingFactor = RVal: 0.25
+;        PathCodeRValue[1] = RVal: 23.2691
+;        PathCodeRValue[2] = RVal: 7.88107
+;        PathCodeRValue[3] = RVal: 0
+;        PathCodeRValue[4] = RVal: 0
+;        FrameCodeRValueX = RVal: 7.8813
+;        CavityCodeRValueX = RVal: 23.2691
+;        FrameCodeUValueX = RVal: 0.126883
+;        CavityCodeUValueX = RVal: 0.0429754
+;        OverallCodeUValue = RVal: 0.0639532
+;        OverallCodeUValueX = RVal: 0.0639522
+;        CodeUValueLabel = RVal: " "
+;        CavityThickness = RVal: 5.5
+;        CavityMatCond[1] = RVal: 0.0218254
+;        CavityMatCond[2] = RVal: 0.0218254
+;        CavityMatCond[3] = RVal: 0.0218254
+;        CavityMatCond[4] = RVal: 0.0218254
+;        CavityMatCond[5] = RVal: 0.0218254
+;        CavityMatCond[6] = RVal: 0.0218254
+;        CavityMatCond[7] = RVal: 0.0218254
+;        CavityMatCond[8] = RVal: 0.0218254
+;        CavityMatCondQII[1] = RVal: 0.0218254
+;        CavityMatCondQII[2] = RVal: 0.0218254
+;        CavityMatCondQII[3] = RVal: 0.0218254
+;        CavityMatCondQII[4] = RVal: 0.0218254
+;        CavityMatCondQII[5] = RVal: 0.0218254
+;        CavityMatCondQII[6] = RVal: 0.0218254
+;        CavityMatCondQII[7] = RVal: 0.0218254
+;        CavityMatCondQII[8] = RVal: 0.0218254
+;        AbvJoistInsulThick = RVal: 0
+;        BlwJoistInsulThick = RVal: 0
+;        ICQCeilingInsMult = RVal: 0
+;        Thickness[1] = RVal: 0.5
+;        Thickness[2] = RVal: 5.5
+;        Thickness[3] = RVal: 0.5
+;        Thickness[4] = RVal: 0
+;        Thickness[5] = RVal: 0
+;        Thickness[6] = RVal: 0
+;        Thickness[7] = RVal: 0
+;        Thickness[8] = RVal: 0
+;        Thickness[9] = RVal: 0
+;        Thickness[10] = RVal: 0
+;        LayerLabels[1] = RVal: "Inside Finish:"
+;        LayerLabels[2] = RVal: "Sheathing / Insulation:"
+;        LayerLabels[3] = RVal: "Cavity / Frame:"
+;        LayerLabels[4] = RVal: "Sheathing / Insulation:"
+;        LayerLabels[5] = RVal: "Other Side Finish:"
+;        LayerLabels[6] = RVal: "none"
+;        SecTypeLabel = RVal: " "
+;        WinterDesUValue = RVal: 0.0639532
+;        OverallThickness = RVal: 6.5
+;        LayerOrderLabel = RVal: "(inside to outside)"
+;        Path2Label = RVal: "Frame Path"
+;        LayerVar[1] = RVal: 0
+;        LayerVar[2] = RVal: 0
+;        LayerVar[3] = RVal: 0
+;        LayerVar[4] = RVal: 0
+;        LayerVar[5] = RVal: 1
+;        LayerVar[6] = RVal: -1
+;        FrameLayerAbr = RVal: "2x6"  (616)
+;        CavityLayerAbr = RVal: "R-21"  (21)
+;        FurringInsulLayerAbr = RVal: "no insul."  (100401)
+;        FurringInsul2LayerAbr = RVal: "no insul."  (100401)
+;        FurringInsulLayerStr = RVal: "no insul."
+;        FurringInsul2LayerStr = RVal: "no insul."
+;        FurringLayerAbr = RVal: "no furring"  (0)
+;        Furring2LayerAbr = RVal: "no furring"  (0)
+;        FramingRpt = RVal: "2x6 @ 16 in. O.C."
+;        CavityRRpt = RVal: "R 21"
+;        AbvDeckInsulLayerRpt = RVal: "- no insulation -"  (0)
+;        SheathInsul2LayerRpt = RVal: "- no sheathing/insul. -"  (0)
+;        SheathInsulLayerRpt = RVal: "- no sheathing/insul. -"  (0)
+;        NumLayersRpt = RVal: 3
+;        AssemblyLayersRpt[1] = RVal: "Inside Finish: Gypsum Board"
+;        AssemblyLayersRpt[2] = RVal: "Cavity / Frame: R-21 / 2x6"
+;        AssemblyLayersRpt[3] = RVal: "Other Side Finish: Gypsum Board"
+;        AtcEdg_ConsType = PDef: "n/a"  (0)
+;        AssignedSurfaceArea = RVal: 0
+;        AssignedCondZoneArea = RVal: 0
+;        AssignedDemisingArea = RVal: 0
+;        SurfacesOfNewZone = RVal: 0
+;        SurfacesOfNotNewZone = RVal: 0
+;        SurfacesQIIDegraded = RVal: 0
+;        SurfacesQIINotDegraded = RVal: 0
+;        RptNonStd = RVal: 0
+;        TempDensity = RVal: 1.5
+;        TempSpecHeat = RVal: 0.2
+;        TempCondCT = RVal: 0.0032537
+;        InsFurMatName[2] = RVal: "Ins-R21-D1.5-SH0.2-C0.02183"
+;        DisplayInpErrMsg = RVal: 0
+;        ..
+;     
+;     ResConsAssm   User: "Interior Floor"  
+;        CanAssignTo = UVal: "Interior Floors"  (4)
+;        Type = UVal: "Wood Framed Floor"  (20)
+;        NumPaths = RVal: 2
+;        MaxNumLayers = RVal: 8
+;        NumLayers = RVal: 5
+;        RoofingLayer = UVal: "Light Roof (Asphalt Shingle)"  (100201)
+;        AbvDeckInsulLayer = UVal: "- no insulation -"  (0)
+;        RoofDeckLayer = UVal: "Wood Siding/sheathing/decking"  (100102)
+;        InsideFinishLayer = UVal: "Gypsum Board"  (100101)
+;        AtticFloorLayer = UVal: "- no attic floor -"  (0)
+;        FloorSurfaceLayer = UVal: "Carpeted"  (100105)
+;        FlrConcreteFillLayer = UVal: "- no concrete fill -"  (0)
+;        FloorDeckLayer = UVal: "Wood Siding/sheathing/decking"  (100102)
+;        SheathInsul2Layer = UVal: "- no sheathing/insul. -"  (0)
+;        MassLayer = UVal: "- none -"  (0)
+;        MassThickness = UVal: "- none -"  (0)
+;        FurringInsul2Layer = UVal: "- no insulation -"  (100401)
+;        FurringInsulLayer = UVal: "- no insulation -"  (100401)
+;        Furring2Layer = UVal: "- none -"  (0)
+;        FurringLayer = UVal: "- none -"  (0)
+;        CavityLayer = UVal: "- no insulation -"  (0)
+;        CavityLayerRVal = RVal: 0
+;        FrameLayer = UVal: "2x12 @ 16 in. O.C."  (1216)
+;        SheathInsulLayer = UVal: "- no sheathing/insul. -"  (0)
+;        WallExtFinishLayer = UVal: "- select finish -"  (0)
+;        OtherSideFinishLayer = UVal: "Gypsum Board"  (100101)
+;        FlrExtFinishLayer = UVal: "- select finish -"  (0)
+;        FrameWCanBeInput = RVal: 0
+;        SpecifyFrameW = RVal: 0
+;        FrameWInput = RVal: 0
+;        FlrExtConditions = PDef: "Exterior"  (0)
+;        RadiantBarrier = UVal: 0
+;        RaisedHeelTruss = UVal: 0
+;        RaisedHeelTrussHeight = UVal: 3.5
+;        RoofingType = UVal: "all others"  (0)
+;        OutsdAirFilmR = RVal: 0.61
+;        InsdAirFilmR = RVal: 0.92
+;        UfactorCalcMethod = RVal: "Parallel Path"  (1)
+;        InsideLayerFirst = RVal: 1
+;        MaterialLibItem = PDef: "none"  (0)
+;        CavityPathMats[1] = RVal: "Carpet"
+;        CavityPathMats[2] = RVal: "Wood layer"
+;        CavityPathMats[4] = RVal: "Gypsum Board"
+;        FramePathMats[1] = RVal: "Carpet"
+;        FramePathMats[2] = RVal: "Wood layer"
+;        FramePathMats[3] = RVal: "SoftWood"
+;        FramePathMats[4] = RVal: "Gypsum Board"
+;        NumLayerMats = RVal: 4
+;        FrameLayerMapIdx[1] = RVal: 4
+;        FrameLayerMapIdx[2] = RVal: 0
+;        AbvJoistInsLyrMapIdx = RVal: 0
+;        BlwJoistInsLyrMapIdx = RVal: 0
+;        FrameCavityLayerMat[1] = RVal: 3
+;        FrameCavityLayerMat[2] = RVal: 0
+;        LayerPropertyIndex[1] = RVal: 1
+;        LayerPropertyIndex[2] = RVal: 3
+;        LayerPropertyIndex[3] = RVal: 4
+;        LayerPropertyIndex[4] = RVal: 6
+;        LayerPropertyIndex[5] = RVal: 0
+;        LayerPropertyIndex[6] = RVal: 0
+;        FrameLayerSymVal[1] = RVal: 100105
+;        FrameLayerSymVal[2] = RVal: 100102
+;        FrameLayerSymVal[3] = RVal: 1216
+;        FrameLayerSymVal[4] = RVal: 100101
+;        FrameLayerSymVal[5] = RVal: 0
+;        FrameLayerSymVal[6] = RVal: 0
+;        CavityLayerSymVal[1] = RVal: 100105
+;        CavityLayerSymVal[2] = RVal: 100102
+;        CavityLayerSymVal[3] = RVal: 0
+;        CavityLayerSymVal[4] = RVal: 100101
+;        CavityLayerSymVal[5] = RVal: 0
+;        CavityLayerSymVal[6] = RVal: 0
+;        FrameSpacing = RVal: 16
+;        FrmFctrCanBeInput = RVal: 0
+;        SpecifyFrmFctr = RVal: 0
+;        PathFraction[1] = RVal: 0.9
+;        PathFraction[2] = RVal: 0.1
+;        FramingFactor = RVal: 0.1
+;        PathCodeRValue[1] = RVal: 4.74791
+;        PathCodeRValue[2] = RVal: 16.227
+;        PathCodeRValue[3] = RVal: 0
+;        PathCodeRValue[4] = RVal: 0
+;        FrameCodeRValueX = RVal: 16.2274
+;        CavityCodeRValueX = RVal: 4.7479
+;        FrameCodeUValueX = RVal: 0.0616242
+;        CavityCodeUValueX = RVal: 0.210619
+;        OverallCodeUValue = RVal: 0.19572
+;        OverallCodeUValueX = RVal: 0.19572
+;        CodeMaximumUValue = RVal: 0
+;        CodeUValueLabel = RVal: " "
+;        CavityThickness = RVal: 11.25
+;        CavityMatCond[1] = RVal: 0
+;        CavityMatCond[2] = RVal: 0
+;        CavityMatCond[3] = RVal: 0
+;        CavityMatCond[4] = RVal: 0
+;        CavityMatCond[5] = RVal: 0
+;        CavityMatCond[6] = RVal: 0
+;        CavityMatCond[7] = RVal: 0
+;        CavityMatCond[8] = RVal: 0
+;        CavityMatCondQII[1] = RVal: 0
+;        CavityMatCondQII[2] = RVal: 0
+;        CavityMatCondQII[3] = RVal: 0
+;        CavityMatCondQII[4] = RVal: 0
+;        CavityMatCondQII[5] = RVal: 0
+;        CavityMatCondQII[6] = RVal: 0
+;        CavityMatCondQII[7] = RVal: 0
+;        CavityMatCondQII[8] = RVal: 0
+;        AbvJoistInsulThick = RVal: 0
+;        BlwJoistInsulThick = RVal: 0
+;        ICQCeilingInsMult = RVal: 0
+;        Thickness[1] = RVal: 0.5
+;        Thickness[2] = RVal: 0.5
+;        Thickness[3] = RVal: 11.25
+;        Thickness[4] = RVal: 0.5
+;        Thickness[5] = RVal: 0
+;        Thickness[6] = RVal: 0
+;        Thickness[7] = RVal: 0
+;        Thickness[8] = RVal: 0
+;        Thickness[9] = RVal: 0
+;        Thickness[10] = RVal: 0
+;        LayerLabels[1] = RVal: "Floor Surface:"
+;        LayerLabels[2] = RVal: "Concrete Fill:"
+;        LayerLabels[3] = RVal: "Floor Deck:"
+;        LayerLabels[4] = RVal: "Cavity / Frame:"
+;        LayerLabels[5] = RVal: "Sheathing / Insulation:"
+;        LayerLabels[6] = RVal: "Ceiling Below Finish:"
+;        SecTypeLabel = RVal: " "
+;        WinterDesUValue = RVal: 0.19572
+;        OverallThickness = RVal: 12.75
+;        LayerOrderLabel = RVal: "(topmost to bottom)"
+;        Path2Label = RVal: "Frame Path"
+;        LayerVar[1] = RVal: 3
+;        LayerVar[2] = RVal: 3
+;        LayerVar[3] = RVal: 3
+;        LayerVar[4] = RVal: 1
+;        LayerVar[5] = RVal: 3
+;        LayerVar[6] = RVal: 0
+;        FrameLayerAbr = RVal: "2x12"  (1216)
+;        CavityLayerAbr = RVal: "no insul."  (0)
+;        FurringInsulLayerAbr = RVal: "no insul."  (100401)
+;        FurringInsul2LayerAbr = RVal: "no insul."  (100401)
+;        FurringInsulLayerStr = RVal: "no insul."
+;        FurringInsul2LayerStr = RVal: "no insul."
+;        FurringLayerAbr = RVal: "no furring"  (0)
+;        Furring2LayerAbr = RVal: "no furring"  (0)
+;        FramingRpt = RVal: "2x12 @ 16 in. O.C."
+;        CavityRRpt = RVal: "none"
+;        AbvDeckInsulLayerRpt = RVal: "- no insulation -"  (0)
+;        SheathInsul2LayerRpt = RVal: "- no sheathing/insul. -"  (0)
+;        SheathInsulLayerRpt = RVal: "- no sheathing/insul. -"  (0)
+;        NumLayersRpt = RVal: 4
+;        AssemblyLayersRpt[1] = RVal: "Floor Surface: Carpeted"
+;        AssemblyLayersRpt[2] = RVal: "Floor Deck: Wood Siding/sheathing/decking"
+;        AssemblyLayersRpt[3] = RVal: "Cavity / Frame: no insul. / 2x12"
+;        AssemblyLayersRpt[4] = RVal: "Ceiling Below Finish: Gypsum Board"
+;        AtcEdg_ConsType = PDef: "n/a"  (0)
+;        AssignedSurfaceArea = RVal: 3660
+;        AssignedCondZoneArea = RVal: 3660
+;        AssignedDemisingArea = RVal: 0
+;        SurfacesOfNewZone = RVal: 1
+;        SurfacesOfNotNewZone = RVal: 0
+;        SurfacesQIIDegraded = RVal: 0
+;        SurfacesQIINotDegraded = RVal: 1
+;        RptNonStd = RVal: 0
+;        TempDensity = RVal: 1.5
+;        TempSpecHeat = RVal: 0.2
+;        TempCondCT = RVal: 0.0032537
+;        DisplayInpErrMsg = RVal: 0
+;        ..
+
+
+
+;  ConsAssm:
+;  
+;     ConsAssm   User: "Base_CZ12-NonresMetalFrameWallU062"  
+;        CompatibleSurfType = UVal: "ExteriorWall"  (1)
+;        SpecMthd = RVal: "Layers"  (1)
+;        UFactor = RVal: 0.0620347
+;        AssignedSurfType = RVal: 1
+;        Status = RVal: "New"  (1)
+;        ExtRoughness = RVal: "MediumRough"  (3)
+;        ExtSolAbs = RVal: 0.7
+;        ExtThrmlAbs = RVal: 0.9
+;        ExtVisAbs = RVal: 0.8
+;        IntSolAbs = RVal: 0.7
+;        IntThrmlAbs = RVal: 0.9
+;        IntVisAbs = RVal: 0.8
+;        SlabType = PDef: "- specify -"  (0)
+;        SlabInsOrientation = PDef: "None"  (1)
+;        SlabInsThrmlR = PDef: "R0"  (0)
+;        FieldAppliedCoating = RVal: 0
+;        CRRCInitialRefl = RVal: 0.08
+;        CRRCAgedRefl = RVal: 0.08
+;        CRRCInitialEmit = RVal: 0.75
+;        CRRCAgedEmit = RVal: 0.75
+;        MatRef[1] = UVal: "Stucco - 7/8 in."
+;        MatRef[2] = UVal: "Compliance Insulation R13.99"
+;        MatRef[3] = UVal: "Air - Metal Wall Framing - 16 or 24 in. OC"
+;        MatRef[4] = UVal: "Gypsum Board - 1/2 in."
+;        AreaNew = RVal: 3030.21
+;        AreaAltered = RVal: 0
+;        AreaExisting = RVal: 0
+;        AreaNewNonResCond = RVal: 3030.21
+;        AreaNewResCond = RVal: 0
+;        AreaNewRelocCond = RVal: 0
+;        AreaAltNonResCond = RVal: 0
+;        AreaAltResCond = RVal: 0
+;        AreaAltRelocCond = RVal: 0
+;        FrmMat = RVal: "Metal"  (3)
+;        CavityInsVal = RVal: 0
+;        PerfFacRpt = RVal: "U-Factor: 0.062"
+;        InsCheckSum = RVal: 13.99
+;        RoofDens = RDef: 0
+;        BuiltUpRoof = RDef: 0
+;        BallastedRoof = RDef: 0
+;        NumMats = RVal: 4
+;        SumMatHeatCap = RVal: 2.20758
+;        IsSpandrel = RVal: "false"  (2)
+;        ContainsMetalWallMaterial = RVal: "false"  (2)
+;        ContainsMetalFrameMaterial = RVal: "true"  (1)
+;        ContainsWoodFrameMaterial = RVal: "false"  (2)
+;        ContainsMetalRoofMaterial = RVal: "false"  (2)
+;        ContainsHollowCoreMasonryMaterial = RVal: "false"  (2)
+;        CompositeNonWallCheckVal = RVal: 0
+;        CompositeWallCheckVal1 = RVal: 0
+;        CompositeWallCheckVal2 = RVal: 0
+;        CompositeWallCheckVal3 = RVal: 0
+;        CompositeConsCheckVal = RVal: 0
+;        OutsdAirFilmR = RVal: 0.17
+;        InsdAirFilmR = RVal: 0.68
+;        NewConsCnt = RVal: 4
+;        AlteredConsCnt = RVal: 0
+;        ExistingConsCnt = RVal: 0
+;        HtCapCat = RVal: "NotMass"  (3)
+;        ConsType = RVal: "MetalFrameWall"  (2)
+;        UAValueNewNonRes = RVal: 187.979
+;        ..
+;     
+;     ConsAssm   User: "NACM_Interior Wall"  
+;        CompatibleSurfType = UVal: "InteriorWall"  (6)
+;        SpecMthd = RVal: "Layers"  (1)
+;        UFactor = RVal: 0.319489
+;        AssignedSurfType = RVal: 6
+;        Status = RVal: "New"  (1)
+;        ExtRoughness = RVal: "MediumRough"  (3)
+;        ExtSolAbs = RVal: 0.7
+;        ExtThrmlAbs = RVal: 0.9
+;        ExtVisAbs = RVal: 0.8
+;        IntSolAbs = RVal: 0.7
+;        IntThrmlAbs = RVal: 0.9
+;        IntVisAbs = RVal: 0.8
+;        SlabType = PDef: "- specify -"  (0)
+;        SlabInsOrientation = PDef: "None"  (1)
+;        SlabInsThrmlR = PDef: "R0"  (0)
+;        FieldAppliedCoating = RVal: 0
+;        CRRCInitialRefl = RVal: 0.08
+;        CRRCAgedRefl = RVal: 0.08
+;        CRRCInitialEmit = RVal: 0.75
+;        CRRCAgedEmit = RVal: 0.75
+;        MatRef[1] = UVal: "Gypsum Board - 5/8 in."
+;        MatRef[2] = UVal: "Air - Metal Wall Framing - 16 or 24 in. OC"
+;        MatRef[3] = UVal: "Gypsum Board - 5/8 in."
+;        AreaNew = RVal: 2645.59
+;        AreaAltered = RVal: 0
+;        AreaExisting = RVal: 0
+;        FrmMat = RVal: "Metal"  (3)
+;        CavityInsVal = RVal: 0
+;        PerfFacRpt = RVal: "U-Factor: 0.319"
+;        InsCheckSum = RVal: 0
+;        RoofDens = RDef: 0
+;        BuiltUpRoof = RDef: 0
+;        BallastedRoof = RDef: 0
+;        NumMats = RVal: 3
+;        SumMatHeatCap = RVal: 1.1428
+;        IsSpandrel = RVal: "false"  (2)
+;        ContainsMetalWallMaterial = RVal: "false"  (2)
+;        ContainsMetalFrameMaterial = RVal: "true"  (1)
+;        ContainsWoodFrameMaterial = RVal: "false"  (2)
+;        ContainsMetalRoofMaterial = RVal: "false"  (2)
+;        ContainsHollowCoreMasonryMaterial = RVal: "false"  (2)
+;        CompositeNonWallCheckVal = RVal: 0
+;        CompositeWallCheckVal1 = RVal: 0
+;        CompositeWallCheckVal2 = RVal: 0
+;        CompositeWallCheckVal3 = RVal: 0
+;        CompositeConsCheckVal = RVal: 0
+;        OutsdAirFilmR = RVal: 0.68
+;        InsdAirFilmR = RVal: 0.68
+;        NewConsCnt = RVal: 8
+;        AlteredConsCnt = RVal: 0
+;        ExistingConsCnt = RVal: 0
+;        ..
+;  
+;  WITH FOCUS ON SIMULATION PROPERTIES -
+;  
+;      <ConsAssm>
+;        <Name>Base_CZ12-NonresMetalFrameWallU062</Name>
+;        <SpecMthd>Layers</SpecMthd>
+;        <ExtRoughness>MediumRough</ExtRoughness>
+;        <ExtSolAbs>0.7</ExtSolAbs>
+;        <ExtThrmlAbs>0.9</ExtThrmlAbs>
+;        <ExtVisAbs>0.8</ExtVisAbs>
+;        <IntSolAbs>0.7</IntSolAbs>
+;        <IntThrmlAbs>0.9</IntThrmlAbs>
+;        <IntVisAbs>0.8</IntVisAbs>
+;        <MatRef index="0">Stucco - 7/8 in.</MatRef>
+;        <MatRef index="1">Compliance Insulation R13.99</MatRef>
+;        <MatRef index="2">Air - Metal Wall Framing - 16 or 24 in. OC</MatRef>
+;        <MatRef index="3">Gypsum Board - 1/2 in.</MatRef>
+;      </ConsAssm>
+;      <ConsAssm>
+;        <Name>NACM_Interior Wall</Name>
+;        <SpecMthd>Layers</SpecMthd>
+;        <ExtRoughness>MediumRough</ExtRoughness>
+;        <ExtSolAbs>0.7</ExtSolAbs>
+;        <ExtThrmlAbs>0.9</ExtThrmlAbs>
+;        <ExtVisAbs>0.8</ExtVisAbs>
+;        <IntSolAbs>0.7</IntSolAbs>
+;        <IntThrmlAbs>0.9</IntThrmlAbs>
+;        <IntVisAbs>0.8</IntVisAbs>
+;        <MatRef index="0">Gypsum Board - 5/8 in.</MatRef>
+;        <MatRef index="1">Air - Metal Wall Framing - 16 or 24 in. OC</MatRef>
+;        <MatRef index="2">Gypsum Board - 5/8 in.</MatRef>
+;      </ConsAssm>
+
+END
+;*************************************************************************
+
+
+;*************************************************************************
+RULELIST  "Transform_ResMat_to_Mat_Properties" 1 0 1 0
+;   Rules to transform a fully defaulted ResMat object
+;   to (Com) Mat for simulation in E+
+;*************************************************************************
+
+;   Mat:CodeCat  should already be set to  "Specify Properties"
+
+   "Set Mat:UserRVal"          Mat:UserRVal  =
+      {  if (IfValidAnd( MatchingResMatRef:Thickness   > 0 ) .AND.
+             IfValidAnd( MatchingResMatRef:RValPerInch > 0 ))
+         then  MatchingResMatRef:Thickness * MatchingResMatRef:RValPerInch
+         else if (IfValidAnd( MatchingResMatRef:Resistance > 0 ))
+         then  MatchingResMatRef:Resistance
+         else  UNCHANGED  endif endif  }
+
+   "Set Mat:UserThrmlCndct"    Mat:UserThrmlCndct  =
+      {  if (IfValidAnd( MatchingResMatRef:Conductivity > 0 ))
+         then  MatchingResMatRef:Conductivity
+         else  UNCHANGED  endif  }
+
+   "Set Mat:UserSpecHt"       Mat:UserSpecHt  =
+      {  if (IfValidAnd( MatchingResMatRef:SpecHeat > 0 ))
+         then  MatchingResMatRef:SpecHeat
+         else  UNCHANGED  endif  }
+
+   "Set Mat:UserDens"         Mat:UserDens  =
+      {  if (IfValidAnd( MatchingResMatRef:Density > 0 ))
+         then  MatchingResMatRef:Density
+         else  UNCHANGED  endif  }
+
+   "Set Mat:UserThkns"        Mat:UserThkns  =
+      {  if (IfValidAnd( MatchingResMatRef:Thickness > 0 ))
+         then  MatchingResMatRef:Thickness
+         else  UNCHANGED  endif  }
+
+
+;  samples -
+;  
+;  ResMats:
+;  
+;     ResMat   User: "SoftWood"  
+;        Density = UVal: 35
+;        SpecHeat = UVal: 0.39
+;        Conductivity = UVal: 0.08167
+;        ConductivityQII = RVal: 0.08167
+;        ConductivityCT = UVal: 0.0012
+;        RValPerInch = UVal: 1.0204
+;        ..
+;     
+;     ResMat   User: "Steel"  
+;        Density = UVal: 489
+;        SpecHeat = UVal: 0.12
+;        Conductivity = UVal: 26.2
+;        ConductivityQII = RVal: 26.2
+;        RValPerInch = UVal: 0.00318
+;        ..
+;     
+;     ResMat   User: "SIPSskin"  
+;        Thickness = UVal: 0.4375
+;        Density = UVal: 41
+;        SpecHeat = UVal: 0.45
+;        Conductivity = UVal: 0.06127
+;        ConductivityQII = RVal: 0.06127
+;        ConductivityCT = UVal: 0.0012
+;        RValPerInch = UVal: 1.36
+;        ..
+;     
+;     ResMat   User: "Ceiling Insul"  
+;        Density = UVal: 1.5
+;        SpecHeat = UVal: 0.2
+;        ConductivityCT = UVal: 0.00418
+;        ..
+;     
+;     ResMat   User: "Gypsum Board"  
+;        Thickness = UVal: 0.5
+;        Density = UVal: 40
+;        SpecHeat = UVal: 0.27
+;        Conductivity = UVal: 0.09167
+;        ConductivityQII = RVal: 0.09167
+;        ConductivityCT = UVal: 0.0001217
+;        RValPerInch = UVal: 0.9091
+;        ..
+;     
+;     ResMat   User: "Insul-R4-D1.5-SH0.35-C0.02083"  
+;        Thickness = UVal: 1
+;        Density = UVal: 1.5
+;        SpecHeat = UVal: 0.35
+;        Conductivity = UVal: 0.0208325
+;        ConductivityQII = UVal: 0.0208325
+;        ConductivityCT = UVal: 0.00175
+;        ..
+
+
+;  Mats:
+;  
+;     Mat   User: "Stucco - 7/8 in."  
+;        CodeCat = UVal: "Plastering Materials"  (190)
+;        CodeItem = UVal: "Stucco - 7/8 in."  (18024)
+;        RVal = RVal: 0.18
+;        ThrmlCndct = RVal: 0.405
+;        SpecHt = RVal: 0.2
+;        Dens = RVal: 115.81
+;        Thkns = RVal: 0.88
+;        FrmMat = PDef: "- specify -"  (0)
+;        FrmConfig = PDef: "- specify -"  (0)
+;        FrmDepth = PDef: "- specify -"  (0)
+;        CavityIns = RVal: 0
+;        FrmFacHeaders = RVal: 0
+;        HeaderIns = RVal: 0
+;        CMUWt = PDef: "- specify -"  (0)
+;        CMUFill = PDef: "- specify -"  (0)
+;        CavityInsVal = RVal: 0
+;        FrmDepthVal = RVal: 0
+;        IsSpandrel = RVal: 0
+;        IsHollowCoreMasonry = RVal: 0
+;        IsMetalWall = RVal: 0
+;        IsMetalFrame = RVal: 0
+;        IsWoodFrame = RVal: 0
+;        IsMetalFrameLayer = RVal: 0
+;        IsWoodFrameLayer = RVal: 0
+;        IsMetalRoof = RVal: 0
+;        IsWoodFrameRoof = RVal: 0
+;        RefCnt = RVal: 1
+;        SimpleCompositeR = RVal: 0
+;        HeatCap = RVal: 1.69855
+;        InsCheck = RVal: 0
+;        ..
+;     
+;     Mat   User: "Compliance Insulation R13.99"  
+;        CodeCat = UVal: "Insulation Board"  (100)
+;        CodeItem = UVal: "Compliance Insulation R13.99"  (9123)
+;        RVal = RVal: 13.99
+;        ThrmlCndct = RVal: 0.0133
+;        SpecHt = RVal: 0.27
+;        Dens = RVal: 1
+;        Thkns = RVal: 2.2328
+;        FrmMat = PDef: "- specify -"  (0)
+;        FrmConfig = PDef: "- specify -"  (0)
+;        FrmDepth = PDef: "- specify -"  (0)
+;        CavityIns = RVal: 0
+;        FrmFacHeaders = RVal: 0
+;        HeaderIns = RVal: 0
+;        CMUWt = PDef: "- specify -"  (0)
+;        CMUFill = PDef: "- specify -"  (0)
+;        CavityInsVal = RVal: 0
+;        FrmDepthVal = RVal: 0
+;        IsSpandrel = RVal: 0
+;        IsHollowCoreMasonry = RVal: 0
+;        IsMetalWall = RVal: 0
+;        IsMetalFrame = RVal: 0
+;        IsWoodFrame = RVal: 0
+;        IsMetalFrameLayer = RVal: 0
+;        IsWoodFrameLayer = RVal: 0
+;        IsMetalRoof = RVal: 0
+;        IsWoodFrameRoof = RVal: 0
+;        RefCnt = RVal: 1
+;        SimpleCompositeR = RVal: 0
+;        HeatCap = RVal: 0.0502381
+;        InsCheck = RVal: 13.99
+;        ..
+;     
+;     Mat   User: "Air - Metal Wall Framing - 16 or 24 in. OC"  
+;        CodeCat = UVal: "Air"  (10)
+;        CodeItem = UVal: "Air - Metal Wall Framing - 16 or 24 in. OC"  (1001)
+;        RVal = RVal: 0.65
+;        ThrmlCndct = RVal: 0.705
+;        SpecHt = RVal: 0.24
+;        Dens = RVal: 0.08
+;        Thkns = RVal: 5.5
+;        FrmMat = PDef: "- specify -"  (0)
+;        FrmConfig = PDef: "- specify -"  (0)
+;        FrmDepth = PDef: "- specify -"  (0)
+;        CavityIns = RVal: 0
+;        FrmFacHeaders = RVal: 0
+;        HeaderIns = RVal: 0
+;        CMUWt = PDef: "- specify -"  (0)
+;        CMUFill = PDef: "- specify -"  (0)
+;        CavityInsVal = RVal: 0
+;        FrmDepthVal = RVal: 0
+;        IsSpandrel = RVal: 0
+;        IsHollowCoreMasonry = RVal: 0
+;        IsMetalWall = RVal: 0
+;        IsMetalFrame = RVal: 1
+;        IsWoodFrame = RVal: 0
+;        IsMetalFrameLayer = RVal: 1
+;        IsWoodFrameLayer = RVal: 0
+;        IsMetalRoof = RVal: 0
+;        IsWoodFrameRoof = RVal: 0
+;        RefCnt = RVal: 2
+;        SimpleCompositeR = RVal: 0
+;        HeatCap = RVal: 0.0088
+;        InsCheck = RVal: 0
+;        ..
+;  
+;  WITH FOCUS ON SIMULATION PROPERTIES -
+;  
+;      <Mat>
+;        <Name>Stucco - 7/8 in.</Name>
+;        <RVal>0.18</RVal>
+;        <ThrmlCndct>0.405</ThrmlCndct>
+;        <SpecHt>0.2</SpecHt>
+;        <Dens>115.81</Dens>
+;        <Thkns>0.88</Thkns>
+;      </Mat>
+;      <Mat>
+;        <Name>Compliance Insulation R13.99</Name>
+;        <RVal>13.99</RVal>
+;        <ThrmlCndct>0.0133</ThrmlCndct>
+;        <SpecHt>0.27</SpecHt>
+;        <Dens>1</Dens>
+;        <Thkns>2.2328</Thkns>
+;      </Mat>
+;      <Mat>
+;        <Name>Air - Metal Wall Framing - 16 or 24 in. OC</Name>
+;        <RVal>0.65</RVal>
+;        <ThrmlCndct>0.705</ThrmlCndct>
+;        <SpecHt>0.24</SpecHt>
+;        <Dens>0.08</Dens>
+;        <Thkns>5.5</Thkns>
+;      </Mat>
+
+
+
+END
+;*************************************************************************
+
+
+;*************************************************************************
+;*************************************************************************
+
+ENDFILE

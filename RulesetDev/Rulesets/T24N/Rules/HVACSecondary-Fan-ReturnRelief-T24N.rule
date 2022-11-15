@@ -1,0 +1,391 @@
+// HVAC Secondary Systems - Fans - Relief
+//
+// -------------------------------------------------------------------------
+//  Copyright (c) 2012-2017, California Energy Commission
+//  All rights reserved.
+//  Redistribution and use in source and binary forms, with or without
+//  modification, are permitted provided that the following conditions are
+//  met:
+// 
+//    * Redistributions of source code must retain the above copyright
+//  notice, this list of conditions and the following disclaimer.
+//    * Redistributions in binary form must reproduce the above copyright
+//  notice, this list of conditions and the following disclaimer in
+//  the documentation and/or other materials provided with the
+//  distribution.
+//    * Neither the name of the California Energy Commission nor the names of its
+//  contributors may be used to endorse or promote products
+//  derived from this software without specific prior written
+//  permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+//  IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+//  TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION
+//  BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+//  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+//  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+//  BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+//  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+//  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// -------------------------------------------------------------------------
+
+
+//  This rule file addresses the following building descriptors:
+
+
+// Create return fan
+RULE AirSys:AirSeg:FanRef
+  ANNUAL
+    if( BaseSysNum > 0 .AND. Type = "Return" .AND. AirSys:RetFanPwrRat > 0 )
+    then
+      if( ServesResZn > 0 )
+      then RuleLibrary( Fan, "ResBaseSys RetFan", 1, Name )
+      else RuleLibrary( Fan, "BaseSys RetFan", 1, Name )
+      endif
+    else UNCHANGED
+    endif
+ENDRULE
+
+// Create relief fan
+RULE NEW AirSys:BaseReliefAirSegRef
+  DATATYPE
+    AirSeg
+  LONGFORM
+    BaselineReliefAirSegmentReference
+  INPUTCLASS
+    NotInput
+  ANNUAL
+    if( BaseSysNum > 0 .AND. IfValidAnd( ReliefFanPwrRat > 0 ) )
+    then
+      if( ServesResZn > 0 )
+      then UNDEFINED
+      else RuleLibrary( AirSeg, "BaseSys ReliefAirSeg", 1, Name )
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
+
+// Re-evaluate BaseSysNum, ServesResZn, and SysCnt rule for other dependencies
+RULE NEW AirSys:AirSeg:Fan:BaseSysNum
+  ANNUAL
+    if( LocalStatus( BaseSysNum ) = 0 )
+    then AirSys:BaseSysNum
+    else UNCHANGED
+    endif
+ENDRULE
+RULE NEW Fan:ServesResZn
+  ANNUAL
+    if( ParentComp = "AirSys" )
+    then ValidOr( AirSys:ServesResZn, 0 )
+    else 0
+    endif
+ENDRULE 
+RULE AirSys:AirSeg:Fan:SysCnt
+  ANNUAL
+    if( BaseSysNum > 0 .AND. 
+        ( AirSeg:Type = "Return" .OR. AirSeg:Type = "Relief" ) )
+    then AirSys:Cnt
+    else UNCHANGED
+    endif
+ENDRULE
+RULE NEW AirSys:AirSeg:Fan:SysType
+  ANNUAL
+    if( BaseSysNum > 0 .AND. 
+        ( AirSeg:Type = "Return" .OR. AirSeg:Type = "Relief" ) )
+    then AirSys:Type
+    else UNCHANGED
+    endif
+ENDRULE
+
+// Set FlowCap
+RULE AirSys:AirSeg:Fan:FlowCap
+  ANNUAL
+    if( BaseSysNum > 0 .AND. 
+        ( AirSeg:Type = "Return" .OR. AirSeg:Type = "Relief" ) )
+    then 
+      if( ServesResZn > 0 )
+      then // ResAirSys, set equal to supply fan per BW's guidance
+        AirSys:SupFanCap
+      else // Aligned w/ 90.1 App G, original proposal to CEC; used for NRes
+        Max( AirSys:SupFanCap - AirSys:SysVentFlow, 0.9 * AirSys:SupFanCap )        
+      endif
+    else UNCHANGED
+    endif
+ENDRULE
+
+RULE AirSys:AirSeg:Fan:FlowMin
+  ANNUAL
+    if( BaseSysNum > 0 .AND. 
+        ( AirSeg:Type = "Return" .OR. AirSeg:Type = "Relief" ) )
+    then 0
+    else UNCHANGED
+    endif
+ENDRULE
+
+RULE AirSys:AirSeg:Fan:PwrIdx
+  ANNUAL
+    if( BaseSysNum > 0 )
+    then
+      if( AirSeg:Type = "Return" )
+      then // Return fan
+        ( AirSys:BaseFanPwrWithAdj * 1000 * AirSys:RetFanPwrRat ) / FlowCap
+      else
+      if( AirSeg:Type = "Relief" )
+      then // Relief fan
+        ( AirSys:BaseFanPwrWithAdj * 1000 * AirSys:ReliefFanPwrRat ) / FlowCap
+      else UNCHANGED
+      endif endif
+    else UNCHANGED
+    endif
+ENDRULE
+
+RULE AirSys:AirSeg:Fan:FlowEff
+  ANNUAL
+    if( BaseSysNum > 0 .AND. 
+        ( AirSeg:Type = "Return" .OR. AirSeg:Type = "Relief" ) )
+    then 0.65
+    else UNCHANGED
+    endif
+ENDRULE
+
+// ********** Baseline Fan Mtr Size ********************************************
+// For standard design using PwrIdx to describe fan power, which includes influence of MtrEff,
+// determining the motor size and corresponding efficinecy is an iterative process. The
+// rule steps below establish this iteration.
+RULE NEW AirSys:AirSeg:Fan:MtrBHPStart
+  ANNUAL
+    if( BaseSysNum > 0 .AND. 
+        ( AirSeg:Type = "Return" .OR. AirSeg:Type = "Relief" ) )
+    then FlowCap * PwrIdx / 745.6  
+    else UNCHANGED
+    endif
+ENDRULE
+RULE NEW AirSys:AirSeg:Fan:MtrHPIdxStart
+  ANNUAL
+     if( BaseSysNum > 0 .AND. 
+         ( AirSeg:Type = "Return" .OR. AirSeg:Type = "Relief" ) .AND.
+         IfValidAnd( MtrBHPStart > 0 ) )
+    then StdElecMtrSize:MotorHPIndex("InputMotorHP", MtrBHPStart)  
+    else UNCHANGED
+    endif
+ENDRULE
+RULE NEW AirSys:AirSeg:Fan:MtrEffStart
+  ANNUAL
+     if( BaseSysNum > 0 .AND. 
+         ( AirSeg:Type = "Return" .OR. AirSeg:Type = "Relief" ) .AND.
+         IfValidAnd( MtrHPIdxStart > 0 ) )
+    then StdElecMtrPerf:MotorEfficiency("MotorHPIndex", MtrHPIdxStart)  
+    else UNCHANGED
+    endif
+ENDRULE
+RULE NEW AirSys:AirSeg:Fan:MtrBHPGuess1
+  ANNUAL
+     if( BaseSysNum > 0 .AND. 
+         ( AirSeg:Type = "Return" .OR. AirSeg:Type = "Relief" ) .AND.
+         IfValidAnd( MtrBHPStart > 0 ) .AND.
+         IfValidAnd( MtrEffStart > 0 ) )
+    then MtrBHPStart * MtrEffStart
+    else UNCHANGED
+    endif
+ENDRULE
+RULE NEW AirSys:AirSeg:Fan:MtrHPIdxGuess1
+  ANNUAL
+     if( BaseSysNum > 0 .AND. 
+         ( AirSeg:Type = "Return" .OR. AirSeg:Type = "Relief" ) .AND.
+         IfValidAnd( MtrBHPGuess1 > 0 ) )
+    then StdElecMtrSize:MotorHPIndex("InputMotorHP", MtrBHPGuess1)  
+    else UNCHANGED
+    endif
+ENDRULE
+RULE NEW AirSys:AirSeg:Fan:MtrEffGuess1
+  ANNUAL
+     if( BaseSysNum > 0 .AND. 
+         ( AirSeg:Type = "Return" .OR. AirSeg:Type = "Relief" ) .AND.
+         IfValidAnd( MtrHPIdxGuess1 > 0 ) )
+    then StdElecMtrPerf:MotorEfficiency("MotorHPIndex", MtrHPIdxGuess1)  
+    else UNCHANGED
+    endif
+ENDRULE
+RULE NEW AirSys:AirSeg:Fan:MtrHPIdxFinal
+  ANNUAL
+     if( BaseSysNum > 0 .AND. 
+         ( AirSeg:Type = "Return" .OR. AirSeg:Type = "Relief" ) .AND.
+         IfValidAnd( MtrHPIdxGuess1 > 0 ) )
+    then MtrHPIdxGuess1
+    else UNCHANGED
+    endif
+ENDRULE
+RULE NEW AirSys:AirSeg:Fan:MtrEffFinal
+  ANNUAL
+     if( BaseSysNum > 0 .AND. 
+         ( AirSeg:Type = "Return" .OR. AirSeg:Type = "Relief" ) .AND.
+         IfValidAnd( MtrEffGuess1 > 0 ) )
+    then MtrEffGuess1
+    else UNCHANGED
+    endif
+ENDRULE
+
+RULE AirSys:AirSeg:Fan:MtrHP
+  ANNUAL
+    if( BaseSysNum > 0 .AND.
+        IfValidAnd( MtrHPIdxFinal > 0 ) )
+    then StdElecMtrPerf:MotorHPValue("MotorHPIndex", MtrHPIdxFinal)  
+    else UNCHANGED
+    endif
+ENDRULE
+
+RULE NEW AirSys:AirSeg:Fan:MtrPerfIdx
+  ANNUAL
+     if( BaseSysNum > 0 .AND. 
+         ( AirSeg:Type = "Return" .OR. AirSeg:Type = "Relief" ) .AND.
+         IfValidAnd( MtrHP > 0 ) )
+    then StdElecMtrSize:MotorHPIndex("InputMotorHP", MtrHP)
+    else UNCHANGED
+    endif
+ENDRULE
+RULE AirSys:AirSeg:Fan:MtrEff
+  ANNUAL
+     if( BaseSysNum > 0 .AND. 
+         ( AirSeg:Type = "Return" .OR. AirSeg:Type = "Relief" ) .AND.
+         IfValidAnd( MtrPerfIdx > 0 ) )
+    then StdElecMtrPerf:MotorEfficiency("MotorHPIndex", MtrPerfIdx)   
+    else UNCHANGED
+    endif
+ENDRULE
+
+RULE AirSys:AirSeg:Fan:MtrBHP
+  ANNUAL
+     if( BaseSysNum > 0 .AND. 
+         ( AirSeg:Type = "Return" .OR. AirSeg:Type = "Relief" ) .AND.
+        LocalStatus( PwrIdx ) > 0 .AND. 
+        LocalStatus( FlowCap ) > 0 .AND.
+        LocalStatus( MtrEff ) > 0 ) 
+    then PwrIdx * FlowCap * MtrEff / 745.6
+    else UNCHANGED
+    endif
+ENDRULE
+RULE NEW AirSys:AirSeg:Fan:MtrBHPIdx
+  ANNUAL
+     if( BaseSysNum > 0 .AND. 
+         ( AirSeg:Type = "Return" .OR. AirSeg:Type = "Relief" ) .AND.
+         IfValidAnd( MtrBHP >= 0 ) .AND. 
+         IfValidAnd( FlowCap > 0 ) ) 
+    then MtrBHP / FlowCap * 1000
+    else 0
+    endif
+ENDRULE
+
+RULE AirSys:AirSeg:Fan:MtrPos
+  ANNUAL
+     if( BaseSysNum > 0 .AND. 
+         ( AirSeg:Type = "Return" .OR. AirSeg:Type = "Relief" ) )
+    then "InAirStream"
+    else UNCHANGED
+    endif
+ENDRULE
+
+RULE AirSys:AirSeg:Fan:TotEff
+  ANNUAL
+    if( BaseSysNum > 0 .AND. 
+        ( AirSeg:Type = "Return" .OR. AirSeg:Type = "Relief" ) .AND.
+        IfValidAnd( FlowEff >= 0 ) .AND. 
+        IfValidAnd( MtrEff > 0 ) )
+    then FlowEff * MtrEff
+    else UNCHANGED
+    endif
+ENDRULE
+
+RULE AirSys:AirSeg:Fan:TotStaticPress
+  ANNUAL
+    if( BaseSysNum > 0 .AND.
+        ( AirSeg:Type = "Return" .OR. AirSeg:Type = "Relief" ) .AND.
+        IfValidAnd( PwrIdx > 0 ) .AND. 
+        IfValidAnd( TotEff >= 0 ) )
+    then PwrIdx * TotEff / 0.1175
+    else UNCHANGED
+    endif
+ENDRULE
+
+RULE AirSys:AirSeg:Fan:Pwr_fPLRCrvRef
+  ANNUAL
+    if( BaseSysNum > 0 .AND.
+        ( AirSeg:Type = "Return" .OR. AirSeg:Type = "Relief" ) )
+    then
+      if( CtrlMthd = "VariableSpeedDrive" ) 
+      then
+        if( SysType = "SZVAVAC" .OR. SysType = "SZVAVHP" .OR. SysType = "SZVAVDFHP" )
+        then Rulelibrary(CrvCubic, "FanVSDPerfSpResetPwrRatio_fCFMRatio")
+        else Rulelibrary(CrvCubic, "FanVSDGoodSpResetPwrRatio_fCFMRatio")
+        endif
+      else UNDEFINED
+      endif
+    else UNCHANGED
+    endif
+ENDRULE
+
+RULE NEW AirSeg:FanFlowCap
+  ANNUAL
+    SumChildren( Fan:FlowCap )
+ENDRULE
+
+RULE NEW AirSys:RetFanCap
+  ANNUAL
+    SumChildrenIf( AirSeg:FanFlowCap, AirSeg:Type = "Return" )
+ENDRULE
+
+RULE NEW AirSys:ReliefFanCap
+  ANNUAL
+    SumChildrenIf( AirSeg:FanFlowCap, AirSeg:Type = "Relief" )
+ENDRULE
+
+// Evaluate AirSys:RetAirFlowRat after Return/Relief rules
+ RULE AirSys:RetAirFlowRat
+  DEFAULT
+    if( SumChildren( HtRcvry:RcvryFromExhSys ) > 0 )
+    then 0
+    else if( IfValidAnd( IsAllOA > 0 ) .AND. IfValidAnd( SupFanCap > 0 ) )
+    then Min( Max( ValidOr( RetFanCap , 0 ), ValidOr( ExhFanCap, 0 ) ) / SupFanCap, 1 )
+    else if( IfValidAnd( SupFanCap > 0 ) .AND. IfValidAnd( RetFanCap > 0 ) )
+    then Min( RetFanCap / SupFanCap, 1 )
+    else if( IfValidAnd( SupFanCap > 0 ) .AND. IfValidAnd( ExhFanCap > 0 ) )
+    then Min( ExhFanCap / SupFanCap, 1 )
+    else 1
+    endif endif endif endif
+  ANNUAL
+    if( SumChildren( HtRcvry:RcvryFromExhSys ) > 0 )
+    then 0
+    else if( IfValidAnd( IsAllOA > 0 ) .AND. IfValidAnd( SupFanCap > 0 ) )
+    then Min( Max( ValidOr( RetFanCap , 0 ), ValidOr( ExhFanCap, 0 ) ) / SupFanCap, 1 )
+    else if( IfValidAnd( SupFanCap > 0 ) .AND. IfValidAnd( RetFanCap > 0 ) )
+    then Min( RetFanCap / SupFanCap, 1 )
+    else if( IfValidAnd( SupFanCap > 0 ) .AND. IfValidAnd( ExhFanCap > 0 ) )
+    then Min( ExhFanCap / SupFanCap, 1 )
+    else 1
+    endif endif endif endif
+ENDRULE
+
+// ********** Simulated Capacities / Efficiency ********************************
+RULE AirSys:AirSeg:Fan:FlowCapSim
+// The return fan capacity is set to be equal to the supply fan capacity
+// to fix the issue that the supply flow is limited by the return flow
+// The simulated return flow rate will still be equal to the calculated
+// SupFanCap * RetAirFlowRat, where RetAirFlowRat is calculated from use
+// return fan flow
+  ANNUAL
+    if( ( AirSeg:Type = "Return" .OR. AirSeg:Type = "Relief" ) .AND.
+        IfValidAnd( AirSys:SupFanCap > 0 ) )
+    then AirSys:SupFanCap * SysCnt 
+    else UNCHANGED
+    endif
+ENDRULE
+
+RULE AirSys:AirSeg:Fan:FlowMinSim
+  ANNUAL
+    if( BaseSysNum > 0 .AND.
+        ( AirSeg:Type = "Return" .OR. AirSeg:Type = "Relief" ) )
+    then FlowMin * SysCnt
+    else UNCHANGED
+    endif
+ENDRULE
