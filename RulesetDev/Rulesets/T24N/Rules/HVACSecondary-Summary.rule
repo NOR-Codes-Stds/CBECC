@@ -460,18 +460,27 @@ RULE NEW AirSys:ExhSysFanPwr
   DEFAULT
     if( IsExhSys > 0 )
     then ExhFanPwr + SupFanPwr
+    else
+    if( SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:ExhFlow ) > 0 )
+    then ExhFanPwr // Is a DOAS providing Exhaust
     else 0
-    endif
+    endif endif
   SIZING
     if( IsExhSys > 0 )
     then ExhFanPwr + SupFanPwr
+    else
+    if( SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:ExhFlow ) > 0 )
+    then ExhFanPwr // Is a DOAS providing Exhaust
     else 0
-    endif
+    endif endif
   ANNUAL
     if( IsExhSys > 0 )
     then ExhFanPwr + SupFanPwr
+    else
+    if( SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:ExhFlow ) > 0 )
+    then ExhFanPwr // Is a DOAS providing Exhaust
     else 0
-    endif
+    endif endif
 ENDRULE
 RULE NEW AirSys:ExhSysFanPwrIdx
   DATATYPE
@@ -1147,27 +1156,40 @@ ENDRULE
 
 
 // =========================== AirSystem =======================================
-
 RULE AirSys:ClgEffUnitRpt
   DESCRIPTION
     "A text string for reporting the (DX) cooling efficiency unit of system."
   INPUTCLASS 
     NotInput
-  ANNUAL
+  ANNUAL : T24N_2019
     if( SumChildrenIf( CoilClg:CapTotNetRtd, CoilClg:Type = "DirectExpansion" ) > 0 )
     then
-      if( IfValidAnd( EffMetric = "SEER2/EER2/HSPF2" ) .AND. 
-          IfValidAnd( SEER2IsValid > 0 ) .AND.
-          IfValidAnd( MaxChild( CoilClg:DXSEER2 ) > 0 ) )
+      if( IfValidAnd( MaxChild( CoilClg:CodeMinSEER2 ) > 0 ) .OR.
+          IfValidAnd( MaxChild( CoilClg:CodeMinSEER ) > 0 ) )
+      then // Is SEER or SEER2 rated 
+        "SEER/EER"
+      else
+      if( IfValidAnd( MaxChild( CoilClg:CodeMinEER ) > 0 ) )
+      then
+       "EER"
+      else 
+        "NA"
+      endif endif
+    else 
+      "NA"
+    endif
+  ANNUAL : T24N
+    if( SumChildrenIf( CoilClg:CapTotNetRtd, CoilClg:Type = "DirectExpansion" ) > 0 )
+    then
+      if( IfValidAnd( MaxChild( CoilClg:CodeMinSEER2 ) > 0 ) )
       then
         "SEER2/EER2"
       else
-      if( IfValidAnd( MaxChild( CoilClg:DXSEER ) > 0 ) .AND.
-          IfValidAnd( MaxChild( CoilClg:CodeMinSEER ) > 0 ) )
+      if( IfValidAnd( MaxChild( CoilClg:CodeMinSEER ) > 0 ) )
       then
         "SEER/EER"
       else
-      if( IfValidAnd( MaxChild( CoilClg:DXEER ) > 0 ) )
+      if( IfValidAnd( MaxChild( CoilClg:CodeMinEER ) > 0 ) )
       then
        "EER"
       else 
@@ -1183,24 +1205,57 @@ RULE AirSys:ClgEffRpt
     "A text string for reporting the (DX) cooling efficiency of system."
   INPUTCLASS 
     NotInput
-  ANNUAL
+  ANNUAL : T24N_2019
+    if( IfValidAnd( ClgEffUnitRpt != "NA" ) )
+    then
+      if( IfValidAnd( ClgEffUnitRpt = "SEER/EER" ) )
+      then
+        if( MaxChild( CoilClg:CodeMinEER ) > 0 .OR. 
+            MaxChild( CoilClg:CodeMinEER2 ) > 0 .OR.
+            MaxChild( CoilClg:UserDefEER ) > 0 )
+        then // EER rating required, or user has entered an EER
+          Format( FltToStr( MaxChild( CoilClg:DXSEERRnd ), MaxChild( CoilClg:EERSEERRndScl ) ) ) + " / " +
+          Format( FltToStr( MaxChild( CoilClg:DXEERRnd ), MaxChild( CoilClg:EERSEERRndScl ) ) ) 
+        else 
+          Format( FltToStr( MaxChild( CoilClg:DXSEERRnd ), MaxChild( CoilClg:EERSEERRndScl ) ) ) + " / NA"
+        endif
+      else
+      if( IfValidAnd( ClgEffUnitRpt = "EER" ) )
+      then
+        Format( FltToStr( MaxChild( CoilClg:DXEERRnd ), MaxChild( CoilClg:EERSEERRndScl ) ) )
+      else 
+        "NA"
+      endif endif
+    else 
+    if( SumChildrenIf( CoilClg:CapTotNetRtd, CoilClg:Type = "ChilledWater" ) > 0 )
+    then
+      "NA - See Chiller"
+    else 
+      "NA"
+    endif endif
+  ANNUAL : T24N
     if( IfValidAnd( ClgEffUnitRpt != "NA" ) )
     then
       if( IfValidAnd( ClgEffUnitRpt = "SEER2/EER2" ) )
       then
-        if( MaxChild( CoilClg:DXEER2 ) > 0 )
-        then // EER2 rating required
+        if( MaxChild( CoilClg:CodeMinEER2 ) > 0 .OR. MaxChild( CoilClg:UserDefEER ) > 0 )
+        then // EER2 rating required or user has entered it
           Format( FltToStr( MaxChild( CoilClg:DXSEER2 ), MaxChild( CoilClg:EERSEERRndScl ) ) ) + " / " +
           Format( FltToStr( MaxChild( CoilClg:DXEER2 ), MaxChild( CoilClg:EERSEERRndScl ) ) ) 
-        else 
+        else // No EER2 required or entered, report SEER2 only
           Format( FltToStr( MaxChild( CoilClg:DXSEER2 ), MaxChild( CoilClg:EERSEERRndScl ) ) ) + " / NA"
         endif
       else
       if( IfValidAnd( ClgEffUnitRpt = "SEER/EER" ) )
       then
-        Format( FltToStr( MaxChild( CoilClg:DXSEERRnd ), MaxChild( CoilClg:EERSEERRndScl ) ) ) + " / " +
-        Format( FltToStr( MaxChild( CoilClg:DXEERRnd ), MaxChild( CoilClg:EERSEERRndScl ) ) )        
-      else
+        if( MaxChild( CoilClg:CodeMinEER ) > 0 .OR. MaxChild( CoilClg:UserDefEER ) > 0 )
+        then // EER rating required or user has entered it
+          Format( FltToStr( MaxChild( CoilClg:DXSEERRnd ), MaxChild( CoilClg:EERSEERRndScl ) ) ) + " / " +
+          Format( FltToStr( MaxChild( CoilClg:DXEERRnd ), MaxChild( CoilClg:EERSEERRndScl ) ) )        
+        else // No EER required or entered, report SEER only
+          Format( FltToStr( MaxChild( CoilClg:DXSEERRnd ), MaxChild( CoilClg:EERSEERRndScl ) ) ) + " / NA"
+        endif
+      else // Not SEER/SEER2 rated
       if( IfValidAnd( ClgEffUnitRpt = "EER" ) )
       then
         Format( FltToStr( MaxChild( CoilClg:DXEERRnd ), MaxChild( CoilClg:EERSEERRndScl ) ) )
@@ -1216,31 +1271,57 @@ RULE AirSys:ClgEffRpt
     endif endif
 ENDRULE
 
-
-
-
 // -----------------------------------------------------------------------------
-
 RULE AirSys:HtgEffUnitRpt
   DESCRIPTION
     "A text string for reporting the heating efficiency unit of the system."
   INPUTCLASS 
     NotInput
-  ANNUAL
+  ANNUAL : T24N_2019
     if( SumChildrenIf( CoilHtg:CapTotNetRtd, CoilHtg:Type = "HeatPump" ) > 0 )
     then
-      if( IfValidAnd( EffMetric = "SEER2/EER2/HSPF2" ) .AND. 
-          IfValidAnd( HSPF2IsValid > 0 ) .AND.
-          IfValidAnd( MaxChild( CoilHtg:HtPumpHSPF2 ) > 0 ) )
-      then
-        "HSPF2"
-      else
-      if( IfValidAnd( MaxChild( CoilHtg:HtPumpHSPF ) > 0 ) .AND.
+      if( IfValidAnd( MaxChild( CoilHtg:CodeMinHSPF2 ) > 0 ) .OR. 
           IfValidAnd( MaxChild( CoilHtg:CodeMinHSPF ) > 0 ) )
       then
-        "HSPF"
+        "HSPF/COP"
       else 
-      if( IfValidAnd( MaxChild( CoilHtg:HtPumpCOP ) > 0 ) )
+      if( IfValidAnd( MaxChild( CoilHtg:CodeMinCOP ) > 0 ) )
+      then
+        "COP"
+      else 
+        "NA"
+      endif endif
+    else
+    if( SumChildrenIf( CoilHtg:CapTotGrossRtd, CoilHtg:Type = "Furnace" ) > 0 )
+    then 
+      if( IfValidAnd( MaxChild( CoilHtg:CodeMinAFUE ) > 0 ) )
+      then
+        "AFUE"
+      else if( IfValidAnd( MaxChild( CoilHtg:CodeMinThrmlEff ) > 0 ) )
+      then
+        "ThrmlEff"
+      else 
+        "NA"
+      endif endif 
+    else 
+    if( SumChildren( AirSeg:ElecResHtgCap) > 0 )
+    then 
+      "NA"
+    else 
+      "NA"
+    endif endif endif
+  ANNUAL : T24N
+    if( SumChildrenIf( CoilHtg:CapTotNetRtd, CoilHtg:Type = "HeatPump" ) > 0 )
+    then
+      if( IfValidAnd( MaxChild( CoilHtg:CodeMinHSPF2 ) > 0 ) )
+      then
+        "HSPF2/COP"
+      else
+      if( IfValidAnd( MaxChild( CoilHtg:CodeMinHSPF ) > 0 ) )
+      then
+        "HSPF/COP"
+      else 
+      if( IfValidAnd( MaxChild( CoilHtg:CodeMinCOP ) > 0 ) )
       then
         "COP"
       else 
@@ -1249,11 +1330,10 @@ RULE AirSys:HtgEffUnitRpt
     else
     if( SumChildrenIf( CoilHtg:CapTotGrossRtd, CoilHtg:Type = "Furnace" ) > 0 )
     then 
-      if( IfValidAnd( MaxChild( CoilHtg:FurnAFUE ) > 0 ) .AND. 
-          MaxChild( CoilHtg:CapTotGrossRtd ) < 225000 )
+      if( IfValidAnd( MaxChild( CoilHtg:CodeMinAFUE ) > 0 ) )
       then
         "AFUE"
-      else if( IfValidAnd( MaxChild( CoilHtg:FurnThrmlEff ) > 0 ) )
+      else if( IfValidAnd( MaxChild( CoilHtg:CodeMinThrmlEff ) > 0 ) )
       then
         "ThrmlEff"
       else 
@@ -1273,17 +1353,67 @@ RULE AirSys:HtgEffRpt
     "A text string for reporting the heating efficiency of the system."
   INPUTCLASS 
     NotInput
-  ANNUAL
+  ANNUAL : T24N_2019
     if( IfValidAnd( HtgEffUnitRpt != "NA" ) )
     then
-      if( IfValidAnd( HtgEffUnitRpt = "HSPF2" ) )
+      if( IfValidAnd( HtgEffUnitRpt = "HSPF/COP" ) )
       then
-        Format( FltToStr( MaxChild( CoilHtg:HtPumpHSPF2 ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) )
+        if( MaxChild( CoilHtg:UserDefCOP ) > 0 )
+        then // User has entered COP
+          Format( FltToStr( MaxChild( CoilHtg:HtPumpHSPFRnd ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) ) + " / " +
+          Format( FltToStr( MaxChild( CoilHtg:HtPumpCOPRnd ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) ) 
+        else 
+          Format( FltToStr( MaxChild( CoilHtg:HtPumpHSPFRnd ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) ) + " / NA"
+        endif
       else
-      if( IfValidAnd( HtgEffUnitRpt = "HSPF" ) )
+      if( IfValidAnd( HtgEffUnitRpt = "COP" ) )
       then
-        Format( FltToStr( MaxChild( CoilHtg:HtPumpHSPFRnd ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) )
+        Format( FltToStr( MaxChild( CoilHtg:HtPumpCOPRnd ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) )
       else
+      if( IfValidAnd( HtgEffUnitRpt = "AFUE" ) )
+      then
+        Format( FltToStr( MaxChild( CoilHtg:FurnAFUE ) * 100, 1 ) )
+      else
+      if( IfValidAnd( HtgEffUnitRpt = "ThrmlEff" ) )
+      then
+        Format( FltToStr( MaxChild( CoilHtg:FurnThrmlEff ) * 100, 1 ) )
+      else 
+        "NA"
+      endif endif endif endif
+    else
+    if( SumChildrenIf( CoilHtg:CapTotGrossRtd, CoilHtg:Type = "Resistance" ) > 0 )
+    then
+      "Elec. Res."
+    else
+    if( SumChildrenIf( CoilHtg:CapTotGrossRtd, CoilHtg:Type = "HotWater" ) > 0 )
+    then
+      "NA - See Boiler"
+    else 
+      "NA"
+    endif endif endif
+  ANNUAL : T24N
+    if( IfValidAnd( HtgEffUnitRpt != "NA" ) )
+    then
+      if( IfValidAnd( HtgEffUnitRpt = "HSPF2/COP" ) )
+      then
+        if( MaxChild( CoilHtg:UserDefCOP ) > 0 )
+        then // User has entered COP
+          Format( FltToStr( MaxChild( CoilHtg:HtPumpHSPF2 ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) ) + " / " +
+          Format( FltToStr( MaxChild( CoilHtg:HtPumpCOPRnd ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) ) 
+        else // No COP entered, report HSPF2 only
+          Format( FltToStr( MaxChild( CoilHtg:HtPumpHSPF2 ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) ) + " / NA"
+        endif
+      else
+      if( IfValidAnd( HtgEffUnitRpt = "HSPF/COP" ) )
+      then
+        if( MaxChild( CoilHtg:UserDefCOP ) > 0 )
+        then // User has entered COP
+          Format( FltToStr( MaxChild( CoilHtg:HtPumpHSPF ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) ) + " / " +
+          Format( FltToStr( MaxChild( CoilHtg:HtPumpCOPRnd ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) ) 
+        else // No COP entered, report HSPF only
+          Format( FltToStr( MaxChild( CoilHtg:HtPumpHSPF ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) ) + " / NA"
+        endif
+      else // Is COP rated
       if( IfValidAnd( HtgEffUnitRpt = "COP" ) )
       then
         Format( FltToStr( MaxChild( CoilHtg:HtPumpCOPRnd ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) )
@@ -1299,7 +1429,7 @@ RULE AirSys:HtgEffRpt
         "NA"
       endif endif endif endif endif
     else
-    if( SumChildren( AirSeg:ElecResHtgCap ) > 0 )
+    if( SumChildrenIf( CoilHtg:CapTotGrossRtd, CoilHtg:Type = "Resistance" ) > 0 )
     then
       "Elec. Res."
     else
@@ -1312,27 +1442,40 @@ RULE AirSys:HtgEffRpt
 ENDRULE
 
 // =========================== ZoneSystem ======================================
-
 RULE ZnSys:ClgEffUnitRpt
   DESCRIPTION
     "A text string for reporting the cooling efficiency unit of system."
   INPUTCLASS 
     NotInput
-  ANNUAL
+  ANNUAL : T24N_2019
     if( SumChildrenIf( CoilClg:CapTotNetRtd, CoilClg:Type = "DirectExpansion" ) > 0 )
-    then 
-      if( IfValidAnd( EffMetric = "SEER2/EER2/HSPF2" ) .AND. 
-          IfValidAnd( SEER2IsValid > 0 ) .AND.
-          IfValidAnd( MaxChild( CoilClg:DXSEER2 ) > 0 ) )
+    then
+      if( IfValidAnd( MaxChild( CoilClg:CodeMinSEER2 ) > 0 ) .OR.
+          IfValidAnd( MaxChild( CoilClg:CodeMinSEER ) > 0 ) )
+      then // Is SEER or SEER2 rated 
+        "SEER/EER"
+      else
+      if( IfValidAnd( MaxChild( CoilClg:CodeMinEER ) > 0 ) )
+      then
+       "EER"
+      else 
+        "NA"
+      endif endif
+    else 
+      "NA"
+    endif
+  ANNUAL : T24N
+    if( SumChildrenIf( CoilClg:CapTotNetRtd, CoilClg:Type = "DirectExpansion" ) > 0 )
+    then
+      if( IfValidAnd( MaxChild( CoilClg:CodeMinSEER2 ) > 0 ) )
       then
         "SEER2/EER2"
       else
-      if( IfValidAnd( MaxChild( CoilClg:DXSEER ) > 0 ) .AND.
-          IfValidAnd( MaxChild( CoilClg:CodeMinSEER ) > 0 ) )
+      if( IfValidAnd( MaxChild( CoilClg:CodeMinSEER ) > 0 ) )
       then
         "SEER/EER"
-      else 
-      if( IfValidAnd( MaxChild( CoilClg:DXEER ) > 0 ) )
+      else
+      if( IfValidAnd( MaxChild( CoilClg:CodeMinEER ) > 0 ) )
       then
        "EER"
       else 
@@ -1348,29 +1491,57 @@ RULE ZnSys:ClgEffRpt
     "A text string for reporting the cooling efficiency of system."
   INPUTCLASS 
     NotInput
-  ANNUAL
+  ANNUAL : T24N_2019
+    if( IfValidAnd( ClgEffUnitRpt != "NA" ) )
+    then
+      if( IfValidAnd( ClgEffUnitRpt = "SEER/EER" ) )
+      then
+        if( MaxChild( CoilClg:CodeMinEER ) > 0 .OR. 
+            MaxChild( CoilClg:CodeMinEER2 ) > 0 .OR.
+            MaxChild( CoilClg:UserDefEER ) > 0 )
+        then // EER rating required, or user has entered an EER
+          Format( FltToStr( MaxChild( CoilClg:DXSEERRnd ), MaxChild( CoilClg:EERSEERRndScl ) ) ) + " / " +
+          Format( FltToStr( MaxChild( CoilClg:DXEERRnd ), MaxChild( CoilClg:EERSEERRndScl ) ) ) 
+        else 
+          Format( FltToStr( MaxChild( CoilClg:DXSEERRnd ), MaxChild( CoilClg:EERSEERRndScl ) ) ) + " / NA"
+        endif
+      else
+      if( IfValidAnd( ClgEffUnitRpt = "EER" ) )
+      then
+        Format( FltToStr( MaxChild( CoilClg:DXEERRnd ), MaxChild( CoilClg:EERSEERRndScl ) ) )
+      else 
+        "NA"
+      endif endif
+    else 
+    if( SumChildrenIf( CoilClg:CapTotNetRtd, CoilClg:Type = "ChilledWater" ) > 0 )
+    then
+      "NA - See Chiller"
+    else 
+      "NA"
+    endif endif
+  ANNUAL : T24N
     if( IfValidAnd( ClgEffUnitRpt != "NA" ) )
     then
       if( IfValidAnd( ClgEffUnitRpt = "SEER2/EER2" ) )
       then
-        if( MaxChild( CoilClg:DXEER2 ) > 0 )
-        then // EER2 specified
+        if( MaxChild( CoilClg:CodeMinEER2 ) > 0 .OR. MaxChild( CoilClg:UserDefEER ) > 0 )
+        then // EER2 rating required or user has entered it
           Format( FltToStr( MaxChild( CoilClg:DXSEER2 ), MaxChild( CoilClg:EERSEERRndScl ) ) ) + " / " +
           Format( FltToStr( MaxChild( CoilClg:DXEER2 ), MaxChild( CoilClg:EERSEERRndScl ) ) ) 
-        else 
+        else // No EER2 required or entered, report SEER2 only
           Format( FltToStr( MaxChild( CoilClg:DXSEER2 ), MaxChild( CoilClg:EERSEERRndScl ) ) ) + " / NA"
         endif
-      else  
+      else
       if( IfValidAnd( ClgEffUnitRpt = "SEER/EER" ) )
       then
-        if( MaxChild( CoilClg:DXEER ) > 0 )
-        then // EER specified
+        if( MaxChild( CoilClg:CodeMinEER ) > 0 .OR. MaxChild( CoilClg:UserDefEER ) > 0 )
+        then // EER rating required or user has entered it
           Format( FltToStr( MaxChild( CoilClg:DXSEERRnd ), MaxChild( CoilClg:EERSEERRndScl ) ) ) + " / " +
-          Format( FltToStr( MaxChild( CoilClg:DXEERRnd ), MaxChild( CoilClg:EERSEERRndScl ) ) )
-        else 
-          Format( FltToStr( MaxChild( CoilClg:DXSEER ), MaxChild( CoilClg:EERSEERRndScl ) ) ) + " / NA"
-        endif        
-      else
+          Format( FltToStr( MaxChild( CoilClg:DXEERRnd ), MaxChild( CoilClg:EERSEERRndScl ) ) )        
+        else // No EER required or entered, report SEER only
+          Format( FltToStr( MaxChild( CoilClg:DXSEERRnd ), MaxChild( CoilClg:EERSEERRndScl ) ) ) + " / NA"
+        endif
+      else // Not SEER/SEER2 rated
       if( IfValidAnd( ClgEffUnitRpt = "EER" ) )
       then
         Format( FltToStr( MaxChild( CoilClg:DXEERRnd ), MaxChild( CoilClg:EERSEERRndScl ) ) )
@@ -1378,7 +1549,7 @@ RULE ZnSys:ClgEffRpt
         "NA"
       endif endif endif
     else 
-    if ( SumChildrenIf( CoilClg:CapTotNetRtd, CoilClg:Type = "ChilledWater" ) > 0 )
+    if( SumChildrenIf( CoilClg:CapTotNetRtd, CoilClg:Type = "ChilledWater" ) > 0 )
     then
       "NA - See Chiller"
     else 
@@ -1387,27 +1558,52 @@ RULE ZnSys:ClgEffRpt
 ENDRULE
 
 // -----------------------------------------------------------------------------
-
 RULE ZnSys:HtgEffUnitRpt
   DESCRIPTION
     "A text string for reporting the heating efficiency unit of the system."
   INPUTCLASS 
     NotInput
-  ANNUAL
+  ANNUAL : T24N_2019
     if( SumChildrenIf( CoilHtg:CapTotNetRtd, CoilHtg:Type = "HeatPump" ) > 0 )
+    then
+      if( IfValidAnd( MaxChild( CoilHtg:CodeMinHSPF2 ) > 0 ) .OR. 
+          IfValidAnd( MaxChild( CoilHtg:CodeMinHSPF ) > 0 ) ) 
+      then
+        "HSPF/COP"
+      else 
+      if( IfValidAnd( MaxChild( CoilHtg:CodeMinCOP ) > 0 ) )
+      then
+        "COP"
+      else 
+        "NA"
+      endif endif
+    else
+    if( SumChildrenIf( CoilHtg:CapTotGrossRtd, CoilHtg:Type = "Furnace" ) > 0 )
     then 
-      if( IfValidAnd( EffMetric = "SEER2/EER2/HSPF2" ) .AND. 
-          IfValidAnd( HSPF2IsValid > 0 ) .AND.
-          IfValidAnd( MaxChild( CoilHtg:HtPumpHSPF2 ) > 0 ) )
+      if( IfValidAnd( MaxChild( CoilHtg:CodeMinAFUE ) > 0 ) )
       then
-        "HSPF2"
-      else
-      if( IfValidAnd( MaxChild( CoilHtg:HtPumpHSPF ) > 0 ) .AND.
-          IfValidAnd( MaxChild( CoilHtg:CodeMinHSPF ) > 0 ) )
+        "AFUE"
+      else if( IfValidAnd( MaxChild( CoilHtg:CodeMinThrmlEff ) > 0 ) )
       then
-        "HSPF"
+        "ThrmlEff"
+      else 
+        "NA"
+      endif endif 
+    else 
+      "NA"
+    endif endif
+  ANNUAL : T24N
+    if( SumChildrenIf( CoilHtg:CapTotNetRtd, CoilHtg:Type = "HeatPump" ) > 0 )
+    then
+      if( IfValidAnd( MaxChild( CoilHtg:CodeMinHSPF2 ) > 0 ) )
+      then
+        "HSPF2/COP"
       else
-      if( IfValidAnd( MaxChild( CoilHtg:HtPumpCOP ) > 0 ) )
+      if( IfValidAnd( MaxChild( CoilHtg:CodeMinHSPF ) > 0 ) )
+      then
+        "HSPF/COP"
+      else 
+      if( IfValidAnd( MaxChild( CoilHtg:CodeMinCOP ) > 0 ) )
       then
         "COP"
       else 
@@ -1416,11 +1612,10 @@ RULE ZnSys:HtgEffUnitRpt
     else
     if( SumChildrenIf( CoilHtg:CapTotGrossRtd, CoilHtg:Type = "Furnace" ) > 0 )
     then 
-      if( IfValidAnd( MaxChild( CoilHtg:FurnAFUE ) > 0 ) .AND. 
-          MaxChild( CoilHtg:CapTotGrossRtd ) < 225000 )
+      if( IfValidAnd( MaxChild( CoilHtg:CodeMinAFUE ) > 0 ) )
       then
         "AFUE"
-      else if( IfValidAnd( MaxChild( CoilHtg:FurnThrmlEff ) > 0 ) )
+      else if( IfValidAnd( MaxChild( CoilHtg:CodeMinThrmlEff ) > 0 ) )
       then
         "ThrmlEff"
       else 
@@ -1436,17 +1631,67 @@ RULE ZnSys:HtgEffRpt
     "A text string for reporting the heating efficiency of the system."
   INPUTCLASS 
     NotInput
-  ANNUAL
+  ANNUAL : T24N_2019
     if( IfValidAnd( HtgEffUnitRpt != "NA" ) )
     then
-      if( IfValidAnd( HtgEffUnitRpt = "HSPF2" ) )
+      if( IfValidAnd( HtgEffUnitRpt = "HSPF/COP" ) )
       then
-        Format( FltToStr( MaxChild( CoilHtg:HtPumpHSPF2 ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) )
+        if( MaxChild( CoilHtg:UserDefCOP ) > 0 )
+        then // User has entered COP
+          Format( FltToStr( MaxChild( CoilHtg:HtPumpHSPFRnd ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) ) + " / " +
+          Format( FltToStr( MaxChild( CoilHtg:HtPumpCOPRnd ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) ) 
+        else 
+          Format( FltToStr( MaxChild( CoilHtg:HtPumpHSPFRnd ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) ) + " / NA"
+        endif
       else
-      if( IfValidAnd( HtgEffUnitRpt = "HSPF" ) )
+      if( IfValidAnd( HtgEffUnitRpt = "COP" ) )
       then
-        Format( FltToStr( MaxChild( CoilHtg:HtPumpHSPFRnd ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) )
+        Format( FltToStr( MaxChild( CoilHtg:HtPumpCOPRnd ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) )
       else
+      if( IfValidAnd( HtgEffUnitRpt = "AFUE" ) )
+      then
+        Format( FltToStr( MaxChild( CoilHtg:FurnAFUE ) * 100, 1 ) )
+      else
+      if( IfValidAnd( HtgEffUnitRpt = "ThrmlEff" ) )
+      then
+        Format( FltToStr( MaxChild( CoilHtg:FurnThrmlEff ) * 100, 1 ) )
+      else 
+        "NA"
+      endif endif endif endif
+    else
+    if( SumChildrenIf( CoilHtg:CapTotGrossRtd, CoilHtg:Type = "Resistance" ) > 0 )
+    then
+      "Elec. Res."
+    else
+    if( SumChildrenIf( CoilHtg:CapTotGrossRtd, CoilHtg:Type = "HotWater" ) > 0 )
+    then
+      "NA - See Boiler"
+    else 
+      "NA"
+    endif endif endif
+  ANNUAL : T24N
+    if( IfValidAnd( HtgEffUnitRpt != "NA" ) )
+    then
+      if( IfValidAnd( HtgEffUnitRpt = "HSPF2/COP" ) )
+      then
+        if( MaxChild( CoilHtg:UserDefCOP ) > 0 )
+        then // User has entered COP
+          Format( FltToStr( MaxChild( CoilHtg:HtPumpHSPF2 ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) ) + " / " +
+          Format( FltToStr( MaxChild( CoilHtg:HtPumpCOPRnd ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) ) 
+        else // No COP entered, report HSPF2 only
+          Format( FltToStr( MaxChild( CoilHtg:HtPumpHSPF2 ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) ) + " / NA"
+        endif
+      else
+      if( IfValidAnd( HtgEffUnitRpt = "HSPF/COP" ) )
+      then
+        if( MaxChild( CoilHtg:UserDefCOP ) > 0 )
+        then // User has entered COP
+          Format( FltToStr( MaxChild( CoilHtg:HtPumpHSPF ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) ) + " / " +
+          Format( FltToStr( MaxChild( CoilHtg:HtPumpCOPRnd ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) ) 
+        else // No COP entered, report HSPF only
+          Format( FltToStr( MaxChild( CoilHtg:HtPumpHSPF ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) ) + " / NA"
+        endif
+      else // Is COP rated
       if( IfValidAnd( HtgEffUnitRpt = "COP" ) )
       then
         Format( FltToStr( MaxChild( CoilHtg:HtPumpCOPRnd ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) )
