@@ -94,29 +94,27 @@ RULE NEW CoilHtg:CodeMinAFUE
       then // AirSys
         if( CapTotInpRtd < 225000 )
         then // AFUE rating threshold
-          if( Proj:StdsVersionYr >= 2016 )
-          then // Compliance2016 and beyond. See Issue 2561, which supercedes 2173
-            if( AirSys:SubType = "Packaged1Phase" ) 
-            then 0.81 // Table E-6, 1-phase, gas, weatherized
-            else if( AirSys:SubType = "Split1Phase" ) 
-            then 0.80 // Table E-6, 1-phase non-weatherized
-            else 0.78 // 3-phase and other
-            endif endif
-          else 0.78
-          endif
-        else UNDEFINED
+          if( IfValidAnd( AirSys:SubType = "Packaged1Phase" ) .OR. IfValidAnd( AirSys:SubType = "Packaged3Phase" ) )
+          then 0.81 // Table E-6, gas, weatherized
+          else
+          if( IfValidAnd( AirSys:SubType = "Split1Phase" ) .OR. IfValidAnd( AirSys:SubType = "Split3Phase" ) )
+          then 0.80 // Table E-6, non-weatherized
+          else 0.81 // All other, assume weatherized. Was 0.78, which was incorrect. See Ticket 3445
+          endif endif
+        else UNDEFINED // >=225MBH uses ThrmlEff
         endif
       else // ------------------------------------------------------------------
       if( ParentComp = "ZnSys" )
       then // ZnSys
         // First, types covered by 2016 Appliance Std, Table E-2
-        if( ZnSys:SubType = "Wall" )
+        if( IfValidAnd( ZnSys:SubType = "Wall" ) )
         then 
-          if( ZnSys:FurnaceType = "Gravity" )
+          if( IfValidAnd( ZnSys:FurnaceType = "Gravity" ) )
           then // Wall, Gravity. See issue 2173 
             if( CapTotInpRtd <= 27000 )
             then 0.65
-            else if( CapTotInpRtd <= 46000 )
+            else
+            if( CapTotInpRtd <= 46000 )
             then 0.66
             else 0.67
             endif endif
@@ -126,25 +124,27 @@ RULE NEW CoilHtg:CodeMinAFUE
           else 0.76
           endif endif
         else
-        if( ZnSys:SubType = "Floor" )
+        if( IfValidAnd( ZnSys:SubType = "Floor" ) )
         then // Floor, All
           if( CapTotInpRtd <= 37000 )
           then 0.57
           else 0.58
           endif 
         else
-        if( ZnSys:SubType = "Room" )
+        if( IfValidAnd( ZnSys:SubType = "Room" ) )
         then // Room, All
           if( CapTotInpRtd <= 20000 )
           then 0.61
-          else if( CapTotInpRtd <= 27000 )
+          else
+          if( CapTotInpRtd <= 27000 )
           then 0.66
-          else if( CapTotInpRtd <= 46000 )
+          else
+          if( CapTotInpRtd <= 46000 )
           then 0.67                 
           else 0.68
           endif endif endif               
         else
-        if( ZnSys:SubType = "Other" )
+        if( IfValidAnd( ZnSys:SubType = "Other" ) )
         then // See Issue 2561, which supercedes 2173
           if( Proj:StdsVersionYr >= 2016 )
           then 0.80 // Compliance2016 and beyond. Assume 1-phase non-weatherized for this case
@@ -154,21 +154,43 @@ RULE NEW CoilHtg:CodeMinAFUE
         // All other furnaces
         if( CapTotInpRtd < 225000 )
         then
-          if( Proj:StdsVersionYr >= 2016 )
-          then // Compliance2016 and beyond. See Issue 2561, which supercedes 2173
-            if( ZnSys:SubType = "Packaged1Phase" ) 
-            then 0.81 // Table E-6, 1-phase, gas, weatherized
-            else if( ZnSys:SubType = "Split1Phase" ) 
-            then 0.80 // Table E-6, 1-phase non-weatherized
-            else 0.78 // 3-phase and other
-            endif endif
-          else 0.78 // Before Compliance2016
-          endif      
-        else UNDEFINED
+          if( IfValidAnd( ZnSys:SubType = "Packaged1Phase" ) .OR. IfValidAnd( ZnSys:SubType = "Packaged3Phase" ) )
+          then 0.81 // Table E-6, gas, weatherized
+          else
+          if( IfValidAnd( ZnSys:SubType = "Split1Phase" ) .OR. IfValidAnd( ZnSys:SubType = "Split3Phase" ) )
+          then 0.80 // Table E-6, non-weatherized
+          else 0.81 // All other, assume weatherized. Was 0.78, which was incorrect. See Ticket 3445
+          endif endif
+        else UNDEFINED // >=225MBH uses ThrmlEff
         endif endif endif endif endif
       else UNDEFINED
       endif endif
     else UNDEFINED
+    endif
+  ANNUAL : T24N_2019
+    if( BaseSysNum > 0 .AND. Type = "Furnace" )
+    then
+      if( BaseSysNum = 1 )
+      then 0.80 // H/M Guestrooms and HRR is Split1Phase (non-weatherized).
+      else if( IfValidAnd( CapTotInpRtd < 225000 ) )
+      then 0.81 // Assume baseline is Packaged3Phase (weatherized).
+                // See tic 2561, which supercedes 2173, and then finally tic 3445
+      else UNDEFINED
+      endif endif
+    else UNCHANGED
+    endif
+  ANNUAL : T24N
+    if( BaseSysNum > 0 .AND. Type = "Furnace" )
+    then
+// See Appl Stds Table E-6
+      if( BaseSysNum = 1 .OR. BaseSysNum = 201 )
+      then 0.81 // H/M Guestrooms and MFam Common is Packaged1Phase (weatherized). See Issue 3432/3431
+      else if( IfValidAnd( CapTotInpRtd < 225000 ) )
+      then 0.81 // Assume baseline is Packaged3Phase (weatherized).
+                // See tic 2561, which supercedes 2173, and then finally tic 3445
+      else UNDEFINED
+      endif endif
+    else UNCHANGED
     endif
 ENDRULE
 
@@ -239,26 +261,13 @@ RULE CoilHtg:FurnAFUE
       endif
     else z:FurnAFUE
     endif
-  ANNUAL : T24N_2019
+  ANNUAL
     if( BaseSysNum > 0 .AND. Type = "Furnace" )
-    then
-      if( BaseSysNum = 1 .AND. IfValidAnd( CapTotInpRtd < 225000 ) )
-      then 0.80 // Res SZAC is Split1Phase. See Issue 2691
-      else if( IfValidAnd( CapTotInpRtd < 225000 ) )
-      then 0.78 // Assume baseline is Packaged3Phase. See Issue 2561, which supercedes 2173
+    then // Is baseline system
+      if( IfValidAnd( CodeMinAFUE > 0 ) )
+      then CodeMinAFUE
       else UNDEFINED
-      endif endif
-    else UNCHANGED
-    endif
-  ANNUAL : T24N
-    if( BaseSysNum > 0 .AND. Type = "Furnace" )
-    then
-      if( BaseSysNum = 1 .OR. BaseSysNum = 201 )
-      then 0.81 // H/M Guestrooms and MFam Common is Packaged1Phase ( weatherized ). See Issue 3432/3431
-      else if( IfValidAnd( CapTotInpRtd < 225000 ) )
-      then 0.78 // Assume baseline is Packaged3Phase. See Issue 2561, which supercedes 2173
-      else UNDEFINED
-      endif endif
+      endif
     else UNCHANGED
     endif
 ENDRULE
@@ -274,29 +283,40 @@ RULE NEW CoilHtg:CodeMinThrmlEff
     NotInput
   DEFAULT
     if( Type = "Furnace" .AND. IfValidAnd( CapTotInpRtd > 0 ) )
-    then // ------------------------------------------------------------------
-      if( ParentComp = "AirSys" )
-      then 
-        if( CapTotInpRtd < 225000 )
-        then UNDEFINED // AFUE is only efficiency metric for <225 kBtu/hr, per email from LF on 9/11/17
-        else
+    then
+      if( CapTotInpRtd < 225000 )
+      then UNDEFINED // AFUE is only efficiency metric for <225 kBtu/hr, per email from LF on 9/11/17
+      else
+      if( Proj:StdsVersionYr < 2022 )
+      then // Prior to 1/1/2023
         if( FuelSrc = "Oil" ) 
         then 0.81
         else 0.80
-        endif endif
-      else // ------------------------------------------------------------------
-      if( ParentComp = "ZnSys" )
-      then
-        if( CapTotInpRtd < 225000 )
-        then UNDEFINED // AFUE is only efficiency metric for <225 kBtu/hr, per email from LF on 9/11/17
-        else
-        if( FuelSrc = "Oil" ) 
-        then 0.81
-        else 0.80
-        endif endif
-      else UNDEFINED
-      endif endif
+        endif
+      else
+      if( FuelSrc = "Oil" ) 
+      then 0.82
+      else 0.81
+      endif endif endif
     else UNDEFINED
+    endif
+  ANNUAL : T24N_2019
+    if( BaseSysNum > 0 .AND. Type = "Furnace")
+    then 
+      if( CapTotInpRtd >= 225000 )
+      then 0.80 // Gas furnace Appl Stds Table E-5, prior to 1/1/23
+      else UNDEFINED
+      endif
+    else UNCHANGED
+    endif
+  ANNUAL : T24N
+    if( BaseSysNum > 0 .AND. Type = "Furnace")
+    then 
+      if( CapTotInpRtd >= 225000 )
+      then 0.81 // Gas furnace Appl Stds Table E-5, eff 1/1/23
+      else UNDEFINED
+      endif 
+    else UNCHANGED
     endif
 ENDRULE
 
@@ -325,12 +345,8 @@ RULE CoilHtg:FurnThrmlEff
           IfValidAnd( CodeMinThrmlEff > 0 ) )
       then // For PROPOSED AutoEffInput only 
         CodeMinThrmlEff
-// Remove calculation of FurnThrmlEff for AFUE rated equipment
-;     else if( IfValidAnd( FurnAFUE > 0 ) )
-;     then // Convert user input of AFUE to ThrmlEff
-;       ( 0.0051427 * ( FurnAFUE * 100 ) ) + 0.3989
       else UNDEFINED
-      endif ;endif
+      endif
     else UNDEFINED
     endif
   CHECKCODE : T24N
@@ -378,10 +394,10 @@ RULE CoilHtg:FurnThrmlEff
   ANNUAL
     if( BaseSysNum > 0 .AND. Type = "Furnace")
     then 
-      if( IfValidAnd( FurnAFUE > 0 ) )
+      if( IfValidAnd( CodeMinAFUE > 0 ) )
       then // Is AFUE rated, use equation to calculate ThrmlEff from AFUE
         ( 0.0051427 * ( FurnAFUE * 100 ) ) + 0.3989
-      else 0.8
+      else CodeMinThrmlEff
       endif
     else UNCHANGED
     endif
