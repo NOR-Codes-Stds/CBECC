@@ -211,9 +211,28 @@ ENDRULE
 
 // Set a flag indicating the standard design system is SEER2
 // -----------------------------------------------------------------------------
+RULE NEW AirSys:StdIsSEER2
+  DATATYPE
+    Integer
+  LONGFORM
+    StandardIsSEER2
+  DESCRIPTION
+    "A flag that indicates SEER2/EER2/HSPF2 efficiency ratings should be used for the standard design."
+  INPUTCLASS 
+    NotInput
+  ANNUAL : T24N_2019
+    0 // No std design AirSys uses SEER2 in 2019 
+  ANNUAL : T24N
+    if( BaseSysNum > 200 )
+    then 1 // Baseline Res Common Area is AirSys split 1-phase system <65kBtu/hr, use SEER2
+    else 0
+    endif
+ENDRULE  
 RULE NEW ZnSys:StdIsSEER2
   DATATYPE
     Integer
+  LONGFORM
+    StandardIsSEER2
   DESCRIPTION
     "A flag that indicates SEER2/EER2/HSPF2 efficiency ratings should be used for the standard design."
   INPUTCLASS 
@@ -229,9 +248,27 @@ RULE NEW ZnSys:StdIsSEER2
     endif
   ANNUAL : T24N
     if( BaseSysNum = 1 )
-    then 1 // Std design H/M is SEER2
+    then 1  // Baseline Hotel/Motel res system is ZnSys packaged 1-phase system <65kBtu/hr, use SEER2
     else 0
     endif
+ENDRULE  
+RULE NEW CoilClg:StdIsSEER2
+  DATATYPE
+    Integer
+  LONGFORM
+    StandardIsSEER2
+  DESCRIPTION
+    "A flag that indicates SEER2/EER2/HSPF2 efficiency ratings should be used for the standard design."
+  INPUTCLASS 
+    NotInput
+  ANNUAL
+    if( ParentComp = "AirSys" )
+    then AirSys:StdIsSEER2
+    else
+    if( ParentComp = "ZnSys" )
+    then ZnSys:StdIsSEER2
+    else 0
+    endif endif
 ENDRULE  
 
 // ********** Direct Expansion Cooling Minimum Efficiencies ******************************
@@ -339,7 +376,7 @@ RULE NEW CoilClg:CodeMinSEER
   ANNUAL : T24N
     if( BaseSysNum > 0 .AND. Type = "DirectExpansion" .AND. IfValidAnd( CapTotNetRtd > 0 ) )
     then
-      if( BaseSysNum = 1 .OR. BaseSysNum = 201 )
+      if( IfValidAnd( StdIsSEER2 > 0 ) )
       then // Baseline Hotel/Motel and Res Common Area is packaged 1-phase system < 65kBtu/hr, uses SEER2/EER2
         UNDEFINED
       else
@@ -442,26 +479,34 @@ RULE NEW CoilClg:CodeMinSEER2
   ANNUAL : T24N
     if( BaseSysNum > 0 .AND. Type = "DirectExpansion" .AND. IfValidAnd( CapTotNetRtd > 0 ) )
     then
-      if( BaseSysNum = 1 )
-      then // Baseline Hotel/Motel res system is ZnSys packaged 1-phase system < 65kBtu/hr, use SEER2
-        UnitaryACHPMinEffReq:SEER2( "StandardsVersion", Proj:StdsVersion,
-                                    "Category", ZnSys:UnitaryCat, 
-                                    "SubCategory", ZnSys:SubType,
-                                    "CondenserType", "Air", 
-                                    "SizeCategory", Min( CapTotNetRtd, 64999 ) ) 
-      else 
-      if( BaseSysNum = 201 )
-       // Baseline Res Common Area is assumed AirSys packaged 1-phase system < 65kBtu/hr, use SEER2
-      then
-        UnitaryACHPMinEffReq:SEER2( "StandardsVersion", Proj:StdsVersion,
-                                    "Category", AirSys:UnitaryCat,
-                                    "SubCategory", AirSys:SubType,
-                                    "CondenserType", "Air", 
-                                    "SizeCategory", Min( CapTotNetRtd, 64999 ) )
-      else UNDEFINED // All other Baseline NonRes <65kBtu/hr is assumed packaged 3-phase, use SEER
+      if( ParentComp = "ZnSys" )
+      then 
+        if( ZnSys:StdIsSEER2 > 0 )
+        then // Baseline Hotel/Motel res system is ZnSys packaged 1-phase system < 65kBtu/hr, uses EER2a
+          UnitaryACHPMinEffReq:SEER2( "StandardsVersion", Proj:StdsVersion,
+                                      "Category", ZnSys:UnitaryCat, 
+                                      "SubCategory", ZnSys:SubType,
+                                      "CondenserType", "Air", 
+                                      "SizeCategory", Min( CapTotNetRtd, 64999 ) ) 
+        else UNDEFINED
+        endif
+      else
+      if( ParentComp = "AirSys" )
+      then 
+        if( AirSys:StdIsSEER2 > 0 )
+         // Baseline Res Common Area is assumed AirSys packaged 1-phase system < 65kBtu/hr, uses EER2a
+        then
+          UnitaryACHPMinEffReq:SEER2( "StandardsVersion", Proj:StdsVersion,
+                                     "Category", AirSys:UnitaryCat,
+                                     "SubCategory", AirSys:SubType,
+                                     "CondenserType", "Air", 
+                                     "SizeCategory", Min( CapTotNetRtd, 64999 ) )
+        else UNDEFINED // All other Baseline NonRes <65kBtu/hr is assumed packaged 3-phase, use SEER/EER
+        endif
+      else UNDEFINED
       endif endif
     else UNCHANGED
-    endif 
+    endif
 ENDRULE
 
 RULE NEW CoilClg:SEERToSEER2Rat
@@ -483,10 +528,6 @@ RULE NEW CoilClg:SEERToSEER2Rat
                                              "SubCategory", AirSys:SubType,
                                              "CondenserType", "Air", 
                                              "SizeCategory", CapTotNetRtd )
-;       if( AirSys:SubType = "Split1Phase" .OR. AirSys:SubType = "Split3Phase" )
-;       then 0.95 // Split AC or HP
-;       else 0.96 // Packaged AC or HP
-;       endif
       else UNDEFINED
       endif
     else // ------------------------------------------------------------------
@@ -499,10 +540,6 @@ RULE NEW CoilClg:SEERToSEER2Rat
                                              "SubCategory", ZnSys:SubType,
                                              "CondenserType", "Air", 
                                              "SizeCategory", CapTotNetRtd )
-;       if( AirSys:SubType = "Split1Phase" .OR. AirSys:SubType = "Split3Phase" )
-;       then 0.95 // Split AC or HP
-;       else 0.96 // Packaged AC or HP
-;       endif
       else UNDEFINED
       endif
     else UNDEFINED
@@ -520,26 +557,34 @@ RULE NEW CoilClg:SEERToSEER2Rat
   ANNUAL : T24N
     if( BaseSysNum > 0 .AND. Type = "DirectExpansion" .AND. IfValidAnd( CapTotNetRtd > 0 ) )
     then
-      if( BaseSysNum = 1 )
-      then // Baseline Hotel/Motel res system is ZnSys packaged 1-phase system < 65kBtu/hr, use SEER2
-        UnitaryACHPMinEffReq:SEERToSEER2Rat( "StandardsVersion", Proj:StdsVersion,
-                                             "Category", ZnSys:UnitaryCat, 
-                                             "SubCategory", ZnSys:SubType,
-                                             "CondenserType", "Air", 
-                                             "SizeCategory", Min( CapTotNetRtd, 64999 ) ) 
-      else 
-      if( BaseSysNum = 201 )
-       // Baseline Res Common Area is assumed AirSys packaged 1-phase system < 65kBtu/hr, use SEER2
-      then
-        UnitaryACHPMinEffReq:SEERToSEER2Rat( "StandardsVersion", Proj:StdsVersion,
-                                             "Category", AirSys:UnitaryCat,
-                                             "SubCategory", AirSys:SubType,
-                                             "CondenserType", "Air", 
-                                             "SizeCategory", Min( CapTotNetRtd, 64999 ) )
-      else UNDEFINED // All other Baseline NonRes <65kBtu/hr is assumed packaged 3-phase, use SEER
+      if( ParentComp = "ZnSys" )
+      then 
+        if( ZnSys:StdIsSEER2 > 0 )
+        then // Baseline Hotel/Motel res system is ZnSys packaged 1-phase system < 65kBtu/hr, uses EER2a
+          UnitaryACHPMinEffReq:SEERToSEER2Rat( "StandardsVersion", Proj:StdsVersion,
+                                      "Category", ZnSys:UnitaryCat, 
+                                      "SubCategory", ZnSys:SubType,
+                                      "CondenserType", "Air", 
+                                      "SizeCategory", Min( CapTotNetRtd, 64999 ) ) 
+        else UNDEFINED
+        endif
+      else
+      if( ParentComp = "AirSys" )
+      then 
+        if( AirSys:StdIsSEER2 > 0 )
+         // Baseline Res Common Area is assumed AirSys packaged 1-phase system < 65kBtu/hr, uses EER2a
+        then
+          UnitaryACHPMinEffReq:SEERToSEER2Rat( "StandardsVersion", Proj:StdsVersion,
+                                     "Category", AirSys:UnitaryCat,
+                                     "SubCategory", AirSys:SubType,
+                                     "CondenserType", "Air", 
+                                     "SizeCategory", Min( CapTotNetRtd, 64999 ) )
+        else UNDEFINED // All other Baseline NonRes <65kBtu/hr is assumed packaged 3-phase, use SEER/EER
+        endif
+      else UNDEFINED
       endif endif
     else UNCHANGED
-    endif 
+    endif
 ENDRULE
 
 // Determine code minimum EER for systems with DX cooling coils
@@ -620,23 +665,30 @@ RULE NEW CoilClg:CodeMinEER2
   ANNUAL : T24N
     if( BaseSysNum > 0 .AND. Type = "DirectExpansion" )
     then
-      if( BaseSysNum = 1 )
-      then // Baseline Hotel/Motel res system is ZnSys packaged 1-phase system < 65kBtu/hr, uses EER2a
-        UnitaryACHPMinEffReq:EER2a( "StandardsVersion", Proj:StdsVersion,
-                                    "Category", ZnSys:UnitaryCat, 
-                                    "SubCategory", ZnSys:SubType,
-                                    "CondenserType", "Air", 
-                                    "SizeCategory", Min( CapTotNetRtd, 64999 ) ) 
-      else 
-      if( BaseSysNum = 201 )
-       // Baseline Res Common Area is assumed AirSys packaged 1-phase system < 65kBtu/hr, uses EER2a
-      then
-        UnitaryACHPMinEffReq:EER2a( "StandardsVersion", Proj:StdsVersion,
-                                   "Category", AirSys:UnitaryCat,
-                                   "SubCategory", AirSys:SubType,
-                                   "CondenserType", "Air", 
-                                   "SizeCategory", Min( CapTotNetRtd, 64999 ) )
-      else UNDEFINED // All other Baseline NonRes <65kBtu/hr is assumed packaged 3-phase, use SEER/EER
+      if( ParentComp = "ZnSys" )
+      then 
+        if( ZnSys:StdIsSEER2 > 0 .AND. ZnSys:UnitaryCat = "AC" )
+        then // EER2 only applicable to 'AC' category
+          UnitaryACHPMinEffReq:EER2a( "StandardsVersion", Proj:StdsVersion,
+                                      "Category", ZnSys:UnitaryCat, 
+                                      "SubCategory", ZnSys:SubType,
+                                      "CondenserType", "Air", 
+                                      "SizeCategory", Min( CapTotNetRtd, 64999 ) ) 
+        else UNDEFINED
+        endif
+      else
+      if( ParentComp = "AirSys" )
+      then 
+        if( AirSys:StdIsSEER2 > 0 .AND. AirSys:UnitaryCat = "AC" )
+        then // EER2 only applicable to 'AC' category
+          UnitaryACHPMinEffReq:EER2a( "StandardsVersion", Proj:StdsVersion,
+                                     "Category", AirSys:UnitaryCat,
+                                     "SubCategory", AirSys:SubType,
+                                     "CondenserType", "Air", 
+                                     "SizeCategory", Min( CapTotNetRtd, 64999 ) )
+        else UNDEFINED
+        endif
+      else UNDEFINED
       endif endif
     else UNCHANGED
     endif
@@ -841,7 +893,7 @@ RULE NEW CoilClg:CodeMinEER
   ANNUAL : T24N
     if( BaseSysNum > 0 .AND. Type = "DirectExpansion" .AND. IfValidAnd( CapTotNetRtd > 0 ) )
     then // Is baseline system
-      if( BaseSysNum = 1 )
+      if( IfValidAnd( StdIsSEER2 > 0 ) )
       then // Baseline uses SEER2/EER2
         UNDEFINED
       else
@@ -1052,13 +1104,10 @@ RULE NEW CoilClg:EERToEER2Rat
   ANNUAL : T24N
     if( BaseSysNum > 0 .AND. Type = "DirectExpansion" )
     then
-      if( BaseSysNum = 1 .AND. ParentComp = "ZnSys" )
-      then 0.96 // Baseline Hotel/Motel res system is ZnSys packaged 1-phase system < 65kBtu/hr, use SEER2/EER2
-      else 
-      if( BaseSysNum = 201 .AND. ParentComp = "AirSys" )
-      then 0.96 // Baseline Res Common Area is assumed AirSys packaged 1-phase system < 65kBtu/hr, use SEER2/EER2
-      else UNDEFINED // All other Baseline NonRes <65kBtu/hr is assumed packaged 3-phase, use SEER
-      endif endif
+      if( IfValidAnd( CodeMinEER2 > 0 ) )
+      then 0.96 // Baseline uses SEER2/EER2
+      else UNDEFINED
+      endif
     else UNCHANGED
     endif 
 ENDRULE
@@ -1890,28 +1939,14 @@ RULE CoilClg:DXEIR_fTempCrvRef
       then // Use IP curve for systems simulated in CSE (AirSys, BaseSysNum = 201
         RuleLibrary(CrvDblQuad, "CoilClgDXEIRRatio_fTwbToadbIP") 
       else
-      if( BaseSysNum = 1 )
-      then
-        if( IfValidAnd( Proj:StdsVersion = "Compliance2025" ) )
-        then // Is 2025 standards, assume same as 2022 below
-          RuleLibrary(CrvMapDblVar, "CoilClgDXStdSEER14EER11EIR_fTwbToadbSI" )
-        else if( IfValidAnd( Proj:StdsVersion = "Compliance2022" ) )
-        then // Is 2022 standards, assume Packaged1Phase, SEER-14.0/EER-11.0. See ticket 3432
-          RuleLibrary(CrvMapDblVar, "CoilClgDXStdSEER14EER11EIR_fTwbToadbSI" )
-        else // Is pre-2022, Res SZAC is Split1Phase. See Issue 2691 & 2851
-        if( CapTotNetRtd < 45000 )
-        then // 1Phase, SEER-14.0/EER-12.2
-          RuleLibrary(CrvMapDblVar, "CoilClgDXStdSEER14EER12p2EIR_fTwbToadbSI")
-        else // 1Phase, SEER-14.0/EER-11.7
-          RuleLibrary(CrvMapDblVar, "CoilClgDXStdSEER14EER11p7EIR_fTwbToadbSI")
-        endif endif endif
-      else
-      if( CapTotNetRtd < 65000 )
-      then // 3Phase, SEER-14.0/EER-11.4. Used to be SEER-13, but should have been changed. See Tic 3433
-        RuleLibrary(CrvMapDblVar, "CoilClgDXStdSEER14EIR_fTwbToadbSI")
+      if( LocalCompAssigned( DXEIR_fTempCrvRef ) = ComponentType( "CrvDblQuad" ) .AND.
+          IfValidAnd( CapTotNetRtd < 65000 ) .AND. 
+          ( IfValidAnd( CodeMinSEER > 0 ) .OR. IfValidAnd( CodeMinSEER2 > 0 ) ) )
+      then // Is SEER rated, update to SEER curve map. Dependent values calculated based on EER/SEER in SEEREIR_fTCurve.rule
+        RuleLibrary(CrvMapDblVar, "CoilClgDXSEEREIR_fTwbToadbSI", 1)
       else // Default curve for sizing DX non-PTAC/PTHP equipment 
         RuleLibrary(CrvDblQuad, "CoilClgDXEIRRatio_fTwbToadbSI") 
-      endif endif endif endif endif
+      endif endif endif endif
     else UNCHANGED
     endif
   ANNUAL : S901G
