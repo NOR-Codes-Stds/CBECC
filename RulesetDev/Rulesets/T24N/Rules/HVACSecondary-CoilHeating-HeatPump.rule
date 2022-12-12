@@ -206,6 +206,24 @@ RULE NEW CoilHtg:HSPFCOPRndScl
     endif endif endif
 ENDRULE
 
+// Set a flag indicating the standard design system is SEER2
+// -----------------------------------------------------------------------------
+RULE NEW CoilHtg:StdIsSEER2
+  DATATYPE
+    Integer
+  LONGFORM
+    StandardIsSEER2
+  DESCRIPTION
+    "A flag that indicates SEER2/EER2/HSPF2 efficiency ratings should be used for the standard design."
+  INPUTCLASS 
+    NotInput
+  ANNUAL
+    if( LocalCompAssigned( CoilClgRef ) )
+    then ValidOr( CoilClgRef:StdIsSEER2, 0 )
+    else 0
+    endif
+ENDRULE  
+
 // ********** Electric Heat Pump Heating Minimum Efficiencies *********************
 // CodeMin for HeatPump HSPF
 RULE NEW CoilHtg:CodeMinHSPF
@@ -272,21 +290,28 @@ RULE NEW CoilHtg:CodeMinHSPF
     else UNCHANGED
     endif 
   ANNUAL : T24N
-    if( BaseSysNum > 0 .AND. Type = "HeatPump" )
+    if( BaseSysNum > 0 .AND. Type = "HeatPump" .AND. IfValidAnd( SysClgCap < 65000 ) )
     then
-      if( BaseSysNum = 201 )
-      then // Res Common Area is packaged 1-phase system < 65kBtu/hr, uses SEER2
-        UNDEFINED
+      if( IfValidand( StdIsSEER2 > 0 ) )
+      then UNDEFINED
       else
-      if( IfValidAnd( SysClgCap < 65000 ) .AND. ParentComp = "AirSys" )
-      then // All other Baseline NonRes <65kBtu/hr is assumed packaged 3-phase, uses SEER
+      if( ParentComp = "AirSys" )
+      then
         UnitaryACHPMinEffReq:HSPF( "StandardsVersion", Proj:StdsVersion,
                                    "Category", "HP",
                                    "SubCategory", AirSys:SubType,
                                    "CondenserType", "Air",
                                    "SizeCategory", SysClgCap ) 
+      else
+      if( ParentComp = "ZnSys" )
+      then
+        UnitaryACHPMinEffReq:HSPF( "StandardsVersion", Proj:StdsVersion,
+                                   "Category", "HP",
+                                   "SubCategory", ZnSys:SubType,
+                                   "CondenserType", "Air",
+                                   "SizeCategory", SysClgCap ) 
       else UNDEFINED // Not used if net capacity >= 65 MBH
-      endif endif
+      endif endif endif
     else UNCHANGED
     endif 
 ENDRULE
@@ -315,7 +340,7 @@ RULE NEW CoilHtg:CodeMinHSPF2
                                       "Category", "HP", 
                                       "SubCategory", AirSys:SubType,
                                       "CondenserType", "Air", 
-                                      "SizeCategory", SysClgCap )
+                                      "SizeCategory", Min( SysClgCap, 64999 ) )
         else UNDEFINED
         endif
       else // ------------------------------------------------------------------
@@ -327,7 +352,7 @@ RULE NEW CoilHtg:CodeMinHSPF2
                                       "Category", "HP", 
                                       "SubCategory", ZnSys:SubType,
                                       "CondenserType", "Air", 
-                                      "SizeCategory", SysClgCap )
+                                      "SizeCategory", Min( SysClgCap, 64999 ) )
         else UNDEFINED
         endif
       else UNDEFINED
@@ -337,18 +362,33 @@ RULE NEW CoilHtg:CodeMinHSPF2
   ANNUAL : T24N
     if( BaseSysNum > 0 .AND. Type = "HeatPump" )
     then
-      if( BaseSysNum = 201 .AND. ParentComp = "AirSys" )
-       // Baseline Res Common Area is assumed AirSys packaged 1-phase system < 65kBtu/hr, use SEER2
-      then
-        UnitaryACHPMinEffReq:HSPF2( "StandardsVersion", Proj:StdsVersion,
-                                    "Category", "HP",
-                                    "SubCategory", AirSys:SubType,
-                                    "CondenserType", "Air", 
-                                    "SizeCategory", 64999 )
-      else UNDEFINED // All other Baseline NonRes <65kBtu/hr is assumed packaged 3-phase, use SEER
-      endif
+      if( ParentComp = "ZnSys" )
+      then 
+        if( ZnSys:StdIsSEER2 > 0 )
+        then
+          UnitaryACHPMinEffReq:HSPF2( "StandardsVersion", Proj:StdsVersion,
+                                      "Category", ZnSys:UnitaryCat, 
+                                      "SubCategory", ZnSys:SubType,
+                                      "CondenserType", "Air", 
+                                      "SizeCategory", Min( SysClgCap, 64999 ) ) 
+        else UNDEFINED
+        endif
+      else
+      if( ParentComp = "AirSys" )
+      then 
+        if( AirSys:StdIsSEER2 > 0 )
+        then
+          UnitaryACHPMinEffReq:HSPF2( "StandardsVersion", Proj:StdsVersion,
+                                     "Category", AirSys:UnitaryCat,
+                                     "SubCategory", AirSys:SubType,
+                                     "CondenserType", "Air", 
+                                     "SizeCategory", Min( SysClgCap, 64999 ) )
+        else UNDEFINED
+        endif
+      else UNDEFINED
+      endif endif
     else UNCHANGED
-    endif 
+    endif
 ENDRULE
 
 RULE NEW CoilHtg:HSPFToHSPF2Rat
@@ -389,18 +429,33 @@ RULE NEW CoilHtg:HSPFToHSPF2Rat
   ANNUAL
     if( BaseSysNum > 0 .AND. Type = "HeatPump" )
     then
-      if( BaseSysNum = 201 .AND. ParentComp = "AirSys" )
-       // Baseline Res Common Area is assumed AirSys packaged 1-phase system < 65kBtu/hr, use HSPF2
-      then
-        UnitaryACHPMinEffReq:HSPFToHSPF2Rat( "StandardsVersion", Proj:StdsVersion,
-                                             "Category", "HP",
-                                             "SubCategory", AirSys:SubType,
-                                             "CondenserType", "Air", 
-                                             "SizeCategory", 64999 )
-      else UNDEFINED // All other Baseline NonRes <65kBtu/hr is assumed packaged 3-phase, use HSPF
-      endif
+      if( ParentComp = "ZnSys" )
+      then 
+        if( ZnSys:StdIsSEER2 > 0 )
+        then
+          UnitaryACHPMinEffReq:HSPFToHSPF2Rat( "StandardsVersion", Proj:StdsVersion,
+                                      "Category", ZnSys:UnitaryCat, 
+                                      "SubCategory", ZnSys:SubType,
+                                      "CondenserType", "Air", 
+                                      "SizeCategory", Min( SysClgCap, 64999 ) ) 
+        else UNDEFINED
+        endif
+      else
+      if( ParentComp = "AirSys" )
+      then 
+        if( AirSys:StdIsSEER2 > 0 )
+        then
+          UnitaryACHPMinEffReq:HSPFToHSPF2Rat( "StandardsVersion", Proj:StdsVersion,
+                                     "Category", AirSys:UnitaryCat,
+                                     "SubCategory", AirSys:SubType,
+                                     "CondenserType", "Air", 
+                                     "SizeCategory", Min( SysClgCap, 64999 ) )
+        else UNDEFINED
+        endif
+      else UNDEFINED
+      endif endif
     else UNCHANGED
-    endif 
+    endif
 ENDRULE
 // -----------------------------------------------------------------------------
 // CodeMin for HeatPump COP
