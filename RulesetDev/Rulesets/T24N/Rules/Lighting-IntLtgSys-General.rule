@@ -2059,8 +2059,122 @@ RULE NEW IntLtgSys:PAFCombError5
     endif
 ENDRULE
 
+// Determine whether the system is qualify for the credit from "Demand Responsive Control" - JP (tic 3374) 12/12/22
+RULE NEW Spc:MultLvlLtgCtrlReq
+  RULESETS
+    T24N
+  DATATYPE
+    Integer
+  DESCRIPTION
+    "A flag to determine whether multilevel lighting Control is mandatorily required"
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( Area < 100 .OR. SpcFunc = "Restrooms" .OR. IsHlthCare > 0 )
+    then 0
+    else if( IfValidAnd( IntLtgSysChildren > 0 ) )
+    then if( SumChildrenIf( IntLtgSys:Pwr, IntLtgSys:AllowType = "GeneralAllowance" ) / Area > 0.5 )
+         then 1
+         else 0
+         endif
+    else if( IfValidAnd( IntLPDReg > 0.5 ) )
+    then 1
+    else 0
+    endif endif endif
+ENDRULE
+RULE IntLtgSys:MultLvlCtrlReq
+  DESCRIPTION
+    "A flag to determine whether multilevel lighting Control is mandatorily required"
+  DEFAULT
+    if( ParentComp = "ResOtherZn" )
+    then 0
+    else if( Spc:MultLvlLtgCtrlReq > 0 .AND. AllowType = "GeneralAllowance" )
+    then 1
+    else 0
+    endif endif
+ENDRULE
+RULE IntLtgSys:MultLvlCtrlExcept
+  DESCRIPTION
+    "This flag indicates this lighting system meets criteria of Exception(s) to 130.1(b).
+     This flag is used to determine whether this lighting system is able to claim the 
+     lighting power credit from 'Demand Responsive Control'."
+  HELP
+    "Check this checkbox if this system serves an enclosed area smaller than 100 
+     square feet or has only one luminaire with no more than two lamps or has only 
+     one inseparable SSL luminaire."
+  DEFAULT
+    0
+ENDRULE
+RULE IntLtgSys:DRCExcept
+  DESCRIPTION
+    "This flag indicates this lighting system meets criteria of Exception to 110.12(c)
+     This flag is used to determine whether this lighting system is able to claim the 
+     lighting power credit from 'Demand Responsive Control'."
+  HELP
+    "Check this checkbox if this system serves a space where a health or life safety 
+     statute, ordinance, or regulation does not permit the general lighting to be reduced."
+  DEFAULT
+    0
+  CHECKCODE
+    if( DRCExcept > 0 .AND. AllowType = "GeneralAllowance" .AND. (
+        IfValidAnd( PAFCredType[1] = "DemandResponsiveControl" ) .OR.  
+        IfValidAnd( PAFCredType[2] = "DemandResponsiveControl" ) .OR.
+        IfValidAnd( PAFCredType[3] = "DemandResponsiveControl" ) .OR.
+        IfValidAnd( PAFCredType[4] = "DemandResponsiveControl" ) .OR.
+        IfValidAnd( PAFCredType[5] = "DemandResponsiveControl" ) ) )
+    then PostError( "Based on the Exception conditon to 110.12(c) ordinance or
+                     regulation does not permit the general lighting to be reduced.
+                     Therefore, 'DemandResponsiveControl' should not be used for
+                     lighting system '%s', Name" )
+    else UNCHANGED
+    endif
+ENDRULE
+RULE NEW IntLtgSys:ReqDRCPwr
+  RULESETS
+    T24N
+  DATATYPE
+    Float
+  DESCRIPTION
+    "Lighting power in the scope of Section 110.12(c)"
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( MultLvlCtrlReq > 0 .AND. MultLvlCtrlExcept = 0 .AND. DRCExcept = 0 )
+    then Pwr
+    else 0
+    endif 
+ENDRULE
+RULE NEW Spc:ReqDRCLtgPwr
+  RULESETS
+    T24N
+  DATATYPE
+    Float
+  DESCRIPTION
+    "Lighting power in the scope of Section 110.12(c)"
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( IntLtgSysChildren > 0 ) )
+    then SumChildren( IntLtgSys:ReqDRCPwr )
+    else if( MultLvlLtgCtrlReq > 0 )
+    then ValidOr( IntLPDReg, 0 ) * Area
+    else 0
+    endif endif
+ENDRULE
+RULE NEW Bldg:ReqDRCLtgPwr
+  RULESETS
+    T24N
+  DATATYPE
+    Float
+  DESCRIPTION
+    "Total lighting power in the scope of Section 110.12(c)"
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    SumChildren( Spc:ReqDRCLtgPwr )
+ENDRULE
 
-
+// PAFErrorFlags
 RULE NEW IntLtgSys:PAFErrorFlag1
   DATATYPE
     Integer
@@ -2096,7 +2210,7 @@ RULE NEW IntLtgSys:PAFErrorFlag1
 //    else if ( IfValidAnd( PAFCredType[1] = "InstitutionalTuning" ) )
 //    then 0
       else if ( IfValidAnd( PAFCredType[1] = "DemandResponsiveControl" ) )
-      then if ( IfValidAnd( Bldg:TotFlrArea < 10000 ) )
+      then if ( Bldg:ReqDRCLtgPwr < 4000 .OR. MultLvlCtrlReq = 0 .OR. MultLvlCtrlExcept > 0 )
         then 0
         else 3  // prohibited per Title 24, Part 6, Section 140.6(a)2
         endif
@@ -2173,7 +2287,7 @@ RULE NEW IntLtgSys:PAFErrorFlag2
 //    else if ( IfValidAnd( PAFCredType[2] = "InstitutionalTuning" ) )
 //    then 0
       else if ( IfValidAnd( PAFCredType[2] = "DemandResponsiveControl" ) )
-      then if ( IfValidAnd( Bldg:TotFlrArea < 10000 ) )
+      then if ( Bldg:ReqDRCLtgPwr < 4000 .OR. MultLvlCtrlReq = 0 .OR. MultLvlCtrlExcept > 0 )
         then 0
         else 3  // prohibited per Title 24, Part 6, Section 140.6(a)2
         endif
@@ -2251,7 +2365,7 @@ RULE NEW IntLtgSys:PAFErrorFlag3
 //    else if ( IfValidAnd( PAFCredType[3] = "InstitutionalTuning" ) )
 //    then 0
       else if ( IfValidAnd( PAFCredType[3] = "DemandResponsiveControl" ) )
-      then if ( IfValidAnd( Bldg:TotFlrArea < 10000 ) )
+      then if ( Bldg:ReqDRCLtgPwr < 4000 .OR. MultLvlCtrlReq = 0 .OR. MultLvlCtrlExcept > 0 )
         then 0
         else 3  // prohibited per itle 24, Part 6, Section 140.6(a)2
         endif
@@ -2330,7 +2444,7 @@ RULE NEW IntLtgSys:PAFErrorFlag4
 //    else if ( IfValidAnd( PAFCredType[4] = "InstitutionalTuning" ) )
 //    then 0
       else if ( IfValidAnd( PAFCredType[4] = "DemandResponsiveControl" ) )
-      then if ( IfValidAnd( Bldg:TotFlrArea < 10000 ) )
+      then if ( Bldg:ReqDRCLtgPwr < 4000 .OR. MultLvlCtrlReq = 0 .OR. MultLvlCtrlExcept > 0 )
         then 0
         else 3  // prohibited per itle 24, Part 6, Section 140.6(a)2
         endif
@@ -2410,7 +2524,7 @@ RULE NEW IntLtgSys:PAFErrorFlag5
 //    else if ( IfValidAnd( PAFCredType[5] = "InstitutionalTuning" ) )
 //    then 0
       else if ( IfValidAnd( PAFCredType[5] = "DemandResponsiveControl" ) )
-      then if ( IfValidAnd( Bldg:TotFlrArea < 10000 ) )
+      then if ( Bldg:ReqDRCLtgPwr < 4000 .OR. MultLvlCtrlReq = 0 .OR. MultLvlCtrlExcept > 0 )
         then 0
         else 3  // prohibited per itle 24, Part 6, Section 140.6(a)2
         endif
