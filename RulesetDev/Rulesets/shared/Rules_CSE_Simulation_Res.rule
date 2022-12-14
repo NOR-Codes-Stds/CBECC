@@ -555,6 +555,11 @@ RULELIST "CSE_SimulationPrep_DHW_Zones_HVAC" 1 0 0 1
 	"Create site-wide <other> meter"		Proj:CSE_OtherFuelMETER	= {	if ( IfValidAnd( Fuel_HaveOther > 0.5 )==0) then  UNDEFINED
 																							else  CreateComp( cseMETER, "MtrOther" )  endif  }
 
+   "Setup Elec/Fuel meters by dwelling # of bedrooms"    Proj:Action =     ; SAC 08/20/22 (CUAC)
+      {  if (IfValidAnd( CUACReportID > 0 ))
+         then  EvalRulelist( "CSE_SimulationPrep_MetersByBedroomCount" )
+         else  EvalRulelist( "CSE_SimulationPrep_NoMetersByBedroomCount" )  endif  }
+
 
    "Set ResProj:WriteAirFlowMtr[1] - whether or not to write CSE AFMETER[1]"        ResProj:WriteAirFlowMtr[1]   =   ; SAC 10/01/20 (tic #1247)
       {  if (SumAcrossIf(   ResZn:AirFlowMeter,   ResZn:AirFlowMeter = 1 ) > 0 .OR. SumAcrossIf(  ResOtherZn:AirFlowMeter,  ResOtherZn:AirFlowMeter = 1 ) > 0 .OR.
@@ -823,6 +828,90 @@ END
 ;*************************************************************************
 
 
+;************************************************************************* SAC 08/19/22
+RULELIST "CSE_SimulationPrep_MetersByBedroomCount" 1 0 0 0
+;*************************************************************************
+
+;   "Create CSE_ElecMETERByRms[1] - Studio"      Proj:CSE_ElecMETERByRms[1] =
+;      {	if (SumAcrossIf( ResZn:CondFloorArea, ResZn:AffordableUnitsByBedrmsWithMult[1] > 0 ) < 1) then  UNCHANGED
+;         else  CreateComp( cseMETER, "MtrElec_0bedrm" )  endif  }
+;
+;   "Create CSE_ElecMETERByRms[2-7] - 1-6 bdrm"   for:#bd=(2-7)   Proj:CSE_ElecMETERByRms[#bd] =
+;      {	if (SumAcrossIf( ResZn:CondFloorArea, ResZn:AffordableUnitsByBedrmsWithMult[#bd] > 0 ) < 1) then  UNCHANGED
+;         else  CreateComp( cseMETER, Format( "MtrElec_%dbedrm", #bd-1 ) )  endif  }
+
+   "Set Proj:DwellUnitBedrmLabel[1]"   Proj:DwellUnitBedrmLabel[1] = { "0bedrm" }
+   "Set Proj:DwellUnitBedrmLabel[2]"   Proj:DwellUnitBedrmLabel[2] = { "1bedrm" }
+   "Set Proj:DwellUnitBedrmLabel[3]"   Proj:DwellUnitBedrmLabel[3] = { "2bedrm" }
+   "Set Proj:DwellUnitBedrmLabel[4]"   Proj:DwellUnitBedrmLabel[4] = { "3bedrm" }
+   "Set Proj:DwellUnitBedrmLabel[5]"   Proj:DwellUnitBedrmLabel[5] = { "4bedrm" }
+   "Set Proj:DwellUnitBedrmLabel[6]"   Proj:DwellUnitBedrmLabel[6] = { "5bedrm" }
+   "Set Proj:DwellUnitBedrmLabel[7]"   Proj:DwellUnitBedrmLabel[7] = { "6bedrm" }
+
+;"store BEMProc details"		Proj:Action = {  StoreBEMProc( Format( "%s-b4Mtrs", RunAbbrev ), 0 )  }
+;"dbg" Proj:Action = { PostMessageToLog( "SumAll( CUAC:AffordableUnitsByBedrms[3] ) = %g", SumAll( CUAC:AffordableUnitsByBedrms[3] ) ) }
+
+   "Create CSE_ElecMETERByRms[1-7] - 0-6 bdrm"   for:#B=(1to7)   Proj:CSE_ElecMETERByRms[#B] =
+      {	if (SumAll( CUAC:AffordableUnitsByBedrms[#B] ) < 1) then  UNCHANGED
+         else  CreateComp( cseMETER, "MtrElec_" + DwellUnitBedrmLabel[#B] )  endif  }
+
+;"store BEMProc details"		Proj:Action = {  StoreBEMProc( Format( "%s-aftrMtrs", RunAbbrev ), 0 )  }
+
+   ; shouldn't need CSE_Elec2METERByRms[*] as they are used to track uses not present in dwelling unit zones (compliance ltg & parking exhaust fan) - SAC 08/20/22 (CUAC)
+   ;     "CSE_Elec2METERByRms",               BEMP_Obj,  8,  1,  0,  NInp,  "",                 0,  1, "cseMETER",    0, "",     7010, "CSE_Elec2METERByRms",       "" 
+
+   "Create CSE_NatGasMETERByRms[1-7] - 0-6 bdrm"   for:#B=(1to7)   Proj:CSE_NatGasMETERByRms[#B] =
+      {	if (LocalCompAssigned( CSE_NatGasMETER ) < 1 .OR. LocalCompAssigned( CSE_ElecMETERByRms[#B] ) < 1) then  UNCHANGED
+         else  CreateComp( cseMETER, "MtrNatGas_" + DwellUnitBedrmLabel[#B] )  endif  }
+
+   "Create CSE_OtherFuelMETERByRms[1-7] - 0-6 bdrm"   for:#B=(1to7)   Proj:CSE_OtherFuelMETERByRms[#B] =
+      {	if (LocalCompAssigned( CSE_OtherFuelMETER ) < 1 .OR. LocalCompAssigned( CSE_ElecMETERByRms[#B] ) < 1) then  UNCHANGED
+         else  CreateComp( cseMETER, "MtrOther_" + DwellUnitBedrmLabel[#B] )  endif  }
+
+   "Set ResZn:CSE_ElecMETER"     ResZn:CSE_ElecMETER =      ; SAC 08/20/22 (CUAC)
+      {  if (     IfValidAnd( AffordableUnitsByBedrmsWithMult[1] > 0 )) then  Proj:CSE_ElecMETERByRms[1]
+         else if (IfValidAnd( AffordableUnitsByBedrmsWithMult[2] > 0 )) then  Proj:CSE_ElecMETERByRms[2]
+         else if (IfValidAnd( AffordableUnitsByBedrmsWithMult[3] > 0 )) then  Proj:CSE_ElecMETERByRms[3]
+         else if (IfValidAnd( AffordableUnitsByBedrmsWithMult[4] > 0 )) then  Proj:CSE_ElecMETERByRms[4]
+         else if (IfValidAnd( AffordableUnitsByBedrmsWithMult[5] > 0 )) then  Proj:CSE_ElecMETERByRms[5]
+         else if (IfValidAnd( AffordableUnitsByBedrmsWithMult[6] > 0 )) then  Proj:CSE_ElecMETERByRms[6]
+         else if (IfValidAnd( AffordableUnitsByBedrmsWithMult[7] > 0 )) then  Proj:CSE_ElecMETERByRms[7]
+         else  Proj:CSE_ElecMETER  endif endif endif endif endif endif endif  }
+
+   "Set ResZn:CSE_Elec2METER"       ResZn:CSE_Elec2METER       = {  Proj:CSE_Elec2METER  }   ; no meters by # bedrms for Elec2METER
+
+   "Set ResZn:CSE_NatGasMETER"     ResZn:CSE_NatGasMETER =
+      {  if (     IfValidAnd( AffordableUnitsByBedrmsWithMult[1] > 0 )) then  Proj:CSE_NatGasMETERByRms[1]
+         else if (IfValidAnd( AffordableUnitsByBedrmsWithMult[2] > 0 )) then  Proj:CSE_NatGasMETERByRms[2]
+         else if (IfValidAnd( AffordableUnitsByBedrmsWithMult[3] > 0 )) then  Proj:CSE_NatGasMETERByRms[3]
+         else if (IfValidAnd( AffordableUnitsByBedrmsWithMult[4] > 0 )) then  Proj:CSE_NatGasMETERByRms[4]
+         else if (IfValidAnd( AffordableUnitsByBedrmsWithMult[5] > 0 )) then  Proj:CSE_NatGasMETERByRms[5]
+         else if (IfValidAnd( AffordableUnitsByBedrmsWithMult[6] > 0 )) then  Proj:CSE_NatGasMETERByRms[6]
+         else if (IfValidAnd( AffordableUnitsByBedrmsWithMult[7] > 0 )) then  Proj:CSE_NatGasMETERByRms[7]
+         else  Proj:CSE_NatGasMETER  endif endif endif endif endif endif endif  }
+
+   "Set ResZn:CSE_OtherFuelMETER"     ResZn:CSE_OtherFuelMETER =
+      {  if (     IfValidAnd( AffordableUnitsByBedrmsWithMult[1] > 0 )) then  Proj:CSE_OtherFuelMETERByRms[1]
+         else if (IfValidAnd( AffordableUnitsByBedrmsWithMult[2] > 0 )) then  Proj:CSE_OtherFuelMETERByRms[2]
+         else if (IfValidAnd( AffordableUnitsByBedrmsWithMult[3] > 0 )) then  Proj:CSE_OtherFuelMETERByRms[3]
+         else if (IfValidAnd( AffordableUnitsByBedrmsWithMult[4] > 0 )) then  Proj:CSE_OtherFuelMETERByRms[4]
+         else if (IfValidAnd( AffordableUnitsByBedrmsWithMult[5] > 0 )) then  Proj:CSE_OtherFuelMETERByRms[5]
+         else if (IfValidAnd( AffordableUnitsByBedrmsWithMult[6] > 0 )) then  Proj:CSE_OtherFuelMETERByRms[6]
+         else if (IfValidAnd( AffordableUnitsByBedrmsWithMult[7] > 0 )) then  Proj:CSE_OtherFuelMETERByRms[7]
+         else  Proj:CSE_OtherFuelMETER  endif endif endif endif endif endif endif  }
+
+END
+;************************************************************************* SAC 08/20/22
+RULELIST "CSE_SimulationPrep_NoMetersByBedroomCount" 1 0 0 0
+;*************************************************************************
+   "Set ResZn:CSE_ElecMETER"        ResZn:CSE_ElecMETER        = {  Proj:CSE_ElecMETER  }
+   "Set ResZn:CSE_Elec2METER"       ResZn:CSE_Elec2METER       = {  Proj:CSE_Elec2METER  }
+   "Set ResZn:CSE_NatGasMETER"      ResZn:CSE_NatGasMETER      = {  Proj:CSE_NatGasMETER  }
+   "Set ResZn:CSE_OtherFuelMETER"   ResZn:CSE_OtherFuelMETER   = {  Proj:CSE_OtherFuelMETER  }
+END
+;*************************************************************************
+
+
 ;************************************************************************* SAC 01/12/22
 RULELIST "CSE_SimulationPrep_PVandBattery" 1 0 0 1
 ;*************************************************************************
@@ -911,6 +1000,53 @@ RULELIST "CSE_SimulationPrep_MetersAndReports" 1 0 0 1
 	"Set Proj:CSE_Elec2EXPORT:exBtuSf"			Proj:CSE_Elec2EXPORT:exBtuSf			= {	1000      }
 	"Set Proj:CSE_Elec2EXPORT:exDayBeg_x"		Proj:CSE_Elec2EXPORT:exDayBeg_x		= {	"Jan 1"   }
 	"Set Proj:CSE_Elec2EXPORT:exDayEnd_x"		Proj:CSE_Elec2EXPORT:exDayEnd_x		= {	"Dec 31"  }
+
+
+   "Create site-wide CSE_ElecEXPORTByRms[1-8] export"       for:#B=(1to8)   Proj:CSE_ElecEXPORTByRms[#B] =      ; SAC 08/21/22 (CUAC)
+      {  if (LocalCompAssigned( CSE_ElecMETERByRms[#B] ) < 0.5) then  UNDEFINED
+         else  CreateComp( cseEXPORT, "ExportElec_" + DwellUnitBedrmLabel[#B] )  endif  }
+   "Create site-wide CSE_Elec2EXPORTByRms[1-8] export"      for:#B=(1to8)   Proj:CSE_Elec2EXPORTByRms[#B] =
+      {  if (LocalCompAssigned( CSE_Elec2METERByRms[#B] ) < 0.5) then  UNDEFINED
+         else  CreateComp( cseEXPORT, "ExportElec2_" + DwellUnitBedrmLabel[#B] )  endif  }
+   "Create site-wide CSE_NatGasEXPORTByRms[1-8] export"     for:#B=(1to8)   Proj:CSE_NatGasEXPORTByRms[#B] =
+      {  if (LocalCompAssigned( CSE_NatGasMETERByRms[#B] ) < 0.5) then  UNDEFINED
+         else  CreateComp( cseEXPORT, "ExportNatGas_" + DwellUnitBedrmLabel[#B] )  endif  }
+   "Create site-wide CSE_OtherFuelEXPORTByRms[1-8] export"  for:#B=(1to8)   Proj:CSE_OtherFuelEXPORTByRms[#B] =
+      {  if (LocalCompAssigned( CSE_OtherFuelMETERByRms[#B] ) < 0.5) then  UNDEFINED
+         else  CreateComp( cseEXPORT, "ExportOther_" + DwellUnitBedrmLabel[#B] )  endif  }
+
+   "Set Proj:CSE_ElecEXPORTByRms[1-8]:exExportfile"       for:#B=(1to8)   Proj:CSE_ElecEXPORTByRms[#B]:exExportfile  = {  "Primary"  }        ; SAC 08/21/22 (CUAC)
+   "Set Proj:CSE_ElecEXPORTByRms[1-8]:exType"             for:#B=(1to8)   Proj:CSE_ElecEXPORTByRms[#B]:exType        = {  "MTR"     }
+   "Set Proj:CSE_ElecEXPORTByRms[1-8]:exFreq"             for:#B=(1to8)   Proj:CSE_ElecEXPORTByRms[#B]:exFreq        = {  "HOUR"    }
+   "Set Proj:CSE_ElecEXPORTByRms[1-8]:exMeter"            for:#B=(1to8)   Proj:CSE_ElecEXPORTByRms[#B]:exMeter       = {  CSE_ElecMETERByRms[#B]  }
+   "Set Proj:CSE_ElecEXPORTByRms[1-8]:exBtuSf"            for:#B=(1to8)   Proj:CSE_ElecEXPORTByRms[#B]:exBtuSf       = {  1000      }
+   "Set Proj:CSE_ElecEXPORTByRms[1-8]:exDayBeg_x"         for:#B=(1to8)   Proj:CSE_ElecEXPORTByRms[#B]:exDayBeg_x    = {  "Jan 1"   }
+   "Set Proj:CSE_ElecEXPORTByRms[1-8]:exDayEnd_x"         for:#B=(1to8)   Proj:CSE_ElecEXPORTByRms[#B]:exDayEnd_x    = {  "Dec 31"  }
+
+   "Set Proj:CSE_Elec2EXPORTByRms[1-8]:exExportfile"      for:#B=(1to8)   Proj:CSE_Elec2EXPORTByRms[#B]:exExportfile  = {  "Primary"  }
+   "Set Proj:CSE_Elec2EXPORTByRms[1-8]:exType"            for:#B=(1to8)   Proj:CSE_Elec2EXPORTByRms[#B]:exType        = {  "MTR"     }
+   "Set Proj:CSE_Elec2EXPORTByRms[1-8]:exFreq"            for:#B=(1to8)   Proj:CSE_Elec2EXPORTByRms[#B]:exFreq        = {  "HOUR"    }
+   "Set Proj:CSE_Elec2EXPORTByRms[1-8]:exMeter"           for:#B=(1to8)   Proj:CSE_Elec2EXPORTByRms[#B]:exMeter       = {  CSE_Elec2METERByRms[#B]  }
+   "Set Proj:CSE_Elec2EXPORTByRms[1-8]:exBtuSf"           for:#B=(1to8)   Proj:CSE_Elec2EXPORTByRms[#B]:exBtuSf       = {  1000      }
+   "Set Proj:CSE_Elec2EXPORTByRms[1-8]:exDayBeg_x"        for:#B=(1to8)   Proj:CSE_Elec2EXPORTByRms[#B]:exDayBeg_x    = {  "Jan 1"   }
+   "Set Proj:CSE_Elec2EXPORTByRms[1-8]:exDayEnd_x"        for:#B=(1to8)   Proj:CSE_Elec2EXPORTByRms[#B]:exDayEnd_x    = {  "Dec 31"  }
+
+   "Set Proj:CSE_NatGasEXPORTByRms[1-8]:exExportfile"     for:#B=(1to8)   Proj:CSE_NatGasEXPORTByRms[#B]:exExportfile  = {  "Primary"  }
+   "Set Proj:CSE_NatGasEXPORTByRms[1-8]:exType"           for:#B=(1to8)   Proj:CSE_NatGasEXPORTByRms[#B]:exType        = {  "MTR"     }
+   "Set Proj:CSE_NatGasEXPORTByRms[1-8]:exFreq"           for:#B=(1to8)   Proj:CSE_NatGasEXPORTByRms[#B]:exFreq        = {  "HOUR"    }
+   "Set Proj:CSE_NatGasEXPORTByRms[1-8]:exMeter"          for:#B=(1to8)   Proj:CSE_NatGasEXPORTByRms[#B]:exMeter       = {  CSE_NatGasMETERByRms[#B]  }
+   "Set Proj:CSE_NatGasEXPORTByRms[1-8]:exBtuSf"          for:#B=(1to8)   Proj:CSE_NatGasEXPORTByRms[#B]:exBtuSf       = {  1000      }
+   "Set Proj:CSE_NatGasEXPORTByRms[1-8]:exDayBeg_x"       for:#B=(1to8)   Proj:CSE_NatGasEXPORTByRms[#B]:exDayBeg_x    = {  "Jan 1"   }
+   "Set Proj:CSE_NatGasEXPORTByRms[1-8]:exDayEnd_x"       for:#B=(1to8)   Proj:CSE_NatGasEXPORTByRms[#B]:exDayEnd_x    = {  "Dec 31"  }
+
+   "Set Proj:CSE_OtherFuelEXPORTByRms[1-8]:exExportfile"  for:#B=(1to8)   Proj:CSE_OtherFuelEXPORTByRms[#B]:exExportfile  = {  "Primary"  }
+   "Set Proj:CSE_OtherFuelEXPORTByRms[1-8]:exType"        for:#B=(1to8)   Proj:CSE_OtherFuelEXPORTByRms[#B]:exType        = {  "MTR"     }
+   "Set Proj:CSE_OtherFuelEXPORTByRms[1-8]:exFreq"        for:#B=(1to8)   Proj:CSE_OtherFuelEXPORTByRms[#B]:exFreq        = {  "HOUR"    }
+   "Set Proj:CSE_OtherFuelEXPORTByRms[1-8]:exMeter"       for:#B=(1to8)   Proj:CSE_OtherFuelEXPORTByRms[#B]:exMeter       = {  CSE_OtherFuelMETERByRms[#B]  }
+   "Set Proj:CSE_OtherFuelEXPORTByRms[1-8]:exBtuSf"       for:#B=(1to8)   Proj:CSE_OtherFuelEXPORTByRms[#B]:exBtuSf       = {  1000      }
+   "Set Proj:CSE_OtherFuelEXPORTByRms[1-8]:exDayBeg_x"    for:#B=(1to8)   Proj:CSE_OtherFuelEXPORTByRms[#B]:exDayBeg_x    = {  "Jan 1"   }
+   "Set Proj:CSE_OtherFuelEXPORTByRms[1-8]:exDayEnd_x"    for:#B=(1to8)   Proj:CSE_OtherFuelEXPORTByRms[#B]:exDayEnd_x    = {  "Dec 31"  }
+
 
 ; in the future, only export Std run SSF if in research mode: ( ResProj:RunAbbrev == "s" .AND. EnableResearchMode > 0)
    "Setup DHWSolarSys SSF export for Proposed model"  ResProj:Action  =    ; SAC 1/28/20 - (tic #1013)
@@ -1122,6 +1258,24 @@ RULELIST "CSE_SimulationCleanUp" 1 0 0 1
 	"Blast site-wide Elec2 export"		Proj:CSE_Elec2EXPORT			= {	if (LocalCompAssigned( CSE_Elec2EXPORT      )) then  DeleteComp()  else  UNCHANGED  endif  }
 	"Blast site-wide NatGas export"		Proj:CSE_NatGasEXPORT		= {	if (LocalCompAssigned( CSE_NatGasEXPORT     )) then  DeleteComp()  else  UNCHANGED  endif  }
 	"Blast site-wide <other> export"		Proj:CSE_OtherFuelEXPORT	= {	if (LocalCompAssigned( CSE_OtherFuelEXPORT  )) then  DeleteComp()  else  UNCHANGED  endif  }
+
+   "Blast site-wide CSE_ElecMETERByRms[1-8] - * bdrm"       for:#B=(1to8)      Proj:CSE_ElecMETERByRms[#B] =       ; SAC 08/20/22 (CUAC)
+      {	if (LocalCompAssigned( CSE_ElecMETERByRms[#B]      )) then  DeleteComp()  else  UNCHANGED  endif  }
+   "Blast site-wide CSE_Elec2METERByRms[1-8] - * bdrm"      for:#B=(1to8)      Proj:CSE_Elec2METERByRms[#B] =
+      {	if (LocalCompAssigned( CSE_Elec2METERByRms[#B]     )) then  DeleteComp()  else  UNCHANGED  endif  }
+   "Blast site-wide CSE_NatGasMETERByRms[1-8] - * bdrm"     for:#B=(1to8)      Proj:CSE_NatGasMETERByRms[#B] =
+      {	if (LocalCompAssigned( CSE_NatGasMETERByRms[#B]    )) then  DeleteComp()  else  UNCHANGED  endif  }
+   "Blast site-wide CSE_OtherFuelMETERByRms[1-8] - * bdrm"  for:#B=(1to8)      Proj:CSE_OtherFuelMETERByRms[#B] =
+      {	if (LocalCompAssigned( CSE_OtherFuelMETERByRms[#B] )) then  DeleteComp()  else  UNCHANGED  endif  }
+
+   "Blast site-wide CSE_ElecEXPORTByRms[1-8] - * bdrm"       for:#B=(1to8)      Proj:CSE_ElecEXPORTByRms[#B] =        ; SAC 08/21/22 (CUAC)
+      {	if (LocalCompAssigned( CSE_ElecEXPORTByRms[#B]      )) then  DeleteComp()  else  UNCHANGED  endif  }
+   "Blast site-wide CSE_Elec2EXPORTByRms[1-8] - * bdrm"      for:#B=(1to8)      Proj:CSE_Elec2EXPORTByRms[#B] =
+      {	if (LocalCompAssigned( CSE_Elec2EXPORTByRms[#B]     )) then  DeleteComp()  else  UNCHANGED  endif  }
+   "Blast site-wide CSE_NatGasEXPORTByRms[1-8] - * bdrm"     for:#B=(1to8)      Proj:CSE_NatGasEXPORTByRms[#B] =
+      {	if (LocalCompAssigned( CSE_NatGasEXPORTByRms[#B]    )) then  DeleteComp()  else  UNCHANGED  endif  }
+   "Blast site-wide CSE_OtherFuelEXPORTByRms[1-8] - * bdrm"  for:#B=(1to8)      Proj:CSE_OtherFuelEXPORTByRms[#B] =
+      {	if (LocalCompAssigned( CSE_OtherFuelEXPORTByRms[#B] )) then  DeleteComp()  else  UNCHANGED  endif  }
 END
 
 

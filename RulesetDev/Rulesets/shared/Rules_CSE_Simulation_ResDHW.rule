@@ -417,6 +417,31 @@ RULELIST "CSE_SimulationPrep_DHW_MFam_wsDayUse" 1 0 0 1
 	"Set DwellUnitDHW:cseDHWSYSRef:wsCentralDHWSYS"			DwellUnitDHW:cseDHWSYSRef:wsCentralDHWSYS			= {	if (IfValidAnd( DwellUnitTypeRef:DHWSysRef[1]:CentralDHW > 0.5 ))
 																																					then	DwellUnitTypeRef:DHWSysRef[1]:cseDHWSYSRef
 																																					else	UNDEFINED  endif  }
+   "Set DwellUnitDHW:cseDHWSYSRef:wsElecMtr"    DwellUnitDHW:cseDHWSYSRef:wsElecMtr =        ; SAC 08/21/22 (CUAC)
+      {  if (Parent2ComponentType() == "ResZn")
+         then  Parent2( CSE_ElecMeter )
+         else  UNCHANGED  endif  }
+   "Set DwellUnitDHW:cseDHWSYSRef:wsFuelMtr"    DwellUnitDHW:cseDHWSYSRef:wsFuelMtr = 
+      {  if (Parent2ComponentType() == "ResZn")
+         then  if (IfValidAnd( Proj:Fuel_HaveNatGas < 1 )==0)
+               then  Parent2( CSE_NatGasMETER )
+               else if (IfValidAnd( Proj:Fuel_HaveOther  < 1 )==0)
+               then  Parent2( CSE_OtherFuelMETER )
+               else  UNCHANGED  endif endif
+         else  UNCHANGED  endif  }
+
+   "Adjust cseDHWHEATER:whElecMtr"     cseDHWHEATER:whElecMtr =      ; SAC 10/26/22 (CUAC)
+      {  if (ParentCompAssigned( SourceDwellUnitDHW ) > 0 .AND.
+             ParentCompAssigned( wsElecMtr ) > 0 .AND.
+             LocalCompAssigned( whElecMtr ) > 0)
+         then  Parent( wsElecMtr )
+         else  UNCHANGED  endif  }
+   "Adjust cseDHWHEATER:whFuelMtr"     cseDHWHEATER:whFuelMtr =  
+      {  if (ParentCompAssigned( SourceDwellUnitDHW ) > 0 .AND.
+             ParentCompAssigned( wsFuelMtr ) > 0 .AND.
+             LocalCompAssigned( whFuelMtr ) > 0)
+         then  Parent( wsFuelMtr )
+         else  UNCHANGED  endif  }
 
 ; SAC 7/26/16 - rules to setup "load-sharing" cseDHWSYS objects in order to enable multiple DHWSys per DwellUnit (tic #711)
 	"Set DwellUnitDHW:LoadShareDUDHWRef[1]:cseDHWSYSRef:SourceDHWSys"			DwellUnitDHW:LoadShareDUDHWRef[1]:cseDHWSYSRef:SourceDHWSys			= {	DwellUnitTypeRef:DHWSysRef[2]:Name  }
@@ -493,6 +518,7 @@ RULELIST "CSE_SimulationPrep_DHW_part2" 1 0 0 1
 																						if (IfValidAnd( ResProj:CSEDHWUseMethod = 1 ))
 																						then	124  else  115  endif  }		; SAC 4/6/16 - non-MFam/central switched from 124 to 115		; SAC 4/15/16 - restored 124 for old/2013 models (tic #641)
 
+      ;"store BEMProc details"		Proj:Action = {  StoreBEMProc( Format( "%s-b4DHWMtrs", RunAbbrev ), 0 )  }
 	"Setup cseDHWSYS meters and temperatures"		cseDHWSYS:Action	= {	if (LocalCompAssigned( wsCentralDHWSYS ) > 0) then  UNCHANGED
 																								else	EvalRulelist( "Setup_cseDHWSYS_MetersAndTemperatures", 1 )  endif  }
 
@@ -1345,10 +1371,13 @@ END
 
 ;*************************************************************************
 RULELIST "Setup_cseDHWSYS_MetersAndTemperatures" 1 0 0 0
-	"Set cseDHWSYS:wsElecMtr"			cseDHWSYS:wsElecMtr		= {	Proj:CSE_ElecMETER  }
-	"Set cseDHWSYS:wsFuelMtr"			cseDHWSYS:wsFuelMtr		= {	     if (IfValidAnd( Proj:Fuel_HaveNatGas < 1 )==0) then  Proj:CSE_NatGasMETER
+   ; revised rules to NOT reset meters if already setup - SAC 08/21/22 (CUAC)
+	"Set cseDHWSYS:wsElecMtr"			cseDHWSYS:wsElecMtr		= {	if (LocalCompAssigned( wsElecMtr )) then  UNCHANGED
+                                                                  else  Proj:CSE_ElecMETER  endif  }
+	"Set cseDHWSYS:wsFuelMtr"			cseDHWSYS:wsFuelMtr		= {	if (LocalCompAssigned( wsFuelMtr )) then  UNCHANGED
+                                                                  else if (IfValidAnd( Proj:Fuel_HaveNatGas < 1 )==0) then  Proj:CSE_NatGasMETER
 																						else if (IfValidAnd( Proj:Fuel_HaveOther  < 1 )==0) then  Proj:CSE_OtherFuelMETER
-																						else  UNDEFINED  endif endif  }
+																						else  UNDEFINED  endif endif endif  }
 
 	"Set cseDHWSYS:wsFXHwMtr"			cseDHWSYS:wsFXHwMtr		= {	if (GlobalCompAssigned( Proj:CSE_FXHwDHWMETER ) < 1) then  UNDEFINED		; SAC 4/25/16
 																						else	Proj:CSE_FXHwDHWMETER  endif  }
@@ -1511,6 +1540,12 @@ RULELIST "CSE_SimulationPrep_DHWHtr_DHWHtr" 1 0 0 1
 																case  5 :	UNDEFINED		; "Heat Pump (2016)" 
 																default :	UNDEFINED
 															endswitch  endif  }
+   "Adjust cseDHWHEATER:whFuelMtr"     cseDHWHEATER:whFuelMtr =      ; SAC 10/26/22 (CUAC)
+      {  if (ParentCompAssigned( SourceDwellUnitDHW ) > 0 .AND. Proj:IsComRuleset .AND.
+             ParentCompAssigned( wsFuelMtr ) > 0 .AND.
+             LocalCompAssigned( whFuelMtr ) > 0)
+         then  Parent( wsFuelMtr )
+         else  UNCHANGED  endif  }
 
    ; SAC 9/10/15   ; SAC 10/25/19 - added use of NonStdTankVolume (Sanden HPWHs in elec central systems only)   ; SAC 3/6/20 - revise logic for multiple central compressor types (Colmac)
 	"Set cseDHWHEATER:whVol"   cseDHWHEATER:whVol	=            ; revised logic for std CHPWH - SAC 07/05/21 (tic #1275)
@@ -1672,6 +1707,14 @@ RULELIST "CSE_SimulationPrep_DHWHtr_DHWHtr" 1 0 0 1
 														 IfValidAnd( SourceDHWHeater:ElecMiniTankPower > 0 ) )
 													then  SourceDHWHeater:ElecMiniTankPower  else  UNDEFINED  endif  }
 	"Set cseDHWHEATER:whElecMtr"		cseDHWHEATER:whElecMtr		= {	if (IfValidAnd( whParElec > 0 )) then  Proj:CSE_ElecMETER  else  UNCHANGED  endif  }
+
+   "Adjust cseDHWHEATER:whElecMtr"     cseDHWHEATER:whElecMtr =      ; SAC 10/26/22 (CUAC)
+      {  if (ParentCompAssigned( SourceDwellUnitDHW ) > 0 .AND. Proj:IsComRuleset .AND.
+             ParentCompAssigned( wsElecMtr ) > 0 .AND.
+             LocalCompAssigned( whElecMtr ) > 0)
+         then  Parent( wsElecMtr )
+         else  UNCHANGED  endif  }
+
 
 ; SAC 3/19/16 - DHW input generation for new ASHP detailed model
 ; SAC 5/19/16 - updated logic w/ HPWH_NEEARated
