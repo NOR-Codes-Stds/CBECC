@@ -261,16 +261,21 @@ RULELIST  "BudgetConversion" 1 0 1 0
 
 ; TC 1/29/15 - need to change existing and verified solar emittance to existing value
 ; JP 10/3/19 - added a case for re-roofing (tic #867)    ; SAC 11/12/19 - switched 0.75 RoofEmiss to prior (& default) 0.85 due to this used for some time as most representative of real roofing products
+   ; added new logic for 2022+ code sensitive to both steep/low & CZ - SAC 12/13/22 (tic #1302)
 	"Set SolEmiss"	
 										CathedralCeiling:RoofEmiss = {if(EnergyCodeYearNum = 2019 .AND. IfValidAnd( Proj:AnalysisVersion <= 190101 ))
-					                                        Then UNCHANGED
-					                                        Else if (IsNew .OR. IsAltered .OR. ISAlteredSurface)
-                                                        then if (Proj:RunScope == 2 .AND. IfValidAnd( Proj:AdditionCFA <= 300 ) .AND. IsNew) then UNCHANGED
-                                                             else if (IsVerified) then exSolEmiss
-                                                             else if (RoofSolReflect != 0.1) then 0.85
-                                                             else UNCHANGED endif endif endif
-                                                  else UNCHANGED endif endif}
-
+					                                       Then UNCHANGED
+					                                       Else if (IsNew .OR. IsAltered .OR. ISAlteredSurface)
+                                                      then  if (Proj:RunScope == 2 .AND. IfValidAnd( Proj:AdditionCFA <= 300 ) .AND. IsNew) then UNCHANGED
+                                                            else if (IsVerified) then exSolEmiss
+                                                            else if (Proj:StdDesignBase >= 2022)
+                                                            then   if ( (SteepSlope >  0 .AND. (Proj:ClimateZone == 4 .OR. (Proj:ClimateZone >= 8 .AND. Proj:ClimateZone <= 15))) .OR.
+                                                                        (SteepSlope == 0 .AND. (Proj:ClimateZone == 4 .OR. (Proj:ClimateZone >= 6 .AND. Proj:ClimateZone <= 15))) )
+                                                                   then  0.75
+                                                                   else  UNCHANGED  endif
+                                                            else if (RoofSolReflect != 0.1) then 0.85
+                                                            else UNCHANGED endif endif endif endif
+                                                      else UNCHANGED endif endif}
 
 ;	mjb	2/20/14	make assignments to CeilingBelowAttic's Attic from CathedralCeiling
   "Set CathedralCeiling:StdDesignCeiling - Attic roof reflectance"
@@ -689,7 +694,7 @@ RULELIST  "BudgetConversion" 1 0 1 0
    ; revised logic and added new table look-up to set AbvDeckInsulLayer based on separate table look-up for low-roof-rise attic surfaces for code vint 2022+ - SAC 12/13/22 (tic #1302)
 	"Set Attic:Construction:AbvDeckInsulLayer"	Attic:Construction:AbvDeckInsulLayer	=
       {	if (FloorAreaOverCond > 0.5)
-			then  if ( Proj:StandardsVersion >= 2022 .AND. IfValidAnd( RoofRise < 2 ) .AND.
+			then  if ( Proj:StandardsVersion >= 2022 .AND. IfValidAnd( SteepSlope < 1 ) .AND.
                     (IsNew .OR. (IsAltered .AND. IsVerified < 1)) )
                then  T24RClimateZoneCodeBase:AltLowRoofRiseAboveDeckIns( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )
                else if (IsNew .OR. (IsAltered .AND. IsVerified < 1))
@@ -767,10 +772,11 @@ RULELIST  "BudgetConversion" 1 0 1 0
 ; SAC 9/21/15 - fixed bug where EAA <= 300 SF addition logic being applied to both New & EAA projects (revised to apply only to EAA projects)
 ; SAC 9/23/15 - switched from CondAdditionSize to AdditionCFA (former is always 0 for NewCons-AdditionAlone) and revised logic again to ensure that 300 AdditionCFA also applies to New Cons when IsAddAlone checked
 ; JP 9/17/19  - fixed altered case was included in EAA <=300 case & added replacing roof surface only (tic #867) 
+; revised logic to cause changes regardless of AdditionCFA for EAA models (not AdditionAlone) - SAC 12/13/22 (tic #1302)
 "Set Attic:RoofSolReflect"	Attic:RoofSolReflect	= {	if ( IsNew .OR. IsAltered  .OR. IsAlteredSurface)
 											                                then	if (Construction:RoofingLayer == 100205)		; "25 PSF (Very Heavy Ballast or Pavers)"
 													                                  then	UNCHANGED
-												                                    else if ((Proj:RunScope == 2 .OR. (Proj:RunScope == 1 .AND. IfValidAnd( Proj:IsAddAlone > 0.5 ))) .AND. IfValidAnd( Proj:AdditionCFA <= 300 ))
+												                                    else if ((Proj:RunScope == 1 .AND. IfValidAnd( Proj:IsAddAlone > 0.5 )) .AND. IfValidAnd( Proj:AdditionCFA <= 300 ))
 													                                       then	UNCHANGED
 													                                       else if ( SteepSlope > 0.5 )
 													                                            then	T24RClimateZoneCodeBase:SteepRoofReflect( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )
@@ -796,14 +802,21 @@ RULELIST  "BudgetConversion" 1 0 1 0
 	;"Set Attic:RoofEmiss"						Attic:RoofEmiss						= {	if ( IsNew .OR. IsAltered) then 0.85 else UNCHANGED endif  }
 
    ; SAC 11/12/19 - switched 0.75 RoofEmiss to prior (& default) 0.85 due to this used for some time as most representative of real roofing products
-  "Set Attic:RoofEmiss"		Attic:RoofEmiss		= {if(EnergyCodeYearNum = 2019 .AND. IfValidAnd( Proj:AnalysisVersion <= 190101 ))
-					                                     then if ( IsNew .OR. IsAltered) then 0.85 else UNCHANGED endif
-					                                          else if (IsNew .OR. IsAltered .OR. ISAlteredSurface)
-                                                         then if (Proj:RunScope == 2 .AND. IfValidAnd( Proj:AdditionCFA <= 300 ) .AND. IsNew) then UNCHANGED
-                                                              else if (IsVerified) then exSolEmiss
-                                                                   else if (RoofSolReflect != 0.1) then 0.85
-                                                                        else UNCHANGED endif endif endif
-                                               else UNCHANGED endif endif}
+   ; added new logic for 2022+ code sensitive to both steep/low & CZ - SAC 12/13/22 (tic #1302)
+  "Set Attic:RoofEmiss"		Attic:RoofEmiss		= {   if(EnergyCodeYearNum = 2019 .AND. IfValidAnd( Proj:AnalysisVersion <= 190101 ))
+					                                       then   if ( IsNew .OR. IsAltered) then 0.85 else UNCHANGED endif
+					                                       else if (IsNew .OR. IsAltered .OR. ISAlteredSurface)
+                                                      then   if (Proj:RunScope == 2 .AND. IfValidAnd( Proj:AdditionCFA <= 300 ) .AND. IsNew) then UNCHANGED
+                                                             else if (IsVerified) then exSolEmiss
+                                                             else if (Proj:StdDesignBase >= 2022)
+                                                             then   if ( (SteepSlope >  0 .AND. (Proj:ClimateZone == 4 .OR. (Proj:ClimateZone >= 8 .AND. Proj:ClimateZone <= 15))) .OR.
+                                                                         (SteepSlope == 0 .AND. (Proj:ClimateZone == 4 .OR. (Proj:ClimateZone >= 6 .AND. Proj:ClimateZone <= 15))) )
+                                                                    then  0.75
+                                                                    else  UNCHANGED  endif
+                                                             else if (RoofSolReflect != 0.1)
+                                                             then  0.85
+                                                             else UNCHANGED endif endif endif endif
+                                                      else UNCHANGED endif endif}
 
    ;--------------------------------------------------------------------
    ; BudgetConversion: Attic Radiant Barrier - Res Standard table 150.1-A  (& Std sec 110.8-j)
