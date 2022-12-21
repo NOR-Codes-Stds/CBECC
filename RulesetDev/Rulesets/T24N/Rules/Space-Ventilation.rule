@@ -865,8 +865,7 @@ RULE ThrmlZn:ZnSysVentConnectionType
 ENDRULE
  
 
-// A flag set to indicate if ventilation (OA) is required for the conditioned space
-// Ventilation for unconditioned spaces (i.e. parking garage) handled separately
+// A flag set to indicate if ventilation (supply OA, exhaust, or both) is required for the space
 RULE NEW Spc:VentIsRequired
   DATATYPE
     Integer
@@ -894,6 +893,7 @@ RULE NEW Spc:VentIsRequired
     else 1
     endif endif
 ENDRULE
+
 
 // Set flag to indicate if ventilation flows are included in BuildingStory
 // air balance calculations
@@ -969,6 +969,8 @@ ENDRULE
 RULE NEW Spc:VentOccDensSim
   DATATYPE
     Float
+  LONGFORM
+    VentilationOccupancyDensitySimulated
   DESCRIPTION
     "The occupancy density assumed in the calculation of the CodeMinVentPerArea for each
      VentSpcFunc."
@@ -1874,7 +1876,7 @@ RULE NEW Spc:CodeVentPerAreaForDCV
   DEFAULT : T24N_2016
     UNDEFINED  
   DEFAULT : T24N
-    if( VentIsRequired = 0 )
+    if( VentIsRequired = 0 .OR. IsCond = 0 )
     then 0
     else
     if( LabArea > 0 )
@@ -1923,7 +1925,7 @@ RULE NEW Spc:CodeVentPerArea
       SpaceFunctionData:CodeVentPerArea("FuncType", SpcFunc)
     endif endif endif endif
   DEFAULT : T24N
-    if( VentIsRequired = 0 )
+    if( VentIsRequired = 0 .OR. IsCond = 0 )
     then 0
     else
     if( LabArea > 0 )
@@ -2126,7 +2128,7 @@ RULE NEW Spc:CodeVentPerPerson
     else 15 // Default is 15 cfm/person
     endif endif endif endif
   DEFAULT : T24N
-    if( VentIsRequired = 0 )
+    if( VentIsRequired = 0 .OR. IsCond = 0 )
     then 0
     else
     if( LabArea > 0 )
@@ -2149,7 +2151,7 @@ RULE NEW Spc:CodeVentPerPerson
            // OccDensSim for the SpcFunc. This is the per person value that would be used for DCV,
            // of if using fixed seating or user enters a OccNumSim greater than minimum.
            // Cap value at 15 cfm/person.
-        Min( ( VentOccDensSim / MinOccDensSim ) , 1 ) * 15
+        ( VentOccDensSim / MinOccDensSim ) * 15
       else
         VentilationSpaceFunctionData:CodeVentPerPerson("VentFuncType", VentSpcFunc)
       endif
@@ -2213,7 +2215,7 @@ RULE Spc:CodeOtherVentPerPerson
     // CodeOther = proposed
     ValidOr( VentPerPerson, 0 )
   DEFAULT : S901G ECBC
-    if( VentIsRequired = 0 .OR. VentSpecMthd = "NoVentilation" )
+    if( VentIsRequired = 0 .OR. VentSpecMthd = "NoVentilation" .OR. IsCond = 0 )
     then 0
     else 
     switch( Proj:VentStd )
@@ -3059,17 +3061,21 @@ RULE Spc:CodeVentFlow
       then // Lab min is 0.15 cfm/ft2. See Issue 2139
         Max( CodeVentPerAreaFlow, VentFlow ) 
         / VentAirDistEff
-      else if( CommKitArea > 0 )
+      else
+      if( CommKitArea > 0 )
       then // CommKit rate is max of NACM rate or proposed flow
         Max( Max( CodeVentPerPersonFlow, CodeVentPerAreaFlow ), VentFlow )
         / VentAirDistEff
-      else if( PrkgGarArea > 0 )
+      else
+      if( PrkgGarArea > 0 )
       then // PrkgGar min based on cfm/ft2
         CodeVentPerAreaFlow
-      else if( IsHighRiseRes )
+      else
+      if( IsHighRiseRes )
       then // Is a High-rise residential Spc, use Sum
         ( CodeVentPerPersonFlow + CodeVentPerAreaFlow )
-      else if( IsHotelMotelGuestRm )
+      else
+      if( IsHotelMotelGuestRm )
       then // Is a hotel guest room
         Max( CodeVentPerAreaFlow, CodeVentPerSpcFlow )
       else // All other spaces is Max of PerArea/PerPerson
