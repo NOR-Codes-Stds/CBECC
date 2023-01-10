@@ -198,11 +198,14 @@ RULELIST  "BudgetConversion" 1 0 1 0
 ;	; SAC 10/8/13 - added to ensure proper adjustment of duct locations before/after conversion of proposed CathedralCeilings to CeilingBelowAttic
 ;	"Set Zone:NumPropCathClgObjs"				Zone:NumPropCathClgObjs			= {	ChildCount( CathedralCeiling )  }
 
+   ; added logic to prevent conversion of CathClg->Attic for EAA or AddAlone <=700SF models for 2022 analysis - SAC 01/09/23 (tic #1302)
 	"Create CathedralCeiling:StdDesignCeiling (if necessary)"	CathedralCeiling:StdDesignCeiling	= {	if (ParentComponentType() != "Zone") then  UNDEFINED
+                                                                      else if ( (Proj:RunScope == 2 .OR. (Proj:RunScope == 1 .AND. IfValidAnd( Proj:IsAddAlone > 0.5 ) .AND. IfValidAnd( Proj:AddAloneAddedArea <= 700 ))) .AND.
+                                                                                Proj:StdDesignBase >= 2022 ) then  UNCHANGED
                                                                       else if (IsNew .OR. IsAltered) then 
                                                                               CreateComp( CeilingBelowAttic, Local( Name ) + "-ClgBlwAtc" )
                                                                             else UNCHANGED endif
-                                                                      endif }
+                                                                      endif endif }
 
 	"Assign (or create) Attic above ceiling"	CathedralCeiling:StdDesignCeiling:AtticZone	= {	if (MaxAll( Attic:StdCathClgAtticArea ) > 1) then  MaxAllComp( Attic:StdCathClgAtticArea )
 																																else  CreateComp( Attic, "Std Design CathClg Attic", "Setup_StdCathClgAttic" )  endif  }
@@ -220,7 +223,29 @@ RULELIST  "BudgetConversion" 1 0 1 0
 	"Set CathedralCeiling:StdDesignCeiling:CathCeilUValue"	CathedralCeiling:StdDesignCeiling:CathCeilUValue	= {	Construction:WinterDesUValue  }
   ; set area of CeilingBelowAttic to the horizontal projection of the pitched CathedralCeiling area
 	"Set CathedralCeiling:StdDesignCeiling:Area"				CathedralCeiling:StdDesignCeiling:Area				= {	Area * cos( (RoofTilt * 3.14159265 / 180) )  }
-  "Set CathedralCeiling:StdDesignCeiling:WasCathCeil"  CathedralCeiling:StdDesignCeiling:WasCathCeil = { 1  }		;	mjb	2/20/14	needed later for CBA budget conversion rules
+   "Set CathedralCeiling:StdDesignCeiling:WasCathCeil"  CathedralCeiling:StdDesignCeiling:WasCathCeil = { 1  }		;	mjb	2/20/14	needed later for CBA budget conversion rules
+
+   "Set CathedralCeiling:Construction for ceilings of conditioned zones (2022, EAA or AddALone <=700SF)"    ; add assignment of CathClgCons consistent w/ 2022 Res ACM Table 27 - SAC 01/09/22 (tic #1302)
+      CathedralCeiling:Construction	=
+         {  if (ParentComponentType() == "Zone" .AND. LocalCompAssigned( StdDesignCeiling ) < 1 .AND. Proj:StdDesignBase >= 2022)
+            then	if (Parent( Type ) < 10)
+                  then	if (Proj:RunScope == 2 .AND. IsAltered)
+                        then  RuleLibrary(Cons, "T24-2022 R19 Altered CathedralCeiling" )
+                        else if (IsNew .AND. ((Proj:RunScope == 2 .AND. IfValidAnd( Proj:CondAdditionSize > 0.1 ) .AND. IfValidAnd( Proj:CondAdditionSize <= 700 )) .OR.
+                                              (Proj:RunScope == 1 .AND. IfValidAnd( Proj:IsAddAlone > 0.5 ) .AND. IfValidAnd( Proj:AddAloneAddedArea <= 700 ))) )
+                        then  RuleLibrary(Cons, "T24-2022 R22 Addition CathedralCeiling" )
+                        else  UNCHANGED  endif endif
+                  else  UNCHANGED  endif
+            else  UNCHANGED  endif  }
+	"Set CathedralCeiling:Construction:AbvDeckInsulLayer"    CathedralCeiling:Construction:AbvDeckInsulLayer	=     ; add AbvDeckInsulLayer fro altered, low slope CathClgs - SAC 01/09/23 (tic #1302)
+      {	if (ParentComponentType() == "Zone" .AND. LocalCompAssigned( StdDesignCeiling ) < 1 .AND. Proj:StdDesignBase >= 2022)
+            then	if (Parent( Type ) < 10)
+			         then  if ( IfValidAnd( SteepSlope < 1 ) .AND. IsAltered .AND. IsVerified < 1 )
+                        then  T24RClimateZoneCodeBase:AltLowRoofRiseAboveDeckIns( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )
+                        else  UNCHANGED  endif
+                  else  UNCHANGED  endif
+            else  UNCHANGED  endif  }
+	"Set CathedralCeiling:Construction:AbvDeckInsulLayerRpt"	CathedralCeiling:Construction:AbvDeckInsulLayerRpt	= {  Construction:AbvDeckInsulLayer  } 
 
 ;	"debug CeilingBelowAttic"					CathedralCeiling:Action = { if (IsAltered) then PostWarning( "CathedralCeiling: '%s' Cons: '%s' WinterDesUValue: %g ", Name, Construction:Name, Construction:WinterDesUValue	 ) else UNCHANGED endif }
 
@@ -234,6 +259,7 @@ RULELIST  "BudgetConversion" 1 0 1 0
 ; SAC 10/2/15 - revised if statement to include New Cons Addition Alone in check for additionCFA <= 300SF
 ; JP 10/3/19 - added a case for re-roofing (tic #867)
 ; exclude CZs 4, 8 & 9 from std design RoofSolReflect for New surfaces - SAC 12/22/22 (tic #1302)
+; further mods to last logic change to prevent DRtg runs from remaining UNCHANGED - SAC 01/09/23 (tic #1302)
 "Set CathedralCeiling:RoofSolReflect"	CathedralCeiling:RoofSolReflect	= {	if ( IsNew .OR. IsAltered .OR. IsAlteredSurface)
                                                                           then	if (Construction:RoofingLayer == 100205)		; "25 PSF (Very Heavy Ballast or Pavers)"
 									                                                              then	UNCHANGED
@@ -241,7 +267,7 @@ RULELIST  "BudgetConversion" 1 0 1 0
 									                                                                       (Proj:RunScope == 2 .OR. (Proj:RunScope == 1 .AND. IfValidAnd( Proj:IsAddAlone > 0.5 ))) .AND.IfValidAnd( Proj:AdditionCFA <= 300 ))
                                                                           							 .OR. (Proj:RunScope == 2 .AND. IfValidAnd( Proj:AdditionCFA <= 300 ) .AND. IsNew))
                                                                       							 then	UNCHANGED
-                                                                  								   else if (IsNew .AND. (Proj:ClimateZone == 4 .OR. Proj:ClimateZone == 8 .OR. Proj:ClimateZone == 9)) then  UNCHANGED
+                                                                  								   else if (IsNew .AND. Proj:RunAbbrev != "dr" .AND. (Proj:ClimateZone == 4 .OR. Proj:ClimateZone == 8 .OR. Proj:ClimateZone == 9)) then  UNCHANGED
                                                                                                   else if ( SteepSlope > 0.5 )
                                                                        									  then	T24RClimateZoneCodeBase:SteepRoofReflect( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )
                                                                        									  else	T24RClimateZoneCodeBase:FlatRoofReflect(  "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )
@@ -778,12 +804,13 @@ RULELIST  "BudgetConversion" 1 0 1 0
 ; JP 9/17/19  - fixed altered case was included in EAA <=300 case & added replacing roof surface only (tic #867) 
 ; revised logic to cause changes regardless of AdditionCFA for EAA models (not AdditionAlone) - SAC 12/13/22 (tic #1302)
 ; exclude CZs 4, 8 & 9 from std design RoofSolReflect for New surfaces - SAC 12/22/22 (tic #1302)
+; further mods to last logic change to prevent DRtg runs from remaining UNCHANGED - SAC 01/09/23 (tic #1302)
 "Set Attic:RoofSolReflect"	Attic:RoofSolReflect	= {	if ( IsNew .OR. IsAltered  .OR. IsAlteredSurface)
 											                                then	if (Construction:RoofingLayer == 100205)		; "25 PSF (Very Heavy Ballast or Pavers)"
 													                                  then	UNCHANGED
 												                                    else if ((Proj:RunScope == 1 .AND. IfValidAnd( Proj:IsAddAlone > 0.5 )) .AND. IfValidAnd( Proj:AdditionCFA <= 300 ))
 													                                       then	UNCHANGED
-													                                       else if (IsNew .AND. (Proj:ClimateZone == 4 .OR. Proj:ClimateZone == 8 .OR. Proj:ClimateZone == 9)) then  UNCHANGED
+													                                       else if (IsNew .AND. Proj:RunAbbrev != "dr" .AND. (Proj:ClimateZone == 4 .OR. Proj:ClimateZone == 8 .OR. Proj:ClimateZone == 9)) then  UNCHANGED
                                                                                    else if ( SteepSlope > 0.5 )
 													                                            then	T24RClimateZoneCodeBase:SteepRoofReflect( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )
 													                                            else	T24RClimateZoneCodeBase:FlatRoofReflect(  "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )
