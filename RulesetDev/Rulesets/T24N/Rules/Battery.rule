@@ -218,6 +218,139 @@ RULE NEW Proj:PrscrpBattPwrCap
     SumAll( Spc:T24BattPwrCap ) + SumAll( ResZn:T24BattPwrCap ) + SumAll( ResOtherZn:T24BattPwrCap )
 ENDRULE
 
+
+////////////////////////////////////////////////////////////////////////////////
+// Project-level reduced Battery requirement exception data - SAC 01/10/23
+
+RULE Proj:ReducedBattReqExcpt
+  DESCRIPTION
+    "Exception describing why standard Battery requirements don't apply to this project"
+  INPUTCLASS
+    CondRequired
+  RESETS
+    ResetTheFollowingWhenThisIsModified
+      Proj:ReducedBattReqVal
+ENDRULE
+;  DEFAULT
+;    if (IfValidAnd( PrscrpBattEngyCap < 10 ))
+;    then  "(Exc. 2) No Battery required when prescribed system < 10 kWh"
+;    else if (IfValidAnd( T24PVSize > 0.1 )==0 .OR.
+;             ValidOr( T24PVSize, 0 ) < (0.15 * ValidOr( PrscrpPVSize, 0 )))
+;    then  "(Exc. 1) No Battery required when Std PV < 15% of prescribed size"
+;    else  "- select applicable reason for Battery reduction -"
+;    endif endif
+;              0,    "- select applicable required Battery exception -"
+;            601,    "(Exc. 1) No Battery required when Std PV < 15% of prescribed size"
+;            602,    "(Exc. 2) No Battery required when prescribed system < 10 kWh"
+;            603,    "(Exc. 3) Battery required only for tenant areas >= 5,000 SF"
+;            604,    "(Exc. 4) No Battery req'd for CZ 1 offices, schools & warehouses"
+; PV logic:
+;  DEFAULT 
+;    if (IfValidAnd( IsLowRiseMFam > 0 ))
+;    then if (IfValidAnd( PrscrpPVSize < 1.8 ))
+;         then  "(Exc. 2) No PV required when prescribed system < 1.8 kWdc"
+;         else if (IfValidAnd( PrscrpPVSize > SolAccessRfAreaPVPwr ))
+;         then  "Limited by SARA provided"
+;         else  "- select applicable reason for PV reduction -"
+;         endif endif
+;    else if (IfValidAnd( PrscrpPVSize < 4 ))
+;         then  "(Exc. 2) No PV required when prescribed system < 4 kWdc"
+;         else if (IfValidAnd( SolAccessRfArea < (SumAll( Bldg:TotCondFlrArea ) * 0.03) ))
+;         then  "(Exc. 1) No PV required when SARA < 3% cond floor area"
+;         else if (IfValidAnd( SolAccessRfArea < 80 ))
+;         then  "(Exc. 3) No PV required when SARA < 80 contiguous SF"
+;         else if (IfValidAnd( PrscrpPVSize > SolAccessRfAreaPVPwr ))
+;         then  "Limited by SARA provided"
+;         else  "- select applicable reason for PV reduction -"
+;         endif endif endif endif
+;    endif
+
+RULE Proj:ReducedBattReq
+  DESCRIPTION
+    "whether or not an exception to standard Battery requirements applies to
+    this project (exception must be entered)"
+  INPUTCLASS
+    Optional
+  DEFAULT 
+    if (EnumValue( ReducedBattReqExcpt ) > 0) 
+    then 1
+    else 0
+    endif
+ENDRULE
+
+RULE Proj:ReducedBattReqExcptDesc
+  DESCRIPTION
+    "Full text of exception describing why standard Battery requirements don't apply to this project"
+  INPUTCLASS
+    NotInput
+  DEFAULT 
+    switch (EnumValue( ReducedBattReqExcpt ))
+       case 601 :  "RTF\ReducedPVExcept601.rtf"
+       case 602 :  "RTF\ReducedPVExcept602.rtf"
+       case 603 :  "RTF\ReducedPVExcept603.rtf"
+       case 604 :  "RTF\ReducedPVExcept604.rtf"
+       default :  ""
+    endswitch
+ENDRULE
+
+;RULE Proj:ReducedBattReqMinVal
+;  DESCRIPTION
+;    "Minimum reduced Battery requirement capacity (depending on selected exception)"
+;  INPUTCLASS
+;    NotInput
+;  DEFAULT 
+;    if (IfValidAnd( ReducedBattReq > 0 )==0) then  0
+;    else if (FindInString( ReducedBattReqExcpt, "Limited by SARA" ) >= 0)
+;    then  0  ; SolAccessRfAreaPVPwr
+;    else  0
+;    endif endif
+;ENDRULE
+;
+;RULE Proj:EnforceReducedBattReqMin
+;  DESCRIPTION
+;    "Whether or not to enforce minimum reduced Battery requirement capacity"
+;  INPUTCLASS
+;    NotInput
+;  DEFAULT 
+;    if (ReducedBattReqMinVal > 0)
+;    then  EnumValue( ReducedBattReqExcpt )
+;    else  0  endif
+;ENDRULE
+
+RULE Proj:ReducedBattReqVal
+  DESCRIPTION
+    "Reduced Battery requirement capacity"
+  INPUTCLASS
+    Optional
+  DEFAULT 
+    if (ReducedBattReq > 0 )
+    then  if (FindInString( ReducedBattReqExcpt, "No Batt" ) > 0)
+          then  0
+          else UNDEFINED  endif
+    else  UNDEFINED  endif
+ENDRULE
+;  MINIMUM
+;    ReducedBattReqMinVal
+; part of default expression
+;    else if (ReducedBattReqMinVal > 0.01)
+;    then  ReducedBattReqMinVal
+
+RULE Proj:UseReducedBattReqVal
+  DESCRIPTION
+    "Reduced Battery requirement capacity (only if valid inputs)"
+  INPUTCLASS
+    NotInput
+  DEFAULT 
+    if (ReducedBattReq > 0 .AND. EnumValue( ReducedBattReqExcpt ) > 0 .AND.
+        IfValidAnd( ReducedBattReqVal >= 0 ))
+    then  ReducedBattReqVal
+    else  UNDEFINED
+    endif
+ENDRULE
+
+// End of - Project-level reduced Battery requirement exception data - SAC 01/10/23
+
+
 // Proj-wide Standard Design Battery Requirements
 RULE NEW Proj:T24BattEngyCap
   LONGFORM
@@ -905,18 +1038,20 @@ RULE NEW Proj:HavePVBattSim
 ENDRULE
 
 // Self Utilization Credit (BattGridHarmCredit) stuff - SAC 06/05/22
+// diable BattGridHarmCredit (flexibility credit) for 2022+ codes - SAC 01/10/23 (tic #3464)
 RULE Proj:AllowBattGridHarmCredit
   DESCRIPTION
     "Whether taking the self utilization battery credit is allowed for this project"  
   INPUTCLASS
     NotInput 
   DEFAULT
-    if (IfValidAnd( ResDwellUnits > 0 ) .AND.
-        IfValidAnd( Bldg:AboveGrdStoryCnt < 4 ) .AND.
-        IfValidAnd( CommunitySolarProjID > 0 )==0 .AND.
-        SimBatt > 0 .AND. PVSizeSum > 0 )
+    if (IfValidAnd( Proj:StdsVersionYr >= 2022 )) then  0
+    else if (IfValidAnd( ResDwellUnits > 0 ) .AND.
+             IfValidAnd( Bldg:AboveGrdStoryCnt < 4 ) .AND.
+             IfValidAnd( CommunitySolarProjID > 0 )==0 .AND.
+             SimBatt > 0 .AND. PVSizeSum > 0 )
     then  1
-    else  0  endif
+    else  0  endif endif
 ENDRULE
 
 RULE Proj:BattGridHarmCredit
