@@ -873,24 +873,38 @@ RULE Fan:MtrBHP
         endif endif
       else 0.35 * FlowCap * 0.9 / 745.6 // ~ 0.35 W/cfm
       endif endif
-;    else
-;    // Calculated from TotStaticPress
-;    if( ModelingMthd = "StaticPressure" .AND.
-;        IfValidAnd( FlowCap > 0 ) .AND. 
-;        IfValidAnd( TotStaticPress > 0 ) .AND. 
-;        IfValidAnd( FlowEff > 0 ) )
-;    then FlowCap * TotStaticPress * ( 0.1175 /  745.6 ) / FlowEff
-;    else
-;    // Calculated from PwrIdx
-;    if( ModelingMthd = "PowerPerUnitFlow" .AND.
-;        IfValidAnd( PwrIdx > 0 ) .AND. 
-;        IfValidAnd( FlowCap > 0 ) .AND.
-;        IfValidAnd( MtrEff > 0 ) ) 
-;    then PwrIdx * FlowCap * MtrEff / 745.6
     else
       UNCHANGED // MtrBHP calculated at end based on TotStaticPress
     endif
 ENDRULE 
+
+RULE NEW Fan:UserMtrBHP
+  DATATYPE
+    Float
+  DESCRIPTION
+    "The design motor shaft brake horsepower of the fan, calculated 
+     from user inputs for the selected ModelingMethod."
+  INPUTCLASS
+    NotINput
+  UNITS 
+    hp
+  DEFAULT
+    // Calculated from TotStaticPress
+    if( ModelingMthd = "StaticPressure" .AND.
+        IfValidAnd( FlowCap > 0 ) .AND. 
+        IfValidAnd( TotStaticPress > 0 ) .AND. 
+        IfValidAnd( FlowEff > 0 ) )
+    then FlowCap * TotStaticPress * ( 0.1175 /  745.6 ) / FlowEff
+    else
+    // Calculated from PwrIdx
+    if( ModelingMthd = "PowerPerUnitFlow" .AND.
+        IfValidAnd( PwrIdx > 0 ) .AND. 
+        IfValidAnd( FlowCap > 0 ) .AND.
+        IfValidAnd( MtrEff > 0 ) ) 
+    then PwrIdx * FlowCap * MtrEff / 745.6
+    else ValidOr( MtrBHP, 0 )
+    endif endif
+ENDRULE     
 
 // ********** Total Static Pressure *****************************************
 RULE Fan:TotStaticPress
@@ -1292,6 +1306,14 @@ RULE Fan:MtrHP
       PostError("Fan '%s' does not have Motor HP defined.", Name )
     else UNCHANGED
     endif endif
+  CHECKCODE
+     if( IfValidAnd( UserMtrBHP > MtrHP ) )
+     then
+       PostWarning("The (nameplate) Motor HP of fan '%s' is %.3f, which is less than 
+                    the calculated motor BHP, %.3f, using the selected fan power modeling method
+                    and the relevant inputs.", Name, MtrHP, UserMtrBHP )   
+     else UNCHANGED
+     endif
   ANNUAL
     if( BaseSysNum > 0 .AND.
         IfValidAnd( MtrHPIdxFinal > 0 ) )
@@ -1440,38 +1462,24 @@ RULE Fan:MtrBHP
     else
     if( IfValidAnd( MtrBHP > 0 ) = 0 .AND. ModelingMthd = "BrakeHorsePower" )
     then // MtrBHP is UNDEFINED or is 0
-      PostError("MotorBHP is a required input for fan '%s' if ModelingMethod = 
+      PostError("Motor BHP is a required input for fan '%s' if ModelingMethod = 
                  'BrakeHorsePower'.", Name)   
     else
-    if( IfValidAnd( MtrBHP < MinMtrBHP ) .AND.
+    if( IfValidAnd( UserMtrBHP < MinMtrBHP ) .AND.
         IfValidAnd( MtrHP >= 0.125) .AND.
         IsNew > 0 .AND.
         IsHlthCare = 0 )
     then // User specified MtrBHP is less than ACM required BHP based on user
          // specified MtrHP (applies only to 1/8 HP and larger motors)
-      PostWarning("MotorBHP for fan '%s' is less than the ACM required value
-                   for the user-specified MotorHP. The proposed MotorBHP will
-                   be set to %.3f hp for compliance analysis.", Name, MinMtrBHP)
+      PostWarning("The calculated Motor BHP of fan '%s' is %.3f hp, which less than the ACM required value
+                   for the user-specified (nameplate) Motor HP, %.3f. The proposed Motor BHP will
+                   be set to %.3f hp for compliance analysis.", Name, UserMtrBHP, MtrHP, MinMtrBHP)
     else UNCHANGED
     endif endif endif
   SIZING
     if( BaseSysNum > 0 )
     then // Fan power for sizing is set to 0
       0
-;    else
-;    // Calculated from TotStaticPress
-;    if( ModelingMthd = "StaticPressure" .AND.
-;        IfValidAnd( FlowCap > 0 ) .AND. 
-;        IfValidAnd( TotStaticPress > 0 ) .AND. 
-;        IfValidAnd( FlowEff > 0 ) )
-;    then FlowCap * TotStaticPress * ( 0.1175 /  745.6 ) / FlowEff
-;    else
-;    // Calculated from PwrIdx
-;    if( ModelingMthd = "PowerPerUnitFlow" .AND.
-;        IfValidAnd( PwrIdx > 0 ) .AND. 
-;        IfValidAnd( FlowCap > 0 ) .AND.
-;        IfValidAnd( MtrEff > 0 ) ) 
-;    then PwrIdx * FlowCap * MtrEff / 745.6
     else UNCHANGED
     endif
   ANNUAL
@@ -1489,8 +1497,22 @@ RULE Fan:MtrBHP
     then // Use NACM calculated MinMtrBHP
          // MinMtrBHP = 95% x MtrHPi-1, only applies to non-fractional HP motors
       MinMtrBHP
-    else UNCHANGED
-    endif endif
+    else
+     // Calculated from TotStaticPress
+    if( ModelingMthd = "StaticPressure" .AND.
+        IfValidAnd( FlowCap > 0 ) .AND. 
+        IfValidAnd( TotStaticPress > 0 ) .AND. 
+        IfValidAnd( FlowEff > 0 ) )
+    then FlowCap * TotStaticPress * ( 0.1175 /  745.6 ) / FlowEff
+    else
+    // Calculated from PwrIdx
+    if( ModelingMthd = "PowerPerUnitFlow" .AND.
+        IfValidAnd( PwrIdx > 0 ) .AND. 
+        IfValidAnd( FlowCap > 0 ) .AND.
+        IfValidAnd( MtrEff > 0 ) ) 
+    then PwrIdx * FlowCap * MtrEff / 745.6    
+    else UNCHANGED // Use user-defined MtrBHP
+    endif endif endif endif
 ENDRULE
 // Calculate normalized BHP for reference
 RULE NEW Fan:MtrBHPIdx
@@ -1624,7 +1646,7 @@ RULE Fan:TotStaticPress
     if( IfValidAnd( MtrBHP > 0 ) .AND.
         IfValidAnd( FlowEff >= 0 ) .AND.
         IfValidAnd( FlowCap > 0 ) )
-    then // Recalculate using BHP, which reflects mtr size adjustment
+    then // Recalculate using BHP, which reflects NACM mtr size adjustment; see Fan:MtrBHP rule above
       MtrBHP * FlowEff / FlowCap / ( 0.1175 / 745.6 )
     else
       UNCHANGED
