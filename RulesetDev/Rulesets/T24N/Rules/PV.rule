@@ -33,6 +33,11 @@
 
 //Relevant ACM Section: ...
 
+RULE Proj:Action
+  DEFAULT
+    PostMessageToLog( "START PV rules..." )
+ENDRULE
+;    StoreBEMProc( "begin PV defaulting", 0 )
 
 ////////////////////////////////////////////////////////////////////////////////
 // Project-level SARA (Solar Access Roof Area) data - SAC 04/21/22
@@ -104,8 +109,13 @@ RULE NEW Proj:DisableAllPVBattRequirements
     NotInput
   DEFAULT
     if (IfValidAnd( HlthCareFacility > 0 )) then  1
+    else if (IfValidAnd( ResDwellUnits > 0 ) .AND.
+             IfValidAnd( ResCompOptNew > 0 )==0) then  2
+    else if (IfValidAnd( ResDwellUnits > 0 )==0 .AND.
+             IfValidAnd( IsNewEnv  > 0 )==0 .AND.
+             IfValidAnd( IsNewMech > 0 )==0) then  3
     else  0
-    endif
+    endif endif endif
 ENDRULE
 
 RULE NEW Spc:ShowPVBattSizeBldgType
@@ -127,15 +137,15 @@ RULE NEW Spc:ShowPVBattSizeBldgType
     if (enumvalue(SpcFunc) < 1 .OR. Proj:DisableAllPVBattRequirements .OR.
         IfValidAnd( IsHlthCare > 0 ))
     then  0
-    else if ( IfValidAnd( Proj:PrscrpPVBattClass = "LowRiseRes" ) .OR.
-              IfValidAnd( Proj:PrscrpPVBattClass = "HiRiseRes_NoPVBatt" ) .OR.
-              IfValidAnd( Proj:PrscrpPVBattClass = "NonRes_NoPVBatt" ) )
-    then  0
     else if (SpaceFunctionData:PVBatteryBldgType("FuncType", SpcFunc) == "none")
     then  0
     else  1
-    endif endif endif
+    endif endif
 ENDRULE
+;    else if ( IfValidAnd( Proj:PrscrpPVBattClass = "LowRiseRes" ) .OR.
+;              IfValidAnd( Proj:PrscrpPVBattClass = "HiRiseRes_NoPVBatt" ) .OR.
+;              IfValidAnd( Proj:PrscrpPVBattClass = "NonRes_NoPVBatt" ) )
+;    then  0
 
 RULE Spc:PVBattSizeBldgType
   REFERENCE
@@ -143,7 +153,7 @@ RULE Spc:PVBattSizeBldgType
   DESCRIPTION
     "Building type used to determine prescribed PV & battery sizes"
   INPUTCLASS
-    NotInput
+    Optional
   RESETS
     ResetThisWhenTheFollowingIsModified
       Spc:SpcFunc
@@ -180,15 +190,15 @@ RULE NEW ResOtherZn:ShowPVBattSizeBldgType
   DEFAULT
     if (enumvalue(SpcFunc) < 1 .OR. Proj:DisableAllPVBattRequirements)
     then  0
-    else if ( IfValidAnd( Proj:PrscrpPVBattClass = "LowRiseRes" ) .OR.
-              IfValidAnd( Proj:PrscrpPVBattClass = "HiRiseRes_NoPVBatt" ) .OR.
-              IfValidAnd( Proj:PrscrpPVBattClass = "NonRes_NoPVBatt" ) )
-    then  0
     else if (SpaceFunctionData:PVBatteryBldgType("FuncType", SpcFunc) == "none")
     then  0
     else  1
-    endif endif endif
+    endif endif
 ENDRULE
+;    else if ( IfValidAnd( Proj:PrscrpPVBattClass = "LowRiseRes" ) .OR.
+;              IfValidAnd( Proj:PrscrpPVBattClass = "HiRiseRes_NoPVBatt" ) .OR.
+;              IfValidAnd( Proj:PrscrpPVBattClass = "NonRes_NoPVBatt" ) )
+;    then  0
 
 RULE ResOtherZn:PVBattSizeBldgType
   REFERENCE
@@ -196,7 +206,7 @@ RULE ResOtherZn:PVBattSizeBldgType
   DESCRIPTION
     "Building type used to determine prescribed PV & battery sizes"
   INPUTCLASS
-    NotInput
+    Optional
   RESETS
     ResetThisWhenTheFollowingIsModified
       ResOtherZn:SpcFunc
@@ -566,7 +576,7 @@ RULE NEW Proj:PrscrpPVBattClass
   DEFAULT : T24N_2019
     UNDEFINED
   DEFAULT
-    if (Proj:DisableAllPVBattRequirements > 0)
+    if (DisableAllPVBattRequirements > 0)
     then  "NonRes_NoPVBatt"
     else if (IfValidAnd( ResDwellUnits > 0 ) .AND.
              IfValidAnd( ResProj:NumDwellingUnits > 0 ))
@@ -614,8 +624,14 @@ RULE NEW Proj:NResPVBattAreaMsg
   DEFAULT : T24N_2019
     UNDEFINED
   DEFAULT
-    if (Proj:DisableAllPVBattRequirements == 1)
-    then  "There are no PV/Battery requirements for Hospital facilities (Proj:HlthCareFacility checked)"
+    if (DisableAllPVBattRequirements > 0)
+    then
+      switch (DisableAllPVBattRequirements)
+         case  1 :  "There are no PV/Battery requirements for Hospital facilities (Proj:HlthCareFacility checked)"
+         case  2 :  "There are no PV/Battery requirements for Residential Dwelling projects that are not flagged as New"
+         case  3 :  "There are no PV/Battery requirements for Nonresidential projects that are not flagged as New Envelope or New Mechanical"
+         default :  "Error describing reason for PV/Battery requirement exemption"
+      endswitch
     else
       switch (PrscrpPVBattClass)
          case "HiRiseRes/MixedUse"  :  Format( "Prescribed PV/Battery based on '%s' classification w/ %g stories, %.0f dwellings and %.1f% highrise res and mixed use area", PrscrpPVBattClass, Bldg:TotStoryCnt, ResProj:NumDwellingUnits, HiRiseResNResPVBattAreaPct )
@@ -744,7 +760,7 @@ RULE NEW Proj:PrscrpPVSize
   INPUTCLASS
     NotInput
   DEFAULT
-    if (Proj:DisableAllPVBattRequirements)
+    if (DisableAllPVBattRequirements)
     then  0
     else if ( PrscrpPVBattClass == "HiRiseRes/MixedUse"  .OR.
               PrscrpPVBattClass == "LowRiseRes/MixedUse" .OR.
@@ -783,7 +799,7 @@ RULE Proj:ReducedPVReqExcpt
     ResetTheFollowingWhenThisIsModified
       Proj:ReducedPVReqVal
   DEFAULT 
-    if (Proj:DisableAllPVBattRequirements)
+    if (DisableAllPVBattRequirements)
     then  "- select applicable reason for PV reduction -"
     else if (IfValidAnd( IsLowRiseMFam > 0 ))
     then if (IfValidAnd( PrscrpPVSize < 1.8 ))
@@ -1958,4 +1974,11 @@ RULE NEW Proj:RuleEvalDuration
   ANNUAL_BASELINE
     LogDuration( "            time to evaluate PV ANNUAL_PROPOSED rules:  %.3f seconds" )
 ENDRULE
+
+
+RULE Proj:Action
+  DEFAULT
+    PostMessageToLog( "END PV rules..." )
+ENDRULE
+;    StoreBEMProc( "end PV defaulting", 0 )
 
