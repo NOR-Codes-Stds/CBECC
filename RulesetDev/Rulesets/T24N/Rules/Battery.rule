@@ -1194,7 +1194,37 @@ RULE NEW Proj:BattSizeSum
     SumAll( Batt:MaxCap )
 ENDRULE
 
+; SAC 01/19/23
+RULE NEW Proj:BattCapMult
+  LONGFORM
+    BatteryCapacityMultiplier
+  DATATYPE
+    Float
+  UNITS
+    frac
+  DESCRIPTION
+    "multiplier on user-specified battery energy & power capacity due to PV/Battery exemption or reduced requirement"
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (BattSizeSum > 0)
+    then  if (SumAll( Batt:AllowStandaloneBatt ) > 0 .AND. SumAll( Batt:SimStandaloneBatt ) > 0)
+          then  1   ; no limits on Standalone batteries
+          else if (DisableAllPVBattRequirements > 0)
+          then  0   ; zero out all PV for Hlthcare or EAA
+          else if ((ReducedPVReq > 0 .AND. IfValidAnd( UseReducedPVReqVal = 0 )) .OR.
+                   (ReducedBattReq > 0 .AND. IfValidAnd( ReducedBattReqVal = 0 )))
+          then  0   ; zero out when reduced req = 0
+          else  1
+          endif endif endif
+    else  1
+    endif
+  ANNUAL_BASELINE
+    1
+ENDRULE
+
 // UI message summarizing user input PV & Battery - SAC 05/02/22
+// revised for various removal (*Mult = 0) conditions - SAC 01/19/23
 RULE NEW Proj:UserInpPVBatteryMsg
   LONGFORM
     UserInputPhotovoltaicBatteryMessage
@@ -1208,12 +1238,33 @@ RULE NEW Proj:UserInpPVBatteryMsg
     else if (PVSizeSum < 0.01 .AND. BattSizeSum < 0.01)
     then  "There is no PV or Battery equipment defined in this (proposed) model"
     else if (BattSizeSum < 0.01)
-    then  Format( "User-specified PV array capacity:  %s kWdc  (no battery equipment defined)", FltToStr( PVSizeSum, 1 ) )
+    then  if (DCSizeMultiplier == 0)
+          then  if (DisableAllPVBattRequirements > 0)
+                then  switch (DisableAllPVBattRequirements)
+                        case  2 : "User-specified PV array will not be included in analysis (only included for new residential construction)"
+                        case  3 : "User-specified PV array will not be included in analysis (only included for new envelope or mechanical analysis)"
+                        default : "User-specified PV array will not be included in analysis due to Healthcare facility exemption"
+                      endswitch
+                else  "User-specified PV array will not be included in analysis due to reduced PV requirement of 0 kWdc"
+                endif
+          else  Format( "User-specified PV array capacity:  %s kWdc  (no battery equipment defined)", FltToStr( PVSizeSum, 1 ) )
+          endif
     else if (PVSizeSum < 0.01)
     then  Format( "User-specified Standalone Battery capacity:  %s kWh  (no PV equipment defined)", FltToStr( BattSizeSum, 1 ) )
+    else if (DCSizeMultiplier == 0)
+    then  if (DisableAllPVBattRequirements > 0)
+          then  switch (DisableAllPVBattRequirements)
+                  case  2 : "User-specified PV and Battery will not be included in analysis (only included for new residential construction)"
+                  case  3 : "User-specified PV and Battery will not be included in analysis (only included for new envelope or mechanical analysis)"
+                  default : "User-specified PV and Battery will not be included in analysis due to Healthcare facility exemption"
+                endswitch
+          else  "User-specified PV and Battery will not be included in analysis due to reduced PV requirement of 0 kWdc"
+          endif
+    else if (BattCapMult == 0)
+    then  Format( "User-specified PV array(s):  %s kWdc PV  /  Battery to be excluded from analysis due to reduced Battery requirement of 0 kWh", FltToStr( PVSizeSum, 1 ) )
     else  Format( "User-specified PV and Battery equipment:  %s kWdc PV  /  %s kWh Battery",
                               FltToStr( PVSizeSum, 1 ), FltToStr( BattSizeSum, 1 ) )
-    endif endif endif endif
+    endif endif endif endif endif endif
 ENDRULE
 
 RULE NEW Proj:HaveStandaloneBatt
@@ -1244,7 +1295,7 @@ RULE NEW Proj:HavePVBattSim
   INPUTCLASS
     NotInput 
   DEFAULT 
-    if (SumAll( PVArray:DCSysSize ) > 0.1)
+    if (SumAll( PVArray:DCSysSize ) > 0.1 .AND. DCSizeMultiplier > 0)
     then  1
     else  HaveStandaloneBatt
     endif
