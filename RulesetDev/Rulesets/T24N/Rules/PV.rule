@@ -961,69 +961,6 @@ RULE Proj:UseReducedPVReqVal
     endif
 ENDRULE
 
-// APB 05/18/22 - New SARA limit on proposed PV kW (tic #3352)
-RULE Proj:DCSizeMultiplier
-  DESCRIPTION
-    "Multiplier on PV system size, used to adjust user-entered proposed PV kW down to required exception kW (when exception is applied)"
-  INPUTCLASS
-    NotInput
-  DEFAULT 
-    if (IfValidAnd( UseReducedPVReqVal >= 0 ) .AND. IfValidAnd( SumAll(  PVArray:DCSysSize ) > 0 ))
-    then  if (ValidOr( UseReducedPVReqVal, 999 ) == (SumAll(  PVArray:DCSysSize )))
-          then  1   ; don't re-scale already scaled value
-          else if (ValidOr( UseReducedPVReqVal, 999 ) <= (SumAll(  PVArray:DCSysSize )))
-          then ReducedPVReqVal / SumAll(  PVArray:DCSysSize )
-          else  1
-          endif endif
-    else  1  endif
-  ANNUAL_PROPOSED 
-    if (LocalStatus( DCSizeMultiplier ) > 0) then  UNCHANGED
-    else 1 endif
-  ANNUAL_BASELINE 
-    1
-ENDRULE
-
-// APB 05/18/22 - Add messages about new SARA limit on proposed PV kW
-RULE Proj:ReducedPVReqMsg1
-  DEFAULT 
-    if (DisableAllPVBattRequirements)
-    then  ""
-    else if (IfValidAnd( SumAll(  PVArray:DCSysSize ) > SolAccessRfAreaPVPwr ))
-    then  Format( "Proposed PV capacity of %s kW > cap. based on SARA (%s kW).",
-               FltToStr( SumAll(  PVArray:DCSysSize ), 1 ), FltToStr( SolAccessRfAreaPVPwr, 1 ) )
-    else  ""
-    endif endif
-ENDRULE
-
-; merged ReducedPVReqMsg3 into ReducedPVReqMsg2 - SAC 01/10/23 
-RULE Proj:ReducedPVReqMsg2
-  DEFAULT 
-    if (DisableAllPVBattRequirements)
-    then  ""
-    else if (IfValidAnd( SumAll(  PVArray:DCSysSize ) > SolAccessRfAreaPVPwr ))
-    then  if (ReducedPVReq = 1)
-          then  if (EnumValue(ReducedPVReqExcpt) = 100)  ; "Limited by SARA provided"
-                then "Proposed kW will be adjusted to match the capacity based on SARA."
-                else ""  endif 
-          else if (ReducedPVReq = 0)
-          then       "Standard PV & Battery = Prescriptive tables w/ no reduced PV reqrmt."
-          else ""  endif endif
-    else  ""  endif endif
-ENDRULE
-
-;RULE Proj:ReducedPVReqMsg3
-;  DEFAULT 
-;    if (IfValidAnd( SumAll(  PVArray:DCSysSize ) > SolAccessRfAreaPVPwr ))
-;    then  if (ReducedPVReq = 0)
-;        then "Standard PV & Battery = Prescriptive tables w/ no reduced PV requirement."
-;        else ""
-;        endif
-;    else  ""
-;    endif
-;ENDRULE
-;;        then "With no reduced PV requirement, standard PV & Battery matches prescriptive tables."
-
-
 // Proj-wide PV Requirements
    ; adjust Proj:T24PVSize for lower SARA-based PV for NonRes/MixedUse & HiRiseRes prescrip PV models - SAC 04/21/22
 RULE NEW Proj:T24PVSize
@@ -1060,10 +997,6 @@ ENDRULE
 ;                else  SolAccessRfAreaPVPwr
 ;                endif
 
-
-// Round 2 of T24PVSize mod adjusting for ReducedPVReq
-
-
 // keep track of FRACTION of final Std design PV size / Prescriptive table size
 RULE NEW Proj:PrscrpStdPVSizeRat
   LONGFORM
@@ -1083,7 +1016,6 @@ RULE NEW Proj:PrscrpStdPVSizeRat
     then  T24PVSize / PrscrpPVSize
     else  0  endif
 ENDRULE
-
 
 RULE NEW Proj:T24PVArrayRef
   LONGFORM
@@ -1986,6 +1918,79 @@ RULE Proj:PVSizeSum
   ANNUAL
     SumAll( PVArray:DCSysSize )
 ENDRULE
+
+// APB 05/18/22 - New SARA limit on proposed PV kW (tic #3352)
+// revised per direction from CEC - SAC 01/19/23
+RULE Proj:DCSizeMultiplier
+  DESCRIPTION
+    "Multiplier on PV system size, used to adjust user-entered proposed PV kW down to required exception kW (when exception is applied)"
+  INPUTCLASS
+    NotInput
+  DEFAULT 
+    if (PVSizeSum > 0)
+    then  if (DisableAllPVBattRequirements > 0)
+          then  0   ; zero out all PV for Hlthcare or EAA
+          else if (ReducedPVReq > 0 .AND. IfValidAnd( UseReducedPVReqVal = 0 ))
+          then  0   ; zero out when reduced req = 0
+          else  1
+          endif endif
+    else  1
+    endif
+  ANNUAL_PROPOSED 
+    if (LocalStatus( DCSizeMultiplier ) > 0) then  UNCHANGED
+    else 1 endif
+  ANNUAL_BASELINE 
+    1
+ENDRULE
+;    if (IfValidAnd( UseReducedPVReqVal >= 0 ) .AND. IfValidAnd( SumAll(  PVArray:DCSysSize ) > 0 ))
+;    then  if (ValidOr( UseReducedPVReqVal, 999 ) == (SumAll(  PVArray:DCSysSize )))
+;          then  1   ; don't re-scale already scaled value
+;          else if (ValidOr( UseReducedPVReqVal, 999 ) <= (SumAll(  PVArray:DCSysSize )))
+;          then ReducedPVReqVal / SumAll(  PVArray:DCSysSize )
+;          else  1
+;          endif endif
+;    else  1  endif
+
+// APB 05/18/22 - Add messages about new SARA limit on proposed PV kW
+RULE Proj:ReducedPVReqMsg1
+  DEFAULT 
+    if (DisableAllPVBattRequirements)
+    then  ""
+    else if (IfValidAnd( SumAll(  PVArray:DCSysSize ) > SolAccessRfAreaPVPwr ))
+    then  Format( "Proposed PV capacity of %s kW > cap. based on SARA (%s kW).",
+               FltToStr( SumAll(  PVArray:DCSysSize ), 1 ), FltToStr( SolAccessRfAreaPVPwr, 1 ) )
+    else  ""
+    endif endif
+ENDRULE
+
+; merged ReducedPVReqMsg3 into ReducedPVReqMsg2 - SAC 01/10/23 
+RULE Proj:ReducedPVReqMsg2
+  DEFAULT 
+    if (DisableAllPVBattRequirements)
+    then  ""
+    else if (IfValidAnd( SumAll(  PVArray:DCSysSize ) > SolAccessRfAreaPVPwr ))
+    then  if (ReducedPVReq = 1)
+          then  if (EnumValue(ReducedPVReqExcpt) = 100)  ; "Limited by SARA provided"
+                then "Proposed kW will be adjusted to match the capacity based on SARA."
+                else ""  endif 
+          else if (ReducedPVReq = 0)
+          then       "Standard PV & Battery = Prescriptive tables w/ no reduced PV reqrmt."
+          else ""  endif endif
+    else  ""  endif endif
+ENDRULE
+
+;RULE Proj:ReducedPVReqMsg3
+;  DEFAULT 
+;    if (IfValidAnd( SumAll(  PVArray:DCSysSize ) > SolAccessRfAreaPVPwr ))
+;    then  if (ReducedPVReq = 0)
+;        then "Standard PV & Battery = Prescriptive tables w/ no reduced PV requirement."
+;        else ""
+;        endif
+;    else  ""
+;    endif
+;ENDRULE
+;;        then "With no reduced PV requirement, standard PV & Battery matches prescriptive tables."
+
 
 ////////////////////////////////////////////////////////////////////////////////
 
