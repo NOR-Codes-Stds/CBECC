@@ -62,6 +62,11 @@ RULELIST "CSE_SimulationPrep_DHW" 1 0 0 1
                   IfValidAnd( DHWSolarSysRef:RatingProgram != 3 )) then  1
          else  0  endif endif  }
 
+;   "Setup ResOtherZn NRes DHW system schedules"    ResOtherZn:Action =     ; SAC 02/21/23 (tic #3418)
+;      {  if (HotWtrHrlyUsePerPers > 0)
+;         then  EvalRulelist( "CSE_SimulationPrep_DHW_ResOtherZn", 1 )
+;         else  UNCHANGED  endif  }
+
 ; mods throughout rule module to accommodate no ResProj existence with regard to ResProj:CSEDHWUseMethod (for CBECC-22 Htl/Mtl DHW) - SAC 11/04/21
 	; SAC 4/25/16 - added creation of DHWMETER objects
 	"Create site-wide FXHwDHWMETER"		Proj:CSE_FXHwDHWMETER	= {	CreateComp( cseDHWMETER, "DHWMtrFXMix" )  }
@@ -111,18 +116,21 @@ RULELIST "CSE_SimulationPrep_DHW" 1 0 0 1
 	      else  0
 	      endif  }
 
-   "Create a CSE DHWSYS for each non-central OtherZone serving as DwellUnit:WasherZoneRef"      ; SAC 10/2/19 - MFamProto
+   "Create a CSE DHWSYS for each non-central OtherZone serving as DwellUnit:WasherZoneRef"      ; SAC 10/2/19 - MFamProto    ; expand for nonres use (HotWtrHrlyUsePerPers) - SAC 02/22/23 (tic #3418)
       ResOtherZn:cseDHWSYSRef  =
          {  if (Proj:IsSFamResRuleset .OR. LocalCompAssigned( ozDHWSys ) < 1) then  UNDEFINED
             else if (IfValidAnd( WasherDwellUnits > 0 ) .OR. IfValidAnd( Appl_DishGain > 0 ) .OR.
-                     IfValidAnd( Appl_WasherGain > 0 ))
+                     IfValidAnd( Appl_WasherGain  > 0 ) .OR. IfValidAnd( HotWtrHrlyUsePerPers > 0 ))
             then  if (IfValidAnd( ozDHWSys:CentralDHW > 0 ))
                   then  ozDHWSys:cseDHWSYSRef[1]
                   else  CreateComp( cseDHWSYS, "dhwsys-" + substr( Name, 0, 47 ) )
                   endif
             else  UNDEFINED  endif endif  }
-   "Set ResOtherZn:cseDHWSYSRef:SourceOtherZone"    ResOtherZn:cseDHWSYSRef:SourceOtherZone	 =
+   "Set ResOtherZn:cseDHWSYSRef:SourceOtherZone"   ResOtherZn:cseDHWSYSRef:SourceOtherZone =
       {  if (IfValidAnd( ozDHWSys:CentralDHW > 0 )==0) then  Name  else  UNCHANGED  endif  }
+   "Set ResOtherZn:cseDHWSYSRef:SourceDHWSys"      ResOtherZn:cseDHWSYSRef:SourceDHWSys	 =
+      {  if (IfValidAnd( HotWtrHrlyUsePerPers > 0 ) .AND. IfValidAnd( ozDHWSys:CentralDHW > 0 )==0)
+         then  ozDHWSys:Name  else  UNCHANGED  endif  }
 
 ;"dbg" ResDHWSys:Action = { if (LocalCompAssigned( DHWHeater[1] )==0) then  MessageBox( "setup DHWSys '%s' (run %s) as autosized CHPWH (w/ no Htr[1])?  CentralDHWTypeVal=%g  CHPWHSysDescrip=%g  CHPWHCompAutosizeSim=%g", Name, ResProj:RunAbbrev, ValidOr( CentralDHWTypeVal, -999 ), ValidOr( CHPWHSysDescrip, -999 ), ValidOr( CHPWHCompAutosizeSim, -999 ) )
 ;                                                                  else  MessageBox( "setup DHWSys '%s' (run %s) as autosized CHPWH (w/ Htr[1] assigned)?  CentralDHWTypeVal=%g  CHPWHSysDescrip=%g  CHPWHCompAutosizeSim=%g", Name, ResProj:RunAbbrev, ValidOr( CentralDHWTypeVal, -999 ), ValidOr( CHPWHSysDescrip, -999 ), ValidOr( CHPWHCompAutosizeSim, -999 ) )  endif }
@@ -624,8 +632,18 @@ RULELIST "CSE_SimulationPrep_DHW_part2" 1 0 0 1
 																endswitch  endif endif  }
 
 	; SAC 3/17/16 - added logic for ResProj:CSEDHWUseMethod
-	"Set cseDHWSYS:wsUse_x"				cseDHWSYS:wsUse_x	= {	if (IfValidAnd( ResProj:CSEDHWUseMethod = 1 )==0) then  UNDEFINED
-																				else	Format( "%g * select( $isWeekend, HWUSEF_WE, default HWUSEF_WD )", HWUse )  endif  }
+	"Set cseDHWSYS:wsUse_x"				cseDHWSYS:wsUse_x	=                 ; revised for ResOtherZn:HotWtrHtgSchRef and nonres use - SAC 02/22/23 (tic #3418)
+      {  if (IfValidAnd( SourceOtherZone:HotWtrHrlyUsePerPers > 0 ) .AND.
+             IfValidAnd( SourceOtherZone:MinOccNumSim > 0 ))
+         then  if (LocalStatus( SourceOtherZone:HotWtrHtgSchRef:CSEinput ) > 0)
+               then  Format( "%g * %s", (SourceOtherZone:HotWtrHrlyUsePerPers * SourceOtherZone:MinOccNumSim), SourceOtherZone:HotWtrHtgSchRef:CSEinput )
+               else  UNDEFINED  endif
+         else if (IfValidAnd( ResProj:CSEDHWUseMethod = 1 )==0) then  UNDEFINED
+         else	Format( "%g * select( $isWeekend, HWUSEF_WE, default HWUSEF_WD )", HWUse )
+         endif endif  }
+; RESTORE for use schedules!!
+;               then  Format( "%g * %s", (SourceOtherZone:HotWtrHrlyUsePerPers * SourceOtherZone:MinOccNumSim), SourceOtherZone:HotWtrHtgSchRef:CSEinput )
+;               then  Format( "%g", (SourceOtherZone:HotWtrHrlyUsePerPers * SourceOtherZone:MinOccNumSim) )
 
    "Set Proj:DHWDUShuffleNum[1] (SFam)"      Proj:DHWDUShuffleNum[1] =     ; SAC 02/18/21
       {  if (IfValidAnd( ResProj:SFamDHWDUShuffleNum >= 1) .AND. IfValidAnd( ResProj:SFamDHWDUShuffleNum <= 5) .AND.
@@ -741,9 +759,11 @@ RULELIST "CSE_SimulationPrep_DHW_part2" 1 0 0 1
 
 ; REVISE THIS RULE TO REFERENCE SERVED CFA, # HEATERS & # DWELLING UNITS FOR MORE SYSTEM-SPECIFIC CFAk VALUE
    ; SAC 10/12/15 - revised rule to remove dependence on # DHW heaters and add dependence on # systems (serving same area)
-   "Set cseDHWSYS:CFAk - defined in Res ACM, equation RE-5, used to calc SDLMk (std distrib loss mult)"
+   "Set cseDHWSYS:CFAk - defined in Res ACM, equation RE-5, used to calc SDLMk (std distrib loss mult)"     ; added SourceOtherZone:CondFlrAreaWithMult - SAC 02/22/23 (tic #3418)
       cseDHWSYS:CFAk     = {  if (LocalCompAssigned( SourceDwellUnitType ) > 0.5)
                               then  SourceDwellUnitType:CondFlrArea
+                              else if (IfValidAnd( SourceOtherZone:CondFlrAreaWithMult > 1 ))
+                              then  SourceOtherZone:CondFlrAreaWithMult
                               else if (LocalCompAssigned( SourceDHWSys ) > 0.5)
                               then  if (IfValidAnd( SourceDHWSys:NumAssignedDUFracs > 0 ))
                                     then  SourceDHWSys:FloorAreaServed[1] / SourceDHWSys:NumAssignedDUFracs
@@ -751,7 +771,7 @@ RULELIST "CSE_SimulationPrep_DHW_part2" 1 0 0 1
         ; SAC 8/19/16 - removed mod described above which was causing mult systems in single DU to have same SDLMs (tic #739)
         ;                            then  SumAll( ResZn:DHWFloorArea )
                                     else  0  endif
-                              else  0  endif endif  }      ; error if = 0
+                              else  0  endif endif endif  }      ; error if = 0
                         ; was (prior to 10/26/15):
                         ;                  else if (Proj:IsComRuleset .AND. CentralDHW > 0.5 .AND. ResProj:NumDwellingUnits > 0)
                         ;                  then   SumAll( ResDHWSys:FloorAreaServed[1] ) / ResProj:NumDwellingUnits
@@ -991,9 +1011,10 @@ RULELIST "CSE_SimulationPrep_DHW_part2" 1 0 0 1
 													   else  UNCHANGED  endif endif  }
 
 	; cseDHWHEATER & cseDHWTANK setup
-	      ; SAC 10/2/19 - revs for MFamProto
+	      ; SAC 10/2/19 - revs for MFamProto   ; account for ResOtherZn:HotWtrHrlyUsePerPers > 0 - SAC 02/22/23 (tic #3418)
 	"Create Child cseDHWHEATER - 1"		cseDHWSYS:ChildcseDHWHEATERs[1]	= {	if ( ( IfValidAnd( SourceDHWSys:SimDHWSys > 0.5 )==0 .AND.
-	                                                                                  IfValidAnd( SourceOtherZone:WasherDwellUnits > 0.5 )==0 ) .OR.
+	                                                                                  IfValidAnd( SourceOtherZone:WasherDwellUnits > 0.5 )==0 .AND.
+	                                                                                  IfValidAnd( SourceOtherZone:HotWtrHrlyUsePerPers > 0 )==0 ) .OR.
 	                                                                                LocalCompAssigned( SourceDHWSys:DHWHeater[1] ) < 1 .OR.
 																											  LocalCompAssigned( wsCentralDHWSYS ) > 0) then  UNCHANGED
 																										else	CreateComp( cseDHWHEATER, "dhwhtr1-" + substr( SourceDHWSys:DHWHeater[1]:Name, 0, 44 ) )   endif  }
@@ -1010,7 +1031,8 @@ RULELIST "CSE_SimulationPrep_DHW_part2" 1 0 0 1
    ; LH 170717 - added logic to prevent DHWTank modeling for all 2017 UEF rated equipment
 	"Create Child cseDHWTANK - 1"			cseDHWSYS:ChildcseDHWTANKs[1]		= {
          if ( ( IfValidAnd( SourceDHWSys:SimDHWSys > 0.5 )==0 .AND.
-	             IfValidAnd( SourceOtherZone:WasherDwellUnits > 0.5 )==0 ) .OR.
+	             IfValidAnd( SourceOtherZone:WasherDwellUnits > 0.5 )==0 .AND.
+	             IfValidAnd( SourceOtherZone:HotWtrHrlyUsePerPers > 0 )==0 ) .OR.
 	           LocalCompAssigned( SourceDHWSys:DHWHeater[1] )==0 .OR.
          	  LocalCompAssigned( wsCentralDHWSYS ) > 0) then  UNCHANGED
          else if ( LocalCompAssigned( SourceDHWSys:DHWHeater[1] ) == ComponentType( "ResWtrHtr" ))
@@ -1046,7 +1068,8 @@ RULELIST "CSE_SimulationPrep_DHW_part2" 1 0 0 1
 	"Set cseDHWSYS:ChildcseDHWTANKs[1]:wtMult"		cseDHWSYS:ChildcseDHWTANKs[1]:wtMult		= {	SourceDHWSys:HeaterMultFlt[1]  }
 
 	"Create Child cseDHWHEATER - 2"		cseDHWSYS:ChildcseDHWHEATERs[2]	= {	if (( IfValidAnd( SourceDHWSys:SimDHWSys > 0.5 )==0 .AND.
-	                                                                                  IfValidAnd( SourceOtherZone:WasherDwellUnits > 0.5 )==0 ) .OR.
+	                                                                                  IfValidAnd( SourceOtherZone:WasherDwellUnits > 0.5 )==0 .AND.
+	                                                                                  IfValidAnd( SourceOtherZone:HotWtrHrlyUsePerPers > 0 )==0 ) .OR.
 	                                                                               LocalCompAssigned( SourceDHWSys:DHWHeater[2] ) < 1 .OR.
 																											 LocalCompAssigned( wsCentralDHWSYS ) > 0) then  UNCHANGED
 																										else	CreateComp( cseDHWHEATER, "dhwhtr2-" + substr( SourceDHWSys:DHWHeater[2]:Name, 0, 44 ) )   endif  }
@@ -1060,7 +1083,8 @@ RULELIST "CSE_SimulationPrep_DHW_part2" 1 0 0 1
 
 	"Create Child cseDHWTANK - 2"			cseDHWSYS:ChildcseDHWTANKs[2]		= {
          if ( ( IfValidAnd( SourceDHWSys:SimDHWSys > 0.5 )==0 .AND.
-	             IfValidAnd( SourceOtherZone:WasherDwellUnits > 0.5 )==0 ) .OR.
+	             IfValidAnd( SourceOtherZone:WasherDwellUnits > 0.5 )==0 .AND.
+	             IfValidAnd( SourceOtherZone:HotWtrHrlyUsePerPers > 0 )==0 ) .OR.
 	           LocalCompAssigned( SourceDHWSys:DHWHeater[2] )==0 .OR.
          	  LocalCompAssigned( wsCentralDHWSYS ) > 0) then  UNCHANGED
          else if ( LocalCompAssigned( SourceDHWSys:DHWHeater[2] ) == ComponentType( "ResWtrHtr" ) )
@@ -1094,7 +1118,8 @@ RULELIST "CSE_SimulationPrep_DHW_part2" 1 0 0 1
 	"Set cseDHWSYS:ChildcseDHWTANKs[2]:wtMult"		cseDHWSYS:ChildcseDHWTANKs[2]:wtMult		= {	SourceDHWSys:HeaterMultFlt[2]  }
 
 	"Create Child cseDHWHEATER - 3"		cseDHWSYS:ChildcseDHWHEATERs[3]	= {	if ( ( IfValidAnd( SourceDHWSys:SimDHWSys > 0.5 )==0 .AND.
-	                                                                                  IfValidAnd( SourceOtherZone:WasherDwellUnits > 0.5 )==0 ) .OR.
+	                                                                                  IfValidAnd( SourceOtherZone:WasherDwellUnits > 0.5 )==0 .AND.
+	                                                                                  IfValidAnd( SourceOtherZone:HotWtrHrlyUsePerPers > 0 )==0 ) .OR.
 	                                                                                LocalCompAssigned( SourceDHWSys:DHWHeater[3] ) < 1 .OR.
 																											  LocalCompAssigned( wsCentralDHWSYS ) > 0) then  UNCHANGED
 																										else	CreateComp( cseDHWHEATER, "dhwhtr3-" + substr( SourceDHWSys:DHWHeater[3]:Name, 0, 44 ) )   endif  }
@@ -1108,7 +1133,8 @@ RULELIST "CSE_SimulationPrep_DHW_part2" 1 0 0 1
 
 	"Create Child cseDHWTANK - 3"			cseDHWSYS:ChildcseDHWTANKs[3]		= {
          if (( IfValidAnd( SourceDHWSys:SimDHWSys > 0.5 )==0 .AND.
-	            IfValidAnd( SourceOtherZone:WasherDwellUnits > 0.5 )==0 ) .OR.
+	            IfValidAnd( SourceOtherZone:WasherDwellUnits > 0.5 )==0 .AND.
+	            IfValidAnd( SourceOtherZone:HotWtrHrlyUsePerPers > 0 )==0 ) .OR.
 	          LocalCompAssigned( SourceDHWSys:DHWHeater[3] )==0 .OR.
          	 LocalCompAssigned( wsCentralDHWSYS ) > 0) then  UNCHANGED
          else if (LocalCompAssigned( SourceDHWSys:DHWHeater[3] ) == ComponentType( "ResWtrHtr" ))
@@ -1137,7 +1163,8 @@ RULELIST "CSE_SimulationPrep_DHW_part2" 1 0 0 1
 	"Set cseDHWSYS:ChildcseDHWTANKs[3]:wtMult"		cseDHWSYS:ChildcseDHWTANKs[3]:wtMult		= {	SourceDHWSys:HeaterMultFlt[3]  }
 
 	"Create Child cseDHWHEATER - 4"		cseDHWSYS:ChildcseDHWHEATERs[4]	= {	if ( ( IfValidAnd( SourceDHWSys:SimDHWSys > 0.5 )==0 .AND.
-	                                                                                  IfValidAnd( SourceOtherZone:WasherDwellUnits > 0.5 )==0 ) .OR.
+	                                                                                  IfValidAnd( SourceOtherZone:WasherDwellUnits > 0.5 )==0 .AND.
+	                                                                                  IfValidAnd( SourceOtherZone:HotWtrHrlyUsePerPers > 0 )==0 ) .OR.
 	                                                                                LocalCompAssigned( SourceDHWSys:DHWHeater[4] ) < 1 .OR.
 																											  LocalCompAssigned( wsCentralDHWSYS ) > 0) then  UNCHANGED
 																										else	CreateComp( cseDHWHEATER, "dhwhtr4-" + substr( SourceDHWSys:DHWHeater[4]:Name, 0, 44 ) )   endif  }
@@ -1151,7 +1178,8 @@ RULELIST "CSE_SimulationPrep_DHW_part2" 1 0 0 1
 
 	"Create Child cseDHWTANK - 4"			cseDHWSYS:ChildcseDHWTANKs[4]		= {
          if (( IfValidAnd( SourceDHWSys:SimDHWSys > 0.5 )==0 .AND.
-	            IfValidAnd( SourceOtherZone:WasherDwellUnits > 0.5 )==0 ) .OR.
+	            IfValidAnd( SourceOtherZone:WasherDwellUnits > 0.5 )==0 .AND.
+	            IfValidAnd( SourceOtherZone:HotWtrHrlyUsePerPers > 0 )==0 ) .OR.
 	          LocalCompAssigned( SourceDHWSys:DHWHeater[4] )==0 .OR.
          	 LocalCompAssigned( wsCentralDHWSYS ) > 0) then  UNCHANGED
          else if (LocalCompAssigned( SourceDHWSys:DHWHeater[4] ) == ComponentType( "ResWtrHtr" ))
@@ -1180,7 +1208,8 @@ RULELIST "CSE_SimulationPrep_DHW_part2" 1 0 0 1
 	"Set cseDHWSYS:ChildcseDHWTANKs[4]:wtMult"		cseDHWSYS:ChildcseDHWTANKs[4]:wtMult		= {	SourceDHWSys:HeaterMultFlt[4]  }
 
 	"Create Child cseDHWHEATER - 5"		cseDHWSYS:ChildcseDHWHEATERs[5]	= {	if ( ( IfValidAnd( SourceDHWSys:SimDHWSys > 0.5 )==0 .AND.
-	                                                                                  IfValidAnd( SourceOtherZone:WasherDwellUnits > 0.5 )==0 ) .OR.
+	                                                                                  IfValidAnd( SourceOtherZone:WasherDwellUnits > 0.5 )==0 .AND.
+	                                                                                  IfValidAnd( SourceOtherZone:HotWtrHrlyUsePerPers > 0 )==0 ) .OR.
 	                                                                                LocalCompAssigned( SourceDHWSys:DHWHeater[5] ) < 1 .OR.
 																											  LocalCompAssigned( wsCentralDHWSYS ) > 0) then  UNCHANGED
 																										else	CreateComp( cseDHWHEATER, "dhwhtr5-" + substr( SourceDHWSys:DHWHeater[5]:Name, 0, 44 ) )   endif  }
@@ -1194,7 +1223,8 @@ RULELIST "CSE_SimulationPrep_DHW_part2" 1 0 0 1
 
 	"Create Child cseDHWTANK - 5"			cseDHWSYS:ChildcseDHWTANKs[5]		= {
          if (( IfValidAnd( SourceDHWSys:SimDHWSys > 0.5 )==0 .AND.
-	            IfValidAnd( SourceOtherZone:WasherDwellUnits > 0.5 )==0 ) .OR.
+	            IfValidAnd( SourceOtherZone:WasherDwellUnits > 0.5 )==0 .AND.
+	            IfValidAnd( SourceOtherZone:HotWtrHrlyUsePerPers > 0 )==0 ) .OR.
 	          LocalCompAssigned( SourceDHWSys:DHWHeater[5] )==0 .OR.
          	 LocalCompAssigned( wsCentralDHWSYS ) > 0) then  UNCHANGED
          else if (LocalCompAssigned( SourceDHWSys:DHWHeater[5] ) == ComponentType( "ResWtrHtr" ))
@@ -1223,7 +1253,8 @@ RULELIST "CSE_SimulationPrep_DHW_part2" 1 0 0 1
 	"Set cseDHWSYS:ChildcseDHWTANKs[5]:wtMult"		cseDHWSYS:ChildcseDHWTANKs[5]:wtMult		= {	SourceDHWSys:HeaterMultFlt[5]  }
 
 	"Create Child cseDHWHEATER - 6"		cseDHWSYS:ChildcseDHWHEATERs[6]	= {	if ( ( IfValidAnd( SourceDHWSys:SimDHWSys > 0.5 )==0 .AND.
-	                                                                                  IfValidAnd( SourceOtherZone:WasherDwellUnits > 0.5 )==0 ) .OR.
+	                                                                                  IfValidAnd( SourceOtherZone:WasherDwellUnits > 0.5 )==0 .AND.
+	                                                                                  IfValidAnd( SourceOtherZone:HotWtrHrlyUsePerPers > 0 )==0 ) .OR.
 	                                                                                LocalCompAssigned( SourceDHWSys:DHWHeater[6] ) < 1 .OR.
 																											  LocalCompAssigned( wsCentralDHWSYS ) > 0) then  UNCHANGED
 																										else	CreateComp( cseDHWHEATER, "dhwhtr6-" + substr( SourceDHWSys:DHWHeater[6]:Name, 0, 44 ) )   endif  }
@@ -1237,7 +1268,8 @@ RULELIST "CSE_SimulationPrep_DHW_part2" 1 0 0 1
 
 	"Create Child cseDHWTANK - 6"			cseDHWSYS:ChildcseDHWTANKs[6]		= {
          if (( IfValidAnd( SourceDHWSys:SimDHWSys > 0.5 )==0 .AND.
-	            IfValidAnd( SourceOtherZone:WasherDwellUnits > 0.5 )==0 ) .OR.
+	            IfValidAnd( SourceOtherZone:WasherDwellUnits > 0.5 )==0 .AND.
+	            IfValidAnd( SourceOtherZone:HotWtrHrlyUsePerPers > 0 )==0 ) .OR.
 	          LocalCompAssigned( SourceDHWSys:DHWHeater[6] )==0 .OR.
          	 LocalCompAssigned( wsCentralDHWSYS ) > 0) then  UNCHANGED
          else if (LocalCompAssigned( SourceDHWSys:DHWHeater[6] ) == ComponentType( "ResWtrHtr" ))
@@ -1269,7 +1301,8 @@ RULELIST "CSE_SimulationPrep_DHW_part2" 1 0 0 1
 	; SAC 11/10/15 - added check to ensure no loops for MFamDistType = No Loops/Pumps - was causing HUGE elec use in this scenario
 	; SAC 8/3/16 - removed check for SourceDHWSys:MFamDistType > 0.5 in order to create a DHWLoop for central systems where MFamDistType = "Multi-family: No loops or recirc pump"
 	"Create Child cseDHWLOOP"		cseDHWSYS:ChildcseDHWLOOP	= {	if (( IfValidAnd( SourceDHWSys:SimDHWSys > 0.5 )==0 .AND.
-	                                                                     IfValidAnd( SourceOtherZone:WasherDwellUnits > 0.5 )==0 ) .OR.
+	                                                                     IfValidAnd( SourceOtherZone:WasherDwellUnits > 0.5 )==0 .AND.
+	                                                                     IfValidAnd( SourceOtherZone:HotWtrHrlyUsePerPers > 0 )==0 ) .OR.
 	                                                                   IfValidAnd( SourceDHWSys:CentralDHW > 0.5 )==0 .OR.
 																							 LocalCompAssigned( wsCentralDHWSYS ) > 0) then  UNCHANGED
 																						else	CreateComp( cseDHWLOOP, "dhwlp-" + substr( SourceDHWSys:Name, 0, 44 ) )   endif  }
