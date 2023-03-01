@@ -110,6 +110,18 @@ RULELIST "ProposedModelPrep" 1 0 1 1
       {  if (IfValidAnd( DemRespValid > 0 )==0) then  UNCHANGED
          else  EvalRulelist( "SetupDemRespSched_ResDHWSys", 1 )  endif  }
 
+   ; setup of ResOtherZn nonres DHW properties - SAC 02/22/23 (tic #3418)
+   "set/import ResOtherZn:HotWtrHtgSchRef"      ResOtherZn:HotWtrHtgSchRef =
+      {  if (IfValidAnd( HotWtrHrlyUsePerPers > 0 ) .AND.
+             EnumValue( FuncSchGrp ) > 0)
+         then  RuleLibrary(Schedule,(SpaceFunctionGroups:HotWtrHtgSchRef("FuncGroup",FuncSchGrp)))
+         else  UNCHANGED  endif  }
+   "set ResOtherZn:HotWtrSupTemp"               ResOtherZn:HotWtrSupTemp =
+      {  if (LocalCompAssigned( HotWtrHtgSchRef ))
+         then  135
+         else  UNDEFINED  endif  }
+;           "HotWtrSupTempSchRef",  BEMP_Obj,  1,  0,  1,  Pres,  "",              0,  1, "Schedule",  3, "Type",   3008, "HotWaterSupplyTemperatureScheduleReference",  ""  
+
    "Default all Sch objects"   Proj:Action  = {  EvalRulelist( "Default_Schedules" )  }   ; SAC 08/26/21
 
    ;--------------------------------------------------------
@@ -2478,10 +2490,57 @@ RULELIST "Default_Schedules"  0 0 0 0
 		else if (IfValidAnd( EndMonth[ 1] > 0 ) .AND. IfValidAnd( EndDay[ 1] > 0 ) .AND. LocalCompAssigned( SchWeekRef[ 1] )) then   1
 		else  0  endif endif endif endif endif endif endif endif endif endif endif endif endif endif endif endif endif endif endif endif  }
 
+   "Default Sch:Description (to facilitate setting CSEInput)"     Sch:Description =          ; SAC 02/22/23 (tic #3418)
+      {  if ( (EnumValue( Description ) == 1 .AND. NumWeeks == 12) .OR.
+              EnumValue( Type ) > 3 )
+         then  UNCHANGED
+         else if (NumWeeks == 1 .AND. SchWeekRef[1]:SchDayMonRef == SchWeekRef[1]:SchDayTueRef .AND.
+                                      SchWeekRef[1]:SchDayMonRef == SchWeekRef[1]:SchDayWedRef .AND.
+                                      SchWeekRef[1]:SchDayMonRef == SchWeekRef[1]:SchDayThuRef .AND.
+                                      SchWeekRef[1]:SchDayMonRef == SchWeekRef[1]:SchDayFriRef )
+         then  ; single week and all weekdays equal
+               if (      SchWeekRef[1]:SchDayMonRef == SchWeekRef[1]:SchDaySunRef .AND.
+                         SchWeekRef[1]:SchDayMonRef == SchWeekRef[1]:SchDaySatRef .AND.
+                         SchWeekRef[1]:SchDayMonRef == SchWeekRef[1]:SchDayHolRef ) then  2  ; SingleWeekSingleDay
+               else if ( SchWeekRef[1]:SchDaySunRef == SchWeekRef[1]:SchDaySatRef .AND.
+                         SchWeekRef[1]:SchDaySunRef == SchWeekRef[1]:SchDayHolRef ) then  3  ; SingleWeekWDWE
+               else if ( SchWeekRef[1]:SchDaySunRef == SchWeekRef[1]:SchDayHolRef ) then  4  ; SingleWeekWDSatSun
+               else  -1  endif endif endif
+         else  -1  endif endif  }
+
    "Set Sch:CSEinput via sub-rulelist (for certain sch descriptions)"      Sch:Action =    ; SAC 12/11/20
       {  if (EnumValue( Description ) == 1 .AND. NumWeeks == 12)
          then  EvalRulelist( "SetupSch_CSEInput_MonthlyWDWE", 1 )
-         else  UNCHANGED  endif  }
+         else if (EnumValue( Description ) > 1)
+         then  switch (EnumValue( Description ))
+                  case  2 :  EvalRulelist( "SetupSch_CSEInput_SingleWeekSingleDay", 1 )
+                  case  3 :  EvalRulelist( "SetupSch_CSEInput_SingleWeekWDWE"     , 1 )
+                  case  4 :  EvalRulelist( "SetupSch_CSEInput_SingleWeekWDSatSun" , 1 )
+                  default :  EvalRulelist( "SetupSch_CSEInput_Blast", 1 )
+               endswitch
+
+
+         else  EvalRulelist( "SetupSch_CSEInput_Blast", 1 )  endif endif  }
+END
+;*************************************************************************  SAC 02/22/23
+RULELIST "SetupSch_CSEInput_Blast"  1 0 0 0
+   "Blast Sch:CSEinput"    Sch:CSEinput = {  UNDEFINED  }
+END
+;*************************************************************************  SAC 02/22/23
+RULELIST "SetupSch_CSEInput_SingleWeekSingleDay"  1 0 0 0
+   "Set Sch:CSEinput - single day"     Sch:CSEinput = {  SchWeekRef[1]:SchDayMonRef:CSEInput  }
+END
+;*************************************************************************  SAC 02/22/23
+RULELIST "SetupSch_CSEInput_SingleWeekWDWE"  1 0 0 0
+   "Set Sch:CSEinput - WD/WE"          Sch:CSEinput = {  FormatNL( "select( $isWeHol, %s,  // WE/Hol\n             Default   %s )", SchWeekRef[1]:SchDaySunRef:CSEInput, SchWeekRef[1]:SchDayMonRef:CSEInput )  }
+;   "Set Sch:CSEinput - WD/WE"          Sch:CSEinput = {  FormatNL( "choose( $isWeHol, %s,\n          %s )", SchWeekRef[1]:SchDaySunRef:CSEInput, SchWeekRef[1]:SchDayMonRef:CSEInput )  }
+END
+;*************************************************************************  SAC 02/22/23
+RULELIST "SetupSch_CSEInput_SingleWeekWDSatSun"  1 0 0 0
+   "Set Sch:CSEinput - WD/Sat/Sun"     Sch:CSEinput = {  FormatNL( "select( $dayOfWeek==7, %s,  // Sat\n             $isWeHol,      %s,  // Sun/Hol\n             Default        %s )",
+                  SchWeekRef[1]:SchDaySatRef:CSEInput, SchWeekRef[1]:SchDaySunRef:CSEInput, SchWeekRef[1]:SchDayMonRef:CSEInput )  }
+;   "Set Sch:CSEinput - WD/Sat/Sun"     Sch:CSEinput = {  FormatNL( "choose( $dayOfWeek==7, %s,  // Sat\n        choose( $isWeHol, %s,\n                          %s ) )",
+;                  SchWeekRef[1]:SchDaySatRef:CSEInput, SchWeekRef[1]:SchDaySunRef:CSEInput, SchWeekRef[1]:SchDayMonRef:CSEInput )  }
 END
 ;*************************************************************************  SAC 12/11/20
 RULELIST "SetupSch_CSEInput_MonthlyWDWE"  1 0 0 0

@@ -2755,6 +2755,18 @@ RULELIST "Default_DHWHeater_AreaServedAndHydronic"  0 0 0 0
 																						then  ( (21.4 + (0.00679 * min( SumAll( ResProj:AddAloneTotalArea ), 2500 ))) * DHWSysAssignFrac / SumAll( Zone:HasDHWUse ) ) * ResProj:AdditionCFAFrac
 																						else	  (21.4 + (0.00679 * min( SumAll( Zone:CondFloorArea     ), 2500 ))) * DHWSysAssignFrac / SumAll( Zone:HasDHWUse )  endif endif  }
 
+   "Set OtherZone:HotWtrHrlyUsePerPers"   OtherZone:HotWtrHrlyUsePerPers  =      ; SAC 02/20/23 (tic #3418)
+      {  if (  (SpcFunc == 231 .OR. SpcFunc == 342) .AND.      ; 231, "Laundry Area"
+               SumRevRef( DwellUnit:WasherZoneRef, DwellUnit:CentralLaundryAssigned ) > 0.5)
+         then  0   ; DHW load based on res central DHW assignments
+         else if (SpcFunc < 200) then  0
+         else  SpaceFunctionData:HotWtrHrlyUsePerPers("FuncType",EnumString(SpcFunc))      
+         endif endif  }
+   "Set OtherZone:ShowDHWSysAssignment"   OtherZone:ShowDHWSysAssignment  =      ; SAC 02/21/23 (tic #3418)
+      {  if ( SpcFunc == 231 .OR. SpcFunc == 342 .OR.      ; 231, "Laundry Area"
+              HotWtrHrlyUsePerPers > 0 )
+         then  1  else  0  endif  }
+
    "Set OtherZone:DHWFloorArea"           OtherZone:DHWFloorArea        = {   if (LocalCompAssigned( ozDHWSys ) == 0) then  0  else  Area  endif  }
    ; removed CondFloorArea & LaundryArea conditions and added conditions that ozDHWSys be assigned & SpaceFunctionData:HotWtrHrlyUsePerPers > 0 - SAC 08/30/20 (MFamProto)
 	"Set OtherZone:HasDHWUse"					OtherZone:HasDHWUse				=                          ; SAC 9/20/19 - OtherZone (MFamProto)
@@ -2819,10 +2831,16 @@ RULELIST "Default_DHWHeater_AreaServedAndHydronic"  0 0 0 0
 
 ;	"debug"		Zone:Action	= {	MessageBox( "PROP INPUT -- Zone '%s':  DHWSys1NewCondFloorArea = %g, DHWSys1AltCondFloorArea = %g, DHWSys1ExCondFloorArea = %g", Name, DHWSys1NewCondFloorArea, DHWSys1AltCondFloorArea, DHWSys1ExCondFloorArea )  }
 
+   "Init DHWSys:NResFloorAreaServed"      DHWSys:NResFloorAreaServed = {  0  }      ; SAC 02/24/23 (tic #3418)
+   "Set DHWSys:NResFloorAreaServed from ResOtherZn"   ResOtherZn:ozDHWSys:NResFloorAreaServed =
+      {  if (Proj:IsComRuleset .AND. IfValidAnd( HotWtrHrlyUsePerPers > 0 ))
+         then  ozDHWSys:NResFloorAreaServed + ValidOr( Area, 0 )
+         else  UNCHANGED  endif  }     ; further mods needed for EAA!
+
 ; mjb 12/18/13 - need to keep track of floor area served by DHWSys
 ; SAC 6/27/14 - rules to track MFam DwellUnit floor area served by each DHWSys
 ; SAC 9/23/15 - added 'ResProj:IsMultiFamily > 0.5 .AND. ' to following rules to ensure that DUT & DU objects milling around in SFam models don't effect setting of these properties
-	"Set DHWSys:FloorAreaServed[1] - Init"		DHWSys:FloorAreaServed[1]	= {	0  }
+	"Set DHWSys:FloorAreaServed[1] - Init"		DHWSys:FloorAreaServed[1]	= {	NResFloorAreaServed  }
 	"Set DHWSys:FloorAreaServed[1] - MFam-1"	DwellUnit:DwellUnitTypeRef:DHWSysRef[1]:FloorAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. DwellUnitTypeRef:NumDHWSysTypes > 0) then  TotalDHWFlrArea + DwellUnitTypeRef:DHWSysRef[1]:FloorAreaServed[1]  else  UNCHANGED  endif  }
 	"Set DHWSys:FloorAreaServed[1] - MFam-2"	DwellUnit:DwellUnitTypeRef:DHWSysRef[2]:FloorAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. DwellUnitTypeRef:NumDHWSysTypes > 1) then  TotalDHWFlrArea + DwellUnitTypeRef:DHWSysRef[2]:FloorAreaServed[1]  else  UNCHANGED  endif  }
 	"Set DHWSys:FloorAreaServed[1] - MFam-3"	DwellUnit:DwellUnitTypeRef:DHWSysRef[3]:FloorAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. DwellUnitTypeRef:NumDHWSysTypes > 2) then  TotalDHWFlrArea + DwellUnitTypeRef:DHWSysRef[3]:FloorAreaServed[1]  else  UNCHANGED  endif  }
@@ -2842,7 +2860,7 @@ RULELIST "Default_DHWHeater_AreaServedAndHydronic"  0 0 0 0
 	"Set DHWSys:AltFlrAreaServed[1] - MFam-3"	DwellUnit:DwellUnitTypeRef:DHWSysRef[3]:AltFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. ResProj:RunScope == 2 .AND. Zone:DHWSys1Status == 2 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 3) then  TotalDHWFlrArea + DwellUnitTypeRef:DHWSysRef[3]:AltFlrAreaServed[1]  else  UNCHANGED  endif  }
 	"Set DHWSys:AltFlrAreaServed[1] - MFam-4"	DwellUnit:DwellUnitTypeRef:DHWSysRef[4]:AltFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. ResProj:RunScope == 2 .AND. Zone:DHWSys1Status == 2 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 4) then  TotalDHWFlrArea + DwellUnitTypeRef:DHWSysRef[4]:AltFlrAreaServed[1]  else  UNCHANGED  endif  }
 	"Set DHWSys:AltFlrAreaServed[1] - MFam-5"	DwellUnit:DwellUnitTypeRef:DHWSysRef[5]:AltFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. ResProj:RunScope == 2 .AND. Zone:DHWSys1Status == 2 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 5) then  TotalDHWFlrArea + DwellUnitTypeRef:DHWSysRef[5]:AltFlrAreaServed[1]  else  UNCHANGED  endif  }
-	"Set DHWSys:NewFlrAreaServed[1] - Init"	DHWSys:NewFlrAreaServed[1]	= {	0  }
+	"Set DHWSys:NewFlrAreaServed[1] - Init"	DHWSys:NewFlrAreaServed[1]	= {	NResFloorAreaServed  }
 	"Set DHWSys:NewFlrAreaServed[1] - MFam-1"	DwellUnit:DwellUnitTypeRef:DHWSysRef[1]:NewFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. Zone:DHWSys1Status == 3 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 1) then  TotalDHWFlrArea + DwellUnitTypeRef:DHWSysRef[1]:NewFlrAreaServed[1]  else  UNCHANGED  endif  }
 	"Set DHWSys:NewFlrAreaServed[1] - MFam-2"	DwellUnit:DwellUnitTypeRef:DHWSysRef[2]:NewFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. Zone:DHWSys1Status == 3 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 2) then  TotalDHWFlrArea + DwellUnitTypeRef:DHWSysRef[2]:NewFlrAreaServed[1]  else  UNCHANGED  endif  }
 	"Set DHWSys:NewFlrAreaServed[1] - MFam-3"	DwellUnit:DwellUnitTypeRef:DHWSysRef[3]:NewFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. Zone:DHWSys1Status == 3 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 3) then  TotalDHWFlrArea + DwellUnitTypeRef:DHWSysRef[3]:NewFlrAreaServed[1]  else  UNCHANGED  endif  }
