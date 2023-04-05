@@ -232,6 +232,32 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
                else  UNCHANGED  endif
          else  UNCHANGED  endif endif  }
 
+   "Check for HPDHWCombo systems assigned for zone DHW + HVAC"    Zone:Action =     ; SAC 03/31/23 (tic #1349)
+      {  if (CondFloorArea < 0.1 .OR. LocalCompAssigned( ActiveHVACSystem ) < 0.5 .OR. Proj:StandardsVersion < 2022) then  UNCHANGED
+         else if (IfValidAnd( ActiveHVACSystem:Type = 35 ))
+         then  if ( (DHWSys1Status = 3 .AND. LocalCompAssigned(    DHWSys1:DHWHeater[1] ) != ComponentType( "HVACSys" )) .OR.
+                    (DHWSys1Status = 2 .AND. LocalCompAssigned( AltDHWSys1:DHWHeater[1] ) != ComponentType( "HVACSys" )) .OR.
+                    (DHWSys1Status = 1 .AND. LocalCompAssigned(  exDHWSys1:DHWHeater[1] ) != ComponentType( "HVACSys" )) )
+               then  PostError( "Inconsistent HVAC and DHW system assignments in Zone '%s': when HeatPumpDHWCombo is selected for HVAC, the same system must be selected for DHW.", Name )
+               else if ( (DHWSys1Status = 3 .AND. IfValidAnd(    DHWSys1:DHWHeater[1] = ActiveHVACSystem )==0) .OR.
+                         (DHWSys1Status = 2 .AND. IfValidAnd( AltDHWSys1:DHWHeater[1] = ActiveHVACSystem )==0) .OR.
+                         (DHWSys1Status = 1 .AND. IfValidAnd(  exDHWSys1:DHWHeater[1] = ActiveHVACSystem )==0) )
+               then  PostError( "Inconsistent HVAC and DHW system assignments in Zone '%s': when HeatPumpDHWCombo is selected for HVAC, the same system must be selected for DHW.", Name )
+               else  UNCHANGED  endif endif
+         else if ( (DHWSys1Status = 3 .AND. LocalCompAssigned(    DHWSys1:DHWHeater[1] ) == ComponentType( "HVACSys" )) .OR.
+                   (DHWSys1Status = 2 .AND. LocalCompAssigned( AltDHWSys1:DHWHeater[1] ) == ComponentType( "HVACSys" )) .OR.
+                   (DHWSys1Status = 1 .AND. LocalCompAssigned(  exDHWSys1:DHWHeater[1] ) == ComponentType( "HVACSys" )) )
+         then  if ( (DHWSys1Status = 3 .AND. IfValidAnd(    DHWSys1:DHWHeater[1]:Type = 2 ) .AND. IfValidAnd(    DHWSys1:DHWHeater[1]:HtPumpSysType = 35 )) .OR.
+                    (DHWSys1Status = 2 .AND. IfValidAnd( AltDHWSys1:DHWHeater[1]:Type = 2 ) .AND. IfValidAnd( AltDHWSys1:DHWHeater[1]:HtPumpSysType = 35 )) .OR.
+                    (DHWSys1Status = 1 .AND. IfValidAnd(  exDHWSys1:DHWHeater[1]:Type = 2 ) .AND. IfValidAnd(  exDHWSys1:DHWHeater[1]:HtPumpSysType = 35 )) )
+               then  if ( (DHWSys1Status = 3 .AND. IfValidAnd(    DHWSys1:DHWHeater[1] = ActiveHVACSystem )==0) .OR.
+                          (DHWSys1Status = 2 .AND. IfValidAnd( AltDHWSys1:DHWHeater[1] = ActiveHVACSystem )==0) .OR.
+                          (DHWSys1Status = 1 .AND. IfValidAnd(  exDHWSys1:DHWHeater[1] = ActiveHVACSystem )==0) )
+                     then  PostError( "Inconsistent DHW and HVAC system assignments in Zone '%s': when HeatPumpDHWCombo is selected for DHW, the same system must be selected for HVAC.", Name )
+                     else  UNCHANGED  endif
+               else  UNCHANGED  endif
+         else  UNCHANGED  endif endif endif  }
+
 ; SAC 1/15/14 - removed check - testing analysis for validity... (GC issue #258)
 ;  ; mjb 1/8/14 - check for combination of zonal control credit & combined hydronic systems
 ;	"Check for combination of zonal control credit & combined hydronic systems"
@@ -562,17 +588,18 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 
 	; SAC 11/14/13 - added check for heat pumps including valid capacities     ; SAC 9/22/17 - enable HP autosizing    ; VCHP2 - SAC 11/01/20
 ;	"debug HP CAP check"									HVACHtPump:Action	= {	PostWarning( "HVACHtPump '%s' Type = %g  Cap47 = %g  Cap47 = %g", Name, Type, Cap47, Cap17 )	}
-	"Check for valid HVACHtPump capacities"		HVACHtPump:Action	= {	if (FloorAreaServed < 0.1 .OR. IfValidAnd( AutoSize > 0 )) then  UNCHANGED
-																								else if (Type == 22 .OR. IsPackaged > 0 .OR. Type == 7 .OR. Type == 34)              ; SAC 11/2/18 - VCHP    ; SAC 6/24/20 - PTHP systems    ; RoomHP - SAC 09/01/20   ; AWHP - SAC 12/13/22
-																								then  if (IfValidAnd(Cap47 > 0.1)==0)   ; SAC 11/13/18 - removed check on Cap17
-																								      then	PostError( "Heat pump '%s' must have valid Cap47 input in order to be simulated.", Name )
-																								      else  UNCHANGED  endif
-																								else  if (LocalStatus( Cap47 ) < 1 .OR. (LocalStatus( Cap17 ) < 1 .AND. (Type < 12 .OR. Type == 33)))
-																								      then	PostError( "Heat pump '%s' must have valid Cap47 & Cap17 inputs in order to be simulated.", Name )
-																								      else if (IfValidAnd(Cap47 > 0.1) .AND. (IfValidAnd(Cap17 > 0.1) .OR. Type == 12)) then  UNCHANGED
-																								      else	PostError( "Heat pump '%s' must have valid Cap47 & Cap17 inputs in order to be simulated.", Name )
-																								      endif endif
-																								endif endif  }
+	"Check for valid HVACHtPump capacities"		HVACHtPump:Action	=        ; no cap checks for HeatPumpDHWCombo - SAC 04/02/23 (tic #1349)
+      {  if (FloorAreaServed < 0.1 .OR. IfValidAnd( AutoSize > 0 ) .OR. Type == 35) then  UNCHANGED
+			else if (Type == 22 .OR. IsPackaged > 0 .OR. Type == 7 .OR. Type == 34)              ; SAC 11/2/18 - VCHP    ; SAC 6/24/20 - PTHP systems    ; RoomHP - SAC 09/01/20   ; AWHP - SAC 12/13/22
+			then  if (IfValidAnd(Cap47 > 0.1)==0)   ; SAC 11/13/18 - removed check on Cap17
+			      then	PostError( "Heat pump '%s' must have valid Cap47 input in order to be simulated.", Name )
+			      else  UNCHANGED  endif
+			else  if (LocalStatus( Cap47 ) < 1 .OR. (LocalStatus( Cap17 ) < 1 .AND. (Type < 12 .OR. Type == 33)))
+			      then	PostError( "Heat pump '%s' must have valid Cap47 & Cap17 inputs in order to be simulated.", Name )
+			      else if (IfValidAnd(Cap47 > 0.1) .AND. (IfValidAnd(Cap17 > 0.1) .OR. Type == 12)) then  UNCHANGED
+			      else	PostError( "Heat pump '%s' must have valid Cap47 & Cap17 inputs in order to be simulated.", Name )
+			      endif endif
+			endif endif  }
 
    "Check for all required Capacity & COP inputs for VCHP2 systems"     HVACHtPump:Action =        ; VCHP2 - SAC 07/26/21   ; SAC 09/23/21
       {  if (FloorAreaServed < 0.1 .OR. Type != 33 .OR.

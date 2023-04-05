@@ -1203,7 +1203,7 @@ RULELIST "CSE_SimulationPrep_DHW_part2" 1 0 0 1
 
   ; SAC 12/31/15 - revised logic of following rules to accommodate special handling of DHW heater & tank used to model HVACSys-based air-to-water heat pump DHW heating (tic 560)
   ; SAC 1/13/16 - similar revision as above comment for DHWHeater-source DHW when HeaterElementType = "Heat Pump" and IsHydronic flag set (should only happen in MFam) (tic 560)
-	"Call subordinate rulelist to setup remaining cseDHWHEATER properties"
+	"Call subordinate rulelist to setup remaining cseDHWHEATER properties"        ; HeatPumpDHWCombo - SAC 04/02/23 (tic #1349)
 				cseDHWHEATER:Action	= {	if (LocalCompAssigned( SourceDHWHeater ) > 0.5)
 													then  if (IfValidAnd( SourceDHWHeater:HeaterElementType == 3 ) .AND. IfValidAnd( SourceDHWHeater:IsHydronic > 0.5 ))
 															then	EvalRulelist( "CSE_SimulationPrep_DHWHtr_AWHP",  1 )
@@ -1214,7 +1214,9 @@ RULELIST "CSE_SimulationPrep_DHW_part2" 1 0 0 1
 															then  EvalRulelist( "CSE_SimulationPrep_DHWHtr_AWHP_OLD", 1 )
                                              else if (IfValidAnd( SourceHVACSys:Type = 2 ) .AND. IfValidAnd( SourceHVACSys:HtPumpSysType = 34 ))
 															then  EvalRulelist( "CSE_SimulationPrep_DHWHtr_AWHP", 1 )
-															else	EvalRulelist( "CSE_SimulationPrep_DHWHtr_HVACSys", 1 )  endif endif
+                                             else if (IfValidAnd( SourceHVACSys:Type = 2 ) .AND. IfValidAnd( SourceHVACSys:HtPumpSysType = 35 ))
+															then  EvalRulelist( "CSE_SimulationPrep_DHWHtr_HeatPumpDHWCombo", 1 )
+															else	EvalRulelist( "CSE_SimulationPrep_DHWHtr_HVACSys", 1 )  endif endif endif
 													else  UNCHANGED  endif endif  }
 
 	"Set cseDHWSYS:wsLoadMaxDur - # of hours for tracking the maximum load (default = 12)"    cseDHWSYS:wsLoadMaxDur =   ; SAC 12/2/19
@@ -2054,6 +2056,70 @@ RULELIST "CSE_SimulationPrep_DHWHtr_AWHP" 1 0 0 1
    "Set cseDHWHEATER:whASHPSrcT_x"  cseDHWHEATER:whASHPSrcT_x  =
       {  if (LocalCompAssigned( whASHPSrcZn ) > 0) then  UNDEFINED
          else  "$tDbO"  endif  }
+END
+
+;************************************************************************* HeatPumpDHWCombo - SAC 04/02/23 (tic #1349)
+RULELIST "CSE_SimulationPrep_DHWHtr_HeatPumpDHWCombo" 1 0 0 1
+;*************************************************************************
+   "Set cseDHWHEATER:whType"        cseDHWHEATER:whType        = {  1  }      ; "Small Storage"     
+   "Set cseDHWHEATER:whHeatSrc"     cseDHWHEATER:whHeatSrc     = {  4  }      ; "ASHPX"
+   "Set cseDHWHEATER:whASHPType"    cseDHWHEATER:whASHPType    =
+      {       if (IfValidAnd( SourceHVACSys:HtPumpSystem[1]:DHWComboTankVol > 110 )) then  "Sanden120"
+         else if (IfValidAnd( SourceHVACSys:HtPumpSystem[1]:DHWComboTankVol >  75 )) then  "Sanden80"
+         else                                                                              "Sanden40"
+         endif endif  }
+
+;;      whMult = 1                        // Water heater multiplier
+;   "Set cseDHWHEATER:whFAdjElec_x"  cseDHWHEATER:whFAdjElec_x =               ; SAC 12/11/22 (tic #1318)
+;      {  if (IfValidAnd( SourceHVACSys:Type = 2 ) .AND. IfValidAnd( SourceHVACSys:HtPumpSysType = 34 ) .AND.
+;             IfValidAnd( SourceHVACSys:ClSysMultiSpeed > 0 ))
+;         then  "FAWHPD"
+;         else  UNDEFINED  endif  }
+;
+;;       "whElecMtr",         BEMP_Obj,  1,  0,  1, "",                 0,  1, "cseMETER",    0, "",    3201, "Electric use meter"   --  allow to default to parent meter
+;;   "Set cseDHWHEATER:whFuelMtr"      cseDHWHEATER:whFuelMtr   = {   
+;;   "Set cseDHWHEATER:whVol"         cseDHWHEATER:whVol      = {   
+;;   "Set cseDHWHEATER:whEF"            cseDHWHEATER:whEF         = {   
+;;   "Set cseDHWHEATER:whEff"         cseDHWHEATER:whEff      = {   
+;; whHPAF removed from CSE by CB - SAC 1/22/20
+;;   "Set cseDHWHEATER:whHPAF"         cseDHWHEATER:whHPAF      = {   1  }
+;;   "Set cseDHWHEATER:whSBL"         cseDHWHEATER:whSBL      = {   
+;;   "Set cseDHWHEATER:whLDEF"         cseDHWHEATER:whLDEF      = {   3.4  }
+   "Set cseDHWHEATER:whXBUEndUse to 'User2' for ALL types"   cseDHWHEATER:whXBUEndUse  = {
+         if (Proj:EnergyCodeYearNum >= 2019) then  "User2"
+         else  UNDEFINED  endif  }   ; SAC 1/8/19   / SAC 2/28/19 - added logic to prevent specification for PRE-2019 analysis (where no whXBUEndUse proeprty exists yet in CSE)
+
+   "Set cseDHWHEATER:whZone"        cseDHWHEATER:whZone  =              ; SAC 04/05/23 (tic #1349)
+      {  if (IfValidAnd(        SourceHVACSys:HtPumpSystem[1]:DHWComboTankOutside > 0 )==0 .AND.
+             LocalCompAssigned( SourceHVACSys:HtPumpSystem[1]:DHWComboTankZone    ) > 0)
+         then  SourceHVACSys:HtPumpSystem[1]:DHWComboTankZone:CSE_ZONE
+         else  UNDEFINED  endif  }
+;   "Set cseDHWHEATER:DefaultHPWHZone"     cseDHWHEATER:DefaultHPWHZone  =     ; based on 2022+ Std design options - SAC 12/12/22 (tic #1318)
+;      {  if (T24RCustomStandardDesign:HPWHLoc( "StdOption", EnumString( Proj:StdDesignFuel ), "BldgType", Proj:BldgTypeTblStr, "NumPropHPWH", Proj:NumProposedHPWHs, "ClimateZone", Proj:ClimateZone ) > 0)
+;         then  ; override std design HPWH loc w/ largest cond zone
+;               MaxAllComp( Zone:CondVolume )
+;         else if (ComponentCount( Garage ) > 0) then  MaxAllComp( Garage:Area )
+;         else if (GlobalCompAssigned( Proj:DfltMFamLaundryZn ) > 0) then  Proj:DfltMFamLaundryZn
+;         else if (ComponentCount( CrawlSpace ) > 0) then  MaxAllComp( CrawlSpace:Area )
+;         else if (ComponentCount( Attic ) > 0) then  MaxAllComp( Attic:FloorArea )
+;         else  UNDEFINED  endif endif endif endif endif  }
+;   "Set cseDHWHEATER:whZone"        cseDHWHEATER:whZone  = 
+;      {  if (LocalCompAssigned( DefaultHPWHZone ) > 0) then  DefaultHPWHZone:CSE_ZONE
+;         else  UNDEFINED  endif  }
+   "Set cseDHWHEATER:whTEx_x"       cseDHWHEATER:whTEx_x  =
+      {  if (LocalCompAssigned( whZone ) > 0) then  UNDEFINED
+         else  "$tDbO"  endif  }
+      ;   or possibly Uncond estimate: "($tDbO + 70) / 2"
+
+   "Set cseDHWHEATER:whASHPSrcZn"   cseDHWHEATER:whASHPSrcZn   = {  UNDEFINED  }    ; SAC 04/05/23 (tic #1349)
+   "Set cseDHWHEATER:whASHPSrcT_x"  cseDHWHEATER:whASHPSrcT_x  = {  "$tDbO"    }
+;   "Set cseDHWHEATER:whASHPSrcZn"   cseDHWHEATER:whASHPSrcZn   =     ; garage or outside
+;      {  if (LocalCompAssigned( DefaultHPWHZone ) == ComponentType( "Garage" ))
+;         then  DefaultHPWHZone:CSE_ZONE
+;         else  UNDEFINED  endif  }
+;   "Set cseDHWHEATER:whASHPSrcT_x"  cseDHWHEATER:whASHPSrcT_x  =
+;      {  if (LocalCompAssigned( whASHPSrcZn ) > 0) then  UNDEFINED
+;         else  "$tDbO"  endif  }
 END
 
 
