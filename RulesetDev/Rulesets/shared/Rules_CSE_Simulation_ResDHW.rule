@@ -116,21 +116,28 @@ RULELIST "CSE_SimulationPrep_DHW" 1 0 0 1
 	      else  0
 	      endif  }
 
-   "Create a CSE DHWSYS for each non-central OtherZone serving as DwellUnit:WasherZoneRef"      ; SAC 10/2/19 - MFamProto    ; expand for nonres use (HotWtrHrlyUsePerPers) - SAC 02/22/23 (tic #3418)
-      ResOtherZn:cseDHWSYSRef  =
+   "Create a CSE DHWSYS for each non-central OtherZone ()"      ; SAC 10/2/19 - MFamProto    ; expand for nonres use (HotWtrHrlyUsePerPers) - SAC 02/22/23 (tic #3418)
+      ResOtherZn:cseDHWSYSRef  =                                  ; revise to create slave systems when ResOtherZn served by central system - SAC 03/16/23 (tic #3418)  ; SAC 03/17/23 (tic #3418)
          {  if (Proj:IsSFamResRuleset .OR. LocalCompAssigned( ozDHWSys ) < 1) then  UNDEFINED
             else if (IfValidAnd( WasherDwellUnits > 0 ) .OR. IfValidAnd( Appl_DishGain > 0 ) .OR.
                      IfValidAnd( Appl_WasherGain  > 0 ) .OR. IfValidAnd( HotWtrHrlyUsePerPers > 0 ))
-            then  if (IfValidAnd( ozDHWSys:CentralDHW > 0 ))
+            then  if (IfValidAnd( ozDHWSys:CentralDHW > 0 )==0 .OR.
+                      IfValidAnd( HotWtrHrlyUsePerPers > 0 ))
+                  then  CreateComp( cseDHWSYS, "dhwsys-" + substr( Name, 0, 47 ) )
+                  else if (IfValidAnd( ozDHWSys:CentralDHW > 0 ))
                   then  ozDHWSys:cseDHWSYSRef[1]
-                  else  CreateComp( cseDHWSYS, "dhwsys-" + substr( Name, 0, 47 ) )
-                  endif
+                  else  UNDEFINED  endif endif
             else  UNDEFINED  endif endif  }
+
    "Set ResOtherZn:cseDHWSYSRef:SourceOtherZone"   ResOtherZn:cseDHWSYSRef:SourceOtherZone =
-      {  if (IfValidAnd( ozDHWSys:CentralDHW > 0 )==0) then  Name  else  UNCHANGED  endif  }
+      {  Name  }
+      ;{  if (IfValidAnd( ozDHWSys:CentralDHW > 0 )==0) then  Name  else  UNCHANGED  endif  }
    "Set ResOtherZn:cseDHWSYSRef:SourceDHWSys"      ResOtherZn:cseDHWSYSRef:SourceDHWSys	 =
       {  if (IfValidAnd( HotWtrHrlyUsePerPers > 0 ) .AND. IfValidAnd( ozDHWSys:CentralDHW > 0 )==0)
          then  ozDHWSys:Name  else  UNCHANGED  endif  }
+   "Set ResOtherZn:cseDHWSYSRef:wsCentralDHWSYS"   ResOtherZn:cseDHWSYSRef:wsCentralDHWSYS  =      ; SAC 03/16/23 (tic #3418)
+      {  if (IfValidAnd( HotWtrHrlyUsePerPers > 0 ) .AND. IfValidAnd( ozDHWSys:CentralDHW > 0 ))
+         then  ozDHWSys:cseDHWSYSRef  else  UNCHANGED  endif  }
 
 ;"dbg" ResDHWSys:Action = { if (LocalCompAssigned( DHWHeater[1] )==0) then  MessageBox( "setup DHWSys '%s' (run %s) as autosized CHPWH (w/ no Htr[1])?  CentralDHWTypeVal=%g  CHPWHSysDescrip=%g  CHPWHCompAutosizeSim=%g", Name, ResProj:RunAbbrev, ValidOr( CentralDHWTypeVal, -999 ), ValidOr( CHPWHSysDescrip, -999 ), ValidOr( CHPWHCompAutosizeSim, -999 ) )
 ;                                                                  else  MessageBox( "setup DHWSys '%s' (run %s) as autosized CHPWH (w/ Htr[1] assigned)?  CentralDHWTypeVal=%g  CHPWHSysDescrip=%g  CHPWHCompAutosizeSim=%g", Name, ResProj:RunAbbrev, ValidOr( CentralDHWTypeVal, -999 ), ValidOr( CHPWHSysDescrip, -999 ), ValidOr( CHPWHCompAutosizeSim, -999 ) )  endif }
@@ -1547,10 +1554,10 @@ RULELIST "CSE_SimulationPrep_DHWHtr_DHWHtr" 1 0 0 1
 													endswitch  }
       ; UEF -> whHeatSrc = Fuel (1)  (required when whType = INSTANTANEOUSUEF (5))
 ;       "whElecMtr",         BEMP_Obj,  1,  0,  1, "",                 0,  1, "cseMETER",    0, "",    3201, "Electric use meter"   --  allow to default to parent meter
-   ; SAC 11/9/15  - SAC 4/7/16 - added in RESNET here (tic #631)
-	"Set cseDHWHEATER:whFuelMtr"     ; revised logic for Com (Htl/Mtl) data model - SAC 03/01/22
-			cseDHWHEATER:whFuelMtr	= {	if (IfValidAnd( ResProj:StdsVersionYr <= 2016 )==0 .OR. IfValidAnd( ResProj:DRtgRefRunID == 2014 ))      ; switch IfValidAnd check for Proj:GasType = "Propane" ot Proj:GasType = 2 (EPro/user support) - SAC 01/24/23
-													then	switch ( SourceDHWHeater:HeaterElementType )		; SAC 3/24/16 - revised logic to prevent specifying FuelMtr for Elec heaters
+   ; SAC 11/9/15  - SAC 4/7/16 - added in RESNET here (tic #631)   ; SAC 3/24/16 - revised logic to prevent specifying FuelMtr for Elec heaters
+	"Set cseDHWHEATER:whFuelMtr"     ; revised logic for Com (Htl/Mtl) data model - SAC 03/01/22    ; switch IfValidAnd check for Proj:GasType = "Propane" to Proj:GasType = 2 (EPro/user support) - SAC 01/24/23
+			cseDHWHEATER:whFuelMtr	= {	if (IfValidAnd( ResProj:StdsVersionYr <= 2016 )==0 .OR. IfValidAnd( ResProj:DRtgRefRunID == 2014 ))
+													then	switch ( SourceDHWHeater:HeaterElementType )
 																case  0 :	UNDEFINED		; "Electric Resistance"  
 																case  3 :	UNDEFINED		; "Heat Pump (2013)" 
 																case  5 :	UNDEFINED		; "Heat Pump (2016)" 
@@ -2794,16 +2801,18 @@ RULELIST "CSE_SimulationPrep_DHWLoopSeg" 1 0 0 1
          then   2      ; demand
          else   1      ; supply
          endif  }
-   ; based on Res ACM method WH-LOOPSZ
+   ; based on Res ACM method WH-LOOPSZ   ; mods to take into account NumResOtherZnsServed - SAC 03/17/23 (tic #3418)
    "Set cseDHWLOOPSEG:NUnitThisSeg"
       cseDHWLOOPSEG:NUnitThisSeg = {
-         if (IfValidAnd( SourceDHWSys:NumDUsServed > 0 )==0 .OR. IfValidAnd( wlMult > 0 )==0)
+         if ( ( IfValidAnd( SourceDHWSys:NumDUsServed > 0 )==0 .AND.
+                IfValidAnd( SourceDHWSys:NumResOtherZnsServed > 0 )==0) .OR.
+              IfValidAnd( wlMult > 0 )==0)
          then  -1  ; ERROR
          else if (IfValidAnd( SegmentIndex < 4 )==0)
          then  0      ; no NUnit... for segments 4-6
          else if (IfValidAnd( SegmentIndex < 3 ))
-         then   SourceDHWSys:NumDUsServed / wlMult
-         else   SourceDHWSys:NumDUsServed / wlMult / 2
+         then   (SourceDHWSys:NumDUsServed + SourceDHWSys:NumResOtherZnsServed) / wlMult
+         else   (SourceDHWSys:NumDUsServed + SourceDHWSys:NumResOtherZnsServed) / wlMult / 2
          endif endif endif  }
    "Set cseDHWLOOPSEG:wgSize"
       cseDHWLOOPSEG:wgSize = {
@@ -2954,21 +2963,25 @@ RULELIST "CSE_SimulationPrep_DHWLoopSeg" 1 0 0 1
          else  9     ; ERROR
          endif endif endif  }
 
-   "Set cseDHWLOOPSEG:AvgDULen"
+   "Set cseDHWLOOPSEG:AvgDULen"        ; mods to take into account NumResOtherZnsServed - SAC 03/17/23 (tic #3418)
       cseDHWLOOPSEG:AvgDULen = {
-         if (IfValidAnd( SourceDHWSys:NumDUsServed > 0 )==0) then  0      ; error
-         else   sqrt( ValidOr( SourceDHWSys:FloorAreaServed[1], 0 ) / SourceDHWSys:NumDUsServed )
+         if (IfValidAnd( SourceDHWSys:NumDUsServed > 0 )==0 .AND.
+             IfValidAnd( SourceDHWSys:NumResOtherZnsServed > 0 )==0) then  0      ; error
+         else   sqrt( ValidOr( SourceDHWSys:FloorAreaServed[1], 0 ) /
+                      (SourceDHWSys:NumDUsServed + SourceDHWSys:NumResOtherZnsServed) )
          endif  }
-   "Set cseDHWLOOPSEG:wgLength"
+
+   "Set cseDHWLOOPSEG:wgLength"           ; mods to take into account NumResOtherZnsServed - SAC 03/17/23 (tic #3418)
       cseDHWLOOPSEG:wgLength = {
          if (IfValidAnd( SourceDHWSys:MFamDistType < 1 )) then  0
          else if (IfValidAnd( SegmentIndex = 1 ) .OR. IfValidAnd( SegmentIndex = 6 ))
          then      8 + ( SourceDHWSys:AvgFlrHtServed * ValidOr( SourceDHWSys:NumFloorsServed, 1 ) / 2 )
          else   ; segment index not 1 or 6
-               if (  IfValidAnd( SourceDHWSys:NumDUsServed    >  0 )==0 .OR. 
+               if (  ( IfValidAnd( SourceDHWSys:NumDUsServed         >  0 )==0 .AND.
+                       IfValidAnd( SourceDHWSys:NumResOtherZnsServed >  0 )==0 ) .OR. 
                      IfValidAnd( SourceDHWSys:NRecircLoops    >= 1 )==0 .OR.
                      IfValidAnd( SourceDHWSys:NumFloorsServed >  0 )==0 ) then  UNDEFINED      ; error
-               else   AvgDULen * SourceDHWSys:NumDUsServed /
+               else   AvgDULen * (SourceDHWSys:NumDUsServed + SourceDHWSys:NumResOtherZnsServed) /
                      (4 * SourceDHWSys:NRecircLoops * SourceDHWSys:NumFloorsServed)
                endif
          endif endif  }
@@ -3032,14 +3045,14 @@ RULELIST "CSE_SimulationPrep_DHWLoopBranch" 1 0 0 1
          else  max( (SourceDHWSys:NumFloorsServed / 2), 1 )  endif  }
    ; based on Res ACM method WH-BRN
    ; SAC 8/1/16 - revised expression based on loop segment branch fixes - replaced NUnitThisBranch in denominator w/ ()
-   "Set cseDHWLOOPBRANCH:wbMult"
+   "Set cseDHWLOOPBRANCH:wbMult"          ; mods to take into account NumResOtherZnsServed - SAC 03/17/23 (tic #3418)
       cseDHWLOOPBRANCH:wbMult = {
          if (IfValidAnd( SourceDHWSys:MFamDistType < 1 ) .AND. NUnitThisBranch > 0 .AND.
-             IfValidAnd( SourceDHWSys:NumDUsServed > 0 ))
-         then  SourceDHWSys:NumDUsServed /  NUnitThisBranch
-         else if (IfValidAnd( SourceDHWSys:NumDUsServed > 0 )==0 .OR. NUnitThisBranch <= 0 .OR.
-             IfValidAnd( SourceDHWSys:NRecircLoops > 0 )==0) then  UNDEFINED
-         else  SourceDHWSys:NumDUsServed / (NUnitThisBranch * SourceDHWSys:NRecircLoops * 2)  endif endif  }
+             (ValidOr( SourceDHWSys:NumDUsServed, 0 ) + ValidOr( SourceDHWSys:NumResOtherZnsServed, 0 )) > 0)
+         then  (SourceDHWSys:NumDUsServed + SourceDHWSys:NumResOtherZnsServed) /  NUnitThisBranch
+         else if ( (IfValidAnd( SourceDHWSys:NumDUsServed > 0 )==0 .AND. IfValidAnd( SourceDHWSys:NumResOtherZnsServed > 0 )==0) .OR.
+                   NUnitThisBranch <= 0 .OR. IfValidAnd( SourceDHWSys:NRecircLoops > 0 )==0) then  UNDEFINED
+         else  (SourceDHWSys:NumDUsServed + SourceDHWSys:NumResOtherZnsServed) / (NUnitThisBranch * SourceDHWSys:NRecircLoops * 2)  endif endif  }
 
    ; based on Res ACM method WH-BRSZ
    "Set cseDHWLOOPBRANCH:wbSize"
