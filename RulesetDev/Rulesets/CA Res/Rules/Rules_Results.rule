@@ -1805,9 +1805,10 @@ RULELIST "CARes_StdMixedFuelResults" 1 0 1 1
 ;"dbg" Proj:Action = {  PostMessageToLog( "     just set ResultSummary[1]:StdMixedFuelPVMlt = %g", ValidOr( ResultSummary[1]:StdMixedFuelPVMlt, -999 ) )  }
          ; SAC 8/24/19 - replaced 1/3.413 & 0.01 TDV table multipliers with Proj:TDVSecMult_Elec & TDVSecMult_Fuel to accommodate 2022+ switch to native (E3) TDV table units
          ; SAC 8/26/19 - added primary table multipliers (of 1.0) to all ApplyHourlyResultMult* function calls (to accommodate 2022+ TDV table unit switch)
+         ; revised call to ApplyHourlyResultMultipliers_NEM() to include hourly NEM table name & col arguments - SAC 05/16/23 (NEM3)
    "Calc TDV of PV Electric generation for standard mixed fuel run"  Proj:ResultSummary[1]:StdMixedFuelPVTDV  = {
          int( (100 * ApplyHourlyResultMultipliers_NEM( "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV", "Tot",
-                                                                              NetEnergyMeteringTDVAdj, ResultSummary[1]:StdMixedFuelPVMlt ) / CondFloorArea) + 0.5) / 100  }
+                                                                              NetEnergyMeteringTDVAdj, HrlyNEMTableName, HrlyNEMTableCol, ResultSummary[1]:StdMixedFuelPVMlt ) / CondFloorArea) + 0.5) / 100  }
 ;"dbg" Proj:Action = { PostMessageToLog( "   Just set ResultSummary[1]:StdMixedFuelPVTDV = %g", ValidOr( ResultSummary[1]:StdMixedFuelPVTDV, -999 ) )  }
 
    "Copy StdMixedFuel* results from first EUseSummary into orientation-specific ones"  Proj:Action = {
@@ -5419,34 +5420,35 @@ RULELIST "CARes_ProposedTDVResults" 1 0 0 1
 	"Calculate Elec Demand  - Ext"		Proj:RunResults[9]:PropElecDemand[1]		= {	if (LocalRef( RunResults[9]:PropElecEnergy[1]		) < 0.0001) then  0
 			 			  																						else  ApplyHourlyResultMultipliers( "none", "PeakDemandTable", 1, 1, "none", 0, 0, RunID, "MtrElec",   "Ext" ) / 3.412  endif  }
 
+      ; revised all calls to ApplyHourlyResultMultipliers_NEM() to include hourly NEM table name & col arguments - SAC 05/16/23 (NEM3)
   ; PV
-	"Calculate TDV - Elec   - PV"			Proj:RunResults[13]:PropElecTDV[1]		= {	if (LocalRef( RunResults[13]:PropElecEnergy[1]		) > -0.0001) then  0
+   "Calculate TDV - Elec   - PV"    Proj:RunResults[13]:PropElecTDV[1]     = {   if (LocalRef( RunResults[13]:PropElecEnergy[1]      ) > -0.0001) then  0
       else if (CommunitySolarProjID > 0 .AND. IfValidAnd( CmntySlr_TDV < 0 )) then  CmntySlr_TDV * PVWDCSizeMultiplier[1] / CondFloorArea
-		else if (IfValidAnd( NetEnergyMeteringTDVAdj != 0))
+      else if (IfValidAnd( NetEnergyMeteringTDVAdj != 0) .OR. IfValidAnd( HrlyNEMTableCol > 0 ))
       then  if (LocalRef( RunResults[14]:PropElecEnergy[1] ) = 0)
-            then  int( (100 * ApplyHourlyResultMultipliers_NEM( "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV", "Tot", NetEnergyMeteringTDVAdj          ) / CondFloorArea) + 0.5) / 100
-            else  int( (100 * ApplyHourlyResultMultipliers_NEM( "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV", "Tot", NetEnergyMeteringTDVAdj, 1, "BT" ) / CondFloorArea) + 0.5) / 100  endif
+            then  int( (100 * ApplyHourlyResultMultipliers_NEM( "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV", "Tot", NetEnergyMeteringTDVAdj, HrlyNEMTableName, HrlyNEMTableCol          ) / CondFloorArea) + 0.5) / 100
+            else  int( (100 * ApplyHourlyResultMultipliers_NEM( "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV", "Tot", NetEnergyMeteringTDVAdj, HrlyNEMTableName, HrlyNEMTableCol, 1, "BT" ) / CondFloorArea) + 0.5) / 100  endif
       else        int( (100 * ApplyHourlyResultMultipliers(     "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV" ) / CondFloorArea) + 0.5) / 100  endif endif endif  }
 ;"dbg" Proj:Action = { PostMessageToLog( "--Prop PV-- PropElecEnergy[1] %g -- Batt PropElecEnergy[1] %g -- NetEnergyMeteringTDVAdj %g -- TDVMult_Elec %g -- TDVTableName '%s' -- TDVSecTbl_Elec '%s' -- TDVSecMult_Elec %g", RunResults[13]:PropElecEnergy[1], RunResults[14]:PropElecEnergy[1], NetEnergyMeteringTDVAdj, TDVMult_Elec, TDVTableName, TDVSecTbl_Elec, TDVSecMult_Elec ) }
-	"Calculate TDV - NatGas - PV"			Proj:RunResults[13]:PropNatGasTDV		= {	0  }
-	"Calculate TDV - Other  - PV"			Proj:RunResults[13]:PropOtherTDV			= {	0  }
-	"Calculate TDV - TOTAL  - PV"			Proj:RunResults[13]:ProposedTDV[1]		= {	LocalRef( RunResults[13]:PropElecTDV[1] )   }
-	"Calculate Elec Demand  - PV"			Proj:RunResults[13]:PropElecDemand[1]	= {	if (LocalRef( RunResults[13]:PropElecEnergy[1]		) > -0.0001) then  0
-                                                                                    else if (CommunitySolarProjID > 0 .AND. IfValidAnd( CmntySlr_ElecDemand < 0 )) then  CmntySlr_ElecDemand * PVWDCSizeMultiplier[1]
-			 			  																						else  ApplyHourlyResultMultipliers( "none", "PeakDemandTable", 1, 1, "none", 0, 0, RunID, "MtrElec", "PV" ) / 3.412  endif endif  }
+   "Calculate TDV - NatGas - PV"    Proj:RunResults[13]:PropNatGasTDV      = {   0  }
+   "Calculate TDV - Other  - PV"    Proj:RunResults[13]:PropOtherTDV       = {   0  }
+   "Calculate TDV - TOTAL  - PV"    Proj:RunResults[13]:ProposedTDV[1]     = {   LocalRef( RunResults[13]:PropElecTDV[1] )   }
+   "Calculate Elec Demand  - PV"    Proj:RunResults[13]:PropElecDemand[1]  = {   if (LocalRef( RunResults[13]:PropElecEnergy[1]      ) > -0.0001) then  0
+                                                                                 else if (CommunitySolarProjID > 0 .AND. IfValidAnd( CmntySlr_ElecDemand < 0 )) then  CmntySlr_ElecDemand * PVWDCSizeMultiplier[1]
+                                                                                 else  ApplyHourlyResultMultipliers( "none", "PeakDemandTable", 1, 1, "none", 0, 0, RunID, "MtrElec", "PV" ) / 3.412  endif endif  }
 
   ; Battery
-	"Calculate TDV - Elec   - Battery"	Proj:RunResults[14]:PropElecTDV[1]		= {	if (LocalRef( RunResults[14]:PropElecEnergy[1]		) = 0) then  0
-		else if (IfValidAnd( NetEnergyMeteringTDVAdj != 0))
+   "Calculate TDV - Elec   - Battery"  Proj:RunResults[14]:PropElecTDV[1]     = {   if (LocalRef( RunResults[14]:PropElecEnergy[1]      ) = 0) then  0
+      else if (IfValidAnd( NetEnergyMeteringTDVAdj != 0) .OR. IfValidAnd( HrlyNEMTableCol > 0 ))
       then  if (LocalRef( RunResults[13]:PropElecEnergy[1] ) = 0)
-            then  int( (100 * ApplyHourlyResultMultipliers_NEM( "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT", "Tot", NetEnergyMeteringTDVAdj          ) / CondFloorArea) + 0.5) / 100
-            else  int( (100 * ApplyHourlyResultMultipliers_NEM( "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT", "Tot", NetEnergyMeteringTDVAdj, 1, "PV" ) / CondFloorArea) + 0.5) / 100  endif
+            then  int( (100 * ApplyHourlyResultMultipliers_NEM( "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT", "Tot", NetEnergyMeteringTDVAdj, HrlyNEMTableName, HrlyNEMTableCol          ) / CondFloorArea) + 0.5) / 100
+            else  int( (100 * ApplyHourlyResultMultipliers_NEM( "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT", "Tot", NetEnergyMeteringTDVAdj, HrlyNEMTableName, HrlyNEMTableCol, 1, "PV" ) / CondFloorArea) + 0.5) / 100  endif
       else        int( (100 * ApplyHourlyResultMultipliers(     "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT" ) / CondFloorArea) + 0.5) / 100  endif endif  }
-	"Calculate TDV - NatGas - Battery"	Proj:RunResults[14]:PropNatGasTDV		= {	0  }
-	"Calculate TDV - Other  - Battery"	Proj:RunResults[14]:PropOtherTDV			= {	0  }
-	"Calculate TDV - TOTAL  - Battery"	Proj:RunResults[14]:ProposedTDV[1]		= {	LocalRef( RunResults[14]:PropElecTDV[1] )   }
-	"Calculate Elec Demand  - Battery"	Proj:RunResults[14]:PropElecDemand[1]	= {	if (LocalRef( RunResults[14]:PropElecEnergy[1]		) = 0) then  0
-			 			  																						else  ApplyHourlyResultMultipliers( "none", "PeakDemandTable", 1, 1, "none", 0, 0, RunID, "MtrElec", "BT" ) / 3.412  endif  }
+   "Calculate TDV - NatGas - Battery"  Proj:RunResults[14]:PropNatGasTDV      = {   0  }
+   "Calculate TDV - Other  - Battery"  Proj:RunResults[14]:PropOtherTDV       = {   0  }
+   "Calculate TDV - TOTAL  - Battery"  Proj:RunResults[14]:ProposedTDV[1]     = {   LocalRef( RunResults[14]:PropElecTDV[1] )   }
+   "Calculate Elec Demand  - Battery"  Proj:RunResults[14]:PropElecDemand[1]  = {   if (LocalRef( RunResults[14]:PropElecEnergy[1]      ) = 0) then  0
+                                                                                    else  ApplyHourlyResultMultipliers( "none", "PeakDemandTable", 1, 1, "none", 0, 0, RunID, "MtrElec", "BT" ) / 3.412  endif  }
 
   ; Compliance Total
 	"Calculate TDV - Elec   - Comp Ttl"	Proj:RunResults[11]:PropElecTDV[1]		= {	RunResults[1]:PropElecTDV[1]    + RunResults[2]:PropElecTDV[1]    + RunResults[3]:PropElecTDV[1]    + RunResults[4]:PropElecTDV[1]    + RunResults[5]:PropElecTDV[1]     }
@@ -5637,10 +5639,10 @@ RULELIST "CARes_ProposedTDVResults_N" 1 0 0 1
   ; PV
 	"Calculate TDV - Elec   - N-PV"			Proj:RunResultsN[13]:PropElecTDV[1]		= {	if (LocalRef( RunResultsN[13]:PropElecEnergy[1]		) > -0.0001) then  0
       else if (CommunitySolarProjID > 0 .AND. IfValidAnd( CmntySlr_TDV < 0 )) then  CmntySlr_TDV * PVWDCSizeMultiplier[1] / CondFloorArea
-		else if (IfValidAnd( NetEnergyMeteringTDVAdj != 0))
+		else if (IfValidAnd( NetEnergyMeteringTDVAdj != 0) .OR. IfValidAnd( HrlyNEMTableCol > 0 ))
       then  if (LocalRef( RunResultsN[14]:PropElecEnergy[1] ) = 0)
-            then  int( (100 * ApplyHourlyResultMultipliers_NEM( "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV", "Tot", NetEnergyMeteringTDVAdj          ) / CondFloorArea) + 0.5) / 100
-            else  int( (100 * ApplyHourlyResultMultipliers_NEM( "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV", "Tot", NetEnergyMeteringTDVAdj, 1, "BT" ) / CondFloorArea) + 0.5) / 100  endif
+            then  int( (100 * ApplyHourlyResultMultipliers_NEM( "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV", "Tot", NetEnergyMeteringTDVAdj, HrlyNEMTableName, HrlyNEMTableCol          ) / CondFloorArea) + 0.5) / 100
+            else  int( (100 * ApplyHourlyResultMultipliers_NEM( "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV", "Tot", NetEnergyMeteringTDVAdj, HrlyNEMTableName, HrlyNEMTableCol, 1, "BT" ) / CondFloorArea) + 0.5) / 100  endif
       else        int( (100 * ApplyHourlyResultMultipliers(     "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV" ) / CondFloorArea) + 0.5) / 100  endif endif endif  }
 	"Calculate TDV - NatGas - N-PV"			Proj:RunResultsN[13]:PropNatGasTDV		= {	0  }
 	"Calculate TDV - Other  - N-PV"			Proj:RunResultsN[13]:PropOtherTDV		= {	0  }
@@ -5653,10 +5655,10 @@ RULELIST "CARes_ProposedTDVResults_N" 1 0 0 1
 
   ; Battery
 	"Calculate TDV - Elec   - N-Battery"	Proj:RunResultsN[14]:PropElecTDV[1]		= {	if (LocalRef( RunResultsN[14]:PropElecEnergy[1]		) < 0.0001) then  0
-		else if (IfValidAnd( NetEnergyMeteringTDVAdj != 0))
+		else if (IfValidAnd( NetEnergyMeteringTDVAdj != 0) .OR. IfValidAnd( HrlyNEMTableCol > 0 ))
       then  if (LocalRef( RunResultsN[13]:PropElecEnergy[1] ) = 0)
-            then  int( (100 * ApplyHourlyResultMultipliers_NEM( "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT", "Tot", NetEnergyMeteringTDVAdj          ) / CondFloorArea) + 0.5) / 100
-            else  int( (100 * ApplyHourlyResultMultipliers_NEM( "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT", "Tot", NetEnergyMeteringTDVAdj, 1, "PV" ) / CondFloorArea) + 0.5) / 100  endif
+            then  int( (100 * ApplyHourlyResultMultipliers_NEM( "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT", "Tot", NetEnergyMeteringTDVAdj, HrlyNEMTableName, HrlyNEMTableCol          ) / CondFloorArea) + 0.5) / 100
+            else  int( (100 * ApplyHourlyResultMultipliers_NEM( "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT", "Tot", NetEnergyMeteringTDVAdj, HrlyNEMTableName, HrlyNEMTableCol, 1, "PV" ) / CondFloorArea) + 0.5) / 100  endif
       else        int( (100 * ApplyHourlyResultMultipliers(     "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT" ) / CondFloorArea) + 0.5) / 100  endif endif  }
 	"Calculate TDV - NatGas - N-Battery"	Proj:RunResultsN[14]:PropNatGasTDV		= {	0  }
 	"Calculate TDV - Other  - N-Battery"	Proj:RunResultsN[14]:PropOtherTDV		= {	0  }
@@ -5852,10 +5854,10 @@ RULELIST "CARes_ProposedTDVResults_E" 1 0 0 1
   ; PV
 	"Calculate TDV - Elec   - E-PV"			Proj:RunResultsE[13]:PropElecTDV[1]		= {	if (LocalRef( RunResultsE[13]:PropElecEnergy[1]		) > -0.0001) then  0
       else if (CommunitySolarProjID > 0 .AND. IfValidAnd( CmntySlr_TDV < 0 )) then  CmntySlr_TDV * PVWDCSizeMultiplier[1] / CondFloorArea
-		else if (IfValidAnd( NetEnergyMeteringTDVAdj != 0))
+		else if (IfValidAnd( NetEnergyMeteringTDVAdj != 0) .OR. IfValidAnd( HrlyNEMTableCol > 0 ))
       then  if (LocalRef( RunResultsE[14]:PropElecEnergy[1] ) = 0)
-            then  int( (100 * ApplyHourlyResultMultipliers_NEM( "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV", "Tot", NetEnergyMeteringTDVAdj          ) / CondFloorArea) + 0.5) / 100
-            else  int( (100 * ApplyHourlyResultMultipliers_NEM( "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV", "Tot", NetEnergyMeteringTDVAdj, 1, "BT" ) / CondFloorArea) + 0.5) / 100  endif
+            then  int( (100 * ApplyHourlyResultMultipliers_NEM( "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV", "Tot", NetEnergyMeteringTDVAdj, HrlyNEMTableName, HrlyNEMTableCol          ) / CondFloorArea) + 0.5) / 100
+            else  int( (100 * ApplyHourlyResultMultipliers_NEM( "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV", "Tot", NetEnergyMeteringTDVAdj, HrlyNEMTableName, HrlyNEMTableCol, 1, "BT" ) / CondFloorArea) + 0.5) / 100  endif
       else        int( (100 * ApplyHourlyResultMultipliers(     "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV" ) / CondFloorArea) + 0.5) / 100  endif endif endif  }
 	"Calculate TDV - NatGas - E-PV"			Proj:RunResultsE[13]:PropNatGasTDV		= {	0  }
 	"Calculate TDV - Other  - E-PV"			Proj:RunResultsE[13]:PropOtherTDV		= {	0  }
@@ -5866,10 +5868,10 @@ RULELIST "CARes_ProposedTDVResults_E" 1 0 0 1
 
   ; Battery
 	"Calculate TDV - Elec   - E-Battery"	Proj:RunResultsE[14]:PropElecTDV[1]		= {	if (LocalRef( RunResultsE[14]:PropElecEnergy[1]		) < 0.0001) then  0
-		else if (IfValidAnd( NetEnergyMeteringTDVAdj != 0))
+		else if (IfValidAnd( NetEnergyMeteringTDVAdj != 0) .OR. IfValidAnd( HrlyNEMTableCol > 0 ))
       then  if (LocalRef( RunResultsE[13]:PropElecEnergy[1] ) = 0)
-            then  int( (100 * ApplyHourlyResultMultipliers_NEM( "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT", "Tot", NetEnergyMeteringTDVAdj          ) / CondFloorArea) + 0.5) / 100
-            else  int( (100 * ApplyHourlyResultMultipliers_NEM( "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT", "Tot", NetEnergyMeteringTDVAdj, 1, "PV" ) / CondFloorArea) + 0.5) / 100  endif
+            then  int( (100 * ApplyHourlyResultMultipliers_NEM( "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT", "Tot", NetEnergyMeteringTDVAdj, HrlyNEMTableName, HrlyNEMTableCol          ) / CondFloorArea) + 0.5) / 100
+            else  int( (100 * ApplyHourlyResultMultipliers_NEM( "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT", "Tot", NetEnergyMeteringTDVAdj, HrlyNEMTableName, HrlyNEMTableCol, 1, "PV" ) / CondFloorArea) + 0.5) / 100  endif
       else        int( (100 * ApplyHourlyResultMultipliers(     "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT" ) / CondFloorArea) + 0.5) / 100  endif endif  }
 	"Calculate TDV - NatGas - E-Battery"	Proj:RunResultsE[14]:PropNatGasTDV		= {	0  }
 	"Calculate TDV - Other  - E-Battery"	Proj:RunResultsE[14]:PropOtherTDV		= {	0  }
@@ -6065,10 +6067,10 @@ RULELIST "CARes_ProposedTDVResults_S" 1 0 0 1
   ; PV
 	"Calculate TDV - Elec   - S-PV"			Proj:RunResultsS[13]:PropElecTDV[1]		= {	if (LocalRef( RunResultsS[13]:PropElecEnergy[1]		) > -0.0001) then  0
       else if (CommunitySolarProjID > 0 .AND. IfValidAnd( CmntySlr_TDV < 0 )) then  CmntySlr_TDV * PVWDCSizeMultiplier[1] / CondFloorArea
-		else if (IfValidAnd( NetEnergyMeteringTDVAdj != 0))
+		else if (IfValidAnd( NetEnergyMeteringTDVAdj != 0) .OR. IfValidAnd( HrlyNEMTableCol > 0 ))
       then  if (LocalRef( RunResultsS[14]:PropElecEnergy[1] ) = 0)
-            then  int( (100 * ApplyHourlyResultMultipliers_NEM( "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV", "Tot", NetEnergyMeteringTDVAdj          ) / CondFloorArea) + 0.5) / 100
-            else  int( (100 * ApplyHourlyResultMultipliers_NEM( "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV", "Tot", NetEnergyMeteringTDVAdj, 1, "BT" ) / CondFloorArea) + 0.5) / 100  endif
+            then  int( (100 * ApplyHourlyResultMultipliers_NEM( "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV", "Tot", NetEnergyMeteringTDVAdj, HrlyNEMTableName, HrlyNEMTableCol          ) / CondFloorArea) + 0.5) / 100
+            else  int( (100 * ApplyHourlyResultMultipliers_NEM( "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV", "Tot", NetEnergyMeteringTDVAdj, HrlyNEMTableName, HrlyNEMTableCol, 1, "BT" ) / CondFloorArea) + 0.5) / 100  endif
       else        int( (100 * ApplyHourlyResultMultipliers(     "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV" ) / CondFloorArea) + 0.5) / 100  endif endif endif  }
 	"Calculate TDV - NatGas - S-PV"			Proj:RunResultsS[13]:PropNatGasTDV		= {	0  }
 	"Calculate TDV - Other  - S-PV"			Proj:RunResultsS[13]:PropOtherTDV		= {	0  }
@@ -6079,10 +6081,10 @@ RULELIST "CARes_ProposedTDVResults_S" 1 0 0 1
 
   ; Battery
 	"Calculate TDV - Elec   - S-Battery"	Proj:RunResultsS[14]:PropElecTDV[1]		= {	if (LocalRef( RunResultsS[14]:PropElecEnergy[1]		) < 0.0001) then  0
-		else if (IfValidAnd( NetEnergyMeteringTDVAdj != 0))
+		else if (IfValidAnd( NetEnergyMeteringTDVAdj != 0) .OR. IfValidAnd( HrlyNEMTableCol > 0 ))
       then  if (LocalRef( RunResultsS[13]:PropElecEnergy[1] ) = 0)
-            then  int( (100 * ApplyHourlyResultMultipliers_NEM( "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT", "Tot", NetEnergyMeteringTDVAdj          ) / CondFloorArea) + 0.5) / 100
-            else  int( (100 * ApplyHourlyResultMultipliers_NEM( "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT", "Tot", NetEnergyMeteringTDVAdj, 1, "PV" ) / CondFloorArea) + 0.5) / 100  endif
+            then  int( (100 * ApplyHourlyResultMultipliers_NEM( "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT", "Tot", NetEnergyMeteringTDVAdj, HrlyNEMTableName, HrlyNEMTableCol          ) / CondFloorArea) + 0.5) / 100
+            else  int( (100 * ApplyHourlyResultMultipliers_NEM( "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT", "Tot", NetEnergyMeteringTDVAdj, HrlyNEMTableName, HrlyNEMTableCol, 1, "PV" ) / CondFloorArea) + 0.5) / 100  endif
       else        int( (100 * ApplyHourlyResultMultipliers(     "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT" ) / CondFloorArea) + 0.5) / 100  endif endif  }
 	"Calculate TDV - NatGas - S-Battery"	Proj:RunResultsS[14]:PropNatGasTDV		= {	0  }
 	"Calculate TDV - Other  - S-Battery"	Proj:RunResultsS[14]:PropOtherTDV		= {	0  }
@@ -6278,10 +6280,10 @@ RULELIST "CARes_ProposedTDVResults_W" 1 0 0 1
   ; PV
 	"Calculate TDV - Elec   - W-PV"			Proj:RunResultsW[13]:PropElecTDV[1]		= {	if (LocalRef( RunResultsW[13]:PropElecEnergy[1]		) > -0.0001) then  0
       else if (CommunitySolarProjID > 0 .AND. IfValidAnd( CmntySlr_TDV < 0 )) then  CmntySlr_TDV * PVWDCSizeMultiplier[1] / CondFloorArea
-		else if (IfValidAnd( NetEnergyMeteringTDVAdj != 0))
+		else if (IfValidAnd( NetEnergyMeteringTDVAdj != 0) .OR. IfValidAnd( HrlyNEMTableCol > 0 ))
       then  if (LocalRef( RunResultsW[14]:PropElecEnergy[1] ) = 0)
-            then  int( (100 * ApplyHourlyResultMultipliers_NEM( "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV", "Tot", NetEnergyMeteringTDVAdj          ) / CondFloorArea) + 0.5) / 100
-            else  int( (100 * ApplyHourlyResultMultipliers_NEM( "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV", "Tot", NetEnergyMeteringTDVAdj, 1, "BT" ) / CondFloorArea) + 0.5) / 100  endif
+            then  int( (100 * ApplyHourlyResultMultipliers_NEM( "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV", "Tot", NetEnergyMeteringTDVAdj, HrlyNEMTableName, HrlyNEMTableCol          ) / CondFloorArea) + 0.5) / 100
+            else  int( (100 * ApplyHourlyResultMultipliers_NEM( "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV", "Tot", NetEnergyMeteringTDVAdj, HrlyNEMTableName, HrlyNEMTableCol, 1, "BT" ) / CondFloorArea) + 0.5) / 100  endif
       else        int( (100 * ApplyHourlyResultMultipliers(     "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV" ) / CondFloorArea) + 0.5) / 100  endif endif endif  }
 	"Calculate TDV - NatGas - W-PV"			Proj:RunResultsW[13]:PropNatGasTDV		= {	0  }
 	"Calculate TDV - Other  - W-PV"			Proj:RunResultsW[13]:PropOtherTDV		= {	0  }
@@ -6292,10 +6294,10 @@ RULELIST "CARes_ProposedTDVResults_W" 1 0 0 1
 
   ; Battery
 	"Calculate TDV - Elec   - W-Battery"	Proj:RunResultsW[14]:PropElecTDV[1]		= {	if (LocalRef( RunResultsW[14]:PropElecEnergy[1]		) < 0.0001) then  0
-		else if (IfValidAnd( NetEnergyMeteringTDVAdj != 0))
+		else if (IfValidAnd( NetEnergyMeteringTDVAdj != 0) .OR. IfValidAnd( HrlyNEMTableCol > 0 ))
       then  if (LocalRef( RunResultsW[13]:PropElecEnergy[1] ) = 0)
-            then  int( (100 * ApplyHourlyResultMultipliers_NEM( "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT", "Tot", NetEnergyMeteringTDVAdj          ) / CondFloorArea) + 0.5) / 100
-            else  int( (100 * ApplyHourlyResultMultipliers_NEM( "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT", "Tot", NetEnergyMeteringTDVAdj, 1, "PV" ) / CondFloorArea) + 0.5) / 100  endif
+            then  int( (100 * ApplyHourlyResultMultipliers_NEM( "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT", "Tot", NetEnergyMeteringTDVAdj, HrlyNEMTableName, HrlyNEMTableCol          ) / CondFloorArea) + 0.5) / 100
+            else  int( (100 * ApplyHourlyResultMultipliers_NEM( "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT", "Tot", NetEnergyMeteringTDVAdj, HrlyNEMTableName, HrlyNEMTableCol, 1, "PV" ) / CondFloorArea) + 0.5) / 100  endif
       else        int( (100 * ApplyHourlyResultMultipliers(     "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT" ) / CondFloorArea) + 0.5) / 100  endif endif  }
 	"Calculate TDV - NatGas - W-Battery"	Proj:RunResultsW[14]:PropNatGasTDV		= {	0  }
 	"Calculate TDV - Other  - W-Battery"	Proj:RunResultsW[14]:PropOtherTDV		= {	0  }
@@ -6771,10 +6773,10 @@ RULELIST "CARes_StandardTDVResults" 1 0 0 1
   ; PV
    ; mods to calc NEM-adjusted PV TDV (StdElecTDV) & Elec Demand (StdElecDemand) for 2019 analysis
 	"Calculate TDV - Elec   - PV"			Proj:RunResults[13]:StdElecTDV			= {	if (LocalRef( RunResults[13]:StdElecEnergy		) > -0.0001) then  0
-		else if (IfValidAnd( NetEnergyMeteringTDVAdj != 0))
+		else if (IfValidAnd( NetEnergyMeteringTDVAdj != 0) .OR. IfValidAnd( HrlyNEMTableCol > 0 ))
       then  if (LocalRef( RunResults[14]:PropElecEnergy[1] ) = 0)
-            then  int( (100 * ApplyHourlyResultMultipliers_NEM( "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV", "Tot", NetEnergyMeteringTDVAdj          ) / CondFloorArea) + 0.5) / 100
-            else  int( (100 * ApplyHourlyResultMultipliers_NEM( "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV", "Tot", NetEnergyMeteringTDVAdj, 1, "BT" ) / CondFloorArea) + 0.5) / 100  endif
+            then  int( (100 * ApplyHourlyResultMultipliers_NEM( "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV", "Tot", NetEnergyMeteringTDVAdj, HrlyNEMTableName, HrlyNEMTableCol          ) / CondFloorArea) + 0.5) / 100
+            else  int( (100 * ApplyHourlyResultMultipliers_NEM( "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV", "Tot", NetEnergyMeteringTDVAdj, HrlyNEMTableName, HrlyNEMTableCol, 1, "BT" ) / CondFloorArea) + 0.5) / 100  endif
       else        int( (100 * ApplyHourlyResultMultipliers(     "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV" ) / CondFloorArea) + 0.5) / 100  endif endif  }
 	"Calculate TDV - NatGas - PV"			Proj:RunResults[13]:StdNatGasTDV			= {	0  }
 	"Calculate TDV - Other  - PV"			Proj:RunResults[13]:StdOtherTDV			= {	0  }
@@ -6785,10 +6787,10 @@ RULELIST "CARes_StandardTDVResults" 1 0 0 1
   ; Battery
    ; mods to calc NEM-adjusted Battery TDV (StdElecTDV) & Elec Demand (StdElecDemand) for 2019 analysis
 	"Calculate TDV - Elec   - Battery"	Proj:RunResults[14]:StdElecTDV			= {	if (LocalRef( RunResults[14]:StdElecEnergy		) < 0.0001) then  0
-		else if (IfValidAnd( NetEnergyMeteringTDVAdj != 0))
+		else if (IfValidAnd( NetEnergyMeteringTDVAdj != 0) .OR. IfValidAnd( HrlyNEMTableCol > 0 ))
       then  if (LocalRef( RunResults[13]:PropElecEnergy[1] ) = 0)
-            then  int( (100 * ApplyHourlyResultMultipliers_NEM( "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT", "Tot", NetEnergyMeteringTDVAdj          ) / CondFloorArea) + 0.5) / 100
-            else  int( (100 * ApplyHourlyResultMultipliers_NEM( "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT", "Tot", NetEnergyMeteringTDVAdj, 1, "PV" ) / CondFloorArea) + 0.5) / 100  endif
+            then  int( (100 * ApplyHourlyResultMultipliers_NEM( "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT", "Tot", NetEnergyMeteringTDVAdj, HrlyNEMTableName, HrlyNEMTableCol          ) / CondFloorArea) + 0.5) / 100
+            else  int( (100 * ApplyHourlyResultMultipliers_NEM( "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT", "Tot", NetEnergyMeteringTDVAdj, HrlyNEMTableName, HrlyNEMTableCol, 1, "PV" ) / CondFloorArea) + 0.5) / 100  endif
       else        int( (100 * ApplyHourlyResultMultipliers(     "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT" ) / CondFloorArea) + 0.5) / 100  endif endif  }
 	"Calculate TDV - NatGas - Battery"	Proj:RunResults[14]:StdNatGasTDV			= {	0  }
 	"Calculate TDV - Other  - Battery"	Proj:RunResults[14]:StdOtherTDV			= {	0  }
@@ -7342,10 +7344,10 @@ RULELIST "CARes_StandardTDVResults_NESW" 1 0 0 1
   ; PV
    ; mods to calc NEM-adjusted PV TDV (StdElecTDV) & Elec Demand (StdElecDemand) for 2019 analysis
 	"Calculate TDV - Elec   - N-PV"			Proj:RunResultsN[13]:StdElecTDV			= {	if (LocalRef( RunResultsN[13]:StdElecEnergy		) > -0.0001) then  0
-		else if (IfValidAnd( NetEnergyMeteringTDVAdj != 0))
+		else if (IfValidAnd( NetEnergyMeteringTDVAdj != 0) .OR. IfValidAnd( HrlyNEMTableCol > 0 ))
       then  if (LocalRef( RunResultsN[14]:PropElecEnergy[1] ) = 0)
-            then  int( (100 * ApplyHourlyResultMultipliers_NEM( "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV", "Tot", NetEnergyMeteringTDVAdj          ) / CondFloorArea) + 0.5) / 100
-            else  int( (100 * ApplyHourlyResultMultipliers_NEM( "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV", "Tot", NetEnergyMeteringTDVAdj, 1, "BT" ) / CondFloorArea) + 0.5) / 100  endif
+            then  int( (100 * ApplyHourlyResultMultipliers_NEM( "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV", "Tot", NetEnergyMeteringTDVAdj, HrlyNEMTableName, HrlyNEMTableCol          ) / CondFloorArea) + 0.5) / 100
+            else  int( (100 * ApplyHourlyResultMultipliers_NEM( "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV", "Tot", NetEnergyMeteringTDVAdj, HrlyNEMTableName, HrlyNEMTableCol, 1, "BT" ) / CondFloorArea) + 0.5) / 100  endif
       else        int( (100 * ApplyHourlyResultMultipliers(     "PVTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "PV" ) / CondFloorArea) + 0.5) / 100  endif endif  }
 	"Calculate TDV - NatGas - N-PV"			Proj:RunResultsN[13]:StdNatGasTDV		= {	0  }
 	"Calculate TDV - Other  - N-PV"			Proj:RunResultsN[13]:StdOtherTDV			= {	0  }
@@ -7356,10 +7358,10 @@ RULELIST "CARes_StandardTDVResults_NESW" 1 0 0 1
   ; Battery
    ; mods to calc NEM-adjusted Battery TDV (StdElecTDV) & Elec Demand (StdElecDemand) for 2019 analysis
 	"Calculate TDV - Elec   - N-Battery"	Proj:RunResultsN[14]:StdElecTDV			= {	if (LocalRef( RunResultsN[14]:StdElecEnergy		) < 0.0001) then  0
-		else if (IfValidAnd( NetEnergyMeteringTDVAdj != 0))
+		else if (IfValidAnd( NetEnergyMeteringTDVAdj != 0) .OR. IfValidAnd( HrlyNEMTableCol > 0 ))
       then  if (LocalRef( RunResultsN[13]:PropElecEnergy[1] ) = 0)
-            then  int( (100 * ApplyHourlyResultMultipliers_NEM( "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT", "Tot", NetEnergyMeteringTDVAdj          ) / CondFloorArea) + 0.5) / 100
-            else  int( (100 * ApplyHourlyResultMultipliers_NEM( "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT", "Tot", NetEnergyMeteringTDVAdj, 1, "PV" ) / CondFloorArea) + 0.5) / 100  endif
+            then  int( (100 * ApplyHourlyResultMultipliers_NEM( "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT", "Tot", NetEnergyMeteringTDVAdj, HrlyNEMTableName, HrlyNEMTableCol          ) / CondFloorArea) + 0.5) / 100
+            else  int( (100 * ApplyHourlyResultMultipliers_NEM( "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT", "Tot", NetEnergyMeteringTDVAdj, HrlyNEMTableName, HrlyNEMTableCol, 1, "PV" ) / CondFloorArea) + 0.5) / 100  endif
       else        int( (100 * ApplyHourlyResultMultipliers(     "BTTDV", TDVTableName, ((ClimateZone-1) * 3) + 1, TDVMult_Elec, TDVSecTbl_Elec, ClimateZone, TDVSecMult_Elec, RunID, "MtrElec", "BT" ) / CondFloorArea) + 0.5) / 100  endif endif  }
 	"Calculate TDV - NatGas - N-Battery"	Proj:RunResultsN[14]:StdNatGasTDV		= {	0  }
 	"Calculate TDV - Other  - N-Battery"	Proj:RunResultsN[14]:StdOtherTDV			= {	0  }
