@@ -868,6 +868,16 @@ RULELIST "CSE_SimulationPrep_LoadMeters" 1 0 0 1
       {  if (IfValidAnd( LdPassingOnly > 0 )) then  DeleteComp()
          else  UNCHANGED  endif  }
 
+   ; rules to facilitate load submeters (in support of ResZnGrp:Mult > 1) - SAC 05/26/23 (tic #3392)
+   ;"dbg" Proj:Action = { if (SumAll( FluidSys:CSELoadPassing ) > 0) then  PostMessageToLog( "run %s: about to create FluidSys LoadMeter(s)", RunAbbrev )  else UNCHANGED endif }   ; debugging - SAC 05/26/23 (tic #3392)
+   "Init FluidSys:NumResZnsByZnGrpMult[*]"  for:#ZGM=(1to20)  FluidSys:NumResZnsByZnGrpMult[#ZGM] = { 0 }
+   "Increment FluidSys:NumResZnsByZnGrpMult by ResZn"       for:#ZGM=(2to20)  ResZn:CWFluidSysRef:NumResZnsByZnGrpMult[#ZGM] =
+      {  if (IfValidAnd( Mult = #ZGM ) .AND. IfValidAnd( CWFluidSysRef:CSELoadPassing > 0 )) then  CWFluidSysRef:NumResZnsByZnGrpMult[#ZGM] + 1  else  UNCHANGED  endif  }
+   "Increment FluidSys:NumResZnsByZnGrpMult by ResOtherZn"  for:#ZGM=(2to20)  ResOtherZn:CWFluidSysRef:NumResZnsByZnGrpMult[#ZGM] =
+      {  if (IfValidAnd( Mult = #ZGM ) .AND. IfValidAnd( CWFluidSysRef:CSELoadPassing > 0 )) then  CWFluidSysRef:NumResZnsByZnGrpMult[#ZGM] + 1  else  UNCHANGED  endif  }
+   "Create FluidSys cseLOADMETER submeters"  for:#ZGM=(2to20)  FluidSys:CSE_LoadSubMeters[#ZGM] = 
+      {  if (NumResZnsByZnGrpMult[#ZGM] > 0) then  CreateComp( cseLOADMETER, Format( "ldsubmtr-%s ZGM %g", substr( Name, 0, 46 ), #ZGM ) )  else  UNCHANGED  endif  }
+
    "call rulelist to setup cseLOADMETER for each applicable FluidSys"   FluidSys:Action =
       {  if (IfValidAnd( CSELoadPassing > 0 ))
          then  EvalRulelist( "CSE_SimulationPrep_LoadMeters_FluidSys", 1 )
@@ -876,6 +886,13 @@ RULELIST "CSE_SimulationPrep_LoadMeters" 1 0 0 1
       {  if (SumAll( FluidSys:CSELoadMeterIdx ) > 0)
          then  EvalRulelist( "CSE_SimulationPrep_LoadMeters_Export" )
          else  UNCHANGED  endif  }
+
+   ; rules to add load submeters to the main load meter by FluidSys - SAC 05/26/23 (tic #3392)
+   "add FluidSys:CSE_LoadMeter submeters"       for:#ZGM=(2to20)  FluidSys:CSE_LoadMeter:lmtSubMeters[1] =
+      {  if (NumResZnsByZnGrpMult[#ZGM] > 0) then  SetNextArrayElement( CSE_LoadSubMeters[#ZGM]:Name )  else  UNCHANGED  endif  }
+   "add FluidSys:CSE_LoadMeter submeter mults"  for:#ZGM=(2to20)  FluidSys:CSE_LoadMeter:lmtSubMeterMults[1] =
+      {  if (NumResZnsByZnGrpMult[#ZGM] > 0) then  SetNextArrayElement( #ZGM )  else  UNCHANGED  endif  }
+
 ; moved call to evaluate to end of ANNUAL transform, so that done before SDD XML file - SAC 03/19/22
 ;   "call rulelist to setup ProcLds for each applicable FluidSys"   FluidSys:Action =   ; SAC 03/19/22
 ;      {  if (IfValidAnd( CSELoadPassing > 0 ))
