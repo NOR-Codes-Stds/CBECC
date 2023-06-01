@@ -32,32 +32,6 @@
 // -------------------------------------------------------------------------
 //  
 
-
-// -----------------------------------------------------------------------------
-// Data model structure QC rules
-RULE NEW HtRcvry:HtRcvryIdx
-  DATATYPE
-    Integer
-  LONGFORM
-    HeatRecoveryIndex
-  INPUTCLASS 
-    NotInput
-  DEFAULT
-    ChildIndex( 1 ) 
-ENDRULE
-RULE AirSys:HtRcvryRef
-  DESCRIPTION
-    "Reference to the AirSystem HtRcvry object."
-  INPUTCLASS
-    NotInput
-  DEFAULT
-    if( LocalCompAssigned( HtRcvryRef ) = 0 .AND.
-        IfValidAnd( MaxChild( HtRcvry:HtRcvryIdx ) > 0 ) )
-    then ChildRef( HtRcvry:Name, MaxChild( HtRcvry:HtRcvryIdx ) )
-    else UNCHANGED
-    endif
-ENDRULE
-
 // Add heat recovery to standard design when required
 // See ticket 3317
 RULE OACtrl:HtRcvryRef
@@ -72,6 +46,41 @@ RULE OACtrl:HtRcvryRef
     endif
 ENDRULE
 
+// -----------------------------------------------------------------------------
+// Data model structure QC rules
+RULE NEW HtRcvry:HtRcvryIdx
+  DATATYPE
+    Integer
+  LONGFORM
+    HeatRecoveryIndex
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    ChildIndex( 1 ) 
+  SIZING_PROPOSED
+    if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+    then 1
+    else UNCHANGED
+    endif
+ENDRULE
+RULE AirSys:HtRcvryRef
+  DESCRIPTION
+    "Reference to the AirSystem HtRcvry object."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( LocalCompAssigned( HtRcvryRef ) = 0 .AND.
+        IfValidAnd( MaxChild( HtRcvry:HtRcvryIdx ) > 0 ) )
+    then ChildRef( HtRcvry:Name, MaxChild( HtRcvry:HtRcvryIdx ) )
+    else UNCHANGED
+    endif
+  SIZING_PROPOSED
+    if( IfValidAnd( IsPropVentOnlySys > 0 ) )
+    then ChildRef( HtRcvry:Name, MaxChild( HtRcvry:HtRcvryIdx ) )
+    else UNCHANGED
+    endif
+ENDRULE
+
 RULE NEW AirSys:HasHtRcvry
   DATATYPE
     Integer
@@ -82,6 +91,11 @@ RULE NEW AirSys:HasHtRcvry
   INPUTCLASS
     NotInput
   DEFAULT
+    if( LocalCompAssigned( HtRcvryRef ) > 0 )
+    then 1
+    else 0
+    endif
+  SIZING_PROPOSED
     if( LocalCompAssigned( HtRcvryRef ) > 0 )
     then 1
     else 0
@@ -1308,10 +1322,12 @@ RULE HtRcvry:Type
   DEFAULT
     "Plate"
   SIZING
-    if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+    if( AirSys:IsBaseHlthCareSys > 0 )
+    then "Plate"
+    else if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
     then PropVentOnlyZnSysRef:HXType
     else Type
-    endif
+    endif endif
 ENDRULE
 
 RULE HtRcvry:RcvryType
@@ -1351,13 +1367,14 @@ RULE HtRcvry:RcvryType
     else UNCHANGED
     endif 
   SIZING
-    if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 )  )
+    if( AirSys:IsBaseHlthCareSys > 0 )
+    then "SensibleOnly"
+    else if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 )  )
     then PropVentOnlyZnSysRef:RcvryType
-    else
-    if( IfValidAnd( HtRcvryCertification = "HVI" ) )
+    else if( IfValidAnd( HtRcvryCertification = "HVI" ) )
     then "SensibleOnly"
     else RcvryType
-    endif endif
+    endif endif endif
 //ANNUAL
 // Standard design heat recovery is SensibleOnly. Defined in libary object. See ticket 3317
 ENDRULE
@@ -1419,10 +1436,12 @@ RULE HtRcvry:HasHXBypass
 ;     else UNCHANGED
 ;     endif endif
   SIZING
-    if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+    if( AirSys:IsBaseHlthCareSys > 0 )
+    then "Yes"
+    else if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
     then PropVentOnlyZnSysRef:HasHXBypass
     else HasHXBypass
-    endif
+    endif endif
 //ANNUAL
 // Standard design HX has bypass. Defined in libary object. See ticket 3317
 ENDRULE
@@ -1587,17 +1606,18 @@ RULE HtRcvry:HtgSensEff100
     else 0
     endif endif
   SIZING
-    if( RcvryType = "Total" .OR. RcvryType = "SensibleOnly" )
+    if( AirSys:IsBaseHlthCareSys > 0 )
+    then 0.60
+    else if( RcvryType = "Total" .OR. RcvryType = "SensibleOnly" )
     then
       if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
       then PropVentOnlyZnSysRef:HtgSensEff100 // Already adjusted at ZnSys
-      else
-      if( IfValidAnd( HtRcvryCertification = "HVI" ) )
+      else if( IfValidAnd( HtRcvryCertification = "HVI" ) )
       then HtRcvryEffSim * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
       else HtgSensEff100 * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
       endif endif
     else 0
-    endif
+    endif endif
 ENDRULE
 RULE HtRcvry:HtgLatEff100
   DESCRIPTION
@@ -1613,14 +1633,16 @@ RULE HtRcvry:HtgLatEff100
     else 0
     endif endif
   SIZING
-    if( RcvryType = "Total" .OR. RcvryType = "LatentOnly" )
+    if( AirSys:IsBaseHlthCareSys > 0 )
+    then 0
+    else if( RcvryType = "Total" .OR. RcvryType = "LatentOnly" )
     then
       if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
       then PropVentOnlyZnSysRef:HtgLatEff100 // Already adjusted at ZnSys
       else HtgLatEff100 * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
       endif
     else 0
-    endif
+    endif endif
 ENDRULE
 RULE HtRcvry:HtgTotEff100
   DESCRIPTION
@@ -1638,13 +1660,14 @@ RULE HtRcvry:HtgTotEff100
     else 0
     endif endif endif
   SIZING
-    if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+    if( AirSys:IsBaseHlthCareSys > 0 )
+    then 0.60
+    else if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
     then PropVentOnlyZnSysRef:HtgTotEff100 // Already adjusted at ZnSys
-    else
-    if( IfValidAnd( HtRcvryCertification = "HVI" ) )
+    else if( IfValidAnd( HtRcvryCertification = "HVI" ) )
     then UNDEFINED
     else HtgTotEff100 * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
-    endif endif
+    endif endif endif
 ENDRULE
 
 // 100% Flow - Cooling
@@ -1662,17 +1685,18 @@ RULE HtRcvry:ClgSensEff100
     else 0
     endif endif
   SIZING
-    if( RcvryType = "Total" .OR. RcvryType = "SensibleOnly" )
+    if( AirSys:IsBaseHlthCareSys > 0 )
+    then 0.60
+    else if( RcvryType = "Total" .OR. RcvryType = "SensibleOnly" )
     then
       if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
       then PropVentOnlyZnSysRef:ClgSensEff100 // Already adjusted at ZnSys
-      else
-      if( IfValidAnd( HtRcvryCertification = "HVI" ) )
+      else if( IfValidAnd( HtRcvryCertification = "HVI" ) )
       then HtRcvryEffSim * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
       else ClgSensEff100 * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
       endif endif
     else 0
-    endif
+    endif endif
 ENDRULE
 RULE HtRcvry:ClgLatEff100
   DESCRIPTION
@@ -1688,14 +1712,16 @@ RULE HtRcvry:ClgLatEff100
     else 0
     endif endif
   SIZING
-    if( RcvryType = "Total" .OR. RcvryType = "LatentOnly" )
+    if( AirSys:IsBaseHlthCareSys > 0 )
+    then 0
+    else if( RcvryType = "Total" .OR. RcvryType = "LatentOnly" )
     then
       if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
       then PropVentOnlyZnSysRef:ClgLatEff100 // Already adjusted at ZnSys
       else ClgLatEff100 * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
       endif
     else 0
-    endif
+    endif endif
 ENDRULE
 RULE HtRcvry:ClgTotEff100
   DESCRIPTION
@@ -1713,13 +1739,14 @@ RULE HtRcvry:ClgTotEff100
     else 0
     endif endif endif
   SIZING
-    if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+    if( AirSys:IsBaseHlthCareSys > 0 )
+    then 0.60
+    else if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
     then PropVentOnlyZnSysRef:ClgTotEff100 // Already adjusted at ZnSys
-    else
-    if( IfValidAnd( HtRcvryCertification = "HVI" ) )
+    else if( IfValidAnd( HtRcvryCertification = "HVI" ) )
     then UNDEFINED
     else ClgTotEff100 * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
-    endif endif
+    endif endif endif
 ENDRULE
 
 // 75% Flow - Heating
@@ -1735,18 +1762,19 @@ RULE HtRcvry:HtgSensEff75
     else 0
     endif  
   SIZING
-    if( IfValidAnd( RcvryType = "Total" ) .OR. 
-        IfValidAnd( RcvryType = "SensibleOnly" ) )
+    if( AirSys:IsBaseHlthCareSys > 0 )
+    then 0.65
+    else if( IfValidAnd( RcvryType = "Total" ) .OR. 
+             IfValidAnd( RcvryType = "SensibleOnly" ) )
     then
       if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
       then PropVentOnlyZnSysRef:HtgSensEff75 // Already adjusted at ZnSys
-      else
-      if( IfValidAnd( HtRcvryCertification = "HVI" ) )
+      else if( IfValidAnd( HtRcvryCertification = "HVI" ) )
       then HtgSensEff100 // Flow assumed to be CV, set equal to 100% value
       else HtgSensEff75 * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
       endif endif
     else 0
-    endif
+    endif endif
 ENDRULE
 RULE HtRcvry:HtgLatEff75
   DESCRIPTION
@@ -1760,15 +1788,17 @@ RULE HtRcvry:HtgLatEff75
     else 0
     endif  
   SIZING
-    if( IfValidAnd( RcvryType = "Total" ) .OR. 
-        IfValidAnd( RcvryType = "LatentOnly" ) )
+    if( AirSys:IsBaseHlthCareSys > 0 )
+    then 0
+    else if( IfValidAnd( RcvryType = "Total" ) .OR. 
+             IfValidAnd( RcvryType = "LatentOnly" ) )
     then
       if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
       then PropVentOnlyZnSysRef:HtgLatEff75 // Already adjusted at ZnSys
       else HtgLatEff75 * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
       endif
     else 0
-    endif
+    endif endif
 ENDRULE
 RULE HtRcvry:HtgTotEff75
   DESCRIPTION
@@ -1782,13 +1812,14 @@ RULE HtRcvry:HtgTotEff75
     else 0
     endif  
   SIZING
-    if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+    if( AirSys:IsBaseHlthCareSys > 0 )
+    then 0.65
+    else if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
     then PropVentOnlyZnSysRef:HtgTotEff75 // Already adjusted at ZnSys
-    else
-    if( IfValidAnd( HtRcvryCertification = "HVI" ) )
+    else if( IfValidAnd( HtRcvryCertification = "HVI" ) )
     then UNDEFINED
     else HtgTotEff75 * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
-    endif endif
+    endif endif endif
 ENDRULE
 
 // 75% Flow - Cooling
@@ -1804,18 +1835,19 @@ RULE HtRcvry:ClgSensEff75
     else 0
     endif  
   SIZING
-    if( IfValidAnd( RcvryType = "Total" ) .OR. 
-        IfValidAnd( RcvryType = "SensibleOnly" ) )
+    if( AirSys:IsBaseHlthCareSys > 0 )
+    then 0.65
+    else if( IfValidAnd( RcvryType = "Total" ) .OR. 
+             IfValidAnd( RcvryType = "SensibleOnly" ) )
     then
       if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
       then PropVentOnlyZnSysRef:ClgSensEff75 // Already adjusted at ZnSys
-      else
-      if( IfValidAnd( HtRcvryCertification = "HVI" ) )
+      else if( IfValidAnd( HtRcvryCertification = "HVI" ) )
       then ClgSensEff100 // Flow assumed to be CV, set equal to 100% value
       else ClgSensEff75 * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
       endif endif
     else 0
-    endif
+    endif endif
 ENDRULE
 RULE HtRcvry:ClgLatEff75
   DESCRIPTION
@@ -1829,15 +1861,17 @@ RULE HtRcvry:ClgLatEff75
     else 0
     endif
   SIZING
-    if( IfValidAnd( RcvryType = "Total" ) .OR. 
-        IfValidAnd( RcvryType = "LatentOnly" ) )
+    if( AirSys:IsBaseHlthCareSys > 0 )
+    then 0
+    else if( IfValidAnd( RcvryType = "Total" ) .OR. 
+             IfValidAnd( RcvryType = "LatentOnly" ) )
     then
       if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
       then PropVentOnlyZnSysRef:ClgLatEff75 // Already adjusted at ZnSys
       else ClgLatEff75 * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
       endif
     else 0
-    endif 
+    endif endif
 ENDRULE
 RULE HtRcvry:ClgTotEff75
   DESCRIPTION
@@ -1851,13 +1885,14 @@ RULE HtRcvry:ClgTotEff75
     else 0
     endif
   SIZING
-    if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+    if( AirSys:IsBaseHlthCareSys > 0 )
+    then 0.65
+    else if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
     then PropVentOnlyZnSysRef:ClgTotEff75 // Already adjusted at ZnSys
-    else
-    if( IfValidAnd( HtRcvryCertification = "HVI" ) )
+    else if( IfValidAnd( HtRcvryCertification = "HVI" ) )
     then UNDEFINED
     else ClgTotEff75 * HRRHtRcvryFlowAdj * HRRHtRcvryEffAdj
-    endif endif
+    endif endif endif
 ENDRULE
 
 RULE HtRcvry:TempCtrl
@@ -1877,13 +1912,14 @@ RULE HtRcvry:TempCtrl
   DEFAULT
     "None"
   SIZING
-    if( IfValidAnd( HasHXBypass = "No" ) )
+    if( AirSys:IsBaseHlthCareSys > 0 )
     then "None"
-    else
-    if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+    else if( IfValidAnd( HasHXBypass = "No" ) )
+    then "None"
+    else if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
     then PropVentOnlyZnSysRef:TempCtrl
     else TempCtrl
-    endif endif
+    endif endif endif
 //ANNUAL
 //  Standard design heat recovery does not use TempCtrl. See ticket 3317
 ENDRULE
@@ -1959,10 +1995,12 @@ RULE HtRcvry:DefrostCtrl
   DEFAULT
     "None"
   SIZING
-   if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+   if( AirSys:IsBaseHlthCareSys > 0 )
+    then "None"
+    else if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
    then PropVentOnlyZnSysRef:DefrostCtrl
    else DefrostCtrl
-   endif
+   endif endif
 //ANNUAL
 // Standard design has no defrost. Defined in libary object. See ticket 3317
 ENDRULE
@@ -2068,13 +2106,14 @@ RULE HtRcvry:EconoLockout
     else "No"
     endif
   SIZING
-    if( Type = "Plate" .AND. HasHXBypass = "No" )  
+    if( AirSys:IsBaseHlthCareSys > 0 )
+    then "Yes"
+    else if( Type = "Plate" .AND. HasHXBypass = "No" )  
     then "No"
-    else
-    if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+    else if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
     then PropVentOnlyZnSysRef:EconoLockout
     else EconoLockout
-    endif endif
+    endif endif endif
 //ANNUAL
 //  Standard design heat recovery includes Econolockout. Defined in libary object. See ticket 3317
 ENDRULE
@@ -2089,14 +2128,16 @@ RULE HtRcvry:AuxPwr
   DEFAULT
     0
   SIZING
-    if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+    if( AirSys:IsBaseHlthCareSys > 0 )
+    then 0
+    else if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
     then
       if( IfValidAnd( PropVentOnlyZnSysRef:AuxPwr > 0 ) )
       then PropVentOnlyZnSysRef:AuxPwr * SysCnt
       else 0
       endif
     else ValidOr( AuxPwr, 0 ) * SysCnt
-    endif
+    endif endif
   ANNUAL
     ValidOr( AuxPwr, 0 )
 ENDRULE

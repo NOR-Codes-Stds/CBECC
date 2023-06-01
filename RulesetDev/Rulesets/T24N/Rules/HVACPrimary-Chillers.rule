@@ -497,6 +497,19 @@ RULE NEW Chlr:IsExisting
     if( IsNew ) then 0 else 1 endif
 ENDRULE
 
+RULE NEW Chlr:IsBaseHlthCare
+  DATATYPE
+    Integer
+  LONGFORM
+    IsBaselineHealthCare
+  DESCRIPTION
+    "Whether the chiller is a baseline chiller that is part of FluidSys
+     that serves a healthcare facility."
+  INPUTCLASS
+    NotInput
+  SIZING
+    FluidSys:IsBaseHlthCareSys
+ENDRULE 
 
 // ********** <Chiller Capacity> ***********************************************
 RULE NEW Chlr:CapRtdNoPump
@@ -785,8 +798,63 @@ RULE Chlr:FuelSrc
     endif
 ENDRULE
 
+// ********** <Chiller minimum efficiency requirement from Table 110.2-D> **************
+TABLE T24ChlrMinEff
+  FuelSrc    CndsrType   Type                     CapRtd   PathAEER   PathAIPLVEER   PathAKwPerTon   PathAIPLVKwPerTon   PathACOP   PathBEER   PathBIPLVEER   PathBKwPerTon   PathBIPLVKwPerTon
+  Electric   Air         *                        <150     10.100     13.700         0               0                   0          9.700      15.800         0               0
+  Electric   Air         *                        >=150    10.100     14.000         0               0                   0          9.700      16.100         0               0
+  Electric   Fluid       Reciprocating            <75      0          0              0.750           0.600               0          0          0              0.780           0.500
+  Electric   Fluid       Reciprocating            <150     0          0              0.720           0.560               0          0          0              0.750           0.490
+  Electric   Fluid       Reciprocating            <300     0          0              0.660           0.540               0          0          0              0.680           0.440
+  Electric   Fluid       Reciprocating            <600     0          0              0.610           0.520               0          0          0              0.625           0.410
+  Electric   Fluid       Reciprocating            >=600    0          0              0.560           0.500               0          0          0              0.585           0.380
+  Electric   Fluid       Scroll                   <75      0          0              0.750           0.600               0          0          0              0.780           0.500
+  Electric   Fluid       Scroll                   <150     0          0              0.720           0.560               0          0          0              0.750           0.490
+  Electric   Fluid       Scroll                   <300     0          0              0.660           0.540               0          0          0              0.680           0.440
+  Electric   Fluid       Scroll                   <600     0          0              0.610           0.520               0          0          0              0.625           0.410
+  Electric   Fluid       Scroll                   >=600    0          0              0.560           0.500               0          0          0              0.585           0.380
+  Electric   Fluid       Screw                    <75      0          0              0.750           0.600               0          0          0              0.780           0.500
+  Electric   Fluid       Screw                    <150     0          0              0.720           0.560               0          0          0              0.750           0.490
+  Electric   Fluid       Screw                    <300     0          0              0.660           0.540               0          0          0              0.680           0.440
+  Electric   Fluid       Screw                    <600     0          0              0.610           0.520               0          0          0              0.625           0.410
+  Electric   Fluid       Screw                    >=600    0          0              0.560           0.500               0          0          0              0.585           0.380
+  Electric   Fluid       Centrifugal              <150     0          0              0.610           0.550               0          0          0              0.695           0.440
+  Electric   Fluid       Centrifugal              <300     0          0              0.610           0.550               0          0          0              0.635           0.400
+  Electric   Fluid       Centrifugal              <400     0          0              0.560           0.520               0          0          0              0.595           0.390
+  Electric   Fluid       Centrifugal              <600     0          0              0.560           0.500               0          0          0              0.585           0.380
+  Electric   Fluid       Centrifugal              >=600    0          0              0.560           0.500               0          0          0              0.585           0.380
+  Indirect   Air         AbsorptionSingleEffect   *        0          0              0               0                   0.600      0          0              0               0
+  Indirect   Fluid       AbsorptionSingleEffect   *        0          0              0               0                   0.700      0          0              0               0
+  *          *           *                        *        0          0              0               0                   0          0          0              0               0
+ENDTABLE
 
 // ********** <Chiller Integrated Part Load Value - kW/ton Units> **************
+RULE NEW Chlr:CodeMaxPathAIPLVKwPerTon
+  DATATYPE
+    Float
+  LONGFORM
+    CodeMaximumPathAIPLVKwPerTon
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( FuelSrc = "Electric" .AND. CndsrType = "Fluid" .AND. IfValidAnd( CapRtd > 0 ) )
+    then T24ChlrMinEff:PathAIPLVKwPerTon( "FuelSrc", "Electric", "CndsrType", "Fluid", "Type", Type, "CapRtd", CapRtd / 12000 )
+    else UNDEFINED
+    endif
+ENDRULE
+RULE NEW Chlr:CodeMaxPathBIPLVKwPerTon
+  DATATYPE
+    Float
+  LONGFORM
+    CodeMaximumPathBIPLVKwPerTon
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( FuelSrc = "Electric" .AND. CndsrType = "Fluid" .AND. IfValidAnd( CapRtd > 0 ) )
+    then T24ChlrMinEff:PathBIPLVKwPerTon( "FuelSrc", "Electric", "CndsrType", "Fluid", "Type", Type, "CapRtd", CapRtd / 12000 )
+    else UNDEFINED
+    endif
+ENDRULE
 RULE Chlr:IPLVKwPerTon
   DESCRIPTION
     "The IPLV value for water cooled electric chillers in kW/ton."
@@ -809,8 +877,8 @@ RULE Chlr:IPLVKwPerTon
     kW per ton
   DEFAULT
     if( Proj:AutoEffInput = 1 ) then
-      if( FuelSrc = "Electric" .AND. CndsrType = "Fluid" ) then
-        0.400
+      if( FuelSrc = "Electric" .AND. CndsrType = "Fluid" .AND. IfValidAnd( CodeMaxPathBIPLVKwPerTon > 0 ) ) then
+        CodeMaxPathBIPLVKwPerTon
       else UNDEFINED
       endif
     else UNDEFINED
@@ -839,12 +907,40 @@ RULE Chlr:IPLVKwPerTon
   ANNUAL
     if( IsBaseSys ) then
       UNDEFINED
+    else if( IsBaseHlthCare > 0 .AND. IfValidAnd( CodeMaxPathBIPLVKwPerTon > 0 ) )
+    then CodeMaxPathBIPLVKwPerTon
     else z:IPLVKwPerTon
-    endif
+    endif endif
 ENDRULE
 
 
 // ********** <Chiller Integrated Part Load Value - EER Units> *****************
+RULE NEW Chlr:CodeMinPathAIPLVEER
+  DATATYPE
+    Float
+  LONGFORM
+    CodeMinimumPathAIPLVEER
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( FuelSrc = "Electric" .AND. CndsrType = "Air" .AND. IfValidAnd( CapRtd > 0 ) )
+    then T24ChlrMinEff:PathAIPLVEER( "FuelSrc", "Electric", "CndsrType", "Air", "CapRtd", CapRtd / 12000 )
+    else UNDEFINED
+    endif
+ENDRULE
+RULE NEW Chlr:CodeMinPathBIPLVEER
+  DATATYPE
+    Float
+  LONGFORM
+    CodeMinimumPathBIPLVEER
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( FuelSrc = "Electric" .AND. CndsrType = "Air" .AND. IfValidAnd( CapRtd > 0 ) )
+    then T24ChlrMinEff:PathBIPLVEER( "FuelSrc", "Electric", "CndsrType", "Air", "CapRtd", CapRtd / 12000 )
+    else UNDEFINED
+    endif
+ENDRULE
 RULE Chlr:IPLVEER
   DESCRIPTION
     "The IPLV value for air cooled electric chillers in EER units, Btuh/W."
@@ -867,8 +963,8 @@ RULE Chlr:IPLVEER
     Btu/hr/W
   DEFAULT
     if( Proj:AutoEffInput = 1 ) then
-      if( FuelSrc = "Electric" .AND. CndsrType != "Fluid" ) then
-        12.5
+      if( FuelSrc = "Electric" .AND. CndsrType != "Fluid" .AND. IfValidAnd( CodeMinPathBIPLVEER > 0 ) ) then
+        CodeMinPathBIPLVEER
       else UNDEFINED
       endif
     else UNDEFINED
@@ -896,8 +992,10 @@ RULE Chlr:IPLVEER
   ANNUAL
     if( IsBaseSys ) then
       UNDEFINED
+    else if( IsBaseHlthCare > 0 .AND. IfValidAnd( CodeMinPathBIPLVEER > 0 ) )
+    then CodeMinPathBIPLVEER
     else z:IPLVEER
-    endif
+    endif endif
 ENDRULE
 
 
@@ -959,6 +1057,32 @@ ENDRULE
 
 
 // ********** <Chiller kW/ton> ************************************
+RULE NEW Chlr:CodeMaxPathAKwPerTon
+  DATATYPE
+    Float
+  LONGFORM
+    CodeMaximumPathAKwPerTon
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( FuelSrc = "Electric" .AND. CndsrType = "Fluid" .AND. IfValidAnd( CapRtd > 0 ) )
+    then T24ChlrMinEff:PathAKwPerTon( "FuelSrc", "Electric", "CndsrType", "Fluid", "Type", Type, "CapRtd", CapRtd / 12000 )
+    else UNDEFINED
+    endif
+ENDRULE
+RULE NEW Chlr:CodeMaxPathBKwPerTon
+  DATATYPE
+    Float
+  LONGFORM
+    CodeMaximumPathBKwPerTon
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( FuelSrc = "Electric" .AND. CndsrType = "Fluid" .AND. IfValidAnd( CapRtd > 0 ) )
+    then T24ChlrMinEff:PathBKwPerTon( "FuelSrc", "Electric", "CndsrType", "Fluid", "Type", Type, "CapRtd", CapRtd / 12000 )
+    else UNDEFINED
+    endif
+ENDRULE
 RULE Chlr:KwPerTon
   DESCRIPTION
     "The efficiency of water cooled electric chillers in kW/ton."
@@ -982,8 +1106,8 @@ RULE Chlr:KwPerTon
     kW per ton
   DEFAULT
     if( Proj:AutoEffInput = 1 ) then
-      if( FuelSrc = "Electric" .AND. CndsrType = "Fluid" ) then
-        0.590
+      if( FuelSrc = "Electric" .AND. CndsrType = "Fluid" .AND. IfValidAnd( CodeMaxPathBKwPerTon > 0 ) ) then
+        CodeMaxPathBKwPerTon
       else UNDEFINED
       endif
     else UNDEFINED
@@ -1100,112 +1224,16 @@ RULE Chlr:KwPerTon
       else if( IfValidAnd(IPLVKwPerTon > 0) ) then   ; missing or invalid IPLVKwPerTon reported elsewhere
         if( Status <> "New" )
           then UNCHANGED
-        else if( (Type = "Reciprocating" .OR. Type = "Scroll" .OR.
-                  Type = "Screw") .AND. IfValidAnd( CapRtd < (12000 * 75) ) ) then
-          if( KwPerTon <= 0.780 .AND. IPLVKwPerTon <= 0.500 )
-            then UNCHANGED
-          else if( KwPerTon <= 0.750 .AND. IPLVKwPerTon <= 0.600 )
-            then UNCHANGED
-          else PostError( "%.3f kW/ton or %.3f IPLV exceed the code maximums
-                          of 0.780/0.500 or 0.750/0.600 kW/ton & IPLV for
-                          chiller '%s'.",
-                          KwPerTon,IPLVKwPerTon,Name )
-          endif endif
-        else if( (Type = "Reciprocating" .OR. Type = "Scroll" .OR.
-                 Type = "Screw") .AND. IfValidAnd( CapRtd < (12000 * 150) ) ) then
-          if( KwPerTon <= 0.750 .AND. IPLVKwPerTon <= 0.490 )
-            then UNCHANGED
-          else if( KwPerTon <= 0.720 .AND. IPLVKwPerTon <= 0.560 )
-            then UNCHANGED
-          else PostError( "%.3f kW/ton or %.3f IPLV exceed the code maximums
-                          of 0.750/0.490 or 0.720/0.560 kW/ton & IPLV for
-                          chiller '%s'.",
-                          KwPerTon,IPLVKwPerTon,Name )
-          endif endif
-        else if( (Type = "Reciprocating" .OR. Type = "Scroll" .OR.
-                 Type = "Screw") .AND. IfValidAnd( CapRtd < (12000 * 300) ) ) then
-          if( KwPerTon <= 0.680 .AND. IPLVKwPerTon <= 0.440 )
-            then UNCHANGED
-          else if( KwPerTon <= 0.660 .AND. IPLVKwPerTon <= 0.540 )
-            then UNCHANGED
-          else PostError( "%.3f kW/ton or %.3f IPLV exceed the code maximums
-                          of 0.680/0.440 or 0.660/0.540 kW/ton & IPLV for
-                          chiller '%s'.",
-                          KwPerTon,IPLVKwPerTon,Name )
-          endif endif
-        else if( (Type = "Reciprocating" .OR. Type = "Scroll" .OR.
-                 Type = "Screw") .AND. IfValidAnd( CapRtd < (12000 * 600) ) ) then
-          if( KwPerTon <= 0.625 .AND. IPLVKwPerTon <= 0.410 )
-            then UNCHANGED
-          else if( KwPerTon <= 0.610 .AND. IPLVKwPerTon <= 0.520 )
-            then UNCHANGED
-          else PostError( "%.3f kW/ton or %.3f IPLV exceed the code maximums
-                          of 0.625/0.410 or 0.610/0.520 kW/ton & IPLV for
-                          chiller '%s'.",
-                          KwPerTon,IPLVKwPerTon,Name )
-          endif endif
-        else if( (Type = "Reciprocating" .OR. Type = "Scroll" .OR.
-                 Type = "Screw") .AND. IfValidAnd( CapRtd >= (12000 * 600) ) ) then
-          if( KwPerTon <= 0.585 .AND. IPLVKwPerTon <= 0.380 )
-            then UNCHANGED
-          else if( KwPerTon <= 0.560 .AND. IPLVKwPerTon <= 0.500 )
-            then UNCHANGED
-          else PostError( "TEST - %.3f kW/ton or %.3f IPLV exceed the code maximums
-                          of 0.585/0.380 or 0.560/0.500 kW/ton & IPLV for
-                          chiller '%s'.",
-                          KwPerTon,IPLVKwPerTon,Name )
-          endif endif
-        else if( Type = "Centrifugal" .AND. IfValidAnd( CapRtd < (12000 * 150) ) ) then
-          if( KwPerTon <= 0.695 .AND. IPLVKwPerTon <= 0.440 )
-            then UNCHANGED
-          else if( KwPerTon <= 0.610 .AND. IPLVKwPerTon <= 0.550 )
-            then UNCHANGED
-          else PostError( "%.3f kW/ton or %.3f IPLV exceed the code maximums
-                          of 0.695/0.440 or 0.610/0.550 kW/ton & IPLV for
-                          chiller '%s'.",
-                          KwPerTon,IPLVKwPerTon,Name )
-          endif endif
-        else if( Type = "Centrifugal" .AND. IfValidAnd( CapRtd < (12000 * 300) ) ) then
-          if( KwPerTon <= 0.635 .AND. IPLVKwPerTon <= 0.400 )
-            then UNCHANGED
-          else if( KwPerTon <= 0.610 .AND. IPLVKwPerTon <= 0.550 )
-            then UNCHANGED
-          else PostError( "%.3f kW/ton or %.3f IPLV exceed the code maximums
-                          of 0.635/0.400 or 0.610/0.550 kW/ton & IPLV for
-                          chiller '%s'.",
-                          KwPerTon,IPLVKwPerTon,Name )
-          endif endif
-        else if( Type = "Centrifugal" .AND. IfValidAnd( CapRtd < (12000 * 400) ) ) then
-          if( KwPerTon <= 0.595 .AND. IPLVKwPerTon <= 0.390 )
-            then UNCHANGED
-          else if( KwPerTon <= 0.560 .AND. IPLVKwPerTon <= 0.520 )
-            then UNCHANGED
-          else PostError( "%.3f kW/ton or %.3f IPLV exceed the code maximums
-                          of 0.595/0.390 or 0.560/0.520 kW/ton & IPLV",
-                          KwPerTon,IPLVKwPerTon,Name )
-          endif endif
-        else if( Type = "Centrifugal" .AND. IfValidAnd( CapRtd < (12000 * 600) ) ) then
-          if( KwPerTon <= 0.585 .AND. IPLVKwPerTon <= 0.380 )
-            then UNCHANGED
-          else if( KwPerTon <= 0.560 .AND. IPLVKwPerTon <= 0.500 )
-            then UNCHANGED
-          else PostError( "TEST - %.3f kW/ton or %.3f IPLV exceed the code maximums
-                          of 0.585/0.380 or 0.560/0.500 kW/ton & IPLV",
-                          KwPerTon,IPLVKwPerTon,Name )
-          endif endif
-        else if( Type = "Centrifugal" .AND. IfValidAnd( CapRtd >= (12000 * 600) ) ) then
-          if( KwPerTon <= 0.585 .AND. IPLVKwPerTon <= 0.380 )
-            then UNCHANGED
-          else if( KwPerTon <= 0.560 .AND. IPLVKwPerTon <= 0.500 )
-            then UNCHANGED
-          else PostError( "TEST - %.3f kW/ton or %.3f IPLV exceed the code maximums
-                          of 0.585/0.390 or 0.560/0.500 kW/ton & IPLV for
-                          chiller '%s'.",
-                          KwPerTon,IPLVKwPerTon,Name )
-          endif endif
-        else UNCHANGED
-        endif endif endif endif endif endif
-        endif endif endif endif endif
+        else if( KwPerTon <= CodeMaxPathBKwPerTon .AND. IPLVKwPerTon <= CodeMaxPathBIPLVKwPerTon )
+          then UNCHANGED
+        else if( KwPerTon <= CodeMaxPathAKwPerTon .AND. IPLVKwPerTon <= CodeMaxPathAIPLVKwPerTon )
+          then UNCHANGED
+        else PostError( "%.3f kW/ton or %.3f IPLV exceed the code maximums
+                        of %.3f/%.3f or %.3f/%.3f kW/ton & IPLV for
+                        chiller '%s'.",
+                        KwPerTon,IPLVKwPerTon,CodeMaxPathBKwPerTon,CodeMaxPathBIPLVKwPerTon,
+                                              CodeMaxPathAKwPerTon,CodeMaxPathAIPLVKwPerTon,Name )
+        endif endif endif
       else UNCHANGED   ; if IPLVKwPerTon is invalid
       endif endif endif
     else UNCHANGED
@@ -1247,15 +1275,43 @@ RULE Chlr:KwPerTon
       else if( Type = "Screw" .AND. CapRtdSim/12000 >= 300 ) then 0.625
       else 0.585    // centrifugal if > 600 tons
       endif endif endif endif
+    else if( IsBaseHlthCare > 0 .AND. IfValidAnd( CodeMaxPathBKwPerTon > 0 ) )
+    then CodeMaxPathBKwPerTon
     else if( u:FuelSrc = "Electric" .AND. u:CndsrType = "Fluid" ) then
       z:KwPerTon
     else
       UNCHANGED
-    endif endif
+    endif endif endif
 ENDRULE
 
 
 // ********** <Chiller EER> ************************************
+RULE NEW Chlr:CodeMinPathAEER
+  DATATYPE
+    Float
+  LONGFORM
+    CodeMinimumPathAEER
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( FuelSrc = "Electric" .AND. CndsrType = "Air" .AND. IfValidAnd( CapRtd > 0 ) )
+    then T24ChlrMinEff:PathAEER( "FuelSrc", "Electric", "CndsrType", "Air", "CapRtd", CapRtd / 12000 )
+    else UNDEFINED
+    endif
+ENDRULE
+RULE NEW Chlr:CodeMinPathBEER
+  DATATYPE
+    Float
+  LONGFORM
+    CodeMinimumPathBEER
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( FuelSrc = "Electric" .AND. CndsrType = "Air" .AND. IfValidAnd( CapRtd > 0 ) )
+    then T24ChlrMinEff:PathBEER( "FuelSrc", "Electric", "CndsrType", "Air", "CapRtd", CapRtd / 12000 )
+    else UNDEFINED
+    endif
+ENDRULE
 RULE Chlr:EER
   DESCRIPTION
     "The efficiency of air cooled electric chillers using EER."
@@ -1279,8 +1335,8 @@ RULE Chlr:EER
     Btu/hr/W
   DEFAULT
     if( Proj:AutoEffInput = 1 ) then
-      if( FuelSrc = "Electric" .AND. CndsrType != "Fluid" ) then
-        9.5
+      if( FuelSrc = "Electric" .AND. CndsrType != "Fluid" .AND. IfValidAnd( CodeMinPathBEER > 0 ) ) then
+        CodeMinPathBEER
       else UNDEFINED
       endif
     else UNDEFINED
@@ -1325,30 +1381,14 @@ RULE Chlr:EER
       else if( EER = 0 ) then
         PostError( "A non-zero EER value must be provided for chiller '%s'.",Name )
       else if( IfValidAnd(IPLVEER > 0) ) then   ; missing or invalid IPLVEER reported elsewhere
-        if( FuelSrc = "Electric" .AND. CndsrType != "Fluid" .AND.
-            IfValidAnd( CapRtd < (12000*150) ) ) then    // CapRtd/12000 < 150 ) then
-          if( EER >= 10.100 .AND. IPLVEER >= 13.700 )
-            then UNCHANGED
-          else if( EER >= 9.700 .AND. IPLVEER >= 15.800 )
-            then UNCHANGED
-          else PostError( "%.3f EER or %.3f IPLV are less than the code minimums
-                          of 10.1/13.7 or 9.7/15.8 EER & IPLV for
-                          chiller '%s'.",
-                          EER,IPLVEER,Name )
-          endif endif
-        else if( FuelSrc = "Electric" .AND. CndsrType != "Fluid" .AND.
-                 IfValidAnd( CapRtd >= (12000*150) ) ) then    // CapRtd/12000 >= 150 ) then
-          if( EER >= 10.100 .AND. IPLVEER >= 14.000 )
-            then UNCHANGED
-          else if( EER >= 9.700 .AND. IPLVEER >= 16.100 )
-            then UNCHANGED
-          else PostError( "%.3f EER or %.3f IPLV are less than the code minimums
-                          of 10.1/14.0 or 9.7/16.1 EER & IPLV for
-                          chiller '%s'.",
-                          EER,IPLVEER,Name )
-          endif endif
-        else
-          UNCHANGED
+        if( EER >= CodeMinPathAEER .AND. IPLVEER >= CodeMinPathAIPLVEER )
+          then UNCHANGED
+        else if( EER >= CodeMinPathBEER .AND. IPLVEER >= CodeMinPathBIPLVEER )
+          then UNCHANGED
+        else PostError( "%.3f EER or %.3f IPLV are less than the code minimums
+                        of %.3f/%.3f or %.3f/%.3f EER & IPLV for
+                        chiller '%s'.",
+                        EER,IPLVEER,CodeMinPathAEER,CodeMinPathAIPLVEER,CodeMinPathBEER,CodeMinPathBIPLVEER,Name )
         endif endif
       else UNCHANGED
       endif endif endif
@@ -1365,12 +1405,27 @@ RULE Chlr:EER
   ANNUAL
     if( IsBaseSys ) then
       UNCHANGED
+    else if( IsBaseHlthCare > 0 .AND. IfValidAnd( CodeMinPathBEER > 0 ) )
+    then CodeMinPathBEER
     else z:EER
-    endif
+    endif endif
 ENDRULE
 
 
 // ********** <Chiller COP> ************************************
+RULE NEW Chlr:CodeMinCOP
+  DATATYPE
+    Float
+  LONGFORM
+    CodeMinimumCOP
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( FuelSrc != "Electric" )
+    then T24ChlrMinEff:PathACOP( "FuelSrc", FuelSrc, "CndsrType", CndsrType )
+    else UNDEFINED
+    endif
+ENDRULE
 RULE Chlr:COP
   DESCRIPTION
     "The efficiency of heat driven and air cooled electric chillers
@@ -1399,7 +1454,7 @@ RULE Chlr:COP
   DEFAULT
     if( Proj:AutoEffInput = 1 ) then
       if( FuelSrc != "Electric" ) then
-        0.700
+        CodeMinCOP
       else UNDEFINED
       endif
     else if( FuelSrc = "Electric" .AND. CndsrType = "Fluid" .AND.
@@ -1421,11 +1476,11 @@ RULE Chlr:COP
       else
         if( Type = "AbsorptionSingleEffect" .AND. CndsrType = "Fluid" )
           then
-          if( COP >= 0.700 - 0.001 ) then
+          if( COP >= CodeMinCOP - 0.001 ) then
             UNCHANGED
           else
-            PostError( "COP of %.3f is less than the code minimum of 0.700 for
-                       chiller '%s'.",COP,Name )
+            PostError( "COP of %.3f is less than the code minimum of %.3f for
+                       chiller '%s'.", COP, CodeMinCOP, Name )
           endif
 //        else if( Type = "AbsorptionSingleEffect" .AND. CndsrType = "Air" ) then
 //          if( COP >= 0.600 - 0.001 ) then
@@ -1488,8 +1543,10 @@ RULE Chlr:COP
       12/KwPerTon/3.412
     else if( FuelSrc = "Electric" .AND. CndsrType != "Fluid" ) then
       EER/3.412
+    else if( IsBaseHlthCare > 0 .AND. IfValidAnd( CodeMinCOP > 0 ) )
+    then CodeMinCOP
     else u:COP
-    endif endif endif
+    endif endif endif endif
 ENDRULE
 
 
@@ -1515,6 +1572,11 @@ RULE NEW Chlr:EffPath
   SIZING : T24N_2016 T24N
     if( IsBaseSys ) then
       "B"
+    else if( IsBaseHlthCare > 0 ) then
+      if( FuelSrc = "Electric" )
+      then "B"
+      else "A"
+      endif
     // mandatory requirements on chiller efficiency, so a maximum value is required
     else if( u:FuelSrc = "Electric" .AND. u:CndsrType = "Fluid" ) then
       if( LocalStatus(u:IPLVKwPerTon) < 1 )
@@ -1579,7 +1641,7 @@ RULE NEW Chlr:EffPath
       endif endif endif endif endif
       endif endif endif endif endif endif
     else "A"
-    endif endif
+    endif endif endif
   SIZING
     if( IsBaseSys ) then
       "B"

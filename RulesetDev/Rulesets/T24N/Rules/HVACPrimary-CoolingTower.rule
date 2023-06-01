@@ -359,6 +359,19 @@ RULE NEW HtRej:IsExisting
     if( IsNew ) then 0 else 1 endif
 ENDRULE
 
+RULE NEW HtRej:IsBaseHlthCare
+  DATATYPE
+    Integer
+  LONGFORM
+    IsBaselineHealthCare
+  DESCRIPTION
+    "Whether the cooling tower is a baseline cooling tower that is part of FluidSys
+     that serves a healthcare facility."
+  INPUTCLASS
+    NotInput
+  SIZING
+    ValidOr( FluidSys:IsBaseHlthCareSys, 0 )
+ENDRULE 
 
 // -----------------------------------------------------------------------------
 // -------------- Heat Rejection Type ------------------------------------------
@@ -617,8 +630,12 @@ RULE HtRej:FanType
   ANNUAL
     if( IsBaseSys ) then
       "Axial"
+    else if( IsBaseHlthCare > 0 .AND.
+             Type = "OpenTower" .AND. 
+             WtrFlowCap >= 900 )
+    then "Axial"
     else z:FanType
-    endif
+    endif endif
 ENDRULE
 
 
@@ -664,8 +681,11 @@ RULE HtRej:ModCtrl
   ANNUAL
     if( IsBaseSys ) then
       "VariableSpeedDrive"
+    else if( IsBaseHlthCare > 0 .AND.
+             WtrFlowCap/CodeMinGMPPerHP >= 7.5 )
+    then "VariableSpeedDrive"
     else z:ModCtrl
-    endif
+    endif endif
 ENDRULE
 
 
@@ -1159,17 +1179,42 @@ ENDRULE
 
 
 // -------------- Cooling Tower Fan Total HP -----------------------------------
-// Requirement from Table 110.2-G.
-//      For Axial open cooling tower >42.1 gpm/hp
-//            Centrifugal open tower >20.0 gpm/hp
-//                Axial closed tower >14.0 gpm/hp
-//          Centrifugal closed tower >7.0 gpm/hp
-// Baseline rule summary:
-//          Axial open tower - 60 gpm/hp
+// Mandatory requirement from Table 110.2-F.
+TABLE T24HtRejMinGPMPerHP
+  Type                     FanType       GPMPerHP
+  OpenTower                Axial         42.1
+  OpenTower                Centrifugal   20.0
+  ClosedTower              Axial         16.1
+  ClosedTower              Centrifugal   7.0
+  ClosedTowerEvaporative   Axial         16.1
+  ClosedTowerEvaporative   Centrifugal   7.0
+  *                        *             0
+ENDTABLE
 
-//not completely sure how to handle cases of LocalCompAssigned(z:FluidSegInRef)
-//is FALSE
-
+RULE NEW HtRej:CodeMinGMPPerHP
+  DESCRIPTION
+    "The minimum gpm per fan hp meets the code mandatory and prescriptive requirments."
+  DATATYPE
+    Float
+  LONGFORM
+    CodeMinimumGPMPerHP
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( Type = "OpenTower" .AND. WtrFlowCap >= 900 .AND.
+        Proj:CliZnNum != 1 .AND. Proj:CliZnNum != 16 ) then 60
+    else T24HtRejMinGPMPerHP:GPMPerHP( "Type", Type, "FanType", FanType )
+    endif
+  ANNUAL
+    if( IsBaseSys ) then
+      if( Type = "OpenTower" .AND. CapRtdSim < 300 * 12000 .AND.
+          Proj:CliZnNum != 1 .AND. Proj:CliZnNum != 16 ) then 60
+      else T24HtRejMinGPMPerHP:GPMPerHP( "Type", Type, "FanType", FanType )
+      endif
+    else UNCHANGED
+    endif
+ENDRULE
+  
 RULE HtRej:TotFanHP
   DESCRIPTION
     "The sum of the nameplate rated horsepower (hp) of all fan motors on the
@@ -1178,7 +1223,7 @@ RULE HtRej:TotFanHP
     ""
   REFERENCE
     ACM Section 5.8.3-Cooling Towers
-    110.2-G
+    110.2-F
   INPUTCLASS
     Required
   UNITS
@@ -1200,18 +1245,9 @@ RULE HtRej:TotFanHP
     else UNDEFINED
     endif   
   DEFAULT
-    if( LocalStatus(u:TotFanHP) < 5 .AND. Proj:AutoHardSize = 1 ) then
+    if( LocalStatus(u:TotFanHP) < 5 .AND. Proj:AutoHardSize = 1 .AND. CodeMinGMPPerHP > 0 ) then
     // For PROPOSED AutoHardSizing only
-      if( FanType = "Axial" .AND. Type = "OpenTower" ) then WtrFlowCap / 60
-      else if( FanType = "Axial" .AND. Type = "ClosedTower" ) then WtrFlowCap / 16.1
-      else if( FanType = "Axial" .AND. Type = "ClosedTowerEvaporative" ) then WtrFlowCap / 16.1
-      else if( FanType = "Centrifugal" .AND. Type = "OpenTower" ) then WtrFlowCap / 20.0
-      else if( FanType = "Centrifugal" .AND. Type = "ClosedTower" ) then WtrFlowCap / 7.0
-      else if( FanType = "Centrifugal" .AND. Type = "ClosedTowerEvaporative" ) then WtrFlowCap / 7.0
-      else UNDEFINED
-      endif endif endif endif endif endif
-;      WtrFlowCap/60    // -> This is the ACM specification for the baseline - use here to match.
-;      WtrFlowCap/42.1 // -> More conservative, may avoid sizing problems in the simulation
+      WtrFlowCap / CodeMinGMPPerHP
     else UNDEFINED
     endif
   CHECKCODE : S901G
@@ -1270,27 +1306,10 @@ RULE HtRej:TotFanHP
     endif
   CHECKCODE
     if( Status = "New" ) then
-      if( (FanType = "Axial" .AND. Type = "OpenTower" .AND.
-           WtrFlowCap / TotFanHP < 42.1 )
-          .OR.
-          (FanType = "Axial" .AND. Type = "ClosedTower" .AND.
-           WtrFlowCap / TotFanHP < 16.1 )
-          .OR.
-          (FanType = "Axial" .AND. Type = "ClosedTowerEvaporative" .AND.
-           WtrFlowCap / TotFanHP < 16.1 )
-          .OR.
-          (FanType = "Centrifugal" .AND. Type = "OpenTower" .AND.
-           WtrFlowCap / TotFanHP < 20.0 )
-          .OR.
-          (FanType = "Centrifugal" .AND. Type = "ClosedTower" .AND.
-           WtrFlowCap / TotFanHP < 7.0 )
-          .OR.
-          (FanType = "Centrifugal" .AND. Type = "ClosedTowerEvaporative" .AND.
-           WtrFlowCap / TotFanHP < 7.0 )
-        )
+      if( WtrFlowCap / TotFanHP < T24HtRejMinGPMPerHP:GPMPerHP( "Type", Type, "FanType", FanType ) )
       then
         PostError("Total Fan HP of Tower '%s' does not comply with the code 
-                   minimum required performance from Table 110.2-G.", Name)
+                   minimum required performance from Table 110.2-F.", Name)
       else UNCHANGED
       endif
     else UNCHANGED
@@ -1312,18 +1331,8 @@ RULE HtRej:TotFanHP
     else z:TotFanHP
     endif  
   ANNUAL
-    if( IsBaseSys ) then
-      if( Proj:CliZnNum = 1 .OR. Proj:CliZnNum = 16 )
-      then
-        WtrFlowCap/42.1                   // 42.1 gpm/hp
-      else
-        if( CapRtdSim < 300 * 12000 )
-        then
-          WtrFlowCap/42.1
-        else 
-          WtrFlowCap/60                   // 60 gpm/hp
-        endif
-      endif
+    if( IsBaseSys .OR. IfValidAnd( IsBaseHlthCare > 0 ) ) then
+      WtrFlowCap/CodeMinGMPPerHP
     else z:TotFanHP
     endif
 ENDRULE
@@ -1397,7 +1406,8 @@ RULE HtRej:AirFlowCap
     else u:AirFlowCap
     endif
   ANNUAL
-    if( IsBaseSys ) then
+    if( IsBaseSys .OR. 
+        IfValidAnd( IsBaseHlthCare > 0 ) ) then
       TotFanHP * 746 * 0.5 / 190 * 2119
     else z:AirFlowCap
     endif
@@ -1509,8 +1519,11 @@ RULE HtRej:LowSpdAirFlowRat
   ANNUAL
     if( IsBaseSys ) then
       0.50
+    else if( IsBaseHlthCare > 0 .AND.
+             TotFanHP >= 7.5 )
+    then 0.50
     else z:LowSpdAirFlowRat
-    endif
+    endif endif
 ENDRULE
 
 
@@ -1536,10 +1549,13 @@ RULE HtRej:LowSpdAirFlowCap
   ANNUAL 
     if( IsBaseSys ) then
       UNDEFINED
+    else if( IsBaseHlthCare > 0 .AND.
+             TotFanHP >= 7.5 )
+    then LowSpdAirFlowRat * AirFlowCap
     else if( IsExisting )
     then zp:LowSpdAirFlowCap
     else z:LowSpdAirFlowCap
-    endif endif
+    endif endif endif
 ENDRULE
 
 
@@ -1837,8 +1853,11 @@ RULE HtRej:MinSpdRat
   ANNUAL
     if( IsBaseSys ) then
       0.50
+    else if( IsBaseHlthCare > 0 .AND.
+             TotFanHP >= 7.5 )
+    then 0.50
     else z:MinSpdRat
-    endif
+    endif endif
 ENDRULE
 
 // -----------------------------------------------------------------------------

@@ -317,6 +317,19 @@ RULE NEW Blr:IsExisting
     if( IsNew ) then 0 else 1 endif
 ENDRULE
 
+RULE NEW Blr:IsBaseHlthCare
+  DATATYPE
+    Integer
+  LONGFORM
+    IsBaselineHealthCare
+  DESCRIPTION
+    "Whether the boiler is a baseline boiler that is part of FluidSys
+     that serves a healthcare facility."
+  INPUTCLASS
+    NotInput
+  SIZING
+    FluidSys:IsBaseHlthCareSys
+ENDRULE 
 
 // ********** <Boiler FuelSource> **********************************************
 RULE Blr:FuelSrc
@@ -374,6 +387,13 @@ RULE Blr:Type
   OPTION
     HotWater
     Steam
+  CHECKSIM ; ticket 3519
+    if( Type != "HotWater" ) then
+      PostError( "HotWater is the only currently supported type 
+                  in CBECC-Com.  Revise the input for boiler '%s'", Name )
+    else
+      UNCHANGED
+    endif
   SIZING
     if( IsBaseSys ) then
       "HotWater"
@@ -565,8 +585,38 @@ RULE Blr:CapRtdSim
     endif endif
 ENDRULE
 
-
+// ********** <Boiler minimum efficiency requirement from Table 110.2-J> **************
+TABLE T24BlrMinEff
+  Type       FuelSrc   CapRtd       AFUE   ThrmlEff   CombEff
+  HotWater   Gas       <300000      0.82   0          0
+  HotWater   Gas       <=2500000    0      0.84       0
+  HotWater   Gas       <=10000000   0      0          0.85
+  HotWater   Gas       >10000000    0      0          0.82
+  Steam      Gas       <300000      0.80   0          0
+  Steam      Gas       <=2500000    0      0.81       0
+  Steam      Gas       <=10000000   0      0.82       0
+  Steam      Gas       >10000000    0      0.79       0
+  *          *         *            0      0          0
+ENDTABLE
+// Other boiler types are not supported
 // ********** <Boiler AFUE> ****************************************************
+RULE NEW Blr:CodeMinAFUE
+  DATATYPE
+    Float
+  LONGFORM
+    CodeMinimumAFUE
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( CapRtd > 0 ) )
+    then 
+      if( T24BlrMinEff:AFUE( "Type", Type, "FuelSrc", FuelSrc, "CapRtd", CapRtd ) > 0 )
+      then T24BlrMinEff:AFUE( "Type", Type, "FuelSrc", FuelSrc, "CapRtd", CapRtd )
+      else UNDEFINED
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
 RULE Blr:AFUE
   DESCRIPTION
     "The Annual Fuel Utilzation Efficiency of the boiler.  Applies only to
@@ -588,15 +638,20 @@ RULE Blr:AFUE
     0.98
   MAXIMUM
     1.0
+  DEFAULT
+    if( Proj:AutoEffInput = 1 .AND. IfValidAnd( CodeMinAFUE > 0 ) )
+    then CodeMinAFUE
+    else UNDEFINED
+    endif
   CHECKCODE
     if( FuelSrc = "Gas" .OR. FuelSrc = "Oil" ) then
-      if( IfValidAnd(u:CapRtd < 300000) ) then
-        if( IfValidAnd(u:AFUE >= 0.82) ) then
+      if( IfValidAnd(u:CapRtd < 300000) .AND. IfValidAnd( CodeMinAFUE > 0 ) ) then
+        if( IfValidAnd(u:AFUE >= CodeMinAFUE) ) then
           UNCHANGED
         else if( IfValidAnd(u:AFUE > 0)) then
           PostError( "Boiler '%s' has a capacity of less than 300,000 Btu/h 
                       but the AFUE is '%.2f' which is less than the mandatory 
-                      minimum of 0.82.", Name, u:AFUE )
+                      minimum of '%.2f'.", Name, u:AFUE, CodeMinAFUE )
         else if( IfValidAnd(u:AFUE <= 0)) then
           PostError( "Boiler '%s' has a capacity of less than 300,000 Btu/h 
                       but does not have a valid AFUE input.", Name )
@@ -623,15 +678,34 @@ RULE Blr:AFUE
   ANNUAL
     if( IsBaseSys ) then
       if( CapRtdSim < 300000 ) then
-      0.82
+      T24BlrMinEff:AFUE( "Type", Type, "FuelSrc", FuelSrc, "CapRtd", CapRtd )
       else UNDEFINED
       endif
+    else if( IsBaseHlthCare > 0 .AND. IfValidAnd( CodeMinAFUE > 0 ) )
+    then CodeMinAFUE
     else z:AFUE
-    endif
+    endif endif
 ENDRULE
 
 
 // ********** <Boiler Combustion Efficiency> ***********************************
+RULE NEW Blr:CodeMinCombEff
+  DATATYPE
+    Float
+  LONGFORM
+    CodeMinimumCombustionEfficiency
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( CapRtd > 0 ) )
+    then 
+      if( T24BlrMinEff:CombEff( "Type", Type, "FuelSrc", FuelSrc, "CapRtd", CapRtd ) > 0 )
+      then T24BlrMinEff:CombEff( "Type", Type, "FuelSrc", FuelSrc, "CapRtd", CapRtd )
+      else UNDEFINED
+      endif
+    else UNDEFINED
+    endif
+ENDRULE
 RULE Blr:CombEff
   DESCRIPTION
     "The thermal efficiency of the boiler.  Applies only to fuel-fired boilers
@@ -655,44 +729,47 @@ RULE Blr:CombEff
     0.98
   MAXIMUM
     1.0
+  DEFAULT
+    if( Proj:AutoEffInput = 1 .AND. IfValidAnd( CodeMinCombEff > 0 ) )
+    then CodeMinCombEff
+    else UNDEFINED
+    endif
   CHECKCODE
-    if( FuelSrc = "Gas" .OR. FuelSrc = "Oil" ) then
-      if( u:DraftType <> "Condensing" .AND. IfValidAnd(u:CombEff > 0.85) ) then
-        PostError( "Boiler '%s' has a combustion efficiency that is too 
-                    high for a noncondensing boiler.  Adjust the efficiency or 
-                    draft type to be consistent.", Name )
-      else if( IfValidAnd(u:CapRtd >   2500000) .AND. 
-               IfValidAnd(u:CapRtd <= 10000000) ) then
-        if( IfValidAnd(u:CombEff >= 0.85)) then
-          UNCHANGED
-        else if( IfValidAnd(u:CombEff > 0)) then
-          PostError( "Boiler '%s' has a capacity between 2,500,000 and  
-                      10,000,000 Btu/h but the combustion efficiency is 
-                      '%.2f' which is less than the mandatory minimum of 
-                      0.85.", Name, u:CombEff )
-        else if( IfValidAnd(u:CombEff <= 0)) then
-          PostError( "Boiler '%s' has a capacity between 2,500,000 and 
-                      10,000,000 Btu/h but does not have a valid combustion 
-                      efficiency input.", Name )
-        else UNCHANGED
-        endif endif endif
-      else if( IfValidAnd(u:CapRtd > 10000000) ) then
-        if( IfValidAnd(u:CombEff >= 0.82)) then
-          UNCHANGED
-        else if( IfValidAnd(u:CombEff > 0)) then
-          PostError( "Boiler '%s' has a capacity of more than 10,000,000 Btu/h 
-                      but the combustion efficiency is '%.2f' which is less than
-                      the mandatory minimum of 0.82.", Name, u:CombEff )
-        else if( IfValidAnd(u:CombEff <= 0)) then
-          PostError( "Boiler '%s' has a capacity of 10,000,000 Btu/h or more but 
-                      does not have a valid combustion efficiency input.", Name )
-        else UNCHANGED
-        endif endif endif
+    if( u:DraftType <> "Condensing" .AND. IfValidAnd(u:CombEff > 0.85) ) then
+      PostError( "Boiler '%s' has a combustion efficiency that is too 
+                  high for a noncondensing boiler.  Adjust the efficiency or 
+                  draft type to be consistent.", Name )
+    else if( IfValidAnd(u:CapRtd >   2500000) .AND. 
+             IfValidAnd(u:CapRtd <= 10000000) .AND.
+             IfValidAnd( CodeMinCombEff > 0 ) ) then
+      if( IfValidAnd(u:CombEff >= CodeMinCombEff)) then
+        UNCHANGED
+      else if( IfValidAnd(u:CombEff > 0)) then
+        PostError( "Boiler '%s' has a capacity between 2,500,000 and  
+                    10,000,000 Btu/h but the combustion efficiency is 
+                    '%.2f' which is less than the mandatory minimum of 
+                    '%.2f'.", Name, u:CombEff, CodeMinCombEff )
+      else if( IfValidAnd(u:CombEff <= 0)) then
+        PostError( "Boiler '%s' has a capacity between 2,500,000 and 
+                    10,000,000 Btu/h but does not have a valid combustion 
+                    efficiency input.", Name )
       else UNCHANGED
       endif endif endif
-    else
-      UNCHANGED
-    endif
+    else if( IfValidAnd(u:CapRtd > 10000000) .AND.
+             IfValidAnd( CodeMinCombEff > 0 ) ) then
+      if( IfValidAnd(u:CombEff >= CodeMinCombEff)) then
+        UNCHANGED
+      else if( IfValidAnd(u:CombEff > 0)) then
+        PostError( "Boiler '%s' has a capacity of more than 10,000,000 Btu/h 
+                    but the combustion efficiency is '%.2f' which is less than
+                    the mandatory minimum of '%.2f'.", Name, u:CombEff, CodeMinCombEff )
+      else if( IfValidAnd(u:CombEff <= 0)) then
+        PostError( "Boiler '%s' has a capacity of 10,000,000 Btu/h or more but 
+                    does not have a valid combustion efficiency input.", Name )
+      else UNCHANGED
+      endif endif endif
+    else UNCHANGED
+    endif endif endif
   SIZING
     if( IsBaseSys ) then
       UNDEFINED
@@ -710,20 +787,43 @@ RULE Blr:CombEff
       endif
     else z:CombEff
     endif
-  ANNUAL 
-    if( IsBaseSys ) then
-      if( CapRtdSim > 2500000 .AND. CapRtdSim <= 10000000 ) then
-        0.85 
-      else if( CapRtdSim > 10000000 ) then
-        0.82 
-      else UNDEFINED
-      endif endif
+  ANNUAL
+    if( IsBaseSys .AND. CapRtdSim > 2500000 ) then
+      T24BlrMinEff:CombEff( "Type", Type, "FuelSrc", FuelSrc, "CapRtd", CapRtdSim )
+    else if( IsBaseHlthCare > 0 .AND. IfValidAnd( CodeMinCombEff > 0 ) )
+    then CodeMinCombEff
     else z:CombEff
-    endif
+    endif endif
 ENDRULE
 
 
 // ********** <Boiler Thermal Efficiency> **************************************
+RULE NEW Blr:CodeMinThrmlEff
+  DATATYPE
+    Float
+  LONGFORM
+    CodeMinimumThermalEfficiency
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( CapRtd > 0 ) )
+    then 
+      if( T24BlrMinEff:ThrmlEff( "Type", Type, "FuelSrc", FuelSrc, "CapRtd", CapRtd ) > 0 )
+      then T24BlrMinEff:ThrmlEff( "Type", Type, "FuelSrc", FuelSrc, "CapRtd", CapRtd )
+      else UNDEFINED
+      endif
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( IsBaseSys > 0 .AND. IfValidAnd(CapRtdSim > 0) )
+    then 
+      if( T24BlrMinEff:ThrmlEff( "Type", Type, "FuelSrc", FuelSrc, "CapRtd", CapRtdSim ) > 0 )
+      then T24BlrMinEff:ThrmlEff( "Type", Type, "FuelSrc", FuelSrc, "CapRtd", CapRtdSim )
+      else UNDEFINED
+      endif
+    else UNCHANGED
+    endif
+ENDRULE
 RULE Blr:ThrmlEff
   DESCRIPTION
     "The thermal efficiency of the boiler.  Applies only to fuel-fired boilers
@@ -781,8 +881,10 @@ RULE Blr:ThrmlEff
       else
         0.82 - 0.015           // CombEff = 0.82 -> ThrmlEff = 0.805
       endif
-    else 0.80
-    endif endif
+    else if( Proj:AutoEffInput = 1 .AND. IfValidAnd( CodeMinThrmlEff > 0 ) )
+    then CodeMinThrmlEff
+    else UNDEFINED
+    endif endif endif
   CHECKCODE
     if( FuelSrc = "Gas" .OR. FuelSrc = "Oil" ) then
       if( u:DraftType <> "Condensing" .AND. IfValidAnd(u:ThrmlEff > 0.85) ) then
@@ -790,14 +892,15 @@ RULE Blr:ThrmlEff
                     high for a noncondensing boiler.  Adjust the efficiency or 
                     draft type to be consistent.", Name )
       else if( IfValidAnd(u:CapRtd >= 300000) .AND. 
-               IfValidAnd(u:CapRtd <= 2500000) ) then
-        if( IfValidAnd(u:ThrmlEff >= 0.84)) then
+               IfValidAnd(u:CapRtd <= 2500000) .AND.
+               IfValidAnd( CodeMinThrmlEff > 0 ) ) then
+        if( IfValidAnd(u:ThrmlEff >= CodeMinThrmlEff)) then
           UNCHANGED
         else if( IfValidAnd(u:ThrmlEff > 0)) then
           PostError( "Boiler '%s' has a capacity between 300,000 and  
                       2,500,000 Btu/h but the thermal efficiency is 
                       '%.2f' which is less than the mandatory minimum of 
-                      0.84.", Name, u:ThrmlEff )
+                      '%.2f'.", Name, u:ThrmlEff, CodeMinThrmlEff )
         else if( IfValidAnd(u:ThrmlEff <= 0)) then
           PostError( "Boiler '%s' has a capacity between 300,000 and  
                       2,500,000 Btu/h but does not have a valid thermal 
@@ -942,14 +1045,15 @@ RULE Blr:ThrmlEff
     else z:ThrmlEff
     endif
   ANNUAL : T24N
-    if( IsBaseSys ) then
-      if( IfValidAnd(CapRtdSim < 300000) ) then
-        0.8225             // AFUE = 0.82, ThrmlEff = 0.8225 = 0.875 * AFUE + 0.105
-      else if( IfValidAnd(CapRtdSim >= 300000) .AND. IfValidAnd(CapRtdSim <= 2500000) ) then
-        0.84
-      else if( IfValidAnd(CapRtdSim > 2500000) ) then
-        CombEff - 0.015
-      else 0.805
+    if( IsBaseSys .OR. IfValidAnd( IsBaseHlthCare > 0 ) )
+    then
+      if( IfValidAnd( CodeMinAFUE > 0 ) )
+      then 0.875 * CodeMinAFUE + 0.105
+      else if( IfValidAnd( CodeMinCombEff > 0 ) )
+      then CodeMinCombEff - 0.015
+      else if( IfValidAnd( CodeMinThrmlEff > 0 ) )
+      then CodeMinThrmlEff
+      else 0.98 // FuelSrc = "Electric"
       endif endif endif
     else z:ThrmlEff
     endif
