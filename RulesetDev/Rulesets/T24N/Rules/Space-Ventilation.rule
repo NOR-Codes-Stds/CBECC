@@ -978,7 +978,7 @@ RULE NEW Spc:VentOccDensSim
     NotInput
   DEFAULT : T24N_2016
     UNDEFINED
-  DEFAULT : T24N
+  DEFAULT : T24N_2019 // JP 6/7/23 no longer used ticket 3490
     if( VentIsRequired = 0 )
     then 0
     else VentilationSpaceFunctionData:VentOccDensSim("VentFuncType", VentSpcFunc)
@@ -1426,12 +1426,7 @@ RULE ThrmlZn:VentSpecMthd
      FlowPerZone = Only using the FlowPerSpace (cfm) input value.
      Other inputs are ignored."
   HELP
-    "This property is specified at the ThermalZone; it is shown here only for
-     reference. To change the specification method, click on the '...' button to
-     navigate to the ThermalZone.
-
-
-     For each of the methods, the design ventilation air flow is calculated as follows:
+    "For each of the methods, the design ventilation air flow is calculated as follows:
 
 
      Maximum = The maximum of all the various input values.
@@ -1928,7 +1923,7 @@ RULE NEW Spc:CodeVentPerArea
     else // Look up minimum cfm/ft2
       SpaceFunctionData:CodeVentPerArea("FuncType", SpcFunc)
     endif endif endif endif
-  DEFAULT : T24N
+  DEFAULT : T24N_2019
     if( VentIsRequired = 0 .OR. IsCond = 0 )
     then 0
     else
@@ -1944,6 +1939,26 @@ RULE NEW Spc:CodeVentPerArea
     else
     if( HasDCV > 0 )
     then // Use DCV minimum cfm/ft2
+      CodeVentPerAreaForDCV
+    else // Look-up CodeVentPerArea
+      VentilationSpaceFunctionData:CodeVentPerArea("VentFuncType", VentSpcFunc)
+    endif endif endif endif endif
+  DEFAULT : T24N
+    if( VentIsRequired = 0 .OR. IsCond = 0 )
+    then 0
+    else
+    if( LabArea > 0 )
+    then // For labs, standard = proposed with min set by code table
+      Max( ValidOr( VentPerArea, 0 ), VentilationSpaceFunctionData:CodeVentPerArea("VentFuncType", VentSpcFunc) ) 
+    else
+    if( IsHotelMotelGuestRm > 0 )
+    then 0.15 
+    else
+    if( HighRiseResCondFlrArea > 0 )
+    then 0.03
+    else
+    if( IfValidAnd( DsgnOcc > 0 ) )
+    then // Use DCV minimum cfm/ft2 per Exception 1 to Std Section 120.1(c)3
       CodeVentPerAreaForDCV
     else // Look-up CodeVentPerArea
       VentilationSpaceFunctionData:CodeVentPerArea("VentFuncType", VentSpcFunc)
@@ -2131,7 +2146,7 @@ RULE NEW Spc:CodeVentPerPerson
     then 5
     else 15 // Default is 15 cfm/person
     endif endif endif endif
-  DEFAULT : T24N
+  DEFAULT : T24N_2019
     if( VentIsRequired = 0 .OR. IsCond = 0 )
     then 0
     else
@@ -2147,8 +2162,7 @@ RULE NEW Spc:CodeVentPerPerson
     else
 // Ticket 3061: Fix issue with vent not increasing if no DCV and occupancy is higher than default assumption
     if( HasDCV > 0 .OR. 
-        IfValidAnd( FxdSeat > 0 ) .OR. 
-        IfValidAnd( OccNumSim >= MinOccNumSim ) ) // 
+        IfValidAnd( DsgnOcc > 0 ) ) // 
     then // Populate CodeVentPerPerson if has DCV or user increases space occupancy.
       if( VentOccDensSim > 0 )
       then // Calculate ratio of VentOccDensSim for the selected VentSpcFunc to the
@@ -2159,6 +2173,25 @@ RULE NEW Spc:CodeVentPerPerson
         VentilationSpaceFunctionData:CodeVentPerPerson("VentFuncType", VentSpcFunc)
       endif
     else VentilationSpaceFunctionData:CodeVentPerPerson("VentFuncType", VentSpcFunc)
+    endif endif endif endif endif
+  DEFAULT : T24N
+    if( VentIsRequired = 0 .OR. IsCond = 0 )
+    then 0
+    else
+    if( LabArea > 0 )
+    then ValidOr( VentPerPerson, 0 ) // Lab is always baseline = proposed
+    else
+    if( HotelMotelGuestRmCondFlrArea > 0 .OR. 
+        PrkgGarArea > 0 )
+    then 0
+    else
+    if( HighRiseResCondFlrArea > 0 )
+    then 7.5 // 7.5cfm x MinOccNum, where MinOccNum = 1 + Nbr for each DwellingUnitType
+    else
+    if( IfValidAnd( DsgnOcc > 0 ) .OR.
+        HasDCV > 0 )
+    then 15
+    else 0
     endif endif endif endif endif
   DEFAULT : S901G ECBC
     if( VentIsRequired = 0 )
@@ -2181,7 +2214,7 @@ RULE NEW Spc:CodeVentPerPerson
     endif
   SIZING : T24N_2016
     UNCHANGED
-  SIZING : T24N
+  SIZING : T24N_2019
     // Update value if DCV is added to model during sizing
     if( HasDCV > 0 )
     then 
@@ -2193,6 +2226,11 @@ RULE NEW Spc:CodeVentPerPerson
       else
         VentilationSpaceFunctionData:CodeVentPerPerson("VentFuncType", VentSpcFunc)
       endif
+    else CodeVentPerPerson
+    endif
+  SIZING : T24N
+    if( HasDCV > 0 )
+    then 15
     else CodeVentPerPerson
     endif
 ENDRULE
@@ -3057,7 +3095,7 @@ RULE Spc:CodeVentFlow
     NotInput
   UNITS 
     cfm
-  DEFAULT : T24N
+  DEFAULT : T24N_2016 T24N_2019
     if( VentIsRequired )
     then
       if( LabArea > 0 )
@@ -3084,6 +3122,39 @@ RULE Spc:CodeVentFlow
       else // All other spaces is Max of PerArea/PerPerson
         Max( CodeVentPerPersonFlow, CodeVentPerAreaFlow )
       endif endif endif endif endif
+    else 0
+    endif
+  DEFAULT : T24N
+    if( VentIsRequired )
+    then
+      if( LabArea > 0 )
+      then // Lab min is 0.15 cfm/ft2. See Issue 2139
+        Max( CodeVentPerAreaFlow, VentFlow ) 
+        / VentAirDistEff
+      else
+      if( CommKitArea > 0 )
+      then // CommKit rate is max of NACM rate or proposed flow
+        Max( Max( CodeVentPerPersonFlow, CodeVentPerAreaFlow ), VentFlow )
+        / VentAirDistEff
+      else
+      if( PrkgGarArea > 0 )
+      then // PrkgGar min based on cfm/ft2
+        CodeVentPerAreaFlow
+      else
+      if( IsHighRiseRes )
+      then // Is a High-rise residential Spc, use Sum
+        ( CodeVentPerPersonFlow + CodeVentPerAreaFlow )
+      else
+      if( IsHotelMotelGuestRm )
+      then // Is a hotel guest room
+        Max( CodeVentPerAreaFlow, CodeVentPerSpcFlow )
+      else
+      if( IfValidAnd( DsgnOcc > 0 ) )
+      then // Exception 1 to Section 120.1(c)3
+        Max( CodeVentPerPersonFlow, CodeVentPerAreaFlow )
+      else // All other spaces is Max of PerArea/PerPerson
+        CodeVentPerAreaFlow
+      endif endif endif endif endif endif
     else 0
     endif
   DEFAULT : S901G ECBC

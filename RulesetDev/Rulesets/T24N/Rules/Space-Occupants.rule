@@ -44,77 +44,6 @@
 //     Project:Building:BuildingStory:Space
 //     SpaceFunctionDefaults
 
-
-// -------------- Fixed Seating ------------------------------------------
-RULE NEW Spc:FxdSeatEligible
-  DATATYPE
-    Integer
-  LONGFORM
-    FixedSeatingEligible
-  DESCRIPTION
-    "A flag that indicates that the space is eligible for using the fixed seating
-     method for determining space ventilation requirements."
-  HELP : T24N_2022
-    "Space meets the requirements for Exception 1 to Section 120.1(c)3."
-  INPUTCLASS
-    NotInput
-  DEFAULT
-    if( HasNoInternalLds > 0 .OR. 
-        IsRes > 0 .OR. 
-        SpcFunc = "Unleased Tenant Area" )
-    then 0
-    else 1
-    endif
-ENDRULE
-RULE Spc:FxdSeat
-  DESCRIPTION
-    "A flag that indicates that the space uses the expected number of 
-     occupants or fixed seating criteria for determining space ventilation 
-     requirements."
-  HELP : T24N_2022
-    "Space must meet the requirements for Exception 1 to Section 120.1(c)3. If selected
-     an exceptional reporting condition will be triggered."
-  INPUTCLASS
-    Default
-  DEFAULT
-    0
-  SIZING 
-    if( FxdSeatEligible > 0 )
-    then 0
-    else u:FxdSeat
-    endif
-  ANNUAL
-    z:FxdSeat
-ENDRULE
-RULE Spc:OccNumFxdSeat
-  DESCRIPTION
-    "A number of occupants in the space for simulation and ventilation calculations
-     if FixedSeating is selected and is a valid choice."
-  INPUTCLASS
-    Default
-  UNITS
-    people
-  DEFAULT
-    MinOccNum
-  CHECKCODE
-    if( OccNumFxdSeat > 0 .AND. 
-        FxdSeat > 0 .AND.
-        FxdSeatEligible = 0 )
-   then
-     PostWarning("For Space '%s', OccupantNumberFixedSeating is not valid. This
-                  input will be ignored, and default occupancy will be used.",
-                  Name)
-    else UNCHANGED
-    endif
-  SIZING
-    if( FxdSeat =  0 )
-    then 0 
-    else u:OccNumFxdSeat
-    endif
-  ANNUAL
-    z:OccNumFxdSeat
-ENDRULE
-
 // -------------- Minimum # Occupants / Density -------------------------------
 // Minimum for egress/DCV design purposes
 RULE NEW Spc:MinOccNum
@@ -139,9 +68,9 @@ RULE NEW Spc:MinOccNum
       4 * ValidOr( DwellingUnitTypeCnt[4], 0 ) +
       5 * ValidOr( DwellingUnitTypeCnt[5], 0 ) +
       6 * ValidOr( DwellingUnitTypeCnt[6], 0 )  
-    else if( IfValidAnd( FxdSeat > 0 ) .AND. IfValidAnd( FxdSeatEligible > 0 ) )
+    else if( IfValidAnd( DsgnOcc > 0 ) .AND. IfValidAnd( DsgnOccEligible > 0 ) )
     then // Fixed seating can be used
-      ValidOr( OccNumFxdSeat, 0 )
+      ValidOr( DsgnOccNum, 0 )
     else if( LocalStatus( SpcFunc ) > 0 .AND. IfValidAnd( Area > 0 ) )
     then // Calculated using OccDens
       SpaceFunctionData:OccDens("FuncType", SpcFunc) * Area / 1000
@@ -203,7 +132,7 @@ RULE NEW Spc:MinOccNumSim
     if( IsHighRiseRes )
     then MinOccNum
     else
-    if( IfValidAnd( FxdSeat > 0 ) .AND. IfValidAnd( FxdSeatEligible > 0 ) )
+    if( IfValidAnd( DsgnOcc > 0 ) .AND. IfValidAnd( DsgnOccEligible > 0 ) )
     then MinOccNum
     else MinOccNum * 0.5 // 50% of egress density
     endif endif endif
@@ -234,8 +163,10 @@ RULE Spc:OccFrac
   DESCRIPTION
     "The expected fraction of the exiting density of people in a Space, based 
      on SpaceFunction, which will determine the design occupancy."  
-  INPUTCLASS
+  INPUTCLASS : S901G ECBC T24N_2013 T24N_2016 T24N_2019
     Default
+  INPUTCLASS
+    NotInput IgnoreUserInput "Spc:OccFrac no longer an allowed input as of version 2022.3.0, select Designed Occupancy if the space has expected number of occupants"
   MINIMUM
     0.5
   COMMONMAXIMUM
@@ -249,6 +180,83 @@ RULE Spc:OccFrac
     then SpcFuncDefaultsRef:OccFrac
     else Proj:OccFrac
     endif endif
+ENDRULE
+
+// JP 6/7/23 move this section from top to avoid erros and rename property names (tickets 3446 & 3490)
+// -------------- Designed Occupancy ------------------------------------------
+RULE NEW Spc:DsgnOccEligible
+  DATATYPE
+    Integer
+  LONGFORM
+    DesignedOccupancyEligible
+  PREVIOUSNAMES
+    FxdSeatEligible FixedSeatingEligible
+  DESCRIPTION
+    "A flag that indicates that the space is eligible for using the designed occupancy
+     method for determining space ventilation requirements."
+  HELP : T24N_2022
+    "Space meets the requirements for Exception 1 to Section 120.1(c)3."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( HasNoInternalLds > 0 .OR. 
+        IsRes > 0 .OR. 
+        SpcFunc = "Unleased Tenant Area" )
+    then 0
+    else 1
+    endif
+ENDRULE
+RULE Spc:DsgnOcc
+  DESCRIPTION
+    "A flag that indicates that the space uses the expected number of 
+     occupants or fixed seating criteria for determining space ventilation 
+     requirements."
+  PREVIOUSNAMES
+    FxdSeat
+  HELP : T24N_2022
+    "Space must meet the requirements for Exception 1 to Section 120.1(c)3. If selected
+     an exceptional reporting condition will be triggered."
+  INPUTCLASS
+    Default
+  DEFAULT
+    0
+  SIZING 
+    if( DsgnOccEligible > 0 )
+    then u:DsgnOcc
+    else 0
+    endif
+  ANNUAL
+    z:DsgnOcc
+ENDRULE
+RULE Spc:DsgnOccNum
+  DESCRIPTION
+    "A number of occupants in the space for simulation and ventilation calculations
+     if Designed Occupancy is selected and is a valid choice."
+  PREVIOUSNAMES
+    OccNumFxdSeat
+  INPUTCLASS
+    Default
+  UNITS
+    people
+  DEFAULT
+    MinOccNumSim
+  CHECKCODE
+    if( DsgnOccNum > 0 .AND. 
+        DsgnOcc > 0 .AND.
+        DsgnOccEligible = 0 )
+   then
+     PostWarning("For Space '%s', DesignedOccupantNumber is not valid. This
+                  input will be ignored, and default occupancy will be used.",
+                  Name)
+    else UNCHANGED
+    endif
+  SIZING
+    if( DsgnOcc =  0 )
+    then 0 
+    else u:DsgnOccNum
+    endif
+  ANNUAL
+    z:DsgnOccNum
 ENDRULE
 
 // -------------- # Occupants / Density ---------------------------------------
@@ -337,20 +345,23 @@ ENDRULE
 // For simulation
 RULE Spc:OccNumSim
   DESCRIPTION
-    "The number of people in a space for simulation and ventilation calculations."  
+    "The number of people in a space for simulation. It is also used in ventilation 
+     calculations if Designed Occupancy is selected."  
   INPUTCLASS : T24N_2016
     NotInput  IgnoreUserInput  "Removed in transition from 2013 version 3d to 3e and 2016.1 to .2"
-  INPUTCLASS
+  INPUTCLASS : S901G ECBC T24N_2013 T24N_2019
     Default
+  INPUTCLASS
+    NotInput IgnoreUserInput "Spc:OccNumSim no longer an allowed input as of version 2022.3.0, select Designed Occupancy if the space has expected number of occupants"
   DEFAULT 
     if( HasNoInternalLds )
     then 0 // Is Unoccupied, Attic/Crawlspace, or Plenum space
     else if( IsRes > 0  )
     then // Is high-rise res or hotel/motel
       MinOccNumSim
-    else if( FxdSeat > 0 .AND. IfValidAnd( FxdSeatEligible > 0 ) )
+    else if( DsgnOcc > 0 .AND. IfValidAnd( DsgnOccEligible > 0 ) )
     then // Fixed seating can be used
-      OccNumFxdSeat
+      DsgnOccNum
     else // Calculated using OccDensSim
       OccDens * ValidOr( OccFrac, 0 ) * ValidOr( Area, 0 ) / 1000
     endif endif endif
@@ -379,9 +390,9 @@ RULE Spc:OccNumSim
     else if( IsRes > 0 .OR. HasUnknownHVAC > 0 )
     then // Is HRR, hotel/motel, or UnknownHVAC
       MinOccNumSim
-    else if( FxdSeat > 0 .AND. IfValidAnd( FxdSeatEligible > 0 ) )
+    else if( DsgnOcc > 0 .AND. IfValidAnd( DsgnOccEligible > 0 ) )
     then // Fixed seating can be used
-      OccNumFxdSeat
+      DsgnOccNum
     else // Use OccNumSim, either default calc or user input
       OccNumSim
     endif endif endif
