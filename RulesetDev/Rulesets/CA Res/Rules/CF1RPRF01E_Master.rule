@@ -4258,8 +4258,11 @@ RULELIST "CF1RPRF01E_Proposed"  1 0 0 1
   ; ----------------------------------------------------------------------
   ; Section_W Heating Units table
       ; SAC 3/7/19 - added logic to prevent creation of Section_W if no heating units exist
+      ; revised to create cf1rSection_W for HeatPumpDHWCombo HPs - SAC 06/27/23 (tic #1349)
    "Create & initialize new cf1rSection_W object"
-      cf1rCF1RPRF01E:Action  = {  if ( SumAll( SCSysRpt:RefCountByType[1] ) > 0 ) then  CreateChildren( cf1rSection_W, 1, "Section_W" )
+      cf1rCF1RPRF01E:Action  = {  if ( SumAll( SCSysRpt:RefCountByType[1] ) > 0 .OR.
+                                       SumAcrossIf( SCSysRpt:RefCountByType[3], SCSysRpt:HeatingType = "HeatPumpDHWCombo" ) > 0 ) 
+                                  then  CreateChildren( cf1rSection_W, 1, "Section_W" )
                                   else UNDEFINED endif }
    "Create & initialize new cf1rTableHeatingUnits object"
       cf1rSection_W:Action   = {  if ( ComponentCount( cf1rSection_W ) > 0 ) then  CreateChildren( cf1rTableHeatingUnits, 1, "TableHeatingUnits" )
@@ -4267,22 +4270,28 @@ RULELIST "CF1RPRF01E_Proposed"  1 0 0 1
   ; ----------------------------------------------------------------------
   ; Rules to create individual Heating Unit table rows for SCSysRpt instances with RefCountByType[1] > 0
       ; SAC 3/7/19 - added logic to create cf1rtblRowHtgUnit by SCSysRpt only for single family models
+      ; revised to create cf1rtblRowHtgUnit for HeatPumpDHWCombo HPs - SAC 06/27/23 (tic #1349)
    "Create cf1rtblRowHtgUnit for all SCSysRpt instances with non-HP Heating Units (for SFam models)"
-      SCSysRpt:CF1R_HeatingUnitRow   = {  if ( Proj:IsMultiFamily > 0 .OR. IfValidAnd( RefCountByType[1] > 0 )==0 ) then UNDEFINED
+      SCSysRpt:CF1R_HeatingUnitRow   = {  if ( Proj:IsMultiFamily > 0 .OR.
+                                               ( IfValidAnd( RefCountByType[1] > 0 )==0 .AND.
+                                                 IfValidAnd( HeatingType = "HeatPumpDHWCombo" )==0) ) then UNDEFINED
                                           else CreateComp( cf1rtblRowHtgUnit, Name + "HtgUnitRow" ) endif }
       ; SAC 3/7/19 - added rule to create cf1rtblRowHtgUnit by SCSysRpt only for multifamily models
    "Create cf1rtblRowHtgUnit for all HVACHeat instances (for MFam models)"
       HVACHeat:CF1R_HeatingUnitRow   = {  if ( Proj:IsMultiFamily = 0 .OR. SumRevRef( SCSysRpt:HeatSystem, SCSysRpt:ReferenceCount ) < 1 ) then UNDEFINED
                                           else CreateComp( cf1rtblRowHtgUnit, Name + "HtgUnitRow" ) endif }
-   ; ----------------------------------------------------------------------
+
+      ; ----------------------------------------------------------------------
    ; Rules to populate Heating Unit table rows for all SCSysRpt instances
     "Set SCSysRpt:CF1R_HeatingUnitRow:W01_ResidentialHeatingSystemName" SCSysRpt:CF1R_HeatingUnitRow:W01_ResidentialHeatingSystemName  = { 
-           if ( RefCountByType[1] > 0 )
+           if ( IfValidAnd( RefCountByType[1] > 0 ) )
            then  HeatSystem:Name
+           else if ( IfValidAnd( RefCountByType[3] > 0 ) .AND. IfValidAnd( HeatingType = "HeatPumpDHWCombo" ))
+           then  HtPumpSystem:Name
            else  UNCHANGED
-           endif  }
+           endif endif  }
     "Set SCSysRpt:CF1R_HeatingUnitRow:W02_ResidentialHeatingSystemType" SCSysRpt:CF1R_HeatingUnitRow:W02_ResidentialHeatingSystemType  =     ; SAC 10/30/19 - added mappings for WallFurnaceFan & RoomHeater (tic #1150)
-      {    if ( RefCountByType[1] > 0 )
+      {    if ( IfValidAnd( RefCountByType[1] > 0 ) )
            then  switch(HeatSystem:Type)
                     case 1  : "CentralGasFurnace"  ; CBECC "CntrlFurnace - Fuel-fired central furnace"
                     case 2  : "GasWallFurnace"     ; CBECC "WallFurnaceFan - Ductless fan forced wall furnace"
@@ -4296,22 +4305,24 @@ RULELIST "CF1RPRF01E_Proposed"  1 0 0 1
                     case 18 : "GasPackagedFurnace" ; CBECC "PkgGasFurnace"        ; RJH 7/9/20 (tic #1227)
                     default : UNDEFINED
                  endswitch
+           else if (IfValidAnd( RefCountByType[3] > 0 ) .AND. IfValidAnd( HeatingType = "HeatPumpDHWCombo" )) then  "HeatPumpDHWCombo"
            else  UNCHANGED
-           endif  }
+           endif endif  }
     "Set SCSysRpt:CF1R_HeatingUnitRow:W03_HeatingUnitCount" SCSysRpt:CF1R_HeatingUnitRow:W03_HeatingUnitCount  = {  RefCountByType[1]  }
     "Set SCSysRpt:CF1R_HeatingUnitRow:W04_EfficiencyType" SCSysRpt:CF1R_HeatingUnitRow:W04_EfficiencyType  =            ; added HSPF & COP reporting - SAC 06/23/21 (tic #1273)
-         { if ( RefCountByType[1] > 0 )
+         { if ( IfValidAnd( RefCountByType[1] > 0 ) )
            then  if (     HeatEfficType == "AFUE") then  "AFUE"
                  else if (HeatEfficType == "HSPF") then  "HSPF"
+                 else if (HeatEfficType == "HSPF2") then "HSPF2"
                  else if (HeatEfficType == "COP" ) then  "COP"
                  else  UNDEFINED   ; no other enums...
-                 endif endif endif
+                 endif endif endif endif
            else  UNCHANGED
            endif  }
     "Set SCSysRpt:CF1R_HeatingUnitRow:W04a_EfficiencyType" SCSysRpt:CF1R_HeatingUnitRow:W04a_EfficiencyType  =    ; SAC 02/10/21 (tic #1258)
       {  if (LocalStatus( CF1R_HeatingUnitRow:W04_EfficiencyType ) > 0) then  CF1R_HeatingUnitRow:W04_EfficiencyType  else  UNDEFINED  endif  }
     "Set SCSysRpt:CF1R_HeatingUnitRow:W04_EfficiencyAFUE" SCSysRpt:CF1R_HeatingUnitRow:W04_EfficiencyAFUE  = {  
-           if ( RefCountByType[1] > 0 )
+           if ( IfValidAnd( RefCountByType[1] > 0 ) )
            then  atof( Format( "%.2f", MinHeatEffic ) )
 ;           then  Format( "%.2f", MinHeatEffic )
            else  UNCHANGED
@@ -4368,10 +4379,12 @@ RULELIST "CF1RPRF01E_Proposed"  1 0 0 1
   ; ----------------------------------------------------------------------
   ; Rules to create individual HP table rows for SCSysRpt instances with RefCountByType[3] > 0
       ; SAC 3/7/19 - added logic to create cf1rtblRowHP by SCSysRpt only for single family models
+      ; prevent creation of CF1R_HeatPumpRow for Type = HeatPumpDHWCombo - SAC 06/27/23 (tic #1349)
    "Create cf1rtblRowHP for SCSysRpt instances with RefCountByType[3] > 0 (for single family models only)"
       SCSysRpt:CF1R_HeatPumpRow   = {  if ( Proj:IsMultiFamily > 0 .OR. IfValidAnd( RefCountByType[3] > 0 )==0 .OR. (HtPumpSystem:IsDualFuel = 1 .AND. HtPumpSystem:AllowDualFuel > 0) ) 
                                        then UNDEFINED
-                                       else if ( EnumString(HtPumpSystem:Type) = "VCHP - Detailed" ) 
+                                       else if ( EnumString(HtPumpSystem:Type) = "VCHP - Detailed" .OR.
+                                                 IfValidAnd( HtPumpSystem:Type = 35 ) ) 
                                             then UNDEFINED 
                                             else CreateComp( cf1rtblRowHP, Name + "HPRow" )
                                             endif
@@ -4385,17 +4398,6 @@ RULELIST "CF1RPRF01E_Proposed"  1 0 0 1
                                             else CreateComp( cf1rtblRowHP, Name + "HPRow" )
                                             endif
                                        endif }
-
-
-
-
-
-
-
-
-
-
-
 
    ; ----------------------------------------------------------------------
    ; Rules to populate HP table rows for all SCSysRpt instances with RefCountByType[3] > 0
