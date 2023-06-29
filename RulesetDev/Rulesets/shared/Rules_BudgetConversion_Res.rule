@@ -371,13 +371,18 @@ RULELIST  "BudgetConversion" 1 0 1 0
 	; mjb	E+A+A	12/2/13
    ;--------------------------------------------------------------------
 	"Assign Altered ResDr Ufactor"					ResDr:AltUfactor = {	Ufactor }
+   ; revise logic to apply 0.20 Ufactor for EAA New/Altered doors in 2022+ code (per 2022 MFam ACM Table 44) - SAC 06/29/23 (tic #3479)
 	"Set ResDr:Ufactor (for demising doors)"	ResDr:Ufactor	= {	if (IsNew .OR. IsAltered) then
 																							if (ParentComponentType() == "ResIntWall")
-																								then  if (Parent( ResIntWall:IsDemising ) > 0.5) 
-                                                                              then  T24RClimateZoneCodeBase:DoorUfactor( "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )
-																										else  UNCHANGED  endif
-																								else  UNCHANGED  endif
-																							else UNCHANGED endif	}	
+																							then  if (Parent( ResIntWall:IsDemising ) > 0.5) 
+                                                                           then  T24RClimateZoneCodeBase:DoorUfactor( "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )
+																									else  UNCHANGED  endif
+                                                                     else if (IfValidAnd( Proj:AnalysisVersion > 220000 ) .AND. ParentComponentType() == "ResExtWall")
+                                                                     then  if (Proj:ResCompOpt > 1 .AND. Status > 1)
+                                                                           then  0.2
+                                                                           else  UNCHANGED  endif
+                                                                     else  UNCHANGED  endif endif
+																						else UNCHANGED endif	}	
   "Change Altered ResDr to Exist Cons if better than Code"  
       ResDr:Ufactor    = { 	if (ParentComponentType() == "ResIntWall")
 											then if (Parent( ResIntWall:IsDemising ) > 0.5 .AND. IsAltered) 
@@ -2259,13 +2264,15 @@ RULELIST  "BudgetConversion_SetupDuctsAndFan" 1 0 1 0
          then  Fan:WperCFMCool
          else  0  endif endif endif  }
    ; added logic and load of RuleLibrary HVACFan for 2022 small HtPump fan (w/ 0.45 W/CFM) - SAC 03/11/21  ; switched check and library from small to Large HP fan - SAC 03/15/21
+   ; added logic to prevent fan creation for Existing systems - SAC 06/29/23 (tic #3479)
    "Create new HVACSys:Fan if necessary (if lrg HtPump equip (2022+) or current fan assigned to both GFurn & other system(s))"  ; 2019 (tic #928)
-      HVACSys:Fan  = {  if ( (ResProj:RunAbbrev == "s" .OR. ResProj:RunAbbrev == "zb" .OR. (ResProj:SMFFollowsStdDesignFuel .AND. ResProj:RunAbbrev == "smf")) .AND.
-                             IfValidAnd( Proj:AnalysisVersion >= 220000 ) .AND. IfValidAnd( LrgHtPumpStdFanPwr = 0.58 ) )
+      HVACSys:Fan  = {  if (Proj:ResCompOpt > 1 .AND. Status < 2) then  UNCHANGED
+                        else if ( (ResProj:RunAbbrev == "s" .OR. ResProj:RunAbbrev == "zb" .OR. (ResProj:SMFFollowsStdDesignFuel .AND. ResProj:RunAbbrev == "smf")) .AND.
+                                  IfValidAnd( Proj:AnalysisVersion >= 220000 ) .AND. IfValidAnd( LrgHtPumpStdFanPwr = 0.58 ) )
                         then  RuleLibrary( HVACFan, "t24-Fan-LrgHtPump-0.58" )
                         else if (IfValidAnd( Proj:AnalysisVersion < 220000 ) .AND. IfValidAnd( StdGasFurnFanPwr > 0 )==0) then  UNCHANGED
                         else  CreateComp( HVACFan, Local( Name ) + "-gffan", "Setup_HVACDistFan" )
-                        endif endif  }
+                        endif endif endif  }
 
    "If new GasFurn fan created, store prev fan pwr to the new fan (to ensure accurate Altered-Verified fan performance)"
       HVACSys:Fan:WperCFMCool  = {
