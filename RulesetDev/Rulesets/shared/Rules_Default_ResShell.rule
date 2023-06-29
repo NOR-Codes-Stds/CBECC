@@ -382,9 +382,11 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
 	                                                                      endif endif }
 
    ; SAC 12/16/19 - IAQOption revisions to labels, CFMs & Powers updated to reflect new settings (default balanced, min exhaust)
+   ; prevent -NOT MET- message for DUTs serving only Existing HVAC zones - SAC 06/29/23 (tic #3479)
    "Set DwellUnitType:MinIAQCFMLbl"				DwellUnitType:MinIAQCFMLbl		= {	if (IAQDisabled > 0) then  Format( "IAQ Ventilation disabled (%s required but not met)", FltToStr( MinIAQCFM, 1 ) )
 																											else if (MinIAQCFM < 0.05) then  " " 
-																											else if (TotalIAQCFM < (MinIAQCFM - 0.05)) then	Format( "Min IAQ Vent -NOT MET-:  %s CFM required, %s entered", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
+																											else if (TotalIAQCFM < (MinIAQCFM - 0.05) .AND. IfValidAnd( DUNewOrAltHVACFlrAreaServed > 0.5 ))
+                                                                                 then	Format( "Min IAQ Vent -NOT MET-:  %s CFM required, %s entered", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
 																											else  switch (IAQOption)
 																											         case  2:  Format( "Minimum IAQ Ventilation:  %s CFM  (%s entered)", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
 																											         case  3:  Format( "Minimum IAQ Ventilation:  %s CFM", FltToStr( MinIAQCFM, 1 ) )
@@ -705,8 +707,10 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
 ;   "Set DwellUnitType:ApplyStdIAQMaxPwrToDRtg - flag indicating whether or not to apply the std design IAQ maximum power EDR reference run" 
 ;      DwellUnitType:ApplyStdIAQMaxPwrToDRtg     = {  1  }
 
-  "Set baseline IAQ properties" DwellUnitType:Action = { 
-      if( ResProj:IsMultiFamily > 0.5 .AND. ( ResProj:RunAbbrev = "s" .OR. ResProj:RunAbbrev = "zb" .OR. ResProj:RunAbbrev = "smf" ) ) 
+   ; added logic to prevent std design setup of IAQ for DwellUnitTypes serving only Existing zones - SAC 06/29/23 (tic #3479)
+   "Set baseline IAQ properties" DwellUnitType:Action = { 
+      if( ResProj:IsMultiFamily > 0.5 .AND. ( ResProj:RunAbbrev = "s" .OR. ResProj:RunAbbrev = "zb" .OR. ResProj:RunAbbrev = "smf" ) .AND.
+          (Proj:ResCompOpt < 2 .OR. IfValidAnd( DUNewOrAltHVACFlrAreaServed > 0.5 )) ) 
       then EvalRulelist( "BudgetConversion_IAQ_DwellUnitType", 1 ) else UNCHANGED endif }
 
 	"Default DwellUnitType:NumDHWSysTypes"		DwellUnitType:NumDHWSysTypes	= {	1  }
@@ -739,6 +743,11 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
 	"Default DwellUnit:CondFlrArea"			DwellUnit:CondFlrArea		= {	ValidOr( DwellUnitTypeRef:CondFlrArea, 0 )  }
 	"Set DwellUnit:TotalCondFlrArea"			DwellUnit:TotalCondFlrArea	= {	if (ParentComponentType() == "ResZn") then  CondFlrArea * Count  else  0  endif  }
    "Set DwellUnit:TotalCondFlrAreaWithMult" DwellUnit:TotalCondFlrAreaWithMult = {  TotalCondFlrArea * Parent( Mult )  }      ; SAC 04/27/23 (tic #3392)
+   "Set DwellUnit:NewOrAltHVACFlrAreaWithMult"  DwellUnit:NewOrAltHVACFlrAreaWithMult =      ; SAC 06/29/23 (tic #3479)
+      {  if (Proj:ResCompOpt < 2 .OR. TotalCondFlrAreaWithMult < 0.5) then  TotalCondFlrAreaWithMult
+         else if (ResZn:HVACSysStatus < 2) then  0
+         else  TotalCondFlrAreaWithMult  endif endif  }
+
 	"Set DwellUnit:NumBedroomsPerUnit"		DwellUnit:NumBedroomsPerUnit = {	if (ParentComponentType() == "ResZn") then  ValidOr( DwellUnitTypeRef:NumBedrooms, 0 )  else  0  endif  }      ; SAC 08/05/22 (CUAC)
 	"Set DwellUnit:TotalNumBedrooms"			DwellUnit:TotalNumBedrooms	= {	NumBedroomsPerUnit * Count  }
 	"Set DwellUnit:TotalNumBedroomsWithMult" DwellUnit:TotalNumBedroomsWithMult = {  TotalNumBedrooms * Parent( Mult )  }   ; SAC 04/27/23 (tic #3392)
@@ -755,10 +764,12 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
 																									else if (DwellUnitTypeRef:IAQOption == 4 .OR. DwellUnitTypeRef:IAQOption == 5) then  MinIAQCFM
 																									else  ValidOr( DwellUnitTypeRef:TotalIAQCFM, 0 ) * Count  endif endif  }
 
+   ; prevent -NOT MET- message for DUs of Existing HVAC zones - SAC 06/29/23 (tic #3479)
 	"Set DwellUnit:MinIAQCFMLbl"				DwellUnit:MinIAQCFMLbl		= {	if (LocalCompAssigned( DwellUnitTypeRef ) == 0) then  " "
 																									else if (IfValidAnd( DwellUnitTypeRef:IAQDisabled > 0.5 )) then  Format( "IAQ Ventilation disabled (%s required but not met)", FltToStr( MinIAQCFM, 1 ) )
 																									else if (MinIAQCFM < 0.05) then  " "  else if (DwellUnitTypeRef:IAQOption == 3) then  "CFI (Central Fan Integrated) IAQ  - NOT YET IMPLEMENTED -"
-																									else if (TotalIAQCFM < (MinIAQCFM - 0.05)) then	Format( "Min IAQ Vent -NOT MET-:  %s CFM required, %s entered", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
+																									else if (TotalIAQCFM < (MinIAQCFM - 0.05) .AND. IfValidAnd( NewOrAltHVACFlrAreaWithMult > 0.5 ))
+                                                                           then	Format( "Min IAQ Vent -NOT MET-:  %s CFM required, %s entered", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
 																									else if (DwellUnitTypeRef:IAQOption == 2) then  Format( "Minimum IAQ Ventilation:  %s CFM (%s entered)", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
 																									else  Format( "Minimum IAQ Ventilation:  %s CFM", FltToStr( MinIAQCFM, 1 ) )  endif endif endif endif endif endif  }
 
