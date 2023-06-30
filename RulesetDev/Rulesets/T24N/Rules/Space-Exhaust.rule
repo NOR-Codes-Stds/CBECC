@@ -1457,7 +1457,8 @@ RULE Spc:ExhFlow
            Max( CodeVentFlowTarget, CodeVentFlow * ( 1 + Proj:VentTolMaxLimRes ) ) )
     else
     if( BaseVentSysIsExh = 3 )
-    then // Baseline hotel/motel is exhaust for ventilation, limit to NonRes limit
+    then // Is an exhaust system that has direct outside air make-up
+         // For baseline, this includes H/M guestrooms.
       Min( Max( VentFlow, ExhFlow ), 
            Max( CodeVentFlowTarget, CodeVentFlow * ( 1 + Proj:VentTolMaxLimNonRes ) ) )
     else
@@ -1862,26 +1863,22 @@ RULE Spc:InfMthd[2]
     else UNDEFINED
     endif
   SIZING_PROPOSED
-    if( HasUnknownHVAC > 0 .AND. 
-        ( PropVentSysIsExh = 2 .OR. PropVentSysIsExh = 3 ) )
-    then // Core and shell residential
+    if( IsHotelMotelGuestRm > 0 .AND. IsCond > 0 .AND. ThrmlZnRef:VentSrc = "Natural" ) 
+    then // Proposed uses natural ventilation
       "FlowSpace"
     else
-    if( IsHotelMotelGuestRm > 0 .AND. IsCond > 0 .AND. ThrmlZnRef:VentSrc = "Natural" ) // Proposed uses natural ventilation
-    then "FlowSpace"
+    if( PropVentSysIsExh > 1 )
+    then // HRR or Hotel/Motel or Parking Garage
+      "FlowSpace"
     else
-    if( PropVentSysIsExh = 1 )
-    then // General exhaust
-      if( Story:VentExhBalRat < ( 1 - Proj:BalancedVentTolNonRes ) )
+    if( PropVentSysIsExh = 1 .OR. Max( TotExhFlow - MechOAFlow, 0 ) > 0 )
+    then // General exhaust-based ventilation system or has exhaust that requires direct makeup
+      if( Story:OAExhBalRat < ( 1 - Proj:BalancedVentTolNonRes ) )
       then "FlowSpace"
       else UNDEFINED
       endif
-    else
-    if( PropVentSysIsExh > 1 )
-    then // Model all but general exhaust as having 'DirectOutsideAir' w/ inf = vent
-      "FlowSpace"
     else UNDEFINED
-    endif endif endif endif
+    endif endif endif
   SIZING_BASELINE : T24N_2016
     if( HasUnknownHVAC > 0 .OR. IsExistingHVAC > 0 )
     then // Baseline = proposed
@@ -1900,16 +1897,16 @@ RULE Spc:InfMthd[2]
     if( IsHotelMotelGuestRm > 0 .AND. IsCond > 0 .AND. ThrmlZnRef:VentSrc = "Natural" ) // Proposed uses natural ventilation
     then "FlowSpace"
     else
-    if( PropVentSysIsExh = 1 )
-    then 
-      if( Story:VentExhBalRat < ( 1 - Proj:BalancedVentTolNonRes ) )
+    if( BaseVentSysIsExh > 1 )
+    then // All other options have 'DirectOutsideAir' w/ inf = vent
+      "FlowSpace"
+    else
+    if( BaseVentSysIsExh = 1 .OR. Max( TotExhFlow - MechOAFlow, 0 ) > 0 )
+    then // General exhaust-based ventilation system or has exhaust that requires direct makeup
+      if( Story:OAExhBalRat < ( 1 - Proj:BalancedVentTolNonRes ) )
       then "FlowSpace"
       else UNDEFINED
       endif
-    else
-    if( PropVentSysIsExh > 1 )
-    then // Model all but general exhaust as having 'DirectOutsideAir' w/ inf = vent
-      "FlowSpace"
     else UNDEFINED
     endif endif endif endif
   ANNUAL
@@ -1945,8 +1942,8 @@ RULE Spc:DsgnInfRt[2]
 ;      if( IfValidAnd( VentSysRef:ExhSysType = "HeatRecovery" ) )
 ;      then // Proposed is VentOnly w/ HtRcvry, simulate 1 - Eff of flow to approx impact
 ;        ExhFlow * ( 1 - ThrmlZnRef:VentSysRef:HtRcvryEffSim )
-      else // Exh&Vent should be the same, but use exh just to be consistent with inputs
-        ExhFlow
+      else // Make-up for the exhaust air
+        Max( TotExhFlow - MechOAFlow, 0 )
       endif
     else UNDEFINED
     endif
@@ -1959,11 +1956,16 @@ RULE Spc:DsgnInfRt[2]
     if( LocalStatus( InfMthd[2] ) > 0 )
     then
       if( ThrmlZnRef:VentSrc = "Natural" )
-      then // For hotel/motel only 
+      then // Natural only available for hotel/motel
         VentFlow
+      else
+      if( HasUnknownHVAC > 0 .OR. IsExistingHVAC > 0 .OR. HlthCareArea > 0 .OR.
+          IfValidAnd( PrkgGarArea > 0 ) .OR. IfValidAnd( LabArea > 0 ) )
+      then // Baseline = proposed
+      zp:DsgnInfRt[2]         
       else // Exh&Vent should be the same, but use exh just to be consistent with inputs
         ExhFlow
-      endif
+      endif endif
     else UNDEFINED
     endif
   ANNUAL
@@ -1985,7 +1987,7 @@ RULE Spc:InfSchRef[2]
     if( LocalStatus( InfMthd[2] ) > 0 )
     then 
       RuleLibrary( Schedule, 
-                   SpaceFunctionGroups:AvailSchRef("FuncGroup", FuncSchGrp) )
+                   SpaceFunctionGroups:AvailSchRef("FuncGroup", FuncSchGrpSim) )
     else UNDEFINED
     endif
   ANNUAL

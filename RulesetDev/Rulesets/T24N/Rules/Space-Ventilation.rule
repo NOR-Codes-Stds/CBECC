@@ -409,19 +409,20 @@ RULE NEW ThrmlZn:BaseVentSysIsExh
           0
         endif
       else
-      if( IsCond > 0 .AND. VentSrc = "Forced" .AND. 
-          LabArea = 0 .AND. CommKitArea = 0 .AND.
-          CodeExhFlow > 0 .AND. CodeVentFlow = 0 )
-      then // Is a conditioned space with code exhaust but no vent requirement
-        if( ExhSrc = "DirectOutsideAir" )
-        then 3 // Model vent as infiltration
-        else 1 // Model as general exhaust ( no infiltration )
-        endif
-      else
+// No longer used
+;      if( IsCond > 0 .AND. VentSrc = "Forced" .AND. 
+;          LabArea = 0 .AND. CommKitArea = 0 .AND.
+;          CodeExhFlow > 0 .AND. CodeVentFlow = 0 )
+;      then // Is a conditioned space with code exhaust but no vent requirement
+;        if( ExhSrc = "DirectOutsideAir" )
+;        then 3 // Model vent as infiltration
+;        else 1 // Model as general exhaust
+;        endif
+;      else
       if( Type = "Unconditioned" .AND. CodeExhFlow > 0 )
       then 4 // Unconditioned space
       else 0 // Baseline does not use exhaust for ventilation
-      endif endif endif endif
+      endif endif endif ;endif
     else PropVentSysIsExh // Set equal to proposed if no baseline system applies
     endif
 ENDRULE
@@ -443,21 +444,22 @@ RULE NEW ThrmlZn:PropVentSysIsExh
   DESCRIPTION
     "An integer flag that indicates the ventilation system is an exhaust system.
     
-     If flag = 0, the ventilation system is not exhaust, or there is no ventilation 
+     If flag = 0, the OA ventilation system is not an exhaust system, or there is no ventilation 
      air flow specified.
 
-     If flag = 1, then it is an exhaust system that has make-up from the
-     local zone or adjacent zones.
+     If flag = 1, the OA ventilation system is an exhaust system serving a conditioned 
+     nonresidential space, but makeup air is from local zone or adjacent zones. 
+     Ventilation is not modeled as infiltration unless the Story:OAExhBalRat is < 1.0 minus tolerance.
 
-     If flag = 2, then it is a high-rise residential exhaust system.
+     If flag = 2, the OA ventilation system is an exhaust that serves a high-rise residential space.
+     Ventilation is modeled as infiltration.
    
-     If flag = 3, then it is an exhaust system that has direct outside air make-up, 
-     or is a VentilationOnly system where ventilation is modeled as infiltration. This
-     includes H/M guestrooms and other cases where exhaust ventilation is used for
-     conditioned nonresidential spaces.
+     If flag = 3, the OA ventilation system is an exhaust system that serves as a
+     conditioned nonresidential space, and is a VentilationOnly system or makeup air is 
+     direct from outside. In both cases, ventilation is modeled as infiltration.
 
      If flag = 4, then it is an exhaust system for unconditioned space outside
-     the conditioned envelope, i.e. parking garage."
+     the conditioned envelope, i.e. parking garage. Ventilation is modeled as infiltration."
   INPUTCLASS 
     NotInput
   DEFAULT : T24N_2016
@@ -472,36 +474,31 @@ RULE NEW ThrmlZn:PropVentSysIsExh
     else 0
     endif
   DEFAULT
-    if( HasVentSys > 0 .AND. 
-        ( IfValidAnd( VentFlow > 0 ) .OR. IfValidAnd( ExhFlow > 0 ) ) )
-    then // VentSysRef is defined, the VentSys is an an exhaust system, 
-         // and the zone has either vent or exh flow
+    if( HasVentSys > 0 )
+    then // VentSysRef is defined 
       if( Type = "Unconditioned" .AND. 
-          CondgStatus = 0 .AND. 
-          IfValidAnd( ExhFlow > 0 ) )
-      then 4 // Unconditioned, not IndirectlyConditioned ventilation system
+          CondgStatus = 0 .AND.
+          IfValidAnd( VentSysRef:IsExhSys > 0 ) .AND.
+          ( IfValidAnd( VentFlow > 0 ) .OR. IfValidAnd( ExhFlow > 0 ) ) )
+      then 4 // Unconditioned space , not IndirectlyConditioned ventilation system
       else
-      if( IsHighRiseRes > 0 .AND. 
-          IfValidAnd( VentSysRef:IsExhSys > 0 ) )
-      then 2 // HRR exhaust ventilation
-      else
-      if( IsHotelMotelGuestRm > 0 .AND. 
-          IfValidAnd( VentSysRef:IsExhSys > 0 ) )
-      then 3 // Hotel/motel exhaust ventilation
-      else
-      if( IfValidAnd( VentSysRef:IsExhSys > 0 ) .AND.
-          IfValidAnd( ExhSrc = "DirectOutsideAir" ) )
-      then 3 // This is an exhaust based ventilation system
-      else 
-      if( IfValidAnd( VentSysRef:IsExhSys > 0 ) .AND.
-          IfValidAnd( VentSysRef:Type = "VentilationOnly" ) )
-      then 3 // VentilationOnly exhuast system is defined
-      else
-      if( IfValidAnd( VentSysRef:IsExhSys > 0 ) )
-      then 1 // General exhaust ventilation system with no infiltration make-up
+      if( IfValidAnd( VentSysRef:IsExhSys > 0 ) .AND. IfValidAnd( VentFlow > 0 ) )
+      then
+        if( IsHighRiseRes > 0 )
+        then 2 // HRR exhaust ventilation
+        else
+        if( IsHotelMotelGuestRm > 0 )
+        then 3 // Hotel/motel exhaust ventilation
+        else
+        if( IfValidAnd( ExhSrc = "DirectOutsideAir" ) )
+        then 3 // This is an exhaust based ventilation system
+        else 
+        if( IfValidAnd( VentSysRef:Type = "VentilationOnly" ) )
+        then 3 // VentilationOnly exhaust system is defined
+        else 1 // General exhaust-based ventilation system
+        endif endif endif endif
       else 0
-      endif endif endif endif endif
-      endif
+      endif endif
     else 0
     endif
   SIZING : T24N_2016
@@ -523,30 +520,6 @@ RULE NEW ThrmlZn:PropVentSysIsExh
     else // Unchanged
       PropVentSysIsExh
     endif
-; SIZING
-;   if( BaseSysNum > 0 )
-;   then 
-;     if( IsCond > 0 .AND. VentSrc = "Forced" .AND. IsRes > 0 )
-;     then 2 // Baseline vent system for Residential is exhaust
-;     else
-;     if( IsCond > 0 .AND. VentSrc = "Forced" .AND. 
-;         LabArea = 0 .AND. CommKitArea = 0 .AND.
-;         CodeExhFlow > 0 )
-;     then
-;       if( ExhSrc = "DirectOutsideAir" )
-;       then 3 // Model vent as infiltration
-;       else 1 // Model as general exhaust ( no infiltration )
-;       endif
-;     else
-;     if( IsCond > 0 .AND. VentFlow > 0 )
-;     then 0 // Ventilation provided by system
-;     else
-;     if( Type = "Unconditioned" .AND. CodeExhFlow > 0 )
-;     then 3 // Unconditioned space
-;     else 0 // Baseline does not use exhaust for ventilation
-;     endif endif endif endif
-;   else PropVentSysIsExh
-;   endif
 ENDRULE
 
 RULE NEW Spc:PropVentSysIsExh
@@ -555,7 +528,7 @@ RULE NEW Spc:PropVentSysIsExh
   LONGFORM
     ProposedVentilationSystemIsExhaust
   DESCRIPTION
-    "An integer flag that indicates the ventilation system is an exhaust system."
+    "An integer flag that indicates the PROPOSED entilation system is an exhaust system."
   INPUTCLASS
     NotInput
   DEFAULT
@@ -573,11 +546,14 @@ RULE NEW Spc:BaseVentSysIsExh
   LONGFORM
     BaselineVentilationSystemIsExhaust
   DESCRIPTION
-    "An integer flag that indicates the ventilation system is an exhaust system."
+    "An integer flag that indicates the BASELINE ventilation system is an exhaust system."
   INPUTCLASS
     NotInput
   SIZING
-    ThrmlZnRef:BaseVentSysIsExh 
+    if( LocalCompAssigned( ThrmlZnRef ) )
+    then ThrmlZnRef:BaseVentSysIsExh 
+    else 0
+    endif
 ENDRULE
 
 RULE NEW ThrmlZn:PropVentSysIsSup
@@ -586,7 +562,7 @@ RULE NEW ThrmlZn:PropVentSysIsSup
   LONGFORM
     ProposedVentilationSystemIsSupply
   DESCRIPTION
-    "An integer flag that indicates the ventilation system is a supply-only system."
+    "An integer flag that indicates the PROPOSED ventilation system is a supply-only system."
   INPUTCLASS
     NotInput
   DEFAULT
@@ -620,6 +596,42 @@ RULE NEW ThrmlZn:PropVentSysIsBalanced
       then 0 // Is a supply or exhaust system
       else 1
       endif
+    else 0
+    endif
+ENDRULE
+
+RULE NEW ThrmlZn:PropExhSysIsBalanced
+  DATATYPE
+    Integer
+  LONGFORM
+    ProposedExhaustSystemIsBalanced
+  DESCRIPTION
+    "An integer flag that indicates the ventilation system is a balanced system."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( LocalCompAssigned( ExhSysRef ) )
+    then
+      if( IfValidAnd( VentSysRef:IsBalancedVentSys > 0 ) )
+      then 1 // Is a supply or exhaust system
+      else 0
+      endif
+    else 0
+    endif
+ENDRULE
+
+RULE NEW Spc:PropExhSysIsBalanced
+  DATATYPE
+    Integer
+  LONGFORM
+    ProposedExhaustSystemIsBalanced
+  DESCRIPTION
+    "An integer flag that indicates the BASELINE ventilation system is an exhaust system."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( LocalCompAssigned( ThrmlZnRef ) )
+    then ThrmlZnRef:PropExhSysIsBalanced
     else 0
     endif
 ENDRULE
@@ -920,7 +932,7 @@ RULE NEW Spc:IncludeInBal
     if( VentIsRequired = 0 .OR.
         IsCond = 0 .OR. // Is not directly or indirectly conditioned
         IsRes > 0 .OR. // Residential spaces excluded from balance 
-        IfValidAnd( IsResCommon > 0 ) .OR. // Residential common spaces excluded from balance 
+;        IfValidAnd( IsResCommon > 0 ) .OR. // Residential common spaces excluded from balance 
         LabArea > 0 .OR. // Lab spaces excluded from balance
         PrkgGarArea > 0 .OR. // Parking garage spaces excluded from balance
         HlthCareArea > 0 .OR. // Healthcare areas are excluded from balance
@@ -2190,8 +2202,11 @@ RULE NEW Spc:CodeVentPerPerson
     else
     if( IfValidAnd( DsgnOcc > 0 ) )
     then 15
+    else
+    if( HasDCV > 0 )
+    then CodeVentPerAreaFlow / OccNumSim
     else 0
-    endif endif endif endif endif
+    endif endif endif endif endif endif
   DEFAULT : S901G ECBC
     if( VentIsRequired = 0 )
     then 0
