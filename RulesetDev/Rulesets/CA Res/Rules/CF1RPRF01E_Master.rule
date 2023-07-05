@@ -4326,15 +4326,7 @@ RULELIST "CF1RPRF01E_Proposed"  1 0 0 1
                  else if (HeatEfficType == "COP" ) then  "COP"
                  else  UNDEFINED   ; no other enums...
                  endif endif endif endif
-           else if ( IfValidAnd( RefCountByType[3] > 0 ) .AND. IfValidAnd( HeatingType = "HeatPumpDHWCombo" ))
-                then  if (     HeatEfficType == "AFUE") then  "AFUE"
-                      else if (HeatEfficType == "HSPF") then  "HSPF"
-                      else if (HeatEfficType == "HSPF2") then "HSPF2"
-                      else if (HeatEfficType == "COP" ) then  "COP"
-                      else  UNDEFINED   ; no other enums...
-                      endif endif endif endif
-                else  UNCHANGED
-                endif
+           else UNDEFINED
            endif  }
     "Set SCSysRpt:CF1R_HeatingUnitRow:W04_NotApplicableMessage" SCSysRpt:CF1R_HeatingUnitRow:W04_NotApplicableMessage  = { if ( LocalStatus ( CF1R_HeatingUnitRow:W04_EfficiencyType ) < 1 ) then "n/a" else UNDEFINED endif  }
 
@@ -6091,24 +6083,34 @@ RULELIST "CF1RPRF01E_Proposed"  1 0 0 1
 
   ; ----------------------------------------------------------------------
   ; Section_X Cooling Units table
+
       ; SAC 3/7/19 - added logic to prevent creation of Section_X if no cooling units exist
       ; SAC 5/25/19 - added logic to prevent creation of Section_X if only "No Cooling" systems exist
       ; RJH 10/18/19 - removed logic to prevent creation of Section_X for "No Cooling" equipment per Ticket #1147
+      ; RJH 7/5/23 - revised to create cf1rSection_X for HeatPumpDHWCombo HPs with Cooling (tic #1364)
    "Create & initialize new cf1rSection_X object"
-      cf1rCF1RPRF01E:Action  = {  if ( SumAll( SCSysRpt:RefCountByType[2] ) > 0 )
+      cf1rCF1RPRF01E:Action  = {  if ( SumAll( SCSysRpt:RefCountByType[2] ) > 0 .OR.
+                                       SumAcrossIf( SCSysRpt:RefCountByType[3], SCSysRpt:CoolingType = "HeatPumpDHWCombo" ) > 0 ) 
                                   then  CreateChildren( cf1rSection_X, 1, "Section_X" )
                                   else UNDEFINED endif }
    "Create & initialize new cf1rTableCoolingUnits object"
       cf1rSection_X:Action   = {  if ( ComponentCount( cf1rSection_X ) > 0 ) then  CreateChildren( cf1rTableCoolingUnits, 1, "TableCoolingUnits" )
                                   else UNDEFINED endif }
   ; ----------------------------------------------------------------------
-  ; Rules to create individual Cooling Unit table rows for SCSysRpt instances with RefCountByType[2] > 0
+  ; Rules to create individual Cooling Unit table rows for SCSysRpt instances with RefCountByType[2] > 0 OR (RefCountByType[3] > 0 .AND CoolingType = "HeatPumpDHWCombo")
       ; SAC 3/7/19 - added logic to create cf1rtblRowClgUnit by SCSysRpt only for single family models
       ; SAC 5/25/19 - added logic to prevent creation of cf1rtblRowClgUnit for "No Cooling" equipment
       ; RJH 10/18/19 - removed logic to prevent creation of cf1rtblRowClgUnit for "No Cooling" equipment per Ticket #1147
+      ; RJH 7/5/23 - revised to create cf1rtblRowClgUnit for HeatPumpDHWCombo HPs with Cooling (tic #1364)
    "Create cf1rtblRowClgUnit for SCSysRpt instances instances with RefCountByType[2] > 0"
-      SCSysRpt:CF1R_CoolingUnitRow   = {  if ( Proj:IsMultiFamily > 0 .OR. IfValidAnd( RefCountByType[2] > 0 )==0 ) then UNDEFINED
-                                          else CreateComp( cf1rtblRowClgUnit, Name + "ClgUnitRow" ) endif }
+      SCSysRpt:CF1R_CoolingUnitRow   = {  if ( Proj:IsMultiFamily > 0 ) 
+                                          then UNDEFINED
+                                          else if ( (IfValidAnd( RefCountByType[2] > 0) .AND. IfValidAnd( CoolingType != "NoCooling" )) .OR. (IfValidAnd( RefCountByType[3] > 0 ) .AND. IfValidAnd( CoolingType = "HeatPumpDHWCombo" ) .AND. IfValidAnd( HtPumpSystem:IncludesCooling  > 0 )) )
+                                               then CreateComp( cf1rtblRowClgUnit, Name + "ClgUnitRow" ) 
+                                               else UNDEFINED
+                                               endif
+                                          endif  }
+
       ; SAC 3/7/19 - added rule to create cf1rtblRowClgUnit by HVACCool only for multifamily models
       ; SAC 5/25/19 - added logic to prevent creation of cf1rtblRowClgUnit for "No Cooling" equipment
       ; RJH 10/18/19 - removed logic to prevent creation of cf1rtblRowClgUnit for "No Cooling" equipment per Ticket #1147
@@ -6116,14 +6118,17 @@ RULELIST "CF1RPRF01E_Proposed"  1 0 0 1
       HVACCool:CF1R_CoolingUnitRow   = {  if ( Proj:IsMultiFamily = 0 .OR. SumRevRef( SCSysRpt:CoolSystem, SCSysRpt:ReferenceCount ) < 1 ) then UNDEFINED
                                           else CreateComp( cf1rtblRowClgUnit, Name + "ClgUnitRow" ) endif }
    ; ----------------------------------------------------------------------
-   ; Rules to populate Cooling Unit table rows for all SCSysRpt instances with RefCountByType[2] > 0
+   ; Rules to populate Cooling Unit table rows for all SCSysRpt instances with RefCountByType[2] > 0 OR (RefCountByType[3] > 0 .AND CoolingType = "HeatPumpDHWCombo")
     "Set SCSysRpt:CF1R_CoolingUnitRow:X01_ResidentialCoolingSystemName" SCSysRpt:CF1R_CoolingUnitRow:X01_ResidentialCoolingSystemName  = { 
-           if ( RefCountByType[2] > 0 )
+           if ( IfValidAnd( RefCountByType[2] > 0 ) )
            then  CoolSystem:Name
+           else if ( IfValidAnd( RefCountByType[3] > 0 ) .AND. IfValidAnd( CoolingType = "HeatPumpDHWCombo" ))
+           then  HtPumpSystem:Name
            else  UNCHANGED
-           endif  }
+           endif endif  }
+
     "Set SCSysRpt:CF1R_CoolingUnitRow:X02_ResidentialCoolingSystemType" SCSysRpt:CF1R_CoolingUnitRow:X02_ResidentialCoolingSystemType  = {  
-           if ( RefCountByType[2] > 0 )
+           if ( IfValidAnd( RefCountByType[2] > 0 ) )
            then  switch(CoolSystem:Type)
                     case 1  : "NoCooling"                      ; CBECC "NoCooling"
                     case 2  : "CentralSplitAC"                 ; CBECC "SplitAirCond"
@@ -6145,23 +6150,24 @@ RULELIST "CF1RPRF01E_Proposed"  1 0 0 1
                     case 31 : "DuctedDuctlessMultiSplitAC"     ; CBECC "Ducted+DuctlessMultiSplitAirCond"  ; RJH 7/9/20 - tic #1229
                     default : UNDEFINED
                  endswitch
+           else if (IfValidAnd( RefCountByType[3] > 0 ) .AND. IfValidAnd( CoolingType = "HeatPumpDHWCombo" )) then  "HeatPumpDHWCombo"
            else  UNCHANGED
-           endif  }
-    "Set SCSysRpt:CF1R_CoolingUnitRow:X03_CoolingUnitCount" SCSysRpt:CF1R_CoolingUnitRow:X03_CoolingUnitCount  = {  RefCountByType[2]  }
+           endif endif  }
 
-
-
-
-
-
-
+    "Set SCSysRpt:CF1R_CoolingUnitRow:X03_CoolingUnitCount" SCSysRpt:CF1R_CoolingUnitRow:X03_CoolingUnitCount  = {  if (IfValidAnd( RefCountByType[2] > 0 )) 
+                                                                                                                    then RefCountByType[2]
+                                                                                                                    else if (IfValidAnd( RefCountByType[3] > 0 ) .AND. IfValidAnd( HeatingType = "HeatPumpDHWCombo" ))
+                                                                                                                         then RefCountByType[3]
+                                                                                                                         else UNDEFINED
+                                                                                                                         endif
+                                                                                                                    endif }
 
     "Set SCSysRpt:CF1R_CoolingUnitRow:X04a_EfficiencyType" SCSysRpt:CF1R_CoolingUnitRow:X04a_EfficiencyType  =       ; EER2SEER2 - SAC 09/20/22 (tic #1331)
            { if (Proj:AnalysisVersion < 220000)    ; RJH 8/15/22 CF1R 2022
              then UNDEFINED
-             else if (IfValidAnd(MinCoolEER > 0) .AND. IfValidAnd(MinCoolSEER > 0))   
+             else if (IfValidAnd(MinCoolEER > 0) .OR. IfValidAnd(MinCoolSEER > 0))   
                   then "EERSEER"
-                  else if (IfValidAnd(MinCoolEER2 > 0) .AND. IfValidAnd(MinCoolSEER2 > 0)) 
+                  else if (IfValidAnd(MinCoolEER2 > 0) .OR. IfValidAnd(MinCoolSEER2 > 0)) 
                   then "EER2SEER2"
                   else if (IfValidAnd(CoolSystem:CEER > 0))
                        then "CEER"
@@ -6173,7 +6179,7 @@ RULELIST "CF1RPRF01E_Proposed"  1 0 0 1
 
     ; RJH 8/15/22 moved case 5 to X04_EfficiencyCEER   ; revised logic to report EER, not EER2 for 2019- code vints - SAC 11/08/22
     "Set SCSysRpt:CF1R_CoolingUnitRow:X04_EfficiencyEER" SCSysRpt:CF1R_CoolingUnitRow:X04_EfficiencyEER  = {  
-           if ( RefCountByType[2] > 0 .AND. 
+           if (IfValidAnd( RefCountByType[2] > 0 ) .AND. 
                 ( IfValidAnd( CoolSystem:EffMetric = 2 )==0 .OR. 
                   ( Proj:StandardsVersion < 2023 .AND. IfValidAnd( MinCoolEER > 0 ) ) ) )
            then  switch(CoolSystem:Type)   ; RJH 8/27/20 - tic #1003
@@ -6196,11 +6202,17 @@ RULELIST "CF1RPRF01E_Proposed"  1 0 0 1
                     case 31 : atof( Format( "%.2f", MinCoolEER ) )   ; CBECC "Ducted+DuctlessMultiSplitAirCond" 
                     default : UNDEFINED
                  endswitch
-           else  UNCHANGED
+           else if (IfValidAnd( RefCountByType[3] > 0 ) .AND. IfValidAnd( CoolingType = "HeatPumpDHWCombo" )) 
+                then if (IfValidAnd( MinCoolEER > 0 )) 
+                     then atof( Format( "%.2f", MinCoolEER ) )
+                     else UNDEFINED
+                     endif
+                else  UNCHANGED
+                endif
            endif  }
 
     "Set SCSysRpt:CF1R_CoolingUnitRow:X04_EfficiencyEER2" SCSysRpt:CF1R_CoolingUnitRow:X04_EfficiencyEER2  =              ; EER2 - SAC 09/20/22 (tic #1331)   ; revised logic to report EER, not EER2 for 2019- code vints - SAC 11/08/22
-       {   if ( RefCountByType[2] > 0 .AND. IfValidAnd( CoolSystem:EffMetric = 1 )==0 .AND.
+       {   if ( IfValidAnd( RefCountByType[2] > 0 ) .AND. IfValidAnd( CoolSystem:EffMetric = 1 )==0 .AND.
                 ( Proj:StandardsVersion >= 2023 .OR. IfValidAnd( MinCoolEER > 0 )==0 ) )
            then  switch(CoolSystem:Type)   ; RJH 8/27/20 - tic #1003
                     case 1  : UNDEFINED                              ; CBECC "NoCooling"
@@ -6222,11 +6234,17 @@ RULELIST "CF1RPRF01E_Proposed"  1 0 0 1
                     case 31 : atof( Format( "%.2f", MinCoolEER2 ) )   ; CBECC "Ducted+DuctlessMultiSplitAirCond" 
                     default : UNDEFINED
                  endswitch
-           else  UNCHANGED
+           else if (IfValidAnd( RefCountByType[3] > 0 ) .AND. IfValidAnd( CoolingType = "HeatPumpDHWCombo" )) 
+                then if (IfValidAnd( MinCoolEER2 > 0 )) 
+                     then atof( Format( "%.2f", MinCoolEER2 ) )
+                     else UNDEFINED
+                     endif
+                else  UNCHANGED
+                endif
            endif  }
 
     "Set SCSysRpt:CF1R_CoolingUnitRow:X04_EfficiencyCEER" SCSysRpt:CF1R_CoolingUnitRow:X04_EfficiencyCEER  = {  
-           if ( RefCountByType[2] > 0 )
+           if ( IfValidAnd( RefCountByType[2] > 0 ) )
            then  switch(CoolSystem:Type)   ; RJH 8/15/22
                     case 5  : atof( Format( "%.2f", CoolSystem:CEER ) )   ; CBECC "RoomAirCond"
                     default : UNDEFINED
@@ -6239,7 +6257,7 @@ RULELIST "CF1RPRF01E_Proposed"  1 0 0 1
 
     ; revised logic to report SEER, not SEER2 for 2019- code vints - SAC 11/08/22
     "Set SCSysRpt:CF1R_CoolingUnitRow:X05_EfficiencySEER" SCSysRpt:CF1R_CoolingUnitRow:X05_EfficiencySEER  = {  
-           if ( RefCountByType[2] > 0 .AND.
+           if ( IfValidAnd( RefCountByType[2] > 0 ) .AND.
                 ( IfValidAnd( CoolSystem:EffMetric = 2 )==0 .OR.
                   ( Proj:StandardsVersion < 2023 .AND. IfValidAnd( MinCoolSEER > 0 ) ) ) )
            then  switch(CoolSystem:Type)   ; RJH 8/27/20 - tic #1003
@@ -6263,12 +6281,18 @@ RULELIST "CF1RPRF01E_Proposed"  1 0 0 1
                     case 31 : atof( Format( "%.2f", MinCoolSEER ) )  ; CBECC "Ducted+DuctlessMultiSplitAirCond" 
                     default : UNDEFINED
                  endswitch
-           else  UNCHANGED
+           else if (IfValidAnd( RefCountByType[3] > 0 ) .AND. IfValidAnd( CoolingType = "HeatPumpDHWCombo" )) 
+                then if (IfValidAnd( MinCoolSEER > 0 )) 
+                     then atof( Format( "%.2f", MinCoolSEER ) )
+                     else UNDEFINED
+                     endif
+                else  UNCHANGED
+                endif
            endif  }
 
     ; SEER2 - SAC 09/20/22 (tic #1331)   ; revised logic to report SEER, not SEER2 for 2019- code vints - SAC 11/08/22
     "Set SCSysRpt:CF1R_CoolingUnitRow:X05_EfficiencySEER2" SCSysRpt:CF1R_CoolingUnitRow:X05_EfficiencySEER2  = 
-       {   if ( RefCountByType[2] > 0 .AND. IfValidAnd( CoolSystem:EffMetric = 1 )==0 .AND.
+       {   if ( IfValidAnd( RefCountByType[2] > 0 ) .AND. IfValidAnd( CoolSystem:EffMetric = 1 )==0 .AND.
                 ( Proj:StandardsVersion >= 2023 .OR. IfValidAnd( MinCoolSEER > 0 )==0 ) )
            then  switch(CoolSystem:Type)   ; RJH 8/27/20 - tic #1003
                     case 1  : UNDEFINED                              ; CBECC "NoCooling"
@@ -6291,7 +6315,13 @@ RULELIST "CF1RPRF01E_Proposed"  1 0 0 1
                     case 31 : atof( Format( "%.2f", MinCoolSEER2 ) )  ; CBECC "Ducted+DuctlessMultiSplitAirCond" 
                     default : UNDEFINED
                  endswitch
-           else  UNCHANGED
+           else if (IfValidAnd( RefCountByType[3] > 0 ) .AND. IfValidAnd( CoolingType = "HeatPumpDHWCombo" )) 
+                then if (IfValidAnd( MinCoolSEER2 > 0 )) 
+                     then atof( Format( "%.2f", MinCoolSEER2 ) )
+                     else UNDEFINED
+                     endif
+                else  UNCHANGED
+                endif
            endif  }
 
     "Set SCSysRpt:CF1R_CoolingUnitRow:X05_NotApplicableMessage" SCSysRpt:CF1R_CoolingUnitRow:X05_NotApplicableMessage  = { 
@@ -6299,7 +6329,7 @@ RULELIST "CF1RPRF01E_Proposed"  1 0 0 1
 
 
     "Set SCSysRpt:CF1R_CoolingUnitRow:X06_ResidentialCoolingZoneType" SCSysRpt:CF1R_CoolingUnitRow:X06_ResidentialCoolingZoneType  = {  
-           if ( RefCountByType[2] > 0 )
+           if ( IfValidAnd( RefCountByType[2] > 0 ) .OR. (IfValidAnd( RefCountByType[3] > 0 ) .AND. IfValidAnd( CoolingType = "HeatPumpDHWCombo" )) )
            then ( switch( ZonalCoolingType )
                      case "Not Zonal"           : "NotZoneControlled"
                      case "Zonally Controlled"  : "ZoneControlled"
@@ -6308,7 +6338,7 @@ RULELIST "CF1RPRF01E_Proposed"  1 0 0 1
            else  UNCHANGED
            endif  }
     "Set SCSysRpt:CF1R_CoolingUnitRow:X07_CondenserSpeedType" SCSysRpt:CF1R_CoolingUnitRow:X07_CondenserSpeedType  = {  
-           if ( RefCountByType[2] > 0 )
+           if ( IfValidAnd( RefCountByType[2] > 0 ) .OR. (IfValidAnd( RefCountByType[3] > 0 ) .AND. IfValidAnd( CoolingType = "HeatPumpDHWCombo" )) )
            then ( switch( EnumString( CoolCompType ) )
                      case "Single Speed" : "SingleSpeed"
                      case "Multi-speed"  : "MultiSpeed"
@@ -6317,7 +6347,7 @@ RULELIST "CF1RPRF01E_Proposed"  1 0 0 1
            else  UNCHANGED
            endif  }
     "Set SCSysRpt:CF1R_CoolingUnitRow:X08_CoolingSystemHERS_VerificationName" SCSysRpt:CF1R_CoolingUnitRow:X08_CoolingSystemHERS_VerificationName  = {
-           if ( RefCountByType[2] > 0 )
+           if ( IfValidAnd( RefCountByType[2] > 0 ) )
            then  if (LocalCompAssigned( CoolSystem:HERSCheck ) < 1) then  UNDEFINED
                  else  CoolSystem:HERSCheck:Name  endif
            else  UNCHANGED  endif  }
