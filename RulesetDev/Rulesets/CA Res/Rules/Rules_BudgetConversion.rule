@@ -1729,17 +1729,20 @@ RULELIST  "BudgetConversion" 1 0 1 0
    ; SAC 5/17/19 - revised to switch logic from checking for GasFurnace vs. HeatPump
    ; JP  8/16/19 - revised to switch logic from checking for SDHV vs. GasFurnace vs. Other    - SAC 10/28/19 - further revisions to ensure 2019.1.1 results consistent w/ 2019.1.0
    ; added logic to prevent mods to HVACFan:WperCFMCool for 2022+ small HtPump std design fans - SAC 03/11/21  ; small->Large HP - SAC 03/15/21
+   ; added logic to maintain Prop fan power for EAA runs where Fan or Ducts are not 'New' - SAC 07/06/23 (tic #1356)
 	"Set fan Watts per CFM to <codeVal> for central air handlers"  ; GC issue #82
 		HVACFan:WperCFMCool	=
       {  if (IfValidAnd( WperCFMCool = 0.58 ) .AND. MaxRevRef( HVACSys:Fan, HVACSys:LrgHtPumpStdFanPwr ) == 0.58) then  UNCHANGED 
          else if (IfValidAnd( Proj:AnalysisVersion > 190101 ))
          then  if (Type != 1 .OR. (Proj:IsAddAlone > 0.5 .AND. MinRevRef( HVACSys:Fan, HVACSys:Status ) < 2)) then  UNCHANGED		; unchanged if HVACFan:Type != "Single Speed PSC Furnace Fan"
+               else if ( (Proj:RunScope != 1 .OR. Proj:IsAddAlone > 0.5) .AND.
+                         Status < 3 .AND. SumRevRef( HVACSys:Fan, HVACSys:DuctsPresentAndNew ) < 1 ) then  UNCHANGED   ; unchanged if EAA and Fan & Ducts not New
 					else if (FloorAreaServed > 1 .AND. SDHVAreaServed = FloorAreaServed)
                then  T24RClimateZoneCodeBase:SDHVWperCFM(      "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr ) 
 					else if (FloorAreaServed > 1 .AND. GasFurnAreaServed = FloorAreaServed)
                then  T24RClimateZoneCodeBase:GFurnWperCFM(      "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )  
                else  T24RClimateZoneCodeBase:WperCFM( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )  
-					endif endif endif
+					endif endif endif endif
          else  ; 2019.1.0 and earlier logic
                if (Type != 1 .OR. (Proj:IsAddAlone > 0.5 .AND. MinRevRef( HVACSys:Fan, HVACSys:Status ) < 2)) then  UNCHANGED		; unchanged if HVACFan:Type != "Single Speed PSC Furnace Fan"
                ; KN 03/21/2015 Updated to use codebase lookup. Not vetted for E+A+A. 
@@ -2581,13 +2584,16 @@ RULELIST  "BudgetConversion_SetupDuctsAndFan" 1 0 1 0
          then  Fan:WperCFMCool
          else  0  endif endif endif  }
    ; added logic and load of RuleLibrary HVACFan for 2022 small HtPump fan (w/ 0.45 W/CFM) - SAC 03/11/21  ; switched check and library from small to Large HP fan - SAC 03/15/21
+   ; added logic to prevent creation of new fan for EAA runs where Fan or Ducts are not 'New' - SAC 07/06/23 (tic #1356)
    "Create new HVACSys:Fan if necessary (if lrg HtPump equip (2022+) or current fan assigned to both GFurn & other system(s))"  ; 2019 (tic #928)
       HVACSys:Fan  = {  if ( (Proj:RunAbbrev == "s" .OR. (Proj:SMFFollowsStdDesignFuel .AND. Proj:RunAbbrev == "smf")) .AND.
                              IfValidAnd( Proj:AnalysisVersion >= 220000 ) .AND. IfValidAnd( LrgHtPumpStdFanPwr = 0.58 ) )
                         then  RuleLibrary( HVACFan, "t24-Fan-LrgHtPump-0.58" )
                         else if (IfValidAnd( Proj:AnalysisVersion < 220000 ) .AND. IfValidAnd( StdGasFurnFanPwr > 0 )==0) then  UNCHANGED
+                        else if (IfValidAnd( Proj:AnalysisVersion > 220000 ) .AND. (Proj:RunScope != 1 .OR. Proj:IsAddAlone > 0.5) .AND.
+                                 IfValidAnd( Fan:Status < 3 ) .AND. DuctsPresentAndNew < 1 ) then  UNCHANGED
                         else  CreateComp( HVACFan, Local( Name ) + "-gffan", "Setup_HVACDistFan" )
-                        endif endif  }
+                        endif endif endif  }
 
    "If new GasFurn fan created, store prev fan pwr to the new fan (to ensure accurate Altered-Verified fan performance)"
       HVACSys:Fan:WperCFMCool  = {
