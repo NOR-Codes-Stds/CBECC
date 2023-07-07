@@ -60,6 +60,18 @@ RULELIST  "BudgetConversion_DHW" 1 0 1 0
    ; BudgetConversion: DHW System(s)
    ;--------------------------------------------------------------------
 
+   ; rules to force Zone DHW status from Altered to Existing for EAA verified altered scenarios - SAC 07/06/23 (tic #1348)
+   "Switch Zone:DHWSys1Status from Alt to Exist for Std design when Verified Existing specified"   Zone:Action =
+      {  if (IfValidAnd( Proj:AnalysisVersion >= 220000 ) .AND. RunAbbrev == "s" .AND. Proj:RunScope == 2 .AND.
+             DHWSys1Status == 2 .AND. IfValidAnd( DHWSys1Verified > 0 ) .AND. LocalCompAssigned( exDHWSys1 ))
+         then  EvalRulelist( "BudgetConversion_ZoneDHW_SwitchAlteredToExisting", 1 )
+         else  UNCHANGED  endif  }
+   "re-default model if switching to Existing Verified DHW systems during EAA BudgetConversion"    Proj:Action = 
+      {  if (IfValidAnd( Proj:AnalysisVersion >= 220000 ) .AND. RunAbbrev == "s" .AND. Proj:RunScope == 2 .AND.
+             SumAll( Zone:VerifExDHWSys1Assigned ) > 0)
+         then  EvalRulelist( "ProposedInput" )
+         else  UNCHANGED  endif  }
+
    ; SAC 12/23/14 - moved up from below in order to reference in following rules
    ; SAC 3/19/14 - modified to cause 2016, multi-family w/ non-central DHW to simulate standard design
    ; SAC 9/10/15 - added condition to ensure systems/heaters converted to valid std design when DHWCalcMethod anything other than "T24"
@@ -134,7 +146,6 @@ RULELIST  "BudgetConversion_DHW" 1 0 1 0
          else if (Proj:RunAbbrev == "dr" .AND. IfValidAnd( CentralDHWTypeVal = 2 ))
          then  EvalRulelist( "BudgetConversion_DHWSys_DRtg_Central", 1 )
          else  UNCHANGED  endif endif endif endif endif  }
-
 
 
    "Redefault this DHWSys"    DHWSys:Action = {  EvalRulelist( "ProposedInput_DHWEquipment", 1 )  }
@@ -407,6 +418,13 @@ RULELIST  "BudgetConversion_DHW" 1 0 1 0
 																			else if (LocalCompAssigned( MaxNewNCntrlDHWSys:DHWHeater[1] ) == ComponentType( "DHWHeater" )) then  UNCHANGED
 																			else	EvalRulelist( "BudgetConversion_DHWHeater_ImportFromLibrary" )
 																			endif endif  }
+
+   ; added rule to switch Elec Res to HPWH for Altered 2022 systems. VerifExisting and New cons types handled elsewhere - SAC 07/06/23 (tic #1348)
+   "Reset 2022+ Altered DHWHeater:HeaterElementType from ElecRes -> HPWH before std design HPWH assignment below"    DHWHeater:HeaterElementType  = 
+      {  if ( (Proj:RunAbbrev == "s"  .OR. (Proj:SMFFollowsStdDesignFuel .AND. Proj:RunAbbrev == "smf")) .AND. IfValidAnd( ForceStdDesign > 0.5 ) .AND.
+              Proj:StdDesignBase >= 2022 .AND. IsAltered .AND. HeaterElementType == 0 ) 
+         then  5     ; ElecRes -> HPWH
+         else  UNCHANGED   endif  }
 
    ; SAC 10/5/15 - Added eval of rulelist to prevent multiple heaters in a system and multipliers > 1 for any standard design system
    ; SAC 10/27/15 - prevent removing DHWHeater assignments from CENTRAL systems
@@ -2050,7 +2068,12 @@ RULELIST  "BudgetConversion_DHW" 1 0 1 0
 ;	"Set HVACSys:DHWEnergyFactor"		HVACSys:DHWEnergyFactor		= {	if (DHWFloorAreaServed < 0.1 .OR. IfValidAnd( DHWEnergyFactor > 0.5 )) then  UNCHANGED
 ;																							else  3  endif  }
 
+END
+;*************************************************************************
 
+;************************************************************************* SAC 07/06/23 (tic #1348)
+RULELIST "BudgetConversion_ZoneDHW_SwitchAlteredToExisting"  1 0 1 0
+   "Force Zone:DHWSys1Status from Altered to Existing for Std run"   Zone:DHWSys1Status = {  "Existing"  }
 END
 ;*************************************************************************
 
@@ -2424,6 +2447,7 @@ RULELIST  "BudgetConversion_DHWHeater_HeaterElementType" 1 0 1 1
 ; SAC 5/1/15 - revised 2016 logic to only select Propane if NatGasAvailable = 0 AND HeaterElementType set to Propane in the proposed model (issue 531)
 ; SAC 4/7/16 - added logic to set HeaterElementType  for RESNET2014 design rating reference run (tic #631)
 ; SAC 8/16/17 - added logic to retain HPWH as std design for 2019 models when proposed design is HPWH  - SAC 8/22/17 - rolled back HPWH std design mods of 8/16
+; bypass these mods for 2022 std design - SAC 07/06/23 (tic #1348)
 ;"dbg" DHWHeater:Action = { PostMessageToLog( "setting budget DHWHeater '%s' HeaterElementType:  ForceStdDesign %g / DRtgRefRunID %g / StdDesignBase %g / NatGasAvailable %g / Status %g / HeaterElementType %g",
 ;                                 Name, ForceStdDesign, Proj:DRtgRefRunID, Proj:StdDesignBase, Proj:NatGasAvailable, Status, HeaterElementType ) }  ; SAC 09/02/20
 	"Reset DHWHeater:HeaterElementType (when simulating std design)" DHWHeater:HeaterElementType	= {	
@@ -2434,6 +2458,8 @@ RULELIST  "BudgetConversion_DHWHeater_HeaterElementType" 1 0 1 1
       if (HeaterElementType == 1) then  UNCHANGED		; Gas -> Gas
       else	0		; ElecRes, HPWH or HPWHX -> ElecRes
       endif
+    else if (Proj:StdDesignBase >= 2022)
+    then  UNCHANGED    ; 2022+ mods handled previous to this point
     else if (Proj:StdDesignBase >= 2016)
     then   ; LDH 170509 - Added logic to select proper Heater Element type for alterations (tic # 820)
       if ( Proj:NatGasAvailable < 0.5 .AND.  ; No Natural Gas Available at Site
@@ -2449,7 +2475,7 @@ RULELIST  "BudgetConversion_DHWHeater_HeaterElementType" 1 0 1 1
     else if (Proj:NatGasAvailable < 0.5 .AND. HeaterElementType != 0)		; != Electric
     then	0	; Electric
     else	UNCHANGED  
-    endif endif endif endif endif endif  }
+    endif endif endif endif endif endif endif  }
 
    "Set DHWHeater:StdInpRtgConv (fuel unit conversion should InputRatingSim be retained in std model)"   ; SAC 8/28/17 - (tic #893)
       DHWHeater:StdInpRtgConv  = {
