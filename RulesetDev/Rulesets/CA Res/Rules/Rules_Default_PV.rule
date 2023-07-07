@@ -147,10 +147,47 @@ RULELIST "ProposedInput_PVSystem" 0 0 0 0
          if (LocalStatus( PVWDCSizeMultiplier[2] ) > 0) then  UNCHANGED
          else  1  endif  }
 
+
+; solar access area & PV exception defaulting - SAC 07/06/23 (tic #1352)
+   "default Proj:SolAccessRfArea"      Proj:SolAccessRfArea =
+      {  int( SumAll( CathedralCeiling:Area ) + SumAll( Attic:DeckArea ) + 0.5 )  }
+   "Set Proj:T24StdPVPwrDens (W/ft2) - min/default PV power density from Std sec 140.10"
+      Proj:T24StdPVPwrDens = {  14  }
+   "Set Proj:SolAccessRfAreaPVPwr (kW) - min PV system capacity based on SARA (Std sec 140.10)"
+      Proj:SolAccessRfAreaPVPwr = {  SolAccessRfArea * T24StdPVPwrDens / 1000  }
+   "Set Proj:SolAccessRfAreaPVMsg"     Proj:SolAccessRfAreaPVMsg =
+      {  if (SolAccessRfAreaPVPwr < 1) then  UNDEFINED
+         else  Format( "(implies PV cap %s kW @ %.0f W/ft2)", FltToStr( SolAccessRfAreaPVPwr, 1 ), T24StdPVPwrDens )  endif  }
+      ;   else if (CondFloorArea > 0)
+      ;   then  Format( "(PV cap %s kW @ %.0f W/ft2 | SARA %.1f% of cond area)",
+      ;              FltToStr( SolAccessRfAreaPVPwr, 1 ), T24StdPVPwrDens, (SolAccessRfArea * 100 / CondFloorArea) )
+      ;   else  Format( "(PV cap %s kW @ %.0f W/ft2)", FltToStr( SolAccessRfAreaPVPwr, 1 ), T24StdPVPwrDens )
+      ;   endif endif  }
+      ;   then  Format( "(implies PV capacity of %s kW @ %.0f W/ft2 | SARA %.1f% of building cond area)",
+      ;              FltToStr( SolAccessRfAreaPVPwr, 1 ), T24StdPVPwrDens, (SolAccessRfArea * 100 / CondFloorArea) )
+      ;   else  Format( "(implies PV capacity of %s kW @ %.0f W/ft2)", FltToStr( SolAccessRfAreaPVPwr, 1 ), T24StdPVPwrDens )
+
+   "Set Proj:T24RPVNumDwellings"    Proj:T24RPVNumDwellings =        ; SAC 07/07/23 (tic #1352)
+      {  if (IfValidAnd( NoDwellingUnit > 0 ) .AND. (RunScope > 1 .OR. IfValidAnd( IsAddAlone > 0 ))) then  0
+         else if (SFamADUType > 0) then  2  else  1  endif endif  }
+   "Set Proj:T24RPrescribedPV (kW) based on equation 150.1-C"     Proj:T24RPrescribedPV =       ; SAC 07/07/23 (tic #1352)
+      {  ( CondFloorArea      * T24RClimateZoneCodeBase:PrescripPV_CFAmult( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:CompCodeBase, "BldgType", Proj:BldgTypeTblStr ) / 1000 ) +
+         ( T24RPVNumDwellings * T24RClimateZoneCodeBase:PrescripPV_DUmult(  "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:CompCodeBase, "BldgType", Proj:BldgTypeTblStr ) )  }
+   "Set Proj:T24RPrescribedPVMsg"      Proj:T24RPrescribedPVMsg = {  Format( "Presciptive PV:  %.2f kW", T24RPrescribedPV )  }
+
+   "Set Proj:DfltPVExcept"    Proj:DfltPVExcept =
+      {  if (Proj:CompCodeBase == 2022)
+         then  if (SolAccessRfArea < 80)        then  2201
+               else if (T24RPrescribedPV < 1.8) then  2202
+               else  0  endif endif
+         else  0  endif  }
+
 ; reduced PV requirement exception inputs - SAC 12/10/17
-   "Default Proj:ReducedPVReq - whether or not an exception to standard PV requirements applies"
-      Proj:ReducedPVReq  = {  0  }
-   ; Proj:ReducedPVReqExcept,  default via enums  - CondRequired, 0,    BEMP_Sym,   "Exception describing why standard PV requirements don't apply to this project"
+   "Default Proj:ReducedPVReq - whether or not an exception to standard PV requirements applies"   ; updated to default based on DfltPVExcept - SAC 07/07/23 (tic #1352)
+      Proj:ReducedPVReq  = {  if (DfltPVExcept > 0) then  1  else  0  endif  }
+   "Default Proj:ReducedPVReqExcept"      Proj:ReducedPVReqExcept =           ; added default expression - SAC 07/07/23 (tic #1352)
+      {  if (ReducedPVReq > 0 .AND. DfltPVExcept > 0) then  DfltPVExcept
+         else  0  endif  }
    "Set Proj:ReducedPVReqExcDesc - RTF of exception describing why standard PV requirements don't apply to this project"   ; SAC 03/01/21   ; 2022 - SAC 05/23/22 (tic #1292)
       Proj:ReducedPVReqExcDesc  = {
          switch (ReducedPVReqExcept)
