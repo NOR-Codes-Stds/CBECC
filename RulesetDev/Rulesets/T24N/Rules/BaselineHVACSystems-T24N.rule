@@ -720,6 +720,7 @@ RULE NEW Spc:CreateBaseHVAC
 ENDRULE
 
 // Set flag to designate that baseline HVAC should be created for ResOtherZn - SAC 05/06/22
+// prevent CreateBaseHVAC being toggled ON for Existing HVAC systems - SAC 07/12/23
 RULE NEW ResOtherZn:CreateBaseHVAC
   DATATYPE
     Integer
@@ -732,7 +733,8 @@ RULE NEW ResOtherZn:CreateBaseHVAC
   SIZING_PROPOSED
     0
   SIZING_BASELINE
-    if( Proj:CreateBaseHVAC > 0 .AND. Type = "Conditioned" .AND. CondType = "Directly" )
+    if( Proj:CreateBaseHVAC > 0 .AND. Type = "Conditioned" .AND. CondType = "Directly" .AND.
+        IfValidAnd( NewOrAltHVACFloorArea > 0 ) )
         ; ( IsNewHVAC = -999 .OR. IsNewHVAC = 1 .OR. HasUnknownHVAC = 1 ) )
     then 1
     else 0
@@ -1089,8 +1091,11 @@ RULE NEW ResOtherZn:BaseZnAirSysRef
     then
       if( IfValidAnd( Proj:ResCompOpt = "New - Addition Alone" ) .OR.
           IfValidAnd( Proj:ResCompOpt = "Addition and/or Alteration" ) )
-      then // Tic 3485: MFam Addition alone or Add/Alt, always use System 3a: SZAC
-        RuleLibrary( AirSys, "ResBaseAirSys_SZAC", 1 )
+      then // Tic 3485: MFam Addition alone or Add/Alt, always use System 3a: SZAC / revised to retrieve Altered system for HVACSysStatus = Alt - SAC 07/12/23
+        if (HVACSysStatus = "Altered")
+        then  RuleLibrary( AirSys, "ResBaseAirSys_SZAC-Alt", 1 )
+        else  RuleLibrary( AirSys, "ResBaseAirSys_SZAC", 1 )
+        endif
       else
       if( AboveGrdStoryCntForBaseSysMap <= 3 )
       then ; <= 3 stories: 
@@ -1400,7 +1405,26 @@ ENDRULE
 RULE ResOtherZn:ozHVACSystem
 // Proposed system assignment is defined by user.
   SIZING
-    if( Type = "Unconditioned" .OR. CondType = "Indirectly" )
+    if( Type = "Unconditioned" .OR. CondType = "Indirectly" .OR.
+        (Proj:ResCompOpt != "Newly Constructed" .AND. HVACSysStatus != "New") )
+    then UNDEFINED
+    else
+    if( CreateBaseHVAC > 0 )
+    then     
+      if( LocalCompAssigned( BaseZnAirSysRef ) )
+      then // Zone served by a baseline single-zone AirSys
+        BaseZnAirSysRef
+      else UNDEFINED
+      endif
+    else UNCHANGED
+    endif endif
+ENDRULE
+// added rule to ALSO set AltHVACSystem assignment for Altered systems - SAC 07/12/23
+RULE ResOtherZn:AltHVACSystem
+// Proposed system assignment is defined by user.
+  SIZING
+    if (Type = "Unconditioned" .OR. CondType = "Indirectly" .OR.
+        Proj:ResCompOpt = "Newly Constructed" .OR. HVACSysStatus != "Altered")
     then UNDEFINED
     else
     if( CreateBaseHVAC > 0 )
@@ -1421,11 +1445,13 @@ RULE ResOtherZn:ActiveHVACSystem
     else
     if( CreateBaseHVAC > 0 )
     then     
-      if( LocalCompAssigned( ozHVACSystem ) )
+      if( HVACSysStatus = "New" .AND. LocalCompAssigned( ozHVACSystem ) )
       then // Zone served by a baseline single-zone AirSys
         ozHVACSystem
+      else if( HVACSysStatus = "Altered" .AND. LocalCompAssigned( AltHVACSystem ) )
+      then  AltHVACSystem
       else UNDEFINED
-      endif
+      endif endif
     else UNCHANGED
     endif endif 
 ENDRULE
