@@ -1896,6 +1896,7 @@ RULE HtRcvry:ClgTotEff75
     endif endif endif
 ENDRULE
 
+// ********** Temperature Control ************
 RULE HtRcvry:TempCtrl
   DESCRIPTION
     "This field determines if the heat exchanger's supply air outlet is 
@@ -1910,17 +1911,20 @@ RULE HtRcvry:TempCtrl
     None
     Fixed
     Scheduled
+    ReturnAirReset
   DEFAULT
     "None"
   SIZING
-    if( AirSys:IsBaseHlthCareSys > 0 )
+    if( IfValidAnd( u:TempCtrl = "ReturnAirReset" ) )
+    then "Fixed" ; For OS to create a Sch and SPM, then the Sch will be controled by a EMS
+    else if( AirSys:IsBaseHlthCareSys > 0 )
     then "None"
     else if( IfValidAnd( HasHXBypass = "No" ) )
     then "None"
     else if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
     then PropVentOnlyZnSysRef:TempCtrl
     else TempCtrl
-    endif endif endif
+    endif endif endif endif
 //ANNUAL
 //  Standard design heat recovery does not use TempCtrl. See ticket 3317
 ENDRULE
@@ -1947,10 +1951,12 @@ RULE HtRcvry:FixedSupTemp
   SIZING
     if( TempCtrl = "Fixed" )
     then
-      if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
+      if( IfValidAnd( u:TempCtrl = "ReturnAirReset" ) )
+      then 72 ; dummy value, setpoint is controled by EMS
+      else if( IfValidAnd( AirSys:IsPropVentOnlySys > 0 ) )
       then PropVentOnlyZnSysRef:FixedSupTemp
       else FixedSupTemp
-      endif
+      endif endif
     else UNDEFINED
     endif
 ENDRULE
@@ -1980,6 +1986,215 @@ RULE HtRcvry:TempSetptSchRef
     endif
 ENDRULE
 
+// ----------- SAT Reset Limits ReturnAirReset ----------
+RULE HtRcvry:TempSetptRstSupLow
+  DESCRIPTION
+    "The minimum (low) reset supply air temperature for Temperature Ctrl = ReturnAirReset."
+  HELP
+    "Specifies the lower supply air temperature setpoint at the specified corresponding return air
+     temperature. Between the corresponding return air temperature setpoints, the supply air 
+     temperature is adjusted linearly between the reset temperature setpoints."
+  INPUTCLASS
+    Default
+  UNITS
+    °F
+  COMMONMINIMUM
+    50
+  COMMONMAXIMUM
+    65
+  DEFAULT
+    if( TempCtrl = "ReturnAirReset" )
+    then
+      if( IfValidAnd( AirSys:ClgCtrl = "Fixed" ) )
+      then ValidOr( AirSys:ClgFixedSupTemp, 55 )
+      else
+      if( IfValidAnd( AirSys:ClgCtrl = "FixedDualSetpoint" ) )
+      then ValidOr( AirSys:ClgFixedSupTemp, 55 )
+      else
+      if( IfValidAnd( AirSys:ClgCtrl = "OutsideAirReset" ) .OR.
+          IfValidAnd( AirSys:IsWarmestCtrl > 0 ) )
+      then ValidOr( AirSys:ClRstSupLow, 55 )
+      else ValidOr( AirSys:ClgDsgnSupAirTemp, 55 )
+      endif endif endif
+    else UNDEFINED
+    endif
+  CHECKSIM
+    if( IfValidAnd( TempCtrl = "ReturnAirReset" ) )
+    then
+      if( LocalStatus( TempSetptRstSupLow ) = 0 )
+      then
+        PostError("TemperatureSetpointResetSupplyLow for HeatRecovery '%s' is required if 
+                   temperature control = ReturnAirReset.", Name)
+      else UNCHANGED
+      endif
+    else UNCHANGED
+    endif
+ENDRULE
+
+RULE NEW HtRcvry:TempSetptRstSupLowSim
+  DESCRIPTION
+    "The minimum (low) reset supply air temperature simulated. It is converted from °F to °C for
+     simulation in EnergyPlus."
+  INPUTCLASS
+    NotInput
+  UNITS
+    °C
+  SIZING
+    if( IfValidAnd( TempSetptRstSupLow > 0 ) )
+    then ( TempSetptRstSupLow - 32 ) * 5 / 9 
+    else UNCHANGED
+    endif
+ENDRULE
+
+RULE HtRcvry:TempSetptRstSupHi
+  DESCRIPTION
+    "The maximum (high) reset supply air temperature for Temperature Ctrl = ReturnAirReset."
+  HELP
+    "Specifies the higher supply air temperature setpoint at the specified corresponding return air
+     temperature. Between the corresponding return air temperature setpoints, the supply air 
+     temperature is adjusted linearly between the reset temperature setpoints."
+  INPUTCLASS
+    Default
+  UNITS
+    °F
+  COMMONMINIMUM
+    55
+  COMMONMAXIMUM
+    90
+  DEFAULT
+    if( TempCtrl = "ReturnAirReset" )
+    then
+      if( IfValidAnd( AirSys:ClgCtrl = "Fixed" ) )
+      then TempSetptRstSupLow + 5
+      else
+      if( IfValidAnd( AirSys:ClgCtrl = "FixedDualSetpoint" ) )
+      then ValidOr( AirSys:HtgFixedSupTemp, 70 )
+      else 
+      if( IfValidAnd( AirSys:ClgCtrl = "OutsideAirReset" ) .OR.
+          IfValidAnd( AirSys:IsWarmestCtrl > 0 ) )
+      then ValidOr( AirSys:ClRstSupHi, 70 )
+      else ValidOr( AirSys:HtgDsgnSupAirTemp, 70 )
+      endif endif endif
+    else UNDEFINED
+    endif
+  CHECKSIM
+    if( IfValidAnd( TempCtrl = "ReturnAirReset" ) )
+    then
+      if( LocalStatus( TempSetptRstSupHi ) = 0 )
+      then
+        PostError("TemperatureSetpointResetSupplyHigh for HeatRecovery '%s' is required if 
+                   temperature control = ReturnAirReset.", Name)
+      else
+      if( TempSetptRstSupHi < TempSetptRstSupLow )
+      then
+        PostError("TemperatureSetpointResetSupplyHigh must be higher than 
+                   TemperatureSetpointResetSupplyLow for HeatRecovery.", Name)
+      else UNCHANGED
+      endif endif
+    else UNCHANGED
+    endif
+ENDRULE
+
+RULE NEW HtRcvry:TempSetptRstSupHiSim
+  DESCRIPTION
+    "he maximum (high) reset supply air temperature simulated. It is converted from °F to °C for
+     simulation in EnergyPlus."
+  INPUTCLASS
+    NotInput
+  UNITS
+    °C
+  SIZING
+    if( IfValidAnd( TempSetptRstSupHi > 0 ) )
+    then ( TempSetptRstSupHi - 32 ) * 5 / 9 
+    else UNCHANGED
+    endif
+ENDRULE
+
+RULE HtRcvry:TempSetptRstRetHi
+  DESCRIPTION
+    "The return air temperature at the corresponds to the high reset supply air temperature"  
+  HELP
+    "This is the return air temperature that corresponds to high supply air reset temperature."
+  INPUTCLASS
+    Default
+  UNITS
+    °F
+  DEFAULT
+    if( IfValidAnd( TempCtrl = "ReturnAirReset" ) )
+    then 70
+    else UNDEFINED
+    endif 
+  CHECKSIM
+    if( IfValidAnd( TempCtrl = "ReturnAirReset" ) .AND. 
+        LocalStatus( TempSetptRstRetHi ) = 0 )
+    then
+      PostError("TemperatureSetpointResetReturnHigh for HeatRecovery '%s' is required if 
+                 temperature control = ReturnAirReset.", Name)
+    else UNCHANGED
+    endif
+ENDRULE
+
+RULE NEW HtRcvry:TempSetptRstRetHiSim
+  DESCRIPTION
+    "The return air temperature simulated at the corresponds to the high reset supply air 
+     temperaturehe. It is converted from °F to °C for simulation in EnergyPlus."
+  INPUTCLASS
+    NotInput
+  UNITS
+    °C
+  SIZING
+    if( IfValidAnd( TempSetptRstRetHi > 0 ) )
+    then ( TempSetptRstRetHi - 32 ) * 5 / 9 
+    else UNCHANGED
+    endif
+ENDRULE
+
+RULE HtRcvry:TempSetptRstRetLow
+  DESCRIPTION
+    "The return air temperature at the corresponds to the low reset supply air temperature."  
+  HELP
+    "This is the return air temperature that corresponds to low supply air reset temperature."
+  INPUTCLASS
+    Default
+  UNITS
+    °F
+  DEFAULT
+    if( IfValidAnd( TempCtrl = "ReturnAirReset" ) )
+    then 75
+    else UNDEFINED
+    endif 
+  CHECKSIM
+    if( IfValidAnd( TempCtrl = "ReturnAirReset" ) .AND. 
+        LocalStatus( TempSetptRstRetLow ) = 0 )
+    then
+      PostError("TemperatureSetpointResetReturnLow for HeatRecovery '%s' is required if 
+                 temperature control = ReturnAirReset.", Name)
+    else
+    if( IfValidAnd( TempCtrl = "ReturnAirReset" ) .AND. 
+        TempSetptRstRetLow < TempSetptRstRetHi )
+    then
+      PostError("TemperatureSetpointResetReturnLow must be higher than 
+                 TemperatureSetpointResetReturnHigh for HeatRecovery.", Name)
+    else UNCHANGED
+    endif endif
+ENDRULE
+
+RULE NEW HtRcvry:TempSetptRstRetLowSim
+  DESCRIPTION
+    "The return air temperature simulated at the corresponds to the low reset supply air 
+     temperaturehe. It is converted from °F to °C for simulation in EnergyPlus."
+  INPUTCLASS
+    NotInput
+  UNITS
+    °C
+  SIZING
+    if( IfValidAnd( TempSetptRstRetLow > 0 ) )
+    then ( TempSetptRstRetLow - 32 ) * 5 / 9 
+    else UNCHANGED
+    endif
+ENDRULE
+
+// ********** Defrost Control ************
 RULE HtRcvry:DefrostCtrl
   DESCRIPTION
     "Heat exchanger defrost control method."
