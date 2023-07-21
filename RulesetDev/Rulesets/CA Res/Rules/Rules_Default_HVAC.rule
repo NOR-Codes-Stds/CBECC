@@ -809,7 +809,7 @@ RULELIST "Default_AllHVAC" 0 0 0 0
    ; SAC 11/14/18 - blast Ducted HP checkbox and Dist & Fan assignments for VCHP systems
    ; SAC 2/12/19 - revise rule to PREVENT blasting duct flag and assignments for Std, SMF, DRtg... runs    ; VCHP2 - SAC 11/01/20
    "Reset duct-related HVACSys properties for VCHP systems"    HVACSys:Action  =                   ; prevent duct/fan reset for VCHP2 systems - SAC 08/02/21
-      {  if (IfValidAnd( Proj:RunAbbrev = "s" ) .OR. IfValidAnd( Proj:RunAbbrev = "smf" ) .OR.
+      {  if (IfValidAnd( Proj:IsStdOrSMFRun > 0 ) .OR. 
              IfValidAnd( Proj:RunAbbrev = "dr" )) then  UNCHANGED
          else if ( (IfValidAnd( HtPumpDucted > 0 ) .OR. LocalCompAssigned( DistribSystem ) .OR.
                                                         LocalCompAssigned( Fan )) .AND.
@@ -995,6 +995,24 @@ RULELIST "Default_AllHVAC" 0 0 0 0
 																											else 0 endif	}
 	"Set IsHPSysEER flag for HVACHtPump"			HVACHtPump:IsClSysEER		=	{  MaxRevRef( HVACSys:HtPumpSystem, HVACSys:IsHPSysEER ) +
                                                                                  MaxRevRef( HVACSys:HtPumpSystem, HVACSys:IsHPSysEER2 ) }
+
+   "set HVACSys:T24RPV_EER2 - cooling EER2 used to calculate Prescriptive PV"    HVACSys:T24RPV_EER2 =         ; SAC 07/20/23
+      {  if (Proj:RunAbbrev != "u" .AND. LocalStatus( T24RPV_EER2 ) > 0) then  UNCHANGED
+         else if (IfValidAnd( HaveCooling > 0 )==0 .OR. (Type != 2 .AND. HaveCooling < 0.5) .OR.
+                  (Type == 2 .AND. HtPumpSysType == 35 .AND. IfValidAnd( HtPumpSystem[1]:IncludesCooling > 0 )==0) .OR.
+                  (IfValidAnd( ClSysEER > 2 )==0 .AND. IfValidAnd( ClSysEER2 > 2 )==0)) then  999
+         else if (IfValidAnd( ClSysEER2 >= 2 )) then  ClSysEER2
+         else if (IfValidAnd( ClSysEER >= 2 ) .AND. IfValidAnd( ClSysEER2perEER > 0 ))
+         then  ClSysEER * ClSysEER2perEER
+         else  999  endif endif endif endif  }
+
+   "set HVACSys:ForceStd_EER2 - cooling EER2 to be used in standard design models"     HVACSys:ForceStd_EER2 =       ; SAC 07/20/23
+      {  if (Proj:RunAbbrev != "u") then  UNCHANGED
+         else if (IfValidAnd( HaveCooling > 0 )==0 .OR. Type != 2 .OR. IfValidAnd( ClSysEER2 >= 11.7 ) .OR.
+                  (IfValidAnd( HtPumpSysType == 35 ) .AND. IfValidAnd( HtPumpSystem[1]:IncludesCooling > 0 )==0) .OR.
+                  Proj:StdDesignBase < 2025 .OR. (Status < 2 .AND. (Proj:RunScope > 1 .OR. Proj:IsAddAlone > 0))) then  UNDEFINED
+         else if (IfValidAnd( ClSysEER2 < 11.7 )) then  ClSysEER2
+         else  UNDEFINED  endif endif endif  }
 
 ; CFMperTon - HVACHtPump
    ; switched from individual rules to For loop - SAC 09/19/22
@@ -1908,7 +1926,7 @@ RULELIST "SetupHVACSys_Round1_HeatCool" 0 0 0 0
    ; revised logic to prevent overriding HVACSys:HeatSysType for Existing systems - SAC 02/07/23
    "Set HVACSys:HeatSysType"     HVACSys:HeatSysType  = {
          if (NumHeatSystemTypes > 0 .AND. LocalCompAssigned( HeatSystem[1] ))
-         then  if ((Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf" .OR. Proj:RunAbbrev == "dr") .AND. IfValidAnd( IsExisting > 0 )==0)
+         then  if ((Proj:IsStdOrSMFRun .OR. Proj:RunAbbrev == "dr") .AND. IfValidAnd( IsExisting > 0 )==0)
 					then  StdHeatingType
 					else  HeatSystem[1]:Type  endif
          else  0  endif  }
@@ -1999,7 +2017,7 @@ RULELIST "SetupHVACSys_Round1_HeatCool" 0 0 0 0
    ; SAC 6/24/20 - added logic to ensure CoolSysType consistent w/ StdCoolingType for S, SMF & DR runs (tic #1225 & #1226)
    ; revised logic to prevent overriding HVACSys:CoolSysType for Existing systems - SAC 02/07/23
 	"Set HVACSys:CoolSysType"			HVACSys:CoolSysType			= {	if (NumCoolSystemTypes > 0 .AND. LocalCompAssigned( CoolSystem[1] ))
-																							then  if ((Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf" .OR. Proj:RunAbbrev == "dr") .AND. IfValidAnd( IsExisting > 0 )==0)
+																							then  if ((Proj:IsStdOrSMFRun .OR. Proj:RunAbbrev == "dr") .AND. IfValidAnd( IsExisting > 0 )==0)
 																							      then  StdCoolingType
 																							      else  CoolSystem[1]:Type  endif
 																							else  0  endif  }
@@ -2084,7 +2102,7 @@ RULELIST "SetupHVACSys_Round1_HeatPump" 0 0 0 0
 	"Set HVACSys:HtPumpSysType"			HVACSys:HtPumpSysType			= {	if (NumHtPumpSystemTypes > 0 .AND. LocalCompAssigned( HtPumpSystem[1] ))
 																									then  if ((Proj:RunScope == 2 .OR. Proj:IsAddAlone > 0.5) .AND. MinRevRef( Zone:ActiveHVACSystem, Zone:HVACSysStatus ) < 2)
                                                                                  then  HtPumpSystem[1]:Type
-                                                                                 else if (Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf" .OR. Proj:RunAbbrev == "dr")
+                                                                                 else if (Proj:IsStdOrSMFRun .OR. Proj:RunAbbrev == "dr")
 																							            then  StdHeatingType
 																							            else  HtPumpSystem[1]:Type  endif endif
 																									else  0  endif  }
@@ -2108,7 +2126,7 @@ RULELIST "SetupHVACSys_Round1_HeatPump" 0 0 0 0
 ; SAC 9/29/13 - added logic to cause standard design HPs to auto-size their heat caps
 ; SAC 10/27/15 - added check for design rating run abbreviation (Proj:RunAbbrev == "dr")
 	"Default HVACSys:AutoSizeHeatInp"	HVACSys:AutoSizeHeatInp			= {	if (GlobalStatus( Proj:RunAbbrev ) < 1) then  0
-																									else if (Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "S" .OR. Proj:RunAbbrev == "smf" .OR. Proj:RunAbbrev == "dr") then  1  else  0  endif endif  }
+																									else if (Proj:IsStdOrSMFRun .OR. Proj:RunAbbrev == "dr") then  1  else  0  endif endif  }
 	"Set HVACSys:AutoSizeHeat[1]"			HVACSys:AutoSizeHeat[1]			= {	0  }   ; never cause AUTOSIZE to get set for heating portion of HP in CSE
 	"Default HVACSys:AutoSizeCoolInp"	HVACSys:AutoSizeCoolInp			= {	1  }
 	"Set HVACSys:AutoSizeCool[1]"			HVACSys:AutoSizeCool[1]			= {	1  }
@@ -2182,7 +2200,7 @@ RULELIST "SetupHVACSys_Round2_HeatCool" 0 0 0 0
          then  HeatSystem[1]:TypeAbbrevStr
          else  " "  endif  }
       ; SAC 6/26/20 - rollback 6/25 mod which caused issues w/ presence of ducts in std design models (tic #1225 & #1226)
-      ;   then  if (Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf" .OR. Proj:RunAbbrev == "dr")
+      ;   then  if (Proj:IsStdOrSMFRun .OR. Proj:RunAbbrev == "dr")
       ;         then  if (HtOrClDucted < 0.5)
       ;               then T24RHeatingEquipment:DuctlessStdSys( "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", HeatSystem[1]:TypeAbbrevStr )
       ;               else T24RHeatingEquipment:DuctedStdSys(   "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", HeatSystem[1]:TypeAbbrevStr )
@@ -2293,7 +2311,7 @@ RULELIST "SetupHVACSys_Round2_HeatCool" 0 0 0 0
    "Initialize HVACSys:EffMetric"      HVACSys:EffMetric =        ; rules to setup HVACSys:EffMetric based on assigned HVACCool objects - SAC 09/19/22 (tic #1331)
       {  if (IfValidAnd( Proj:StdDesignBase >= 2022 )) then  2  else  1  endif  }
    "Reset HVACSys:EffMetric based on assigned HVACCool[1-10]"   for:#Sys=(1to10)   HVACSys:EffMetric =      ; revised logic to retain user input EffMetric for 2019 std design models - SAC 11/08/22
-      {  if ( (IfValidAnd( Proj:StdDesignBase >= 2022 ) .AND. (Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf")) .OR.
+      {  if ( (IfValidAnd( Proj:StdDesignBase >= 2022 ) .AND. (Proj:IsStdOrSMFRun)) .OR.
               Proj:RunAbbrev == "dr" ) then  UNCHANGED
          else if (IfValidAnd( CoolSystem[#Sys]:EffMetric > 0 ))
          then  CoolSystem[#Sys]:EffMetric
@@ -2303,7 +2321,7 @@ RULELIST "SetupHVACSys_Round2_HeatCool" 0 0 0 0
    ; revised logic to prevent overriding HVACSys:CoolSysTypeAbbrev for Existing systems - SAC 02/07/23
 	"Set HVACSys:CoolSysTypeAbbrev"	HVACSys:CoolSysTypeAbbrev	=
       {  if (NumCoolSystemTypes > 0 .AND. LocalCompAssigned( CoolSystem[1] ))
-         then  if ((Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf" .OR. Proj:RunAbbrev == "dr") .AND. IfValidAnd( IsExisting > 0 )==0)
+         then  if ((Proj:IsStdOrSMFRun .OR. Proj:RunAbbrev == "dr") .AND. IfValidAnd( IsExisting > 0 )==0)
                then  T24RCoolingEquipment:StdSystem( "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", CoolSystem[1]:TypeAbbrevStr )
                else  CoolSystem[1]:TypeAbbrevStr
                endif
@@ -2509,11 +2527,11 @@ RULELIST "SetupHVACSys_Round2_HeatCool" 0 0 0 0
 	"Init HVACSys:HPDFAFUE"           HVACSys:HPDFAFUE          = {	UNDEFINED  }
 	"Init HVACSys:HPLockoutTemp"      HVACSys:HPLockoutTemp     = {	UNDEFINED  }
    "Init HVACSys:LrgHtPumpStdFanPwr" HVACSys:LrgHtPumpStdFanPwr =    ; 2022 - SAC 03/11/21  ; SAC 03/15/21
-      {  if (Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf" .OR. Proj:RunAbbrev == "dr")
+      {  if (Proj:IsStdOrSMFRun .OR. Proj:RunAbbrev == "dr")
          then  UNCHANGED
          else  0  endif  }
    "Init HVACSys:PropHtPumpAutoSz"   HVACSys:PropHtPumpAutoSz  =     ; 2022 - SAC 03/11/21  ; SAC 03/15/21
-      {  if (Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf" .OR. Proj:RunAbbrev == "dr")
+      {  if (Proj:IsStdOrSMFRun .OR. Proj:RunAbbrev == "dr")
          then  UNCHANGED
          else  0  endif  }
 
@@ -2556,7 +2574,7 @@ RULELIST "SetupHVACSys_Round2_HeatPump" 0 0 0 0
    ; revised logic to ensure HtPumpSysTypeAbbrev NOT updated for Existing systems in Std, SMF & DR models - SAC 06/24/21
 	"Set HVACSys:HtPumpSysTypeAbbrev"	HVACSys:HtPumpSysTypeAbbrev	=
       {  if (NumHtPumpSystemTypes > 0 .AND. LocalCompAssigned( HtPumpSystem[1] ))
-         then  if (Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf" .OR. Proj:RunAbbrev == "dr")
+         then  if (Proj:IsStdOrSMFRun .OR. Proj:RunAbbrev == "dr")
                then  if ((Proj:RunScope == 2 .OR. Proj:IsAddAlone > 0.5) .AND. MinRevRef( Zone:ActiveHVACSystem, Zone:HVACSysStatus ) < 2)
                      then  UNCHANGED
                      else if (HtOrClDucted < 0.5)
@@ -2600,7 +2618,7 @@ RULELIST "SetupHVACSys_Round2_HeatPump" 0 0 0 0
    "Initialize HVACSys:EffMetric"      HVACSys:EffMetric =        ; rules to setup HVACSys:EffMetric based on assigned HVACHtPump objects - SAC 09/19/22 (tic #1331)
       {  if (IfValidAnd( Proj:StdDesignBase >= 2022 )) then  2  else  1  endif  }
    "Reset HVACSys:EffMetric based on assigned HVACHtPump[1-10]"   for:#Sys=(1to10)   HVACSys:EffMetric =       ; revised logic to retain user input EffMetric for 2019 std design models - SAC 11/08/22
-      {  if ( (IfValidAnd( Proj:StdDesignBase >= 2022 ) .AND. (Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf")) .OR.
+      {  if ( (IfValidAnd( Proj:StdDesignBase >= 2022 ) .AND. (Proj:IsStdOrSMFRun)) .OR.
               Proj:RunAbbrev == "dr" ) then  UNCHANGED
          else if (IfValidAnd( HtPumpSystem[#Sys]:EffMetric > 0 ))
          then  HtPumpSystem[#Sys]:EffMetric
@@ -2773,7 +2791,7 @@ RULELIST "SetupHVACSys_Round2_HeatPump" 0 0 0 0
 	"Set HVACSys:HPLockoutTemp - 10"	   HVACSys:HPLockoutTemp  = {	if (NumHtPumpSystemTypes > 9 .AND. IfValidAnd( HtPumpSystem[10]ModelDualFuel > 0 ) .AND. IfValidAnd( HtPumpSystem[10]HasHPLockout > 0 ) .AND. IfValidAnd( HtPumpSystem[10]HPLockoutTemp > HPLockoutTemp )) then  HtPumpSystem[10]HPLockoutTemp  else  UNCHANGED  endif  }
 
    "Set HVACSys:LrgHtPumpStdFanPwr"    HVACSys:LrgHtPumpStdFanPwr =        ; 2022 - SAC 03/11/21  ; SAC 03/15/21
-      {  if (Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf" .OR. Proj:RunAbbrev == "dr")
+      {  if (Proj:IsStdOrSMFRun .OR. Proj:RunAbbrev == "dr")
          then  UNCHANGED
          else if (FloorAreaServed[1] > 0.5 .AND. (Proj:RunScope == 1 .OR. Status == 3) .AND. 
              IfValidAnd( HtPumpDucted > 0 ) .AND. LocalCompAssigned( Fan ) > 0.5 .AND.
@@ -2782,7 +2800,7 @@ RULELIST "SetupHVACSys_Round2_HeatPump" 0 0 0 0
          then  0.58
          else  0  endif endif  }
    "Set HVACSys:PropHtPumpAutoSz"      HVACSys:PropHtPumpAutoSz  =         ; 2022 - SAC 03/11/21  ; SAC 03/15/21
-      {  if (Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf" .OR. Proj:RunAbbrev == "dr")
+      {  if (Proj:IsStdOrSMFRun .OR. Proj:RunAbbrev == "dr")
          then  UNCHANGED
          else if (HPSysAutoSize > 0) then  1  else  0  endif endif  }
 
@@ -3579,7 +3597,7 @@ RULELIST "SetupHVACSys_Round2_common" 0 0 0 0
                                                                   else if (IfValidAnd(HtPumpSystem[1]:Type == 35)) then  1
 																		;				else if (AutoSizeHeat[1] > 0.5 .OR. (HPSysCap47 > 1 .AND. HPSysCap17 > 1)) then  1    - replaced this w/ below as part of GC issue 186 fix (SAC 9/29/13)
 																						else if (IfValidAnd( AutoSizeHeatInp > 0.5 ) .OR. IfValidAnd( HtPumpSystem[1]:AutoSize > 0.5 ) .OR.
-																						         Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "S" .OR. Proj:RunAbbrev == "smf" .OR. Proj:RunAbbrev == "dr" .OR. Proj:RunAbbrev == "DR" .OR.
+																						         Proj:IsStdOrSMFRun .OR. Proj:RunAbbrev == "dr" .OR. Proj:RunAbbrev == "DR" .OR.
 																									((IfValidAnd( HPSysCap47 > 1 ) .AND. (IfValidAnd(HPSysCap17 > 1) .OR. IfValidAnd( HtPumpSystem[1]:IsPackaged > 0 ) .OR.
 																									                                      IfValidAnd(HtPumpSystem[1]:Type == 12) .OR. IfValidAnd(HtPumpSystem[1]:Type == 22) .OR.
                                                                                                                  IfValidAnd(HtPumpSystem[1]:Type == 33) .OR. IfValidAnd(HtPumpSystem[1]:Type == 34))) .OR.
@@ -4141,7 +4159,7 @@ RULELIST "Default_HVACDist_OtherThanType" 0 0 0 0
   ; SAC 10/27/15 - added check for design rating run abbreviation (Proj:RunAbbrev == "dr")
 	"Ensure HVACDist:DefaultSystem valid"		HVACDist:Action	= {
 						if (IfValidAnd( Proj:EnergyCodeYearNum = 0 )) then  UNCHANGED   ; SAC 3/13/17 - do nothing for ExEDR
-						else if ((Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "S" .OR. Proj:RunAbbrev == "smf" .OR. Proj:RunAbbrev == "dr") .AND.
+						else if ((Proj:IsStdOrSMFRun .OR. Proj:RunAbbrev == "dr") .AND.
 						         Proj:RunScope == 2 .AND. Status == 2 .AND. IsVerified .AND. IfValidAnd( DuctsVsStandard >= 0 )) then  UNCHANGED
 						else if (ValidOr( DefaultSystem, 1 ) > 0.5) then	EvalRulelist( "ForceDefaults_HVACDist", 1 )
 						else if (ValidOr( LowLkgAH, 0 ) < 0.5) then			EvalRulelist( "ForceDefaults_HVACDist_LowLkgAH", 1 )
@@ -9345,8 +9363,10 @@ RULELIST "Setup_HVACSys_Cool_SplitHeatPump" 1 0 1 0
 											else if (ClSysSEER >= 13) then	11.3 + (0.57 * (ClSysSEER - 13  ))
 											else										10   + (0.84 * (ClSysSEER - 11.5))
 											endif endif endif endif endif endif  }
-	"Set HVACSys:ClSysEER2"						HVACSys:ClSysEER2					=     ; SAC 09/19/22 (tic #1331) - assumes same SEER2/EER2 ratio as SEER/EER...?
+	"Set HVACSys:ClSysEER2"						HVACSys:ClSysEER2					=     ; SAC 09/19/22 (tic #1331) - assumes same SEER2/EER2 ratio as SEER/EER...?  ; SAC 07/20/23 (2025)
 										{	if (EffMetric < 2) then  UNCHANGED
+                                 else if (Proj:IsStdRun .AND. IfValidAnd( ForceStd_EER2 > 0 ))
+                                 then  ForceStd_EER2
                                  else if (Proj:RunScope == 2 .AND. Status == 2 .AND. IsVerified .AND.
 													CoolEqpVsStandard >= 0 .AND.		; => equal or better than standard
 													MaxRevRef( Zone:AltHVACSystem, Zone:VerifExistingEER ) > 5)
@@ -9362,7 +9382,7 @@ RULELIST "Setup_HVACSys_Cool_SplitHeatPump" 1 0 1 0
                                                                    - 13  ))) * T24RCoolingEquipment:EER2perEER( "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", EnumString( StdCoolingType ) )
 											else	(10   + (0.84 * ((ClSysSEER2 / T24RCoolingEquipment:SEER2perSEER( "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", EnumString( StdCoolingType ) ))
                                                                    - 11.5))) * T24RCoolingEquipment:EER2perEER( "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", EnumString( StdCoolingType ) )
-											endif endif endif endif endif endif  }
+											endif endif endif endif endif endif endif  }
    "Set HVACSys:ClSysEER2perEER"    HVACSys:ClSysEER2perEER    =           ; SAC 09/19/22 (tic #1331)
                                                    {  if (EffMetric < 2 .OR. T24RCoolingEquipment:EER2Valid( "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", EnumString( StdCoolingType ) ) < 1) then  0
                                                       else  T24RCoolingEquipment:EER2perEER( "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", EnumString( StdCoolingType ) )  endif  }

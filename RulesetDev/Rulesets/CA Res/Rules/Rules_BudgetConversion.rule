@@ -61,12 +61,21 @@ RULELIST  "BudgetConversion" 1 0 1 0
 ;	"Set Proj:RunAbbrev"			Proj:RunAbbrev			= {	if ( AnalysisType == 13 .AND.       - now set in compliance engine source - SAC 8/4/17
 ;																				  ( (AllOrientations < 0.5 .AND. RunNumber == 2) .OR.
 ;																					 (AllOrientations > 0.5 .AND. RunNumber == 5) ) ) then  "s"  else  "dr"  endif  }
+   "Set Proj:IsStdRun"        Proj:IsStdRun        = {  if (RunAbbrev == "s" .OR. RunAbbrev == "s2" .OR. RunAbbrev == "s3" .OR.
+                                                            RunAbbrev == "S" .OR. RunAbbrev == "S2" .OR. RunAbbrev == "S3")
+                                                        then  1  else  0  endif  }     ; SAC 07/18/23 (2025)
+   "Set Proj:IsStdOrSMFRun"   Proj:IsStdOrSMFRun   = {  if (IsStdRun > 0 .OR. RunAbbrev == "smf" .OR. RunAbbrev == "SMF")
+                                                        then  1  else  0  endif  } 
 	"Set Proj:RunID"				Proj:RunID				= {	if (RunAbbrev == "s") then  "Standard"
+                                                         else if (RunAbbrev == "s2") then  "Standard2"
+                                                         else if (RunAbbrev == "s3") then  "Standard3"
                                                          else if (RunAbbrev == "smf") then  "StdMixedFuel"
-                                                         else  "DesignRating"  endif endif  }
+                                                         else  "DesignRating"  endif endif endif endif  }
 	"Set Proj:RunIDProcFile"	Proj:RunIDProcFile	= {	if (RunAbbrev == "s") then	" - Std"
+                                                         else if (RunAbbrev == "s2") then  " - Std2"
+                                                         else if (RunAbbrev == "s3") then  " - Std3"
                                                          else if (RunAbbrev == "smf") then  " - SMF"
-                                                         else  " - DRtg"       endif endif  }
+                                                         else  " - DRtg"       endif endif endif endif  }
 	"Set Proj:DRtgRefRunID"		Proj:DRtgRefRunID		= {	if (AllowDesignRating > 0.5 .AND. RunAbbrev == "dr") then  DesignRatingBase  else  0  endif  }		; SAC 3/11/16 - added to facilitate RESNET2014 rules
 
    "Store Proj:PropSFamCompactFactor for use in modeling Alt/Ex DHW systems"        Proj:PropSFamCompactFactor =        ; SAC 09/02/20 (tic #1187)
@@ -82,20 +91,22 @@ RULELIST  "BudgetConversion" 1 0 1 0
       {  if (IfValidAnd( AllowStdDesignFuel > 0 ) .AND. IfValidAnd( StdDesignIAQType[1] > 0 ) .AND.
              IfValidAnd( BypassRuleLimits > 0 )==0 .AND.
              (IfValidAnd( MostUserDUIAQ_Exhaust > 0 ) .OR. IfValidAnd( IAQSupInletsAccessible > 0 )) .AND.
-             (RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf"))
+             IsStdOrSMFRun .AND. IfValidAnd( EnergyCodeYearNum < 2025 ))
          then  1  else  0  endif  }
 
 ;"dbg" Proj:Action = {  PostMessageToLog( "   BudgetConversion set appl fuel:  RunAbbrev %s / AllowStdDesignFuel %g / AnalysisVersion %g / StdDesignFuel %g", RunAbbrev, AllowStdDesignFuel, AnalysisVersion, StdDesignFuel )  }
    "Transform current model enduse fuel to force Standard/Design Rating model fuel"    Proj:Action =     ; SAC 6/13/20 (2022AllElecStd) - SAC 6/18/20 - SAC 7/2/20   | revised fixing std design & adding DRtg - SAC 01/15/21
-      {  if ((RunAbbrev == "s" .OR. (Proj:SMFFollowsStdDesignFuel .AND. Proj:RunAbbrev == "smf")) .AND. IfValidAnd( AllowStdDesignFuel > 0 ) .AND. IfValidAnd( StdDesignFuel > 0 ))
+      {  if (IfValidAnd( EnergyCodeYearNum >= 2025 ) .AND. Proj:RunScope == 1 .AND. IfValidAnd( Proj:IsAddAlone > 0.5 )==0)
+         then  EvalRulelist( "BudgetConversion_Std_2025" )        ; 2025+ New Construction
+         else if ((IsStdRun .OR. (Proj:SMFFollowsStdDesignFuel .AND. Proj:RunAbbrev == "smf")) .AND. IfValidAnd( AllowStdDesignFuel > 0 ) .AND. IfValidAnd( StdDesignFuel > 0 ))
          then  EvalRulelist( "BudgetConversion_Std_SpecifyFuel" )
          else if (RunAbbrev == "dr" .AND. IfValidAnd( AllowDRtgDesignFuel > 0 ) .AND. IfValidAnd( DRtgDesignFuel > 0 ))
          then  EvalRulelist( "BudgetConversion_DRtg_SpecifyFuel" )
-         else  UNCHANGED  endif endif  }
+         else  UNCHANGED  endif endif endif  }
 
    "Set HVACSys:EAABudgConvTypeChange - flag indicating HVACSys:Type has changed during EAA BudgetConversion"  HVACSys:EAABudgConvTypeChange =     ; SAC 05/15/23
       {  if (IfValidAnd( Proj:EnergyCodeYearNum >= 2022 )==0 .OR. Proj:RunScope == 1 .OR. Status < 2) then  UNDEFINED
-         else if (Proj:RunAbbrev == "s" .OR. (Proj:SMFFollowsStdDesignFuel .AND. Proj:RunAbbrev == "smf"))
+         else if (Proj:IsStdRun .OR. (Proj:SMFFollowsStdDesignFuel .AND. Proj:RunAbbrev == "smf"))
          then  if (     Type == 2 .AND. IfValidAnd( StdHeatingType = 1 ))    ; CntrlFurnace
                then  1
                else if (Type != 2 .AND. IfValidAnd( StdHeatingType = 4 ))    ; SplitHeatPump
@@ -109,7 +120,7 @@ RULELIST  "BudgetConversion" 1 0 1 0
    "Transform HVACSys settings in EAA models where needed"     HVACSys:Action =
       {  if (IfValidAnd( Proj:EnergyCodeYearNum >= 2022 )==0 .OR. Proj:RunScope == 1 .OR.
              Status < 2) then  UNCHANGED
-         else if (Proj:RunAbbrev == "s" .OR. (Proj:SMFFollowsStdDesignFuel .AND. Proj:RunAbbrev == "smf"))
+         else if (Proj:IsStdRun .OR. (Proj:SMFFollowsStdDesignFuel .AND. Proj:RunAbbrev == "smf"))
          then  if (     Type == 2 .AND. IfValidAnd( StdHeatingType = 1 ))    ; CntrlFurnace
                then  EvalRulelist( "ConvertTo_HVACSys_ACFurnace", 1 )
                else if (Type != 2 .AND. IfValidAnd( StdHeatingType = 4 ))    ; SplitHeatPump
@@ -126,7 +137,7 @@ RULELIST  "BudgetConversion" 1 0 1 0
 
 	; SAC 4/18/16 - bug fix - ensure EDR reference runs ALWAYS based on 2013 internal gains mechanism
 	"Set Proj:IntGainsMethod"	Proj:IntGainsMethod	= {	if (DRtgRefRunID == 2014) then  2013  else  UNCHANGED  endif  }
-;"debugging" Proj:Action = { if (RunAbbrev == "s") then  MessageBox( "Model stored for %s:%s run", RunID, EnumString( StandardsVersion ) )  else  MessageBox( "Model stored for %s:%s run", RunID, EnumString( DesignRatingBase ) )  endif }
+;"debugging" Proj:Action = { if (IsStdRun) then  MessageBox( "Model stored for %s:%s run", RunID, EnumString( StandardsVersion ) )  else  MessageBox( "Model stored for %s:%s run", RunID, EnumString( DesignRatingBase ) )  endif }
    ; SAC 2/28/18 - revised logic to prevent mods to Proj:FuelTDVLabel & Fuel_Have* for 2019+ analysis (w/ no NatGasAvailable flag) (tic #992)
 	"Set Proj:FuelTDVLabel"					Proj:FuelTDVLabel			= {
          if (IfValidAnd( EnergyCodeYearNum >= 2019 )) then  UNCHANGED
@@ -1295,7 +1306,7 @@ RULELIST  "BudgetConversion" 1 0 1 0
 
    ; retrieve HVAC htg & clg caps from PrelimProp run(s) to inform 2022+ Std design Fan power - SAC 03/14/21
    "Set HVACSys:PrelimPropHtgCap"   HVACSys:PrelimPropHtgCap =       ; revised to prevent cap retrieval for unassigned systems or when no PreProp run performed - SAC 03/17/21
-      { if (IfValidAnd( Proj:AnalysisVersion >= 220000 ) .AND. Proj:RunAbbrev == "s" .AND.
+      { if (IfValidAnd( Proj:AnalysisVersion >= 220000 ) .AND. Proj:IsStdRun .AND.
             IfValidAnd( FloorAreaServed[1] > 0.5 ) .AND. IfValidAnd( Proj:PrelimPropRunReqd > 0 ))
          then  if (IfValidAnd( Proj:AllOrientations > 0 ))
                then  min(           RetrieveCSVValue( ValidOr( Proj:ProcessingPath, "" ) + ValidOr( Proj:ProjFileNameNoExt, "" ) + " - PreProp-N-HVACCaps.csv", 2, Name, 1 ),
@@ -1306,7 +1317,7 @@ RULELIST  "BudgetConversion" 1 0 1 0
                endif
          else  UNCHANGED  endif  }
    "Set HVACSys:PrelimPropClgCap"   HVACSys:PrelimPropClgCap = 
-      { if (IfValidAnd( Proj:AnalysisVersion >= 220000 ) .AND. Proj:RunAbbrev == "s" .AND.
+      { if (IfValidAnd( Proj:AnalysisVersion >= 220000 ) .AND. Proj:IsStdRun .AND.
             IfValidAnd( FloorAreaServed[1] > 0.5 ) .AND. IfValidAnd( Proj:PrelimPropRunReqd > 0 ))
          then  if (IfValidAnd( Proj:AllOrientations > 0 ))
                then  min(           RetrieveCSVValue( ValidOr( Proj:ProcessingPath, "" ) + ValidOr( Proj:ProjFileNameNoExt, "" ) + " - PreProp-N-HVACCaps.csv", 2, Name, 2 ),
@@ -1319,7 +1330,7 @@ RULELIST  "BudgetConversion" 1 0 1 0
 
    ; added (temporary) logic to PREVENT this check in MFam models w/ NumDUsServed > 1, since this system can serve multiple DUs and therefore doesn't represent a single (installed) system - SAC 04/21/21
    "Possibly revise HVACSys:LrgHtPumpStdFanPwr based on autosized result"     HVACSys:LrgHtPumpStdFanPwr =        ; SAC 03/14/21  ; SAC 03/15/21
-      {  if (IfValidAnd( Proj:AnalysisVersion >= 220000 ) .AND. Proj:RunAbbrev == "s" .AND.
+      {  if (IfValidAnd( Proj:AnalysisVersion >= 220000 ) .AND. Proj:IsStdRun .AND.
              IfValidAnd( LrgHtPumpStdFanPwr = 0 ) .AND. IfValidAnd( PropHtPumpAutoSz > 0 ) .AND.
              max( ValidOr( PrelimPropHtgCap, 0 ), ValidOr( PrelimPropClgCap, 0 ) ) >= 54.0 .AND.
              (Proj:IsMultiFamily < 0.5 .OR. IfValidAnd( NumDUsServed < 2 )))
@@ -1492,8 +1503,8 @@ RULELIST  "BudgetConversion" 1 0 1 0
 
    "Setup budget ducts & fan"    ; SAC 1/17/18
       Proj:Action = {  EvalRulelist( "BudgetConversion_SetupDuctsAndFan" )  }
-;"store BEMProc details" Proj:Action = {  if (RunAbbrev == "s") then  StoreBEMProc( "frc HVACDist-type", 0 ) else  UNCHANGED  endif  }
-;"debugging" Proj:Action = { if (RunAbbrev == "s") then  MessageBox( "Model stored for %s:%s run", RunID, EnumString( StandardsVersion ) )  else  UNCHANGED  endif }
+;"store BEMProc details" Proj:Action = {  if (IsStdRun) then  StoreBEMProc( "frc HVACDist-type", 0 ) else  UNCHANGED  endif  }
+;"debugging" Proj:Action = { if (IsStdRun) then  MessageBox( "Model stored for %s:%s run", RunID, EnumString( StandardsVersion ) )  else  UNCHANGED  endif }
 
 ; mjb	10/24/14	- mods to keep existing HVAC in Std Design for Additions Alone
 ;	mjb	10/27/14 - mods to keep existing HVAC in Std Design for E+A+A
@@ -1678,7 +1689,7 @@ RULELIST  "BudgetConversion" 1 0 1 0
       {  if (Proj:IsMultiFamily < 0.5 .OR. (IfValidAnd( Proj:BypassRuleLimits > 0 )==0 .AND.
                                             Proj:ApplyStdDesignIAQFromTable < 1)) then  UNCHANGED
          else if (IfValidAnd( Proj:StdDesignIAQType[1] > 0 )==0) then  UNCHANGED
-         else if (Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf" .OR. 
+         else if (Proj:IsStdOrSMFRun .OR. 
                   (IfValidAnd( Proj:ApplyStdIAQMaxPwrToDRtg > 0 ) .AND. IfValidAnd( Proj:BypassRuleLimits > 0 ))) 
          then  min( Proj:StdDesignIAQType[1], 3 )
          else  UNCHANGED  endif endif endif  }
@@ -1687,7 +1698,7 @@ RULELIST  "BudgetConversion" 1 0 1 0
       {  if (Proj:IsMultiFamily < 0.5 .OR. (IfValidAnd( Proj:BypassRuleLimits > 0 )==0 .AND.
                                             Proj:ApplyStdDesignIAQFromTable < 1)) then  UNCHANGED
          else if (IfValidAnd( Proj:StdDesignIAQType[1] > 0 )==0) then  UNCHANGED
-         else if (Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf" .OR.
+         else if (Proj:IsStdOrSMFRun .OR.
                   (IfValidAnd( Proj:ApplyStdIAQMaxPwrToDRtg > 0 ) .AND. IfValidAnd( Proj:BypassRuleLimits > 0 ))) 
          then  if (     Proj:StdDesignIAQType[1]  = 1 .AND. IAQOption = 4) then  5     ; Balanced -> Exhaust
                else if (Proj:StdDesignIAQType[1] >= 3 .AND. IAQOption = 5) then  4     ; Exhaust -> Balanced
@@ -1710,7 +1721,7 @@ RULELIST  "BudgetConversion" 1 0 1 0
 
    "Call subordinate rulelists to handle remaining IAQ mods - needed for Proj:IAQSupInletsAccessible"    Proj:Action =     ; SAC 01/26/21   ; logic to prevent application of InletsNotAccessible rules to Exhaust systems - SAC 03/18/21
       {  if (IfValidAnd( Proj:AnalysisVersion >= 190200 ) .AND. IAQSupInletsAccessible < 1 .AND.
-             (Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf") .AND.
+             (Proj:IsStdOrSMFRun) .AND.
              (IfValidAnd( MostDUIAQ_Balanced > 0 ) .OR. IfValidAnd( MostDUIAQ_Supply > 0 )))
          then  EvalRulelist( "BudgetConversion_IAQ_SupplyInletsNotAccessible" )  ; rules to PREVENT any Proposed model IAQ credit (results in std model higher or equal eff to prop)
          else  EvalRulelist( "BudgetConversion_IAQ_SupplyInletsAccessible" )     ; regular std and drtg model rules
@@ -2143,13 +2154,13 @@ RULELIST "BudgetConversion_EqualOrientation"  1 0 1 0
 ;	"Set ExtWall:StdWindow:NFRCSHGC"    	ExtWall:StdWindow:NFRCSHGC			= {	ClimateZoneTable( Global( Proj:ClimateZone ), 2 )  }
 	"Set ExtWall:StdWindow:NFRCUfactor" 	ExtWall:StdWindow:NFRCUfactor		= {	T24RClimateZoneCodeBase:WindowUfactor( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )  }
    "Adjust ExtWall:StdWindow:NFRCUfactor" ExtWall:StdWindow:NFRCUfactor    =        ; SAC 01/22/21
-      {  if ((Proj:RunAbbrev == "s" .OR. (Proj:SMFFollowsStdDesignFuel .AND. Proj:RunAbbrev == "smf")) .AND.
+      {  if ((Proj:IsStdRun .OR. (Proj:SMFFollowsStdDesignFuel .AND. Proj:RunAbbrev == "smf")) .AND.
              IfValidAnd( Proj:StdDesignWinAdj_Ufactor != 0 ))
          then  StdWindow:NFRCUfactor + Proj:StdDesignWinAdj_Ufactor
          else  UNCHANGED  endif  }
 	"Set ExtWall:StdWindow:NFRCSHGC"    	ExtWall:StdWindow:NFRCSHGC			= {	T24RClimateZoneCodeBase:WindowSHGC(    "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )  }
    "Adjust ExtWall:StdWindow:NFRCSHGC"    ExtWall:StdWindow:NFRCSHGC       =        ; SAC 01/22/21
-      {  if ((Proj:RunAbbrev == "s" .OR. (Proj:SMFFollowsStdDesignFuel .AND. Proj:RunAbbrev == "smf")) .AND.
+      {  if ((Proj:IsStdRun .OR. (Proj:SMFFollowsStdDesignFuel .AND. Proj:RunAbbrev == "smf")) .AND.
              IfValidAnd( Proj:StdDesignWinAdj_SHGC != 0 ))
          then  StdWindow:NFRCSHGC + Proj:StdDesignWinAdj_SHGC
          else  UNCHANGED  endif  }
@@ -2333,7 +2344,7 @@ END
 RULELIST  "BudgetConversion_IAQ_SupplyInletsNotAccessible" 1 0 1 0
 
    "Set IAQFan:HardwireStdFanPower flag"     IAQFan:HardwireStdFanPower =     ; SAC 03/18/21 (tic #1243)
-      {  if ( (Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf") .AND.
+      {  if ( (Proj:IsStdOrSMFRun) .AND.
               ( (IAQFanType == 3 .AND. (ValidOr( WperCFMIAQ, 0 ) * ValidOr( FanPowerMult, 1 )) > 0.7 ) .OR.  ; Balanced
                 (IAQFanType != 3 .AND. (ValidOr( WperCFMIAQ, 0 ) * ValidOr( FanPowerMult, 1 )) > 0.35) ) )   ; Exhaust or Supply
          then  1.0
@@ -2359,35 +2370,35 @@ RULELIST  "BudgetConversion_IAQ_SupplyInletsNotAccessible" 1 0 1 0
    "Set Zone:IAQCFMScaleFactor[1] if appropriate"     Zone:IAQCFMScaleFactor[1]  =        ; SAC 9/9/19 - new logic to prevent MFam evaluation
       {  if (Proj:IsMultiFamily == 0 .AND. IfValidAnd( Proj:IAQCFMScaleFactor[1] > 0 ) .AND.
              ( (Proj:ApplyStdIAQCFMLimitToDRtg .AND. IfValidAnd( Proj:AnalysisVersion > 190101 )) .OR.
-               Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf" )) then  Proj:IAQCFMScaleFactor[1]
+               Proj:IsStdOrSMFRun )) then  Proj:IAQCFMScaleFactor[1]
          else if (Proj:IsMultiFamily > 0 .AND. IfValidAnd( StdDesignIAQCFM > 0 ) .AND.
                   (IAQCFM_Exhaust[1] + IAQCFM_Supply[1] + IAQHRVCFM[1]) > 0.1 .AND.
                   ( (Proj:ApplyStdIAQCFMLimitToDRtg .AND. IfValidAnd( Proj:AnalysisVersion > 190101 )) .OR.
-                    Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf" ))
+                    Proj:IsStdOrSMFRun ))
          then  StdDesignIAQCFM / (IAQCFM_Exhaust[1] + IAQCFM_Supply[1] + IAQHRVCFM[1])
          else  UNDEFINED  endif endif  }
    "Set Zone:IAQCFMScaleFactor[2] if appropriate"     Zone:IAQCFMScaleFactor[2]  =        ; SAC 9/9/19 - new logic to prevent MFam evaluation
       {  if (Proj:IsMultiFamily == 0 .AND. IfValidAnd( Proj:IAQCFMScaleFactor[2] > 0 ) .AND.
              ( (Proj:ApplyStdIAQCFMLimitToDRtg .AND. IfValidAnd( Proj:AnalysisVersion > 190101 )) .OR.
-               Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf" )) then  Proj:IAQCFMScaleFactor[2]
+               Proj:IsStdOrSMFRun )) then  Proj:IAQCFMScaleFactor[2]
          else  UNDEFINED  endif  }
    "Set Zone:IAQPwrScaleFactor[1] if appropriate"     Zone:IAQPwrScaleFactor[1]  =        ; SAC 12/16/19 - added separate scaling factor for IAQ power (for MFam)   ; remove for AnalysisVersion >= 190200 - SAC 01/26/21 (tic #1243)
       {  if (IfValidAnd( Proj:AnalysisVersion < 190200 ) .AND.
              Proj:IsMultiFamily > 0 .AND. IfValidAnd( MaxStdDesignIAQPower > 0 ) .AND.
              (IAQPwr_Exhaust[1] + IAQPwr_Supply[1] + IAQHRVPwr[1]) > 0.1 .AND.
              ( (Proj:ApplyStdIAQMaxPwrToDRtg .AND. IfValidAnd( Proj:AnalysisVersion > 190101 )) .OR.
-               Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf" ))
+               Proj:IsStdOrSMFRun ))
          then  min( 1, MaxStdDesignIAQPower / (IAQPwr_Exhaust[1] + IAQPwr_Supply[1] + IAQHRVPwr[1]) )
          else  UNDEFINED  endif  }
 
    "Set OtherZone:IAQCFMScaleFactor if appropriate"      OtherZone:IAQCFMScaleFactor  =      ; SAC 12/15/19
       {  if (Proj:IsMultiFamily == 0 .AND. IfValidAnd( Proj:IAQCFMScaleFactor[1] > 0 ) .AND.
              ( (Proj:ApplyStdIAQCFMLimitToDRtg .AND. IfValidAnd( Proj:AnalysisVersion > 190101 )) .OR.
-               Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf" )) then  Proj:IAQCFMScaleFactor[1]
+               Proj:IsStdOrSMFRun )) then  Proj:IAQCFMScaleFactor[1]
          else if (Proj:IsMultiFamily > 0 .AND. IfValidAnd( StdDesignIAQCFM > 0 ) .AND.
                   (IAQCFM_Exhaust[1] + IAQCFM_Supply[1] + IAQHRVCFM[1]) > 0.1 .AND.
                   ( (Proj:ApplyStdIAQCFMLimitToDRtg .AND. IfValidAnd( Proj:AnalysisVersion > 190101 )) .OR.
-                    Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf" ))
+                    Proj:IsStdOrSMFRun ))
          then  StdDesignIAQCFM / (IAQCFM_Exhaust[1] + IAQCFM_Supply[1] + IAQHRVCFM[1])
          else  UNDEFINED  endif endif  }
    "Set OtherZone:IAQPwrScaleFactor if appropriate"      OtherZone:IAQPwrScaleFactor  =      ; SAC 12/16/19 - added separate scaling factor for IAQ power (for MFam)   ; remove for AnalysisVersion >= 190200 - SAC 01/26/21 (tic #1243)
@@ -2395,7 +2406,7 @@ RULELIST  "BudgetConversion_IAQ_SupplyInletsNotAccessible" 1 0 1 0
              Proj:IsMultiFamily > 0 .AND. IfValidAnd( MaxStdDesignIAQPower > 0 ) .AND.
              (IAQPwr_Exhaust[1] + IAQPwr_Supply[1] + IAQHRVPwr[1]) > 0.1 .AND.
              ( (Proj:ApplyStdIAQMaxPwrToDRtg .AND. IfValidAnd( Proj:AnalysisVersion > 190101 )) .OR.
-               Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf" ))
+               Proj:IsStdOrSMFRun ))
          then  min( 1, MaxStdDesignIAQPower / (IAQPwr_Exhaust[1] + IAQPwr_Supply[1] + IAQHRVPwr[1]) )
          else  UNDEFINED  endif  }
 
@@ -2412,7 +2423,7 @@ RULELIST  "BudgetConversion_IAQ_SupplyInletsAccessible" 1 0 1 0
 		{  if (IfValidAnd( Proj:AnalysisVersion >= 190200 ))
 		   then  if (IfValidAnd( Proj:StdDesignIAQWperCFM > 0 ) .AND.
                    ( IfValidAnd( Proj:ApplyStdDesignIAQFromTable > 0 ) .OR. 
-                     (IfValidAnd( Proj:BypassRuleLimits > 0 ) .AND. (Proj:ApplyStdIAQMaxPwrToDRtg .OR. Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf")) ))
+                     (IfValidAnd( Proj:BypassRuleLimits > 0 ) .AND. (Proj:ApplyStdIAQMaxPwrToDRtg .OR. Proj:IsStdOrSMFRun)) ))
 		         then  Proj:StdDesignIAQWperCFM
                else if (IAQFanType == 3)  ; Balanced
 		         then  0.7  else  0.35  endif endif
@@ -2425,7 +2436,7 @@ RULELIST  "BudgetConversion_IAQ_SupplyInletsAccessible" 1 0 1 0
                   default :   UNDEFINED
                endswitch
          else if (Proj:IsMultiFamily > 0) then  UNCHANGED
-         else if (Proj:ApplyStdIAQMaxPwrToDRtg .OR. Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf")
+         else if (Proj:ApplyStdIAQMaxPwrToDRtg .OR. Proj:IsStdOrSMFRun)
          then  switch ( IAQFanType )
                   case  1 :   Min( WperCFMIAQ, Proj:StdDesignIAQWperCFM )      ; "Exhaust"                                      
                   case  2 :   Min( WperCFMIAQ, Proj:StdDesignIAQWperCFM )      ; "Supply"                                       
@@ -2446,7 +2457,7 @@ RULELIST  "BudgetConversion_IAQ_SupplyInletsAccessible" 1 0 1 0
          then  UNCHANGED  ; should already be toggled on
          else  0  endif  }
       ;   else if (IfValidAnd( Proj:AnalysisVersion >= 190200 ) .AND. Proj:IsMultiFamily == 0 .AND.
-      ;            (Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf"))
+      ;            (Proj:IsStdOrSMFRun))
       ;   then  UNCHANGED
    "Set IAQFan:FanPowerMult"        IAQFan:FanPowerMult     = {  1.0  }     ; SAC 7/20/20 (tic #1174)
    "Set IAQFan:FanHeatRecovMult"    IAQFan:FanHeatRecovMult = {  1.0  }
@@ -2467,35 +2478,35 @@ RULELIST  "BudgetConversion_IAQ_SupplyInletsAccessible" 1 0 1 0
    "Set Zone:IAQCFMScaleFactor[1] if appropriate"     Zone:IAQCFMScaleFactor[1]  =        ; SAC 9/9/19 - new logic to prevent MFam evaluation
       {  if (Proj:IsMultiFamily == 0 .AND. IfValidAnd( Proj:IAQCFMScaleFactor[1] > 0 ) .AND.
              ( (Proj:ApplyStdIAQCFMLimitToDRtg .AND. IfValidAnd( Proj:AnalysisVersion > 190101 )) .OR.
-               Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf" )) then  Proj:IAQCFMScaleFactor[1]
+               Proj:IsStdOrSMFRun )) then  Proj:IAQCFMScaleFactor[1]
          else if (Proj:IsMultiFamily > 0 .AND. IfValidAnd( StdDesignIAQCFM > 0 ) .AND.
                   (IAQCFM_Exhaust[1] + IAQCFM_Supply[1] + IAQHRVCFM[1]) > 0.1 .AND.
                   ( (Proj:ApplyStdIAQCFMLimitToDRtg .AND. IfValidAnd( Proj:AnalysisVersion > 190101 )) .OR.
-                    Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf" ))
+                    Proj:IsStdOrSMFRun ))
          then  StdDesignIAQCFM / (IAQCFM_Exhaust[1] + IAQCFM_Supply[1] + IAQHRVCFM[1])
          else  UNDEFINED  endif endif  }
    "Set Zone:IAQCFMScaleFactor[2] if appropriate"     Zone:IAQCFMScaleFactor[2]  =        ; SAC 9/9/19 - new logic to prevent MFam evaluation
       {  if (Proj:IsMultiFamily == 0 .AND. IfValidAnd( Proj:IAQCFMScaleFactor[2] > 0 ) .AND.
              ( (Proj:ApplyStdIAQCFMLimitToDRtg .AND. IfValidAnd( Proj:AnalysisVersion > 190101 )) .OR.
-               Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf" )) then  Proj:IAQCFMScaleFactor[2]
+               Proj:IsStdOrSMFRun )) then  Proj:IAQCFMScaleFactor[2]
          else  UNDEFINED  endif  }
    "Set Zone:IAQPwrScaleFactor[1] if appropriate"     Zone:IAQPwrScaleFactor[1]  =        ; SAC 12/16/19 - added separate scaling factor for IAQ power (for MFam)   ; remove for AnalysisVersion >= 190200 - SAC 01/26/21 (tic #1243)
       {  if (IfValidAnd( Proj:AnalysisVersion < 190200 ) .AND.
              Proj:IsMultiFamily > 0 .AND. IfValidAnd( MaxStdDesignIAQPower > 0 ) .AND.
              (IAQPwr_Exhaust[1] + IAQPwr_Supply[1] + IAQHRVPwr[1]) > 0.1 .AND.
              ( (Proj:ApplyStdIAQMaxPwrToDRtg .AND. IfValidAnd( Proj:AnalysisVersion > 190101 )) .OR.
-               Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf" ))
+               Proj:IsStdOrSMFRun ))
          then  min( 1, MaxStdDesignIAQPower / (IAQPwr_Exhaust[1] + IAQPwr_Supply[1] + IAQHRVPwr[1]) )
          else  UNDEFINED  endif  }
 
    "Set OtherZone:IAQCFMScaleFactor if appropriate"      OtherZone:IAQCFMScaleFactor  =      ; SAC 12/15/19
       {  if (Proj:IsMultiFamily == 0 .AND. IfValidAnd( Proj:IAQCFMScaleFactor[1] > 0 ) .AND.
              ( (Proj:ApplyStdIAQCFMLimitToDRtg .AND. IfValidAnd( Proj:AnalysisVersion > 190101 )) .OR.
-               Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf" )) then  Proj:IAQCFMScaleFactor[1]
+               Proj:IsStdOrSMFRun )) then  Proj:IAQCFMScaleFactor[1]
          else if (Proj:IsMultiFamily > 0 .AND. IfValidAnd( StdDesignIAQCFM > 0 ) .AND.
                   (IAQCFM_Exhaust[1] + IAQCFM_Supply[1] + IAQHRVCFM[1]) > 0.1 .AND.
                   ( (Proj:ApplyStdIAQCFMLimitToDRtg .AND. IfValidAnd( Proj:AnalysisVersion > 190101 )) .OR.
-                    Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf" ))
+                    Proj:IsStdOrSMFRun ))
          then  StdDesignIAQCFM / (IAQCFM_Exhaust[1] + IAQCFM_Supply[1] + IAQHRVCFM[1])
          else  UNDEFINED  endif endif  }
    "Set OtherZone:IAQPwrScaleFactor if appropriate"      OtherZone:IAQPwrScaleFactor  =      ; SAC 12/16/19 - added separate scaling factor for IAQ power (for MFam)   ; remove for AnalysisVersion >= 190200 - SAC 01/26/21 (tic #1243)
@@ -2503,7 +2514,7 @@ RULELIST  "BudgetConversion_IAQ_SupplyInletsAccessible" 1 0 1 0
              Proj:IsMultiFamily > 0 .AND. IfValidAnd( MaxStdDesignIAQPower > 0 ) .AND.
              (IAQPwr_Exhaust[1] + IAQPwr_Supply[1] + IAQHRVPwr[1]) > 0.1 .AND.
              ( (Proj:ApplyStdIAQMaxPwrToDRtg .AND. IfValidAnd( Proj:AnalysisVersion > 190101 )) .OR.
-               Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf" ))
+               Proj:IsStdOrSMFRun ))
          then  min( 1, MaxStdDesignIAQPower / (IAQPwr_Exhaust[1] + IAQPwr_Supply[1] + IAQHRVPwr[1]) )
          else  UNDEFINED  endif  }
 
@@ -2590,7 +2601,7 @@ RULELIST  "BudgetConversion_SetupDuctsAndFan" 1 0 1 0
    ; added logic and load of RuleLibrary HVACFan for 2022 small HtPump fan (w/ 0.45 W/CFM) - SAC 03/11/21  ; switched check and library from small to Large HP fan - SAC 03/15/21
    ; added logic to prevent creation of new fan for EAA runs where Fan or Ducts are not 'New' - SAC 07/06/23 (tic #1356)
    "Create new HVACSys:Fan if necessary (if lrg HtPump equip (2022+) or current fan assigned to both GFurn & other system(s))"  ; 2019 (tic #928)
-      HVACSys:Fan  = {  if ( (Proj:RunAbbrev == "s" .OR. (Proj:SMFFollowsStdDesignFuel .AND. Proj:RunAbbrev == "smf")) .AND.
+      HVACSys:Fan  = {  if ( (Proj:IsStdRun .OR. (Proj:SMFFollowsStdDesignFuel .AND. Proj:RunAbbrev == "smf")) .AND.
                              IfValidAnd( Proj:AnalysisVersion >= 220000 ) .AND. IfValidAnd( LrgHtPumpStdFanPwr = 0.58 ) )
                         then  RuleLibrary( HVACFan, "t24-Fan-LrgHtPump-0.58" )
                         else if (IfValidAnd( Proj:AnalysisVersion < 220000 ) .AND. IfValidAnd( StdGasFurnFanPwr > 0 )==0) then  UNCHANGED
@@ -2684,8 +2695,10 @@ RULELIST "Setup_StdDesignPV"  1 0 1 1
    ; toggle off Battery and setup PV system based on StdMixedFuelPVMlt
    "Zero-out Battery (Proj:BattMaxCap)"   Proj:BattMaxCap  = {  0  }
    "Set Proj:PVWInputs to Simplified"     Proj:PVWInputs   = {  0  }   ; "Simplified"
-   "Set Proj:PVWDCSysSize[1] to 1.0"      Proj:PVWDCSysSize[1]   = {
-         ValidOr( ResultSummary[1]:StdMixedFuelPVMlt, 0 )  }
+   "Set Proj:PVWDCSysSize[1]"             Proj:PVWDCSysSize[1]   =
+      {  if (IfValidAnd( EnergyCodeYearNum <= 2022 ))
+         then  ValidOr( ResultSummary[1]:StdMixedFuelPVMlt, 0 )
+         else  ValidOr( T24RPrescribedPV, 0 )  endif  }
 ;"dbg" Proj:Action = { PostMessageToLog( "   just set Std design Proj:PVWDCSysSize[1] = %g", PVWDCSysSize[1] ) }
 
    ; SAC 1/17/18 - revise logic to ensure use of UseReducedPVReqVal when ResultSummary[1]:StdMixedFuelPVMlt not valid
@@ -3055,6 +3068,39 @@ RULELIST "BudgetConversion_DRtg_SpecifyFuel" 1 0 1 1
    "Eval ProposedInput rules to re-default properties related to changes made above"   Proj:Action	= {  EvalRulelist( "ProposedInput" )  }
    "Eval ProposedInput rules #2 to get MFam HACSys"   Proj:Action	= {  EvalRulelist( "ProposedInput" )  }
 END
+;************************************************************************* SAC 07/20/23 (2025)
+RULELIST "BudgetConversion_Std_2025" 1 0 1 1
+;   "Setup Cooking Fuel"       Proj:Action =        ; SAC 01/19/21   ; modified to allow 'Proposed' fuel options - SAC 02/06/21
+;      {  if (StdDesignFuel == 1 .OR. (StdDesignFuel >= 3 .AND. StdDesignFuel_Ckg == 1))
+;         then  EvalRulelist( "BudgetConversion_SetupElectricCooking" )
+;         else if (StdDesignFuel >= 3 .AND. StdDesignFuel_Ckg == 0) then  UNCHANGED     ; std = proposed
+;         else  EvalRulelist( "BudgetConversion_SetupGasCooking" )  endif endif  }
+;   "Setup Clothes Dryer Fuel" Proj:Action =
+;      {  if (StdDesignFuel == 1 .OR. (StdDesignFuel >= 3 .AND. StdDesignFuel_Dry == 1))
+;         then  EvalRulelist( "BudgetConversion_SetupElectricDryer" )
+;         else if (StdDesignFuel >= 3 .AND. StdDesignFuel_Dry == 0) then  UNCHANGED     ; std = proposed
+;         else  EvalRulelist( "BudgetConversion_SetupGasDryer" )  endif endif  }
+   "Setup HVAC Fuel"          Proj:Action =
+      {  if (RunAbbrev == "s") then  EvalRulelist( "BudgetConversion_SetupElectricHVAC" )
+         else  UNCHANGED  endif  }
+   ;   {  if (StdDesignFuel == 1 .OR. (StdDesignFuel >= 3 .AND. StdDesignFuel_HVAC == 1))
+   ;      then  EvalRulelist( "BudgetConversion_SetupElectricHVAC" )
+   ;      else if (StdDesignFuel >= 3 .AND. StdDesignFuel_HVAC == 0) then  UNCHANGED    ; std = proposed
+   ;      else  EvalRulelist( "BudgetConversion_SetupGasHVAC" )  endif endif  }
+   "Setup DHW Fuel"           Proj:Action =
+      {  if (RunAbbrev == "s") then        EvalRulelist( "BudgetConversion_SetupElectricDHW" )
+         else if (RunAbbrev == "s3") then  EvalRulelist( "BudgetConversion_SetupGasDHW" )
+         else  UNCHANGED  endif endif  }
+   ;   {  if (StdDesignFuel == 1 .OR. (StdDesignFuel >= 3 .AND. StdDesignFuel_DHW == 1))
+   ;      then  EvalRulelist( "BudgetConversion_SetupElectricDHW" )
+   ;      else if (StdDesignFuel >= 3 .AND. StdDesignFuel_DHW == 0) then  UNCHANGED     ; std = proposed
+   ;      else  EvalRulelist( "BudgetConversion_SetupGasDHW" )  endif endif  }
+
+   "Eval ProposedInput rules to re-default properties related to changes made above"   Proj:Action	= {  EvalRulelist( "ProposedInput" )  }
+   "Eval ProposedInput rules #2 to get MFam HACSys"   Proj:Action	= {  EvalRulelist( "ProposedInput" )  }
+END
+;*************************************************************************
+
 ;************************************************************************* SAC 6/12/20 (2022AllElecStd) - SAC 7/2/20
 RULELIST "BudgetConversion_SetupElectricAppliances" 1 0 1 1
    "Set Proj:ApplDryerFuel[1]"      Proj:ApplDryerFuel[1]    = {  "Electricity"  }
@@ -3112,7 +3158,7 @@ RULELIST "BudgetConversion_SetupGasDHW" 1 0 1 1
    "Convert elec DHWSys to Gas"     DHWSys:Action  =     ; added logic to prevent conversion to Gas for systems where sm elec POU inst DHW exception applies - SAC 01/17/23 (tic #1340)
       {  if ( IfValidAnd( HeatersAllElec > 0 )==0 .OR. Status != 3 .OR. IfValidAnd( FloorAreaServed[1] > 0 )==0 .OR.
               ( IfValidAnd( ShowNewSmConsInstElecExcept > 0 ) .AND. IfValidAnd( NewSmConsInstElecExcept > 0 ) .AND.
-                (Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf") ) ) then  UNCHANGED
+                (Proj:IsStdOrSMFRun) ) ) then  UNCHANGED
          else  EvalRulelist( "ConvertTo_DHWSys_Gas", 1 )  endif  }
 END
 ;************************************************************************* SAC 6/12/20 (2022AllElecStd)
@@ -3120,7 +3166,13 @@ RULELIST "ConvertTo_HVACSys_HeatPump" 1 0 1 0
    "Set HVACSys:Type to HtPump"        HVACSys:Type  = {  2  }
    "Set HVACSys:NumHtPumpSystemTypes"  HVACSys:NumHtPumpSystemTypes  = {  1  }
    "Assign HVACSys:HtPumpSystem[1]"    HVACSys:HtPumpSystem[1]  =
-      {  RuleLibrary( HVACHtPump, "t24-SplitHeatPump" )  }
+      {  if (Proj:StdDesignBase < 2025)
+         then  RuleLibrary( HVACHtPump, "t24-SplitHeatPump" )
+         else  RuleLibrary( HVACHtPump, "t24-SplitHeatPump", 1 )  endif  }
+   "Update HVACSys:HtPumpSystem[1]:EER2 for models where proposed is lower than std"   HVACSys:HtPumpSystem[1]:EER2 =      ; SAC 07/20/23 (2025)
+      {  if (IfValidAnd( ForceStd_EER2 > 0 ))
+         then  ForceStd_EER2
+         else  UNCHANGED  endif  }
    "Set HVACSys:HtPumpSystemCount[1]"  HVACSys:HtPumpSystemCount[1]  =
       {  if (IfValidAnd( HeatSystemCount[1] > 0 ))
          then  HeatSystemCount[1]  else  1  endif  }

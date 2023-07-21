@@ -177,6 +177,12 @@ RULELIST "ProposedInput" 0 0 0 0
 	"Set Proj:RunIDProcFile"			Proj:RunIDProcFile		= {	" - User"	}
 	"Set Proj:RunAbbrev"					Proj:RunAbbrev				= {	"u"			}
 
+   "Set Proj:IsStdRun"        Proj:IsStdRun      = {  if (RunAbbrev == "s" .OR. RunAbbrev == "s2" .OR. RunAbbrev == "s3" .OR.
+                                                          RunAbbrev == "S" .OR. RunAbbrev == "S2" .OR. RunAbbrev == "S3")
+                                                      then  1  else  0  endif  }     ; SAC 07/18/23 (2025)
+   "Set Proj:IsStdOrSMFRun"   Proj:IsStdOrSMFRun = {  if (IsStdRun > 0 .OR. RunAbbrev == "smf" .OR. RunAbbrev == "SMF")
+                                                      then  1  else  0  endif  } 
+
 	; default to 'Compliance' - logic designed to facilitate setting/resetting this based on INI settings
 	"Default Proj:SimSpeedOption"		Proj:SimSpeedOption		= {	if (LocalStatus( SimSpeedOption ) < 0.5) then  0  else  UNCHANGED  endif  }
 	"Default SimSpeedOption-related properties enabling user customization"		Proj:Action	= {	EvalRulelist( "Default_SimSpeedOption" )  }
@@ -465,7 +471,7 @@ RULELIST "ProposedInput" 0 0 0 0
 	"Set Proj:AllowDesignRating"
 	   Proj:AllowDesignRating	= {	if (EnableEDR) then  1
 	                                 else if (RunScope == 1 .AND. IsAddAlone < 0.5 .AND.
-	                                          IfValidAnd( CompCodeBase > 2015 ))
+	                                           IfValidAnd( CompCodeBase > 2015 ) .AND. IfValidAnd( CompCodeBase < 2025 ))
                                     then  1  else  0  endif endif  }
 	"Blast Proj:DesignRatingCalcs if user-specified as Yes when not allowed -or- set to No but doing Existing EDR or 2019 NewCons analysis"
       Proj:Action	= {
@@ -483,10 +489,14 @@ RULELIST "ProposedInput" 0 0 0 0
          else if (IfValidAnd( EnergyCodeYearNum >= 2019 ) .AND. RunScope == 1 .AND. IsAddAlone < 0.5)
          then  1    ; CA Res 2019 New Cons
          else  0  endif endif endif  }
-	"Default Proj:DesignRatingBase"		Proj:DesignRatingBase	= {	2014  }		; default design rating base is 'IECC2006' / SAC 3/8/16 - updated default to 'RESNET2014'
+	"Default Proj:DesignRatingBase"		Proj:DesignRatingBase	= 		   ; default design rating base is 'IECC2006' / SAC 3/8/16 - updated default to 'RESNET2014'  ; set to '0' for 2025+ - SAC 07/20/23
+      {  if (IfValidAnd( CompCodeBase >= 2025 ))
+         then  0
+         else  2014  endif  }
 	"Call subordinate rulelist to override Proj:DesignRatingBase when appropriate"		; SAC 3/21/16
 	   Proj:Action		= {	if (AllowDesignRating > 0.5 .AND. DesignRatingCalcs > 0.5 .AND.
-	                            DesignRatingBase != 2014 .AND. IfValidAnd( BypassRuleLimits >= 3 )==0)
+	                            DesignRatingBase != 2014 .AND. IfValidAnd( BypassRuleLimits >= 3 )==0 .AND.
+                               IfValidAnd( CompCodeBase < 2025 ))
 									then	EvalRulelist( "ForceDefault_DesignRatingBase_RESNET2014" )
 									else	UNCHANGED  endif  }
 	   ; SAC 12/19/17 - switched input tab name from 'Analysis' to 'EDR/PV' (per request from CEC-LF)
@@ -686,6 +696,66 @@ RULELIST "ProposedInput" 0 0 0 0
       Proj:Action = {   if (EnergyCodeYearNum < 2019) then  UNCHANGED
                         else  EvalRulelist( "ProposedInput_OtherZone" )  endif  }
 
+   ; PRIOR location of PV defaulting rules, before moved down below HVAC defaulting - SAC 07/20/23
+
+   ; SAC 4/14/15 - call subordinate rulelist to evaluate ALL Attic defaulting
+	"Perform Attic defaulting"		Attic:Action	= {	EvalRulelist( "Default_Attic", 1 )  }
+
+   ; SAC 10/24/16 - new rulelist to default cool vent, IAQ & internal gains properties
+   "Default cool vent, IAQ & internal gains properties"
+      Proj:Action = {   EvalRulelist( "ProposedInput_CoolVent_IAQ_IntGains" )  }
+
+   ; SAC 10/24/16 - new rulelist to default Garage properties
+   "Default Garage properties"
+      Proj:Action = {   EvalRulelist( "ProposedInput_Garage" )  }
+
+   ; SAC 5/15/17 - added compressed R-value selections - R-val = (SymVal-mod(SymVal,10))/100  (tic #761)  - SAC 5/18/18 - COPIED rule here to evaluate before EAA_Shell rules (tic #798)
+   "Set Cons:CavityLayerRVal (incl. compressed R-vals)"     Cons:CavityLayerRVal  = {
+         if (CavityLayer = 100401) then  0
+         else if (CavityLayer > 200 .AND. CavityLayer < 100001)
+         then  (CavityLayer - mod( CavityLayer, 10 )) / 100
+         else   CavityLayer  endif endif  }
+
+   ; SAC 7/20/17 - split single rulelist into two - Shell moved up to HERE from below, before Construction defaulting
+   "Default EAA (existing-addition-alteration) Shell properties"
+      Proj:Action = {   EvalRulelist( "ProposedInput_EAA_Shell" )  }
+
+   ; SAC 10/24/16 - new rulelist to default Construction (incl. attic edge) properties
+   "Default Construction (incl. attic edge) properties"
+      Proj:Action = {   EvalRulelist( "ProposedInput_Constructions" )  }
+
+   ; SAC 10/24/16 - new rulelist to default shell surfaces & inter-zone area properties
+   "Default shell surfaces & inter-zone area properties"
+      Proj:Action = {   EvalRulelist( "ProposedInput_SurfacesAndInterZoneAreas" )  }
+
+   ; SAC 10/24/16 - new rulelist to default misc CSE shell properties
+   "Default misc CSE shell properties"
+      Proj:Action = {   EvalRulelist( "ProposedInput_CSE_Shell" )  }
+
+   ; SAC 10/24/16 - new rulelist to default attic & cool vent properties
+   "Default attic & cool vent properties"
+      Proj:Action = {   EvalRulelist( "ProposedInput_Shell_AtticAndCoolVent" )  }
+
+   ; SAC 10/24/16 - new rulelist to default laundry properties
+   "Default laundry properties"
+      Proj:Action = {   EvalRulelist( "ProposedInput_Loads_Laundry" )  }
+
+   ; SAC 10/24/16 - new rulelist to default zone height, HVAC & cool vent properties
+   "Default zone height, HVAC & cool vent properties"
+      Proj:Action = {   EvalRulelist( "ProposedInput_HVAC" )  }
+
+;   "Reset any past Compact Distrib settings"    DHWSys:Action  = {
+;         if (CompactDistrib < 1 .AND. IfValidAnd( CompactFactor < 1 ))
+;         then  EvalRulelist( "ProposedInput_DHWCompactDistribution_Blast" )
+;         else  UNCHANGED  endif  }   ; SAC 1/8/19
+   ; SAC 12/4/18 - rules needed to process DHW Compact Distribution qualification
+   "Determine DHW Compact Distribution qualification"
+      Proj:Action = {   EvalRulelist( "ProposedInput_DHWCompactDistribution" )  }
+                     ;   if (SFamCompactDistrib > 0)
+                     ;   then  EvalRulelist( "ProposedInput_DHWCompactDistribution" )
+                     ;   else  UNCHANGED  endif  }
+
+   ; MOVED PV defaulting rules down here from above HVAC defaulting to accommodate 2025 prescrip PV defaulting dependent on EER2 - SAC 07/20/23
    ; SAC 10/24/16 - new rulelist to default photovoltaic (PV) system properties
 	; SAC 10/6/16 - allow PV sim regardless of *DesignRating* settings for 2019 analysis
    "Set Proj:AllowPVWInputs"     Proj:AllowPVWInputs = {
@@ -778,63 +848,8 @@ RULELIST "ProposedInput" 0 0 0 0
       Proj:TargetDRtgIterNum  = {   if (LocalStatus( TargetDRtgIterNum ) > 0) then  UNCHANGED  else  0  endif  }
    "Set Proj:TargetDRtgMaxIter - max number of times we will iterate to achieve the target design rating"  ; SAC 4/11/17
       Proj:TargetDRtgMaxIter  = {   if (LocalStatus( TargetDRtgMaxIter ) > 0) then  UNCHANGED  else  4  endif  }
+   ; END OF - MOVED PV defaulting rules down here from above HVAC defaulting to accommodate 2025 prescrip PV defaulting dependent on EER2 - SAC 07/20/23
 
-   ; SAC 4/14/15 - call subordinate rulelist to evaluate ALL Attic defaulting
-	"Perform Attic defaulting"		Attic:Action	= {	EvalRulelist( "Default_Attic", 1 )  }
-
-   ; SAC 10/24/16 - new rulelist to default cool vent, IAQ & internal gains properties
-   "Default cool vent, IAQ & internal gains properties"
-      Proj:Action = {   EvalRulelist( "ProposedInput_CoolVent_IAQ_IntGains" )  }
-
-   ; SAC 10/24/16 - new rulelist to default Garage properties
-   "Default Garage properties"
-      Proj:Action = {   EvalRulelist( "ProposedInput_Garage" )  }
-
-   ; SAC 5/15/17 - added compressed R-value selections - R-val = (SymVal-mod(SymVal,10))/100  (tic #761)  - SAC 5/18/18 - COPIED rule here to evaluate before EAA_Shell rules (tic #798)
-   "Set Cons:CavityLayerRVal (incl. compressed R-vals)"     Cons:CavityLayerRVal  = {
-         if (CavityLayer = 100401) then  0
-         else if (CavityLayer > 200 .AND. CavityLayer < 100001)
-         then  (CavityLayer - mod( CavityLayer, 10 )) / 100
-         else   CavityLayer  endif endif  }
-
-   ; SAC 7/20/17 - split single rulelist into two - Shell moved up to HERE from below, before Construction defaulting
-   "Default EAA (existing-addition-alteration) Shell properties"
-      Proj:Action = {   EvalRulelist( "ProposedInput_EAA_Shell" )  }
-
-   ; SAC 10/24/16 - new rulelist to default Construction (incl. attic edge) properties
-   "Default Construction (incl. attic edge) properties"
-      Proj:Action = {   EvalRulelist( "ProposedInput_Constructions" )  }
-
-   ; SAC 10/24/16 - new rulelist to default shell surfaces & inter-zone area properties
-   "Default shell surfaces & inter-zone area properties"
-      Proj:Action = {   EvalRulelist( "ProposedInput_SurfacesAndInterZoneAreas" )  }
-
-   ; SAC 10/24/16 - new rulelist to default misc CSE shell properties
-   "Default misc CSE shell properties"
-      Proj:Action = {   EvalRulelist( "ProposedInput_CSE_Shell" )  }
-
-   ; SAC 10/24/16 - new rulelist to default attic & cool vent properties
-   "Default attic & cool vent properties"
-      Proj:Action = {   EvalRulelist( "ProposedInput_Shell_AtticAndCoolVent" )  }
-
-   ; SAC 10/24/16 - new rulelist to default laundry properties
-   "Default laundry properties"
-      Proj:Action = {   EvalRulelist( "ProposedInput_Loads_Laundry" )  }
-
-   ; SAC 10/24/16 - new rulelist to default zone height, HVAC & cool vent properties
-   "Default zone height, HVAC & cool vent properties"
-      Proj:Action = {   EvalRulelist( "ProposedInput_HVAC" )  }
-
-;   "Reset any past Compact Distrib settings"    DHWSys:Action  = {
-;         if (CompactDistrib < 1 .AND. IfValidAnd( CompactFactor < 1 ))
-;         then  EvalRulelist( "ProposedInput_DHWCompactDistribution_Blast" )
-;         else  UNCHANGED  endif  }   ; SAC 1/8/19
-   ; SAC 12/4/18 - rules needed to process DHW Compact Distribution qualification
-   "Determine DHW Compact Distribution qualification"
-      Proj:Action = {   EvalRulelist( "ProposedInput_DHWCompactDistribution" )  }
-                     ;   if (SFamCompactDistrib > 0)
-                     ;   then  EvalRulelist( "ProposedInput_DHWCompactDistribution" )
-                     ;   else  UNCHANGED  endif  }
 
    ;--------------------------------------------------------------------
    ; ProposedInput: Final Calcs
@@ -1007,11 +1022,19 @@ RULELIST "ProposedInput" 0 0 0 0
    ; ProposedInput: Determine whether Standard Mixed Fuel run is required during analysis
    ;--------------------------------------------------------------------
    "Init Proj:StdMixedFuelRunReqd"    Proj:StdMixedFuelRunReqd  = {  0  }
-   "Eval rules to determine Proj:StdMixedFuelRunReqd"   Proj:Action  = {
-         if (EnergyCodeYearNum < 2019 .OR. AnalysisType < 13 .OR.
+   "Eval rules to determine Proj:StdMixedFuelRunReqd"   Proj:Action  =        ; revised logic to turn OFF SMF run in 2025+ - SAC 07/17/23 (2025)
+      {  if (EnergyCodeYearNum < 2019 .OR. EnergyCodeYearNum >= 2025 .OR. AnalysisType < 13 .OR.
              RunScope != 1 .OR. IsAddAlone > 0.5)
          then  UNCHANGED
          else  EvalRulelist( "Default_StandardMixedFuel" )  endif  }
+
+   "Set Proj:NumPrelimStdRuns - # of standard model runs (performed prior to Proposed) required in analysis"   Proj:NumPrelimStdRuns  =   ; SAC 07/17/23 (2025)  ; switched back to 0 due to Std fan power dependence on PrelimProp run(s) - SAC 07/20/23 (2025)
+      {  0  }
+   "Set Proj:NumStdRuns - # of standard model runs"      Proj:NumStdRuns =       ; SAC 07/20/23 (2025)
+      {  if (EnergyCodeYearNum >= 2025 .AND. AnalysisType >= 13 .AND.
+             RunScope == 1 .AND. IsAddAlone < 0.5)
+         then  3
+         else  1  endif  }
 
    ;--------------------------------------------------------------------  SAC 12/29/17
    ; ProposedInput: Determine whether Preliminary Proposed run is required during analysis
@@ -1115,15 +1138,13 @@ RULELIST "ProposedInput" 0 0 0 0
    ;--------------------------------------------------------------------
    ; revised rule logic to NOT reset AllowCntrlElecDHWSlrPVCred flag to 0 when defaulting Std model, fixing bug where models w/out attic never get credit - SAC 10/29/20
    "Set Proj:AllowCntrlElecDHWSlrPVCred - flag value indicating model includes PV and excludes solar thermal (DHW)"   Proj:AllowCntrlElecDHWSlrPVCred =     ; SAC 5/2/20 (FlexibilityCredit)
-      {  switch (RunAbbrev)
-            case "smf" :  0
-            case "s"   :  UNCHANGED
-            default    :  if (IfValidAnd( PVWDCSysTotal > 0 ) .AND. SumAll( DHWSolarSys:FloorAreaServed ) < 1 .AND.
-                              SumAcrossIf( DHWSys:FloorAreaServed, DHWSys:CentralElecDHW > 0 ) > 1 .AND.
-                              SumAcrossIf( DHWSys:FloorAreaServed, DHWSys:CentralElecDHW = 0 ) < (0.05 * SumAcrossIf( DHWSys:FloorAreaServed, DHWSys:CentralElecDHW > 0 )))
-                          then  1
-                          else  0  endif
-         endswitch  }
+      {  if (IsStdOrSMFRun) then  UNCHANGED
+         else  if (IfValidAnd( PVWDCSysTotal > 0 ) .AND. SumAll( DHWSolarSys:FloorAreaServed ) < 1 .AND.
+                   SumAcrossIf( DHWSys:FloorAreaServed, DHWSys:CentralElecDHW > 0 ) > 1 .AND.
+                   SumAcrossIf( DHWSys:FloorAreaServed, DHWSys:CentralElecDHW = 0 ) < (0.05 * SumAcrossIf( DHWSys:FloorAreaServed, DHWSys:CentralElecDHW > 0 )))
+               then  1
+               else  0  endif
+         endif  }
      ; {  if (IfValidAnd( PVWDCSysTotal > 0 ) .AND. SumAll( DHWSolarSys:FloorAreaServed ) < 1 .AND.
      ;        SumAcrossIf( DHWSys:FloorAreaServed, DHWSys:CentralElecDHW > 0 ) > 1 .AND.
      ;        SumAcrossIf( DHWSys:FloorAreaServed, DHWSys:CentralElecDHW = 0 ) < (0.05 * SumAcrossIf( DHWSys:FloorAreaServed, DHWSys:CentralElecDHW > 0 )) .AND.
