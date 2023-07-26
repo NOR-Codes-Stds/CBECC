@@ -525,8 +525,8 @@ RULELIST "CARes_ProcessResults" 1 0 0 1
          else  EvalRulelist( "ProcessResults_PreventReportingNegativeEDRs" )  endif endif  }
 
 ;"debug"  Proj:Action = {  PostMessageToLog( "  evaluating 'CARes_ProcessResults':  RunAbbrev '%s'  RunNumber %g  - ResultSummary[1]:TargetDRtgPVMult = %g", RunAbbrev, RunNumber, ValidOr( ResultSummary[1]:TargetDRtgPVMult, -999 ) )  }
-   "Call rulelist to report PV scaling"   Proj:Action = {
-         switch (RunAbbrev)
+   "Call rulelist to report PV scaling"   Proj:Action =           ; add logic for 2025 max PV scaling overriding std PV scaling - SAC 07/26/23 (2025)
+      {  switch (RunAbbrev)
             case  "dr"  :  if (IfValidAnd( ResultSummary[1]:TargetDRtgPVMult  != 1 ))
                            then  if (AllOrientations < 0.5)
                                  then  EvalRulelist( "ProcessResults_PVScalingMessage" )
@@ -536,7 +536,11 @@ RULELIST "CARes_ProcessResults" 1 0 0 1
                                 LocalStatus( ResultSummary[1]:RedPVRqPVScalingMsg ) > 0 .OR.
                                 LocalStatus( ResultSummary[1]:UserPVScalingMsg ) > 0 .OR.
                                  ((IfValidAnd( ResultSummary[1]:PropPVScaleFactor != 1 ) .OR.
-                                   IfValidAnd( ResultSummary[1]:PropInputPVMult   <  1 )) .AND. IfValidAnd( MaxPropPVRatio > 0 )))
+                                   IfValidAnd( ResultSummary[1]:PropInputPVMult   <  1 ) .OR.
+                                   ( CompCodeBase >= 2025 .AND. PVSizeOption == 1 .AND. 
+                                     IfValidAnd( UseReducedPVReqVal >= 0 )==0 .AND. IfValidAnd( T24RPrescribedPV >= 0 ) .AND.
+                                     (ValidOr( T24RPrescribedPV, 0 ) / ValidOr( PVWDCSysTotal, 0.1 )) > PVWDCSizeMultiplier[1] ) ) .AND.
+                                  IfValidAnd( MaxPropPVRatio > 0 )))
                            then  EvalRulelist( "ProcessResults_PVScalingMessage" )
                            else  UNCHANGED  endif
             case  "p-N" :  if (IfValidAnd( ResultSummary[2]:TargetDRtgPVMult  != 1 ) .OR.
@@ -731,6 +735,7 @@ RULELIST "ProcessResults_PVScalingMessage" 1 0 1 1
    ; SAC 1/2/18 - added logic referencing EUseSummary:UserPVScalingMsg to report user-initiated PV scaling (tic #923)
    ; SAC 2/6/18 - added logic referencing EUseSummary:RedPVRqPVScalingMsg to report PV system scaling based on Reduced PV Requirement (tic #974)
    ; SAC 8/30/19 - minor rewording of some messages (tic #1056)
+   ; added logic to document PV scaling when Std PV scaling limited when it exceeds max Prop PV - SAC 07/26/23 (2025)
    "Set ResultSummary[1]:ResultsNotes[1] to report PV scaling"
       Proj:ResultSummary[1]:ResultsNotes[1]  = {
          if ((IfValidAnd( ResultSummary[1]:TargetDRtgPVMult  <= 0.995 ) .OR. IfValidAnd( ResultSummary[1]:TargetDRtgPVMult  >= 1.005 )) .AND. 
@@ -758,12 +763,16 @@ RULELIST "ProcessResults_PVScalingMessage" 1 0 1 1
                then  Format( "Proposed PV system(s) scaled by a factor of %.3f due to cap of %g x proposed design electricity use", ResultSummary[1]:PropInputPVMult, MaxPropPVRatio )
                else  Format( "Proposed PV system downsized to %.2f kWdc (a factor of %.3f) due to cap of %g x proposed design electricity use", (PVWDCSysTotal * ResultSummary[1]:PropInputPVMult), ResultSummary[1]:PropInputPVMult, MaxPropPVRatio )
                endif endif
+         else if (LocalStatus( ResultSummary[1]:ResultsNotes[1] ) < 1 .AND. CompCodeBase >= 2025 .AND. PVSizeOption == 1 .AND.
+                  IfValidAnd( UseReducedPVReqVal >= 0 )==0 .AND. IfValidAnd( T24RPrescribedPV >= 0 ) .AND.
+                  (ValidOr( T24RPrescribedPV, 0 ) / ValidOr( PVWDCSysTotal, 0.1 )) > PVWDCSizeMultiplier[1])
+         then  Format( "Proposed PV system(s) scaled by a factor of %.3f due to cap of %g x proposed design electricity use", ResultSummary[1]:PropInputPVMult, MaxPropPVRatio )
          else if ((IfValidAnd( ResultSummary[1]:PropPVScaleFactor <= 0.995 ) .OR. IfValidAnd( ResultSummary[1]:PropPVScaleFactor >= 1.005 )) .AND. IfValidAnd( MaxPropPVRatio > 0 ))
          then  if (IfValidAnd( Proj:PVWLastRow > 1 ))
                then  Format( "Proposed PV system(s) scaled by a factor of %.3f due to cap of %g x proposed design electricity use", ResultSummary[1]:PropPVScaleFactor, MaxPropPVRatio )
                else  Format( "Proposed PV system downsized to %.2f kWdc (a factor of %.3f) due to cap of %g x proposed design electricity use", (PVWDCSysTotal * ResultSummary[1]:PropPVScaleFactor), ResultSummary[1]:PropPVScaleFactor, MaxPropPVRatio )
                endif
-         else  UNCHANGED  endif endif endif endif endif endif  }
+         else  UNCHANGED  endif endif endif endif endif endif endif  }
    "Set ResultSummary[1]:HaveResultsNotesPV[1] related to PV scaling"
       Proj:ResultSummary[1]:HaveResultsNotesPV[1]  = {
          if (LocalStatus( ResultSummary[1]:ResultsNotes[1] ) < 1) then  0
