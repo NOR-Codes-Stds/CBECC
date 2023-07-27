@@ -1158,10 +1158,22 @@ RULELIST  "ApplyPVSystemScaling" 1 0 0 1
 ;"debug" Proj:Action = { MessageBox( "Inside ApplyPVSystemScaling rulelist for run '%s':\PVSizeOption %g  ResultSummary[1]:StdMixedFuelPVMlt %g", RunAbbrev, PVSizeOption, ResultSummary[1]:StdMixedFuelPVMlt )  }
 ;"debug" Proj:Action = { PostMessageToLog( "T24RPrescribedPV %g / PVWDCSysTotal %g / PVWDCSizeMultiplier[1] %g / ResultSummary[1]:PropInputPVMult %g", T24RPrescribedPV, PVWDCSysTotal, PVWDCSizeMultiplier[1], ResultSummary[1]:PropInputPVMult ) }
    "Identify issues in scaling PV or initiate scaling"   Proj:Action  =       ; revised to prevent scaling that exceeds Prop max - SAC 07/26/23 (2025)
-      {  if (CompCodeBase >= 2025 .AND. PVSizeOption == 1 .AND.
-             IfValidAnd( UseReducedPVReqVal >= 0 )==0 .AND. IfValidAnd( T24RPrescribedPV >= 0 ) .AND.
-             (ValidOr( T24RPrescribedPV, 0 ) / ValidOr( PVWDCSysTotal, 0.1 )) > ValidOr( ResultSummary[1]:PropInputPVMult, 999 ))
-         then  UNCHANGED    ; no scaling if that scaling would exceed max allowed
+      {  if ( ( CompCodeBase >= 2025 .AND. PVSizeOption == 1 .AND.
+                IfValidAnd( UseReducedPVReqVal >= 0 )==0 .AND. IfValidAnd( T24RPrescribedPV >= 0 ) .AND.
+                (ValidOr( T24RPrescribedPV, 0 ) / ValidOr( PVWDCSysTotal, 0.1 )) > ValidOr( ResultSummary[1]:PropInputPVMult, 999 ) ) .OR. 
+              PVSizeOption == 3)       ; Maximum PV for Compliance Credit
+         then       if (RunAbbrev = "p"   .AND. IfValidAnd( ResultSummary[1]:PropInputPVMult > 0 ))
+               then  EvalRulelist( "ApplyPVSystemScaling_MaxCompliance" )
+               else if (RunAbbrev = "p-N" .AND. IfValidAnd( ResultSummary[2]:PropInputPVMult > 0 ))
+               then  EvalRulelist( "ApplyPVSystemScaling_MaxCompliance_N" )
+               else if (RunAbbrev = "p-E" .AND. IfValidAnd( ResultSummary[3]:PropInputPVMult > 0 ))
+               then  EvalRulelist( "ApplyPVSystemScaling_MaxCompliance_E" )
+               else if (RunAbbrev = "p-S" .AND. IfValidAnd( ResultSummary[4]:PropInputPVMult > 0 ))
+               then  EvalRulelist( "ApplyPVSystemScaling_MaxCompliance_S" )
+               else if (RunAbbrev = "p-W" .AND. IfValidAnd( ResultSummary[5]:PropInputPVMult > 0 ))
+               then  EvalRulelist( "ApplyPVSystemScaling_MaxCompliance_W" )
+               else  PostMessageToLog( "   Unable to scale proposed PV system - bad or missing EUseSummary:PropInputPVMult" )
+               endif endif endif endif endif
          else if (PVSizeOption == 1)       ; Standard Design PV
          then       if (RunAbbrev = "p"   .AND. (IfValidAnd( ResultSummary[1]:StdMixedFuelPVMlt > 0 ) .OR. IfValidAnd( UseReducedPVReqVal >= 0 ) .OR. (CompCodeBase >= 2025 .AND. T24RPrescribedPV >= 0)))
                then  EvalRulelist( "ApplyPVSystemScaling_StandardDesign" )
@@ -1188,19 +1200,6 @@ RULELIST  "ApplyPVSystemScaling" 1 0 0 1
                then  EvalRulelist( "ApplyPVSystemScaling_StandardDesignTDV_W" )
                else  PostMessageToLog( "   Unable to scale standard PV (TDV) system - bad or missing EUseSummary:StdMixedFuelPVMlt and/or Proj:PVWDCSysTotal" )
                endif endif endif endif endif
-         else if (PVSizeOption == 3)  ; Maximum PV for Compliance Credit
-         then       if (RunAbbrev = "p"   .AND. IfValidAnd( ResultSummary[1]:PropInputPVMult > 0 ))
-               then  EvalRulelist( "ApplyPVSystemScaling_MaxCompliance" )
-               else if (RunAbbrev = "p-N" .AND. IfValidAnd( ResultSummary[2]:PropInputPVMult > 0 ))
-               then  EvalRulelist( "ApplyPVSystemScaling_MaxCompliance_N" )
-               else if (RunAbbrev = "p-E" .AND. IfValidAnd( ResultSummary[3]:PropInputPVMult > 0 ))
-               then  EvalRulelist( "ApplyPVSystemScaling_MaxCompliance_E" )
-               else if (RunAbbrev = "p-S" .AND. IfValidAnd( ResultSummary[4]:PropInputPVMult > 0 ))
-               then  EvalRulelist( "ApplyPVSystemScaling_MaxCompliance_S" )
-               else if (RunAbbrev = "p-W" .AND. IfValidAnd( ResultSummary[5]:PropInputPVMult > 0 ))
-               then  EvalRulelist( "ApplyPVSystemScaling_MaxCompliance_W" )
-               else  PostMessageToLog( "   Unable to scale proposed PV system - bad or missing EUseSummary:PropInputPVMult" )
-               endif endif endif endif endif
          else if (PVSizeOption == 10)  ; Specify PV System Scaling
          then  if (IfValidAnd( PVSizeMultiplier > 0 )==0)
                then  PostMessageToLog( "   Unable to scale proposed PV system - bad or missing Proj:PVSizeMultiplier" )
@@ -1224,7 +1223,7 @@ RULELIST  "ApplyPVSystemScaling" 1 0 0 1
                else  PostMessageToLog( "   Unable to scale proposed PV system - bad or missing EUseSummary:PrelimPropkWh and/or EUseSummary:PrelimPropPV" )
                endif endif endif endif endif endif endif
          else  PostMessageToLog( "   Unable to scale proposed PV system - unrecognized PVSizeOption" )
-         endif endif endif endif endif  }
+         endif endif endif endif  }
 
 ;"log status"   Proj:Action = {  if (DevMode==0 .OR. LocalStatus(RunAbbrev) < 1 .OR. EnergyCodeYearNum < 2019 .OR. AllOrientations < 1) then  UNCHANGED  else
 ;     PostMessageToLog( "    following 'ApplyPVSystemScaling' evals, PropInputPVMult for N %.3f, E %.3f, S %.3f, W %.3f", ResultSummary[2]:PropInputPVMult, ResultSummary[3]:PropInputPVMult, ResultSummary[4]:PropInputPVMult, ResultSummary[5]:PropInputPVMult )  endif  }
@@ -1513,15 +1512,19 @@ RULELIST  "ApplyPVSystemScaling_StandardDesignTDV_W" 1 0 0 1
 END
 ;*************************************************************************
 
-;*************************************************************************  - PV system scaling (tic #923) - SAC 1/2/18
+;*************************************************************************  - PV system scaling (tic #923) - SAC 1/2/18   ; mods for 2025 - SAC 07/27/23
 RULELIST  "ApplyPVSystemScaling_MaxCompliance" 1 0 0 1
    "Set Proj:PVWDCSizeMultiplier[1] to achieve 'Maximum PV for Compliance Credit' scaling"
       Proj:PVWDCSizeMultiplier[1]  = {  ResultSummary[1]:PropInputPVMult  }
    "Set ResultSummary[1]:UserPVScalingMsg to document PV scaling"
       Proj:ResultSummary[1]:UserPVScalingMsg  = {
-         if (IfValidAnd( Proj:PVWLastRow > 1 ))
-         then  Format( "PV System(s) scaled by a factor of %.3f to achieve '%s' PV scaling", PVWDCSizeMultiplier[1], EnumString( PVSizeOption ) )
-         else  Format( "PV System resized to %.2f kWdc (a factor of %.3f) to achieve '%s' PV scaling", (PVWDCSysTotal * PVWDCSizeMultiplier[1]), PVWDCSizeMultiplier[1], EnumString( PVSizeOption ) )
+         if (PVSizeOption == 1)
+         then  if (IfValidAnd( Proj:PVWLastRow > 1 ))
+               then  Format( "PV System(s) scaled by a factor of %.3f to achieve maximum PV credit (std design PV too large)", PVWDCSizeMultiplier[1] )
+               else  Format( "PV System resized to %.2f kWdc (a factor of %.3f) to achieve maximum PV credit (std design PV too large)", (PVWDCSysTotal * PVWDCSizeMultiplier[1]), PVWDCSizeMultiplier[1] )  endif
+         else  if (IfValidAnd( Proj:PVWLastRow > 1 ))
+               then  Format( "PV System(s) scaled by a factor of %.3f to achieve '%s' PV scaling", PVWDCSizeMultiplier[1], EnumString( PVSizeOption ) )
+               else  Format( "PV System resized to %.2f kWdc (a factor of %.3f) to achieve '%s' PV scaling", (PVWDCSysTotal * PVWDCSizeMultiplier[1]), PVWDCSizeMultiplier[1], EnumString( PVSizeOption ) )  endif
          endif  }
 END
 ;*************************************************************************  - orientation-specific PV scaling (tic #965) - SAC 1/17/18
@@ -1530,9 +1533,13 @@ RULELIST  "ApplyPVSystemScaling_MaxCompliance_N" 1 0 0 1
       Proj:PVWDCSizeMultiplier[1]  = {  ResultSummary[2]:PropInputPVMult  }
    "Set ResultSummary[2]:UserPVScalingMsg to document PV scaling_N"
       Proj:ResultSummary[2]:UserPVScalingMsg  = {
-         if (IfValidAnd( Proj:PVWLastRow > 1 ))
-         then  Format( "PV System(s) scaled by a factor of %.3f to achieve '%s' PV scaling", PVWDCSizeMultiplier[1], EnumString( PVSizeOption ) )
-         else  Format( "PV System resized to %.2f kWdc (a factor of %.3f) to achieve '%s' PV scaling", (PVWDCSysTotal * PVWDCSizeMultiplier[1]), PVWDCSizeMultiplier[1], EnumString( PVSizeOption ) )
+         if (PVSizeOption == 1)
+         then  if (IfValidAnd( Proj:PVWLastRow > 1 ))
+               then  Format( "PV System(s) scaled by a factor of %.3f to achieve maximum PV credit (std design PV too large)", PVWDCSizeMultiplier[1] )
+               else  Format( "PV System resized to %.2f kWdc (a factor of %.3f) to achieve maximum PV credit (std design PV too large)", (PVWDCSysTotal * PVWDCSizeMultiplier[1]), PVWDCSizeMultiplier[1] )  endif
+         else  if (IfValidAnd( Proj:PVWLastRow > 1 ))
+               then  Format( "PV System(s) scaled by a factor of %.3f to achieve '%s' PV scaling", PVWDCSizeMultiplier[1], EnumString( PVSizeOption ) )
+               else  Format( "PV System resized to %.2f kWdc (a factor of %.3f) to achieve '%s' PV scaling", (PVWDCSysTotal * PVWDCSizeMultiplier[1]), PVWDCSizeMultiplier[1], EnumString( PVSizeOption ) )  endif
          endif  }
 END
 ;*************************************************************************  - orientation-specific PV scaling (tic #965) - SAC 1/17/18
@@ -1541,9 +1548,13 @@ RULELIST  "ApplyPVSystemScaling_MaxCompliance_E" 1 0 0 1
       Proj:PVWDCSizeMultiplier[1]  = {  ResultSummary[3]:PropInputPVMult  }
    "Set ResultSummary[3]:UserPVScalingMsg to document PV scaling_E"
       Proj:ResultSummary[3]:UserPVScalingMsg  = {
-         if (IfValidAnd( Proj:PVWLastRow > 1 ))
-         then  Format( "PV System(s) scaled by a factor of %.3f to achieve '%s' PV scaling", PVWDCSizeMultiplier[1], EnumString( PVSizeOption ) )
-         else  Format( "PV System resized to %.2f kWdc (a factor of %.3f) to achieve '%s' PV scaling", (PVWDCSysTotal * PVWDCSizeMultiplier[1]), PVWDCSizeMultiplier[1], EnumString( PVSizeOption ) )
+         if (PVSizeOption == 1)
+         then  if (IfValidAnd( Proj:PVWLastRow > 1 ))
+               then  Format( "PV System(s) scaled by a factor of %.3f to achieve maximum PV credit (std design PV too large)", PVWDCSizeMultiplier[1] )
+               else  Format( "PV System resized to %.2f kWdc (a factor of %.3f) to achieve maximum PV credit (std design PV too large)", (PVWDCSysTotal * PVWDCSizeMultiplier[1]), PVWDCSizeMultiplier[1] )  endif
+         else  if (IfValidAnd( Proj:PVWLastRow > 1 ))
+               then  Format( "PV System(s) scaled by a factor of %.3f to achieve '%s' PV scaling", PVWDCSizeMultiplier[1], EnumString( PVSizeOption ) )
+               else  Format( "PV System resized to %.2f kWdc (a factor of %.3f) to achieve '%s' PV scaling", (PVWDCSysTotal * PVWDCSizeMultiplier[1]), PVWDCSizeMultiplier[1], EnumString( PVSizeOption ) )  endif
          endif  }
 END
 ;*************************************************************************  - orientation-specific PV scaling (tic #965) - SAC 1/17/18
@@ -1552,9 +1563,13 @@ RULELIST  "ApplyPVSystemScaling_MaxCompliance_S" 1 0 0 1
       Proj:PVWDCSizeMultiplier[1]  = {  ResultSummary[4]:PropInputPVMult  }
    "Set ResultSummary[4]:UserPVScalingMsg to document PV scaling_S"
       Proj:ResultSummary[4]:UserPVScalingMsg  = {
-         if (IfValidAnd( Proj:PVWLastRow > 1 ))
-         then  Format( "PV System(s) scaled by a factor of %.3f to achieve '%s' PV scaling", PVWDCSizeMultiplier[1], EnumString( PVSizeOption ) )
-         else  Format( "PV System resized to %.2f kWdc (a factor of %.3f) to achieve '%s' PV scaling", (PVWDCSysTotal * PVWDCSizeMultiplier[1]), PVWDCSizeMultiplier[1], EnumString( PVSizeOption ) )
+         if (PVSizeOption == 1)
+         then  if (IfValidAnd( Proj:PVWLastRow > 1 ))
+               then  Format( "PV System(s) scaled by a factor of %.3f to achieve maximum PV credit (std design PV too large)", PVWDCSizeMultiplier[1] )
+               else  Format( "PV System resized to %.2f kWdc (a factor of %.3f) to achieve maximum PV credit (std design PV too large)", (PVWDCSysTotal * PVWDCSizeMultiplier[1]), PVWDCSizeMultiplier[1] )  endif
+         else  if (IfValidAnd( Proj:PVWLastRow > 1 ))
+               then  Format( "PV System(s) scaled by a factor of %.3f to achieve '%s' PV scaling", PVWDCSizeMultiplier[1], EnumString( PVSizeOption ) )
+               else  Format( "PV System resized to %.2f kWdc (a factor of %.3f) to achieve '%s' PV scaling", (PVWDCSysTotal * PVWDCSizeMultiplier[1]), PVWDCSizeMultiplier[1], EnumString( PVSizeOption ) )  endif
          endif  }
 END
 ;*************************************************************************  - orientation-specific PV scaling (tic #965) - SAC 1/17/18
@@ -1563,9 +1578,13 @@ RULELIST  "ApplyPVSystemScaling_MaxCompliance_W" 1 0 0 1
       Proj:PVWDCSizeMultiplier[1]  = {  ResultSummary[5]:PropInputPVMult  }
    "Set ResultSummary[5]:UserPVScalingMsg to document PV scaling_W"
       Proj:ResultSummary[5]:UserPVScalingMsg  = {
-         if (IfValidAnd( Proj:PVWLastRow > 1 ))
-         then  Format( "PV System(s) scaled by a factor of %.3f to achieve '%s' PV scaling", PVWDCSizeMultiplier[1], EnumString( PVSizeOption ) )
-         else  Format( "PV System resized to %.2f kWdc (a factor of %.3f) to achieve '%s' PV scaling", (PVWDCSysTotal * PVWDCSizeMultiplier[1]), PVWDCSizeMultiplier[1], EnumString( PVSizeOption ) )
+         if (PVSizeOption == 1)
+         then  if (IfValidAnd( Proj:PVWLastRow > 1 ))
+               then  Format( "PV System(s) scaled by a factor of %.3f to achieve maximum PV credit (std design PV too large)", PVWDCSizeMultiplier[1] )
+               else  Format( "PV System resized to %.2f kWdc (a factor of %.3f) to achieve maximum PV credit (std design PV too large)", (PVWDCSysTotal * PVWDCSizeMultiplier[1]), PVWDCSizeMultiplier[1] )  endif
+         else  if (IfValidAnd( Proj:PVWLastRow > 1 ))
+               then  Format( "PV System(s) scaled by a factor of %.3f to achieve '%s' PV scaling", PVWDCSizeMultiplier[1], EnumString( PVSizeOption ) )
+               else  Format( "PV System resized to %.2f kWdc (a factor of %.3f) to achieve '%s' PV scaling", (PVWDCSysTotal * PVWDCSizeMultiplier[1]), PVWDCSizeMultiplier[1], EnumString( PVSizeOption ) )  endif
          endif  }
 END
 ;*************************************************************************
