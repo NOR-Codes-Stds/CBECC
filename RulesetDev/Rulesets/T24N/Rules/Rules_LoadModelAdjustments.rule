@@ -190,9 +190,9 @@ RULELIST "LoadModelAdjustments" 1 0 0 0
 
    ; revised rule logic to take into account HVACSysStatus - SAC 06/27/23 (tic #3479)
    "Backward compat for ResOtherZn if an AirSystem is assigned."  ResOtherZn:Action  =
-      { if( ( (HVACSysStatus == "New"      .AND. LocalCompAssigned(  ozHVACSystem ) = ComponentType ("AirSys" )) .OR.
-              (HVACSysStatus == "Altered"  .AND. LocalCompAssigned( AltHVACSystem ) = ComponentType ("AirSys" )) .OR.
-              (HVACSysStatus == "Existing" .AND. LocalCompAssigned(  exHVACSystem ) = ComponentType ("AirSys" )) ) .AND.
+      { if( ( (EnumValue( HVACSysStatus ) == 3 .AND. LocalCompAssigned(  ozHVACSystem ) = ComponentType ("AirSys" )) .OR.
+              (EnumValue( HVACSysStatus ) == 2 .AND. LocalCompAssigned( AltHVACSystem ) = ComponentType ("AirSys" )) .OR.
+              (EnumValue( HVACSysStatus ) == 1 .AND. LocalCompAssigned(  exHVACSystem ) = ComponentType ("AirSys" )) ) .AND.
             ( LocalCompAssigned( IAQFanRef[1] ) .OR. 
               LocalCompAssigned( IAQFanRef[2] ) .OR. 
               LocalCompAssigned( IAQFanRef[3] ) .OR. 
@@ -201,6 +201,35 @@ RULELIST "LoadModelAdjustments" 1 0 0 0
         then EvalRulelist( "Blast_ResOtherZnIAQ_forAirSys", 1 )
         else UNCHANGED
         endif }
+
+      ; converted rules above & below to use EnumValue() since enum strings dependent on data (potentially) not yet defined - SAC 08/19/23
+      ;     HVACSysStatus:   1-"Existing" 2-"Altered" 3-"New"
+         ;"dbg" ResOtherZn:Action = { PostMessageToLog( "   ResOtherZn %24s  /  HVACStatus %7s (%g)  /  IAQOption %24s (%g)  /  CentralSupplyCFM %g  /  SpcFunc %s", Name, HVACSysStatus, EnumValue( HVACSysStatus ), 
+         ;                                    IAQOption, EnumValue( IAQOption ), ValidOr( CentralSupplyCFM, -999 ), SpcFunc ) }
+   "Remove invalid ResOtherZn:CentralSupplyCFM value if invalid"     ResOtherZn:Action  =       ; fix problem present in a EPro model from user - SAC 08/18/23
+      {  if (IfValidAnd( CentralSupplyCFM > 0 )==0) then  UNCHANGED
+         else if ( (EnumValue( HVACSysStatus ) == 3 .AND. LocalCompAssigned(  ozHVACSystem ) = ComponentType ("AirSys" )) .OR.
+                   (EnumValue( HVACSysStatus ) == 2 .AND. LocalCompAssigned( AltHVACSystem ) = ComponentType ("AirSys" )) .OR.
+                   (EnumValue( HVACSysStatus ) == 1 .AND. LocalCompAssigned(  exHVACSystem ) = ComponentType ("AirSys" )) .OR.
+                   EnumValue( SpcFunc ) == 355 .OR.   ; "Parking Garage Area (Parking Zone and Ramps)"
+                   EnumValue( SpcFunc ) == 356 .OR.   ; "Parking Garage Area (Daylight Adaptation Zones)"
+                   EnumValue( IAQOption ) ==  2 .OR.  ; "Individual IAQ Fans"
+                   EnumValue( IAQOption ) == 13 .OR.  ; "Central Exhaust / Individual Supply"
+                   EnumValue( IAQOption ) == 15 )     ; "Central Exhaust"
+         then  EvalRulelist( "Blast_ResOtherZn_CentralSupplyCFM", 1 )
+         else  UNCHANGED  endif endif  }
+   "Remove invalid ResOtherZn:CentralExhaustCFM value if invalid"    ResOtherZn:Action  =       ; SAC 08/18/23
+      {  if (IfValidAnd( CentralExhaustCFM > 0 )==0) then  UNCHANGED
+         else if ( (HVACSysStatus == "New"      .AND. LocalCompAssigned(  ozHVACSystem ) = ComponentType ("AirSys" )) .OR.
+                   (HVACSysStatus == "Altered"  .AND. LocalCompAssigned( AltHVACSystem ) = ComponentType ("AirSys" )) .OR.
+                   (HVACSysStatus == "Existing" .AND. LocalCompAssigned(  exHVACSystem ) = ComponentType ("AirSys" )) .OR.
+                   EnumValue( SpcFunc ) == 355 .OR.   ; "Parking Garage Area (Parking Zone and Ramps)"
+                   EnumValue( SpcFunc ) == 356 .OR.   ; "Parking Garage Area (Daylight Adaptation Zones)"
+                   EnumValue( IAQOption ) ==  2 .OR.  ; "Individual IAQ Fans"
+                   EnumValue( IAQOption ) == 12 .OR.  ; "Central Supply / Individual Exhaust"
+                   EnumValue( IAQOption ) == 14 )     ; "Central Supply"
+         then  EvalRulelist( "Blast_ResOtherZn_CentralExhaustCFM", 1 )
+         else  UNCHANGED  endif endif  }
 
    "Backward compat for MFam IAQ FID & Accessibility input at ResProj level." DwellUnitType:Action =
       { if( IfValidAnd( Proj:ResDwellUnits > 0 ) .AND.
@@ -591,7 +620,19 @@ RULELIST "Blast_ResOtherZnIAQ_forAirSys"  1 0 1 1
    "Blast ResOtherZn:IAQFanCnt"          ResOtherZn:IAQFanCnt[3] = { UNDEFINED }
    "Blast ResOtherZn:IAQFanCnt"          ResOtherZn:IAQFanCnt[4] = { UNDEFINED }
 END
-;*************************************************************************
+;************************************************************************* SAC 08/18/23
+RULELIST "Blast_ResOtherZn_CentralSupplyCFM"  1 0 1 1
+   "Post message to log that CentralSupplyCFM will be blasted."  ResOtherZn:Action =
+       { PostWarning("Removing CentralSupplyCFM for ResidentialOtherZone '%s' since invalid for zones served by AirSystem or include no or non-central supply ventilation.", Name) }
+   "Blast ResOtherZn:CentralSupplyCFM"    ResOtherZn:CentralSupplyCFM   = { UNDEFINED }
+END
+;************************************************************************* SAC 08/18/23
+RULELIST "Blast_ResOtherZn_CentralExhaustCFM"  1 0 1 1
+   "Post message to log that CentralExhaustCFM will be blasted."  ResOtherZn:Action =
+       { PostWarning("Removing CentralExhaustCFM for ResidentialOtherZone '%s' since invalid for zones served by AirSystem or include no or non-central exhaust ventilation.", Name) }
+   "Blast ResOtherZn:CentralExhaustCFM"   ResOtherZn:CentralExhaustCFM  = { UNDEFINED }
+END
+;************************************************************************* 
 
 ;*************************************************************************
 RULELIST "Set_IAQFIDandAccessible_forDwellUnitType" 0 0 1 1
