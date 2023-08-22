@@ -4203,7 +4203,8 @@ RULELIST "Default_HVACDist_OtherThanType" 0 0 0 0
 ; mjb 1/29/15 - mods to lookup Std Duct Leakage from T24RClimateZoneCodeBase table
 ; mjb 1/29/15 - I think DuctLeakageVal default actually only used for LowLkgAH default, which is why it is set to 6 not 8
 ;	"Default HVACDist:DuctLeakageVal"		HVACDist:DuctLeakageVal 	= {	6  }	
-	"Default HVACDist:DuctLeakageVal"		HVACDist:DuctLeakageVal 	= {	T24RClimateZoneCodeBase:DuctLkg( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr ) - 2  }	
+	"Default HVACDist:DuctLeakageVal"		HVACDist:DuctLeakageVal 	= {	T24RClimateZoneCodeBase:DuctLkg(   "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr ) - 2  }	
+	"Default HVACDist:exDuctLeakageVal"		HVACDist:exDuctLeakageVal 	= {	T24RClimateZoneCodeBase:exDuctLkg( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )  }	 ; SAC 08/20/23 (tic #1306)
 
    ; SAC 10/30/19 - ensure buried duct inputs that were previously user inputs are defaulted for 2019+ code vintages (tic #1128)
    "Redefault AreBuried & AreDeeplyBuried flags if user-defined in 2019+ code vintages"   HVACDist:Action  =
@@ -4216,6 +4217,13 @@ RULELIST "Default_HVACDist_OtherThanType" 0 0 0 0
 	"Default HVACDist:AreDeeplyBuried"		HVACDist:AreDeeplyBuried	= {	0  }		
 	"Default HVACDist:IsLessThanFortyFt"	HVACDist:IsLessThanFortyFt	= {	0  }  ; SAC 6/15/18 - restore rule to default IsLessThanFortyFt so that it is VALID in future value checks (tic #981)
 	"Default HVACDist:IsLessThan25Ft"	   HVACDist:IsLessThan25Ft	   = {	0  }  ; SAC 09/23/22 (tic #1296)
+
+   "Set HVACDist:exDuctLeakageValShow"    HVACDist:exDuctLeakageValShow =        ; SAC 08/20/23 (tic #1306)
+      {  if (ShowStatus > 0 .AND. ( Status == 1 .OR. (Status == 2 .AND. IsVerified) .OR.
+                                    ( Status == 4 .AND. Type > 0 .AND.
+                                      ( IsLessThan25Ft .OR.
+                                        (IfValidAnd( PropIsLessThan25Ft > 0 ) .AND.
+                                         (Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf" .OR. Proj:RunAbbrev == "dr")) ) ) )) then  1  else  0  endif  }
 
 ;    HVACDist:DuctLeakage
 
@@ -4239,17 +4247,26 @@ RULELIST "Default_HVACDist_OtherThanType" 0 0 0 0
 ; SAC 5/7/18 - added logic to treat AA models the same as EAA re: duct leakage (tic #986)
    ; added logic to check 40' for <2022 codes and 25' for 2022+ - SAC 09/23/22 (tic #1296)
    ; expanded logic for EAA duct leakage to use exDuctLkg table value for Altered ducts - SAC 03/15/23
+   ; revise logic to prevent hardwiring of DuctLeakageValUse to look-up table value for Altered ducts w/ LowLkgAH specified - SAC 08/20/23 (tic #1306)
+   ; add logic to use exDuctLeakageVal for existing or existing+new ducts (<25ft) - SAC 08/21/23 (tic #1306)
 	"Default HVACDist:DuctLeakageValUse"			HVACDist:DuctLeakageValUse	= {
-         if ((Proj:RunScope == 2 .OR. Proj:IsAddAlone > 0.5) .AND.
-             Status == 2 .AND. IsVerified .AND. LocalStatus( exDuctLeakageValUse ) > 0)
+         if ( exDuctLeakageValShow .AND.
+              ( Status == 1 .OR. Status == 4 .OR.
+                ( (Proj:RunAbbrev == "s" .OR. Proj:RunAbbrev == "smf" .OR. Proj:RunAbbrev == "dr") .AND.
+                  Status == 2 .AND. IsVerified ) ) .AND.
+              IfValidAnd( exDuctLeakageVal > 0 ) )
+         then  exDuctLeakageVal
+         else if ((Proj:RunScope == 2 .OR. Proj:IsAddAlone > 0.5) .AND.
+                  Status == 2 .AND. IsVerified .AND. LocalStatus( exDuctLeakageValUse ) > 0)
          then	exDuctLeakageValUse
          else if ( (Proj:RunScope == 2 .OR. Proj:IsAddAlone > 0.5) .AND.
                    ( (Proj:StdDesignBase <  2022 .AND. Status == 4 .AND. IfValidAnd( IsLessThanFortyFt = 0 )) .OR.
                      (Proj:StdDesignBase >= 2022 .AND. Status == 4 .AND. IfValidAnd( IsLessThan25Ft    = 0 )) .OR.
-                     Status == 1 .OR. Status == 2 ) )
+                     (Status == 2 .AND. LowLkgAH < 0.5) .OR.
+                     Status == 1 ) )
          then T24RClimateZoneCodeBase:exDuctLkg( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr ) 
          else if (LowLkgAH > 0.5 .OR. (DuctLeakage < 1 .AND. IfValidAnd( Proj:EnergyCodeYearNum = 0 ))) then  DuctLeakageVal
-         else  T24RClimateZoneCodeBase:DuctLkg( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )  endif endif endif	}
+         else  T24RClimateZoneCodeBase:DuctLkg( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )  endif endif endif endif	}
    ; SAC 2/19/20 - revised reporting value for MFam models to adjust by -1 for MFam models (vs. -2 for SFam) (tic #1168)
    ; added logic to check 40' for <2022 codes and 25' for 2022+ - SAC 09/23/22 (tic #1296)
    ; expanded logic for EAA duct leakage to use exDuctLkg table value for Altered ducts - SAC 03/15/23
