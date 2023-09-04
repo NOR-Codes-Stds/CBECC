@@ -67,6 +67,9 @@ RULELIST "ap_EnergyPlus_PreSim" 1 0 0 0
          else UNCHANGED
          endif }
          
+   "Evaluate rules to add EMS for SuppHtg LockoutCtrl"  Proj:Action =
+      {  EvalRulelist( "EPlus_PreSim_SuppHtgLockoutCtrl" ) }
+         
    "Evaluate rules to add EMS for HtRcvry RetAirReset TempCtrl"  Proj:Action =
       {  EvalRulelist( "EPlus_PreSim_HtRcvryRetAirResetTempCtrl" ) }
 
@@ -89,6 +92,9 @@ RULELIST "ab_EnergyPlus_PreSim" 1 0 0 0
          then EvalRulelist( "EPlus_PreSim_DayltSavTime" ) 
          else UNCHANGED
          endif }
+         
+   "Evaluate rules to add EMS for SuppHtg LockoutCtrl"  Proj:Action =
+      {  EvalRulelist( "EPlus_PreSim_SuppHtgLockoutCtrl" ) }
          
    "Evaluate rules to add EMS for HtRcvry RetAirReset TempCtrl"  Proj:Action =
       {  EvalRulelist( "EPlus_PreSim_HtRcvryRetAirResetTempCtrl" ) }
@@ -115,27 +121,67 @@ RULELIST "EPlus_PreSim_DayltSavTime" 1 0 0 0
 END
 
 ;*************************************************************************
+; add EnergyManagementSystem for supplimental heat lock-out control to EPlus IDFs
+;*************************************************************************
+RULELIST "EPlus_PreSim_SuppHtgLockoutCtrl" 1 0 0 0
+  "Add EnergyManagementSystem:Sensor for outdoor air drybulb temperature" Proj:Action = {
+      if( SumChildren( CoilHtg:SuppHtgCap ) > 0 )
+      then WriteToSimInput( Format( "EnergyManagementSystem:Sensor, \n\n" ) +
+                            Format( "  OutdoorDBTemp,\t!- Name \n\n" ) +
+                            Format( "  Environment,\t!-  Index Key Name \n\n" ) +
+                            Format( "  Site Outdoor Air Drybulb Temperature%c\t!- Output:Variable Name \n\n\n", 59 ) )
+      else UNCHANGED endif }
+      
+// replace space and special character which is not supported in EMS
+  "Set CoilHtg:EPlusEMSName" CoilHtg:EPlusEMSName = { if( IfValidAnd( AvailCtrlByEMS > 0 ) .AND. IfValidAnd( SuppHtgCap > 0 ) ) then Name else UNCHANGED endif }
+  "Set CoilHtg:EPlusEMSName" CoilHtg:EPlusEMSName = { if( LocalStatus( EPlusEMSName ) > 0 ) then ReplaceInString( " ", "_" ) else UNCHANGED endif }
+  "Set CoilHtg:EPlusEMSName" CoilHtg:EPlusEMSName = { if( LocalStatus( EPlusEMSName ) > 0 ) then ReplaceInString( "-", "_" ) else UNCHANGED endif }
+  "Set CoilHtg:EPlusEMSName" CoilHtg:EPlusEMSName = { if( LocalStatus( EPlusEMSName ) > 0 ) then ReplaceInString( "/", "_" ) else UNCHANGED endif }
+                     
+  "Add EnergyManagementSystem:Actuator Supplimental CoilHtg AvailSch" CoilHtg:Action = {
+      if( LocalCompAssigned( HtPumpSuppCoilHtgRef ) .AND. IfValidAnd( HtPumpSuppTemp > 0 ) .AND. IfValidAnd( ServesResZn > 0 ) = 0 )
+      then WriteToSimInput( Format( "EnergyManagementSystem:Actuator, \n\n" ) +
+                            Format( "  %s_Avail,\t!- Name \n\n", HtPumpSuppCoilHtgRef:EPlusEMSName ) +
+                            Format( "  %s AvailSch,\t!- Actuated Component Unique Name \n\n", HtPumpSuppCoilHtgRef:Name ) +
+                            Format( "  Schedule:Constant,\t!- Actuated Component Type \n\n" ) +
+                            Format( "  Schedule Value%c\t!- Actuated Component Control Type \n\n\n", 59 ) )
+      else UNCHANGED endif }
+
+  "Add EnergyManagementSystem:Program to control Supplimental CoilHtg AvailSch" CoilHtg:Action = {
+      if( LocalCompAssigned( HtPumpSuppCoilHtgRef ) .AND. IfValidAnd( HtPumpSuppTemp > 0 ) .AND. IfValidAnd( ServesResZn > 0 ) = 0 )
+      then WriteToSimInput( Format( "EnergyManagementSystem:Program, \n\n" ) +
+                            Format( "  %s_Avail_Setter,\t!- Name \n\n", HtPumpSuppCoilHtgRef:EPlusEMSName ) +
+                            Format( "  SET LockoutSetPt = ( %0.3f - 32 ) * 5 / 9,\t!- Convert lock-out temp from F to C \n\n", HtPumpSuppTemp ) +
+                            Format( "  IF OutdoorDBTemp >= LockoutSetPt, \n\n" ) +
+                            Format( "  SET %s_Avail = 0, \n\n", HtPumpSuppCoilHtgRef:EPlusEMSName ) + 
+                            Format( "  ELSE, \n\n" ) +
+                            Format( "  SET %s_Avail = 1, \n\n", HtPumpSuppCoilHtgRef:EPlusEMSName ) + 
+                            Format( "  ENDIF%c \n\n\n", 59 ) )
+      else UNCHANGED endif }
+      
+  "Add EnergyManagementSystem:ProgramCallingManager to control Supplimental CoilHtg AvailSch" CoilHtg:Action = {
+      if( LocalCompAssigned( HtPumpSuppCoilHtgRef ) .AND. IfValidAnd( HtPumpSuppTemp > 0 ) .AND. IfValidAnd( ServesResZn > 0 ) = 0 )
+      then WriteToSimInput( Format( "EnergyManagementSystem:ProgramCallingManager, \n\n" ) +
+                            Format( "  %s_Avail_Setter_Mgr,\t!- Name \n\n", HtPumpSuppCoilHtgRef:EPlusEMSName ) +
+                            Format( "  BeginTimestepBeforePredictor,\t!- EnergyPlus Model Calling Point \n\n" ) +
+                            Format( "  %s_Avail_Setter%c\t!- Program Name 1 \n\n\n", HtPumpSuppCoilHtgRef:EPlusEMSName, 59 ) )
+      else UNCHANGED endif }   
+END
+
+;*************************************************************************
 ; add EnergyManagementSystem for HtRcvry ReturnAirReset TempCtrl to EPlus IDFs
 ;*************************************************************************
 RULELIST "EPlus_PreSim_HtRcvryRetAirResetTempCtrl" 1 0 0 0
-  "Set HtRcvry:EPlusEMSName" HtRcvry:EPlusEMSName = { if( IfValidAnd( u:TempCtrl = "ReturnAirReset" ) ) then Name else UNDEFINED endif }
-  "Set HtRcvry:EPlusEMSName" HtRcvry:EPlusEMSName = { if( IfValidAnd( u:TempCtrl = "ReturnAirReset" ) ) then ReplaceInString( " ", "_" ) else UNDEFINED endif }
-  "Set HtRcvry:EPlusEMSName" HtRcvry:EPlusEMSName = { if( IfValidAnd( u:TempCtrl = "ReturnAirReset" ) ) then ReplaceInString( "+", "_" ) else UNDEFINED endif }
-  "Set HtRcvry:EPlusEMSName" HtRcvry:EPlusEMSName = { if( IfValidAnd( u:TempCtrl = "ReturnAirReset" ) ) then ReplaceInString( "-", "_" ) else UNDEFINED endif }
-  "Set HtRcvry:EPlusEMSName" HtRcvry:EPlusEMSName = { if( IfValidAnd( u:TempCtrl = "ReturnAirReset" ) ) then ReplaceInString( "*", "_" ) else UNDEFINED endif }
-  "Set HtRcvry:EPlusEMSName" HtRcvry:EPlusEMSName = { if( IfValidAnd( u:TempCtrl = "ReturnAirReset" ) ) then ReplaceInString( "/", "_" ) else UNDEFINED endif }
-  "Set HtRcvry:EPlusEMSName" HtRcvry:EPlusEMSName = { if( IfValidAnd( u:TempCtrl = "ReturnAirReset" ) ) then ReplaceInString( "@", "_" ) else UNDEFINED endif }
+  "Set HtRcvry:EPlusEMSName" HtRcvry:EPlusEMSName = { if( IfValidAnd( TempCtrlByEMS > 0 ) ) then Name else UNCHANGED endif }
+  "Set HtRcvry:EPlusEMSName" HtRcvry:EPlusEMSName = { if( LocalStatus( EPlusEMSName ) > 0 ) then ReplaceInString( " ", "_" ) else UNCHANGED endif }
+  "Set HtRcvry:EPlusEMSName" HtRcvry:EPlusEMSName = { if( LocalStatus( EPlusEMSName ) > 0 ) then ReplaceInString( "-", "_" ) else UNCHANGED endif }
 
-  "Set AirSys:EPlusEMSName" AirSys:EPlusEMSName = { if( IfValidAnd( u:HtRcvryRef:TempCtrl = "ReturnAirReset" ) ) then Name else UNDEFINED endif }
-  "Set AirSys:EPlusEMSName" AirSys:EPlusEMSName = { if( IfValidAnd( u:HtRcvryRef:TempCtrl = "ReturnAirReset" ) ) then ReplaceInString( " ", "_" ) else UNDEFINED endif }
-  "Set AirSys:EPlusEMSName" AirSys:EPlusEMSName = { if( IfValidAnd( u:HtRcvryRef:TempCtrl = "ReturnAirReset" ) ) then ReplaceInString( "+", "_" ) else UNDEFINED endif }
-  "Set AirSys:EPlusEMSName" AirSys:EPlusEMSName = { if( IfValidAnd( u:HtRcvryRef:TempCtrl = "ReturnAirReset" ) ) then ReplaceInString( "-", "_" ) else UNDEFINED endif }
-  "Set AirSys:EPlusEMSName" AirSys:EPlusEMSName = { if( IfValidAnd( u:HtRcvryRef:TempCtrl = "ReturnAirReset" ) ) then ReplaceInString( "*", "_" ) else UNDEFINED endif }
-  "Set AirSys:EPlusEMSName" AirSys:EPlusEMSName = { if( IfValidAnd( u:HtRcvryRef:TempCtrl = "ReturnAirReset" ) ) then ReplaceInString( "/", "_" ) else UNDEFINED endif }
-  "Set AirSys:EPlusEMSName" AirSys:EPlusEMSName = { if( IfValidAnd( u:HtRcvryRef:TempCtrl = "ReturnAirReset" ) ) then ReplaceInString( "@", "_" ) else UNDEFINED endif }
+  "Set AirSys:EPlusEMSName" AirSys:EPlusEMSName = { if( IfValidAnd( HtRcvryRef:TempCtrlByEMS > 0 ) ) then Name else UNCHANGED endif }
+  "Set AirSys:EPlusEMSName" AirSys:EPlusEMSName = { if( LocalStatus( EPlusEMSName ) > 0 ) then ReplaceInString( " ", "_" ) else UNCHANGED endif }
+  "Set AirSys:EPlusEMSName" AirSys:EPlusEMSName = { if( LocalStatus( EPlusEMSName ) > 0 ) then ReplaceInString( "-", "_" ) else UNCHANGED endif }
 
   "Add EnergyManagementSystem:Sensor to AirSys return node" HtRcvry:Action = {
-      if( IfValidAnd( u:TempCtrl = "ReturnAirReset" ) )
+      if( IfValidAnd( TempCtrl = "ReturnAirReset" ) .AND. IfValidAnd( ServesResZn > 0 ) = 0 )
       then WriteToSimInput( Format( "EnergyManagementSystem:Sensor, \n\n" ) +
                             Format( "  %s_Return_Air_Temp,\t!- Name \n\n", Parent( EPlusEMSName ) ) +
                             Format( "  %s Supply Side (Return Air) Inlet Node,\t!-  Index Key Name \n\n", Parent( Name ) ) +
@@ -143,7 +189,7 @@ RULELIST "EPlus_PreSim_HtRcvryRetAirResetTempCtrl" 1 0 0 0
       else UNCHANGED endif }
       
   "Add EnergyManagementSystem:Actuator to HtRcvry outlet node" HtRcvry:Action = {
-      if( IfValidAnd( u:TempCtrl = "ReturnAirReset" ) )
+      if( IfValidAnd( TempCtrl = "ReturnAirReset" ) .AND. IfValidAnd( ServesResZn > 0 ) = 0 )
       then WriteToSimInput( Format( "EnergyManagementSystem:Actuator, \n\n" ) +
                             Format( "  %s_Setpoint,\t!- Name \n\n", EPlusEMSName ) +
                             Format( "  %s Setpoint,\t!- Actuated Component Unique Name \n\n", Name ) +
@@ -152,39 +198,38 @@ RULELIST "EPlus_PreSim_HtRcvryRetAirResetTempCtrl" 1 0 0 0
       else UNCHANGED endif }
     
   "Add EnergyManagementSystem:Program to HtRcvry outlet node" HtRcvry:Action = {
-      if( IfValidAnd( u:TempCtrl = "ReturnAirReset" ) .AND. IfValidAnd( TempSetptRstRetLowSim != TempSetptRstRetHiSim ) )
+      if( IfValidAnd( TempCtrl = "ReturnAirReset" ) .AND. IfValidAnd( TempSetptRstRetLowSim != TempSetptRstRetHiSim ) .AND. IfValidAnd( ServesResZn > 0 ) = 0 )
       then WriteToSimInput( Format( "EnergyManagementSystem:Program, \n\n" ) +
                             Format( "  %s_Setpoint_Setter,\t!- Name \n\n", EPlusEMSName ) +
-                            Format( "  IF %s_Return_Air_Temp > %0.3f,\t!- Program Line 1 \n\n", Parent( EPlusEMSName ), TempSetptRstRetLowSim ) +
-                            Format( "  SET %s_Setpoint = %0.3f,\t!- Program Line 2 \n\n", EPlusEMSName, TempSetptRstSupLowSim ) + 
-                            Format( "  ELSEIF %s_Return_Air_Temp < %0.3f,\t!- Program Line 3 \n\n", Parent( EPlusEMSName ), TempSetptRstRetHiSim ) +
-                            Format( "  SET %s_Setpoint = %0.3f,\t!- Program Line 4 \n\n", EPlusEMSName, TempSetptRstSupHiSim ) + 
-                            Format( "  ELSE,\t!- Program Line 5 \n\n" ) + 
-                            Format( "  SET %s_Setpoint = %0.3f - ( %s_Return_Air_Temp - %0.3f ) * %0.3f,\t!- Program Line 6 \n\n",
+                            Format( "  IF %s_Return_Air_Temp > %0.3f, \n\n", Parent( EPlusEMSName ), TempSetptRstRetLowSim ) +
+                            Format( "  SET %s_Setpoint = %0.3f, \n\n", EPlusEMSName, TempSetptRstSupLowSim ) + 
+                            Format( "  ELSEIF %s_Return_Air_Temp < %0.3f, \n\n", Parent( EPlusEMSName ), TempSetptRstRetHiSim ) +
+                            Format( "  SET %s_Setpoint = %0.3f, \n\n", EPlusEMSName, TempSetptRstSupHiSim ) + 
+                            Format( "  ELSE, \n\n" ) + 
+                            Format( "  SET %s_Setpoint = %0.3f - ( %s_Return_Air_Temp - %0.3f ) * %0.3f, \n\n",
                                     EPlusEMSName, TempSetptRstSupHiSim, Parent( EPlusEMSName ), TempSetptRstRetHiSim, -(TempSetptRstSupLowSim-TempSetptRstSupHiSim)/(TempSetptRstRetLowSim-TempSetptRstRetHiSim) ) +
-                            Format( "  ENDIF%c\t!- Program Line 5 \n\n\n", 59 ) )
+                            Format( "  ENDIF%c \n\n\n", 59 ) )
       else ; Neutral-offset Return air temperature control; TempSetptRstRetLowSim = TempSetptRstRetHiSim = TempNeutral
-      if( IfValidAnd( u:TempCtrl = "ReturnAirReset" ) )
+      if( IfValidAnd( TempCtrl = "ReturnAirReset" ) .AND. IfValidAnd( ServesResZn > 0 ) = 0 )
       then WriteToSimInput( Format( "EnergyManagementSystem:Program, \n\n" ) +
                             Format( "  %s_Setpoint_Setter,\t!- Name \n\n", EPlusEMSName ) +
-                            Format( "  IF %s_Return_Air_Temp > %0.3f,\t!- Program Line 1 \n\n", Parent( EPlusEMSName ), TempSetptRstRetLowSim ) +
-                            Format( "  SET %s_Setpoint = %0.3f,\t!- Program Line 2 \n\n", EPlusEMSName, TempSetptRstSupLowSim ) + 
-                            Format( "  ELSEIF %s_Return_Air_Temp < %0.3f,\t!- Program Line 3 \n\n", Parent( EPlusEMSName ), TempSetptRstRetHiSim ) +
-                            Format( "  SET %s_Setpoint = %0.3f,\t!- Program Line 4 \n\n", EPlusEMSName, TempSetptRstSupHiSim ) + 
-                            Format( "  ELSE,\t!- Program Line 5 \n\n" ) + 
-                            Format( "  SET %s_Setpoint = %0.3f,\t!- Program Line 6 \n\n",
+                            Format( "  IF %s_Return_Air_Temp > %0.3f, \n\n", Parent( EPlusEMSName ), TempSetptRstRetLowSim ) +
+                            Format( "  SET %s_Setpoint = %0.3f, \n\n", EPlusEMSName, TempSetptRstSupLowSim ) + 
+                            Format( "  ELSEIF %s_Return_Air_Temp < %0.3f, \n\n", Parent( EPlusEMSName ), TempSetptRstRetHiSim ) +
+                            Format( "  SET %s_Setpoint = %0.3f, \n\n", EPlusEMSName, TempSetptRstSupHiSim ) + 
+                            Format( "  ELSE, \n\n" ) + 
+                            Format( "  SET %s_Setpoint = %0.3f, \n\n",
                                     EPlusEMSName, (TempSetptRstSupLowSim+TempSetptRstSupHiSim)/2 ) +
-                            Format( "  ENDIF%c\t!- Program Line 5 \n\n\n", 59 ) )
+                            Format( "  ENDIF%c \n\n\n", 59 ) )
       else UNCHANGED endif endif }      
       
   "Add EnergyManagementSystem:ProgramCallingManager to HtRcvry outlet node" HtRcvry:Action = {
-      if( IfValidAnd( u:TempCtrl = "ReturnAirReset" ) )
+      if( IfValidAnd( TempCtrl = "ReturnAirReset" ) .AND. IfValidAnd( ServesResZn > 0 ) = 0 )
       then WriteToSimInput( Format( "EnergyManagementSystem:ProgramCallingManager, \n\n" ) +
                             Format( "  %s_Setpoint_Setter_Mgr,\t!- Name \n\n", EPlusEMSName ) +
                             Format( "  BeginTimestepBeforePredictor,\t!- EnergyPlus Model Calling Point \n\n" ) +
                             Format( "  %s_Setpoint_Setter%c\t!- Program Name 1 \n\n\n", EPlusEMSName, 59 ) )
       else UNCHANGED endif }   
-
 END
 
 ;*************************************************************************
