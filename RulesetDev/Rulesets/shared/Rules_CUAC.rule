@@ -263,9 +263,9 @@ RULELIST "CUAC_InputErrorCheck" 0 0 0 0
          else  1  endif  }
       ;   else  CUAC_UtilityRates:IsValid( "RateID", GasTariff )   endif  }
 
-      ;"dbg" CUAC:Action = { PostMessageToLog( "GasUtility %g / GasTerritory %g / GasTariff %g", ValidOr( GasUtility, -999 ), ValidOr( GasTerritory, -999 ), ValidOr( GasTariff, -999 ) ) }
+      ;"dbg" CUAC:Action = { PostMessageToLog( "GasUtility %g / G2GasTerritory %g / G2GasTariff %g", ValidOr( GasUtility, -999 ), ValidOr( G2GasTerritory, -999 ), ValidOr( G2GasTariff, -999 ) ) }
 
-   "Set CUAC:ErrorMsg"     CUAC:ErrorMsg =      ; add central laundry check - SAC 12/20/22
+   "Set CUAC:ErrorMsg"     CUAC:ErrorMsg =      ; add central laundry check - SAC 12/20/22  ; prevent Utility valid errors on utilities added in Gen2 - SAC 09/13/23
       {  if (IfValidAnd( Proj:ResDwellUnits > 0 )==0 .OR. IfValidAnd( Proj:CUACReport > 0 )==0)
          then  "Error: Res dwelling units and CUAC not all selected"
          else if (SumAll( ResZn:AffordableHousing ) < 1)
@@ -304,7 +304,8 @@ RULELIST "CUAC_InputErrorCheck" 0 0 0 0
 
          else if (ElecUtility < 1 .OR. G2ElecTerritory < 1 .OR. G2ElecTariff < 1)
          then  "Error: Electric Utility, Territory and/or Tariff not selected"
-         else if (CUAC_UtilityCompanies:IsValid( "UtilityID", ElecUtility ) < 1)
+         else if (CUAC_UtilityRateGen2Data:WhichGen( "Fuel", "Electric", "Utility", EnumString( ElecUtility ) ) < 1 .AND.
+                  CUAC_UtilityCompanies:IsValid( "UtilityID", ElecUtility ) < 1)
          then  "Error: Electric Utility not found in ruleset look-up table"
          else if (CUAC_UtilityRateGen2Data:WhichGen( "Fuel", "Electric", "Utility", EnumString( ElecUtility ), "Territory", EnumString( G2ElecTerritory ) ) < 1 .AND.
                   CUAC_UtilityTerritories:IsValid( "TerritoryID", G2ElecTerritory ) < 1)
@@ -364,7 +365,8 @@ RULELIST "CUAC_InputErrorCheck" 0 0 0 0
 
          else if (ElecUtility < 1 .OR. G2ElecTerritory < 1 .OR. G2ElecTariff < 1)
          then  "Electric Utility, Territory and Tariff must be selected before performing analysis/reporting."
-         else if (CUAC_UtilityCompanies:IsValid( "UtilityID", ElecUtility ) < 1)
+         else if (CUAC_UtilityRateGen2Data:WhichGen( "Fuel", "Electric", "Utility", EnumString( ElecUtility ) ) < 1 .AND.
+                  CUAC_UtilityCompanies:IsValid( "UtilityID", ElecUtility ) < 1)
          then  Format( "Electric Utility '%s' not found in ruleset look-up table.", EnumString( ElecUtility ) )
          else if (CUAC_UtilityRateGen2Data:WhichGen( "Fuel", "Electric", "Utility", EnumString( ElecUtility ), "Territory", EnumString( G2ElecTerritory ) ) < 1 .AND.
                   CUAC_UtilityTerritories:IsValid( "TerritoryID", G2ElecTerritory ) < 1)
@@ -374,7 +376,7 @@ RULELIST "CUAC_InputErrorCheck" 0 0 0 0
 
          else if (GasUtility == 0)
          then  "Gas Utility or 'no gas service' must be selected before performing analysis/reporting."
-         else if (GasUtilitySelected .AND. (G2GasTerritory < 1 .OR. GasTariff < 1))
+         else if (GasUtilitySelected .AND. (G2GasTerritory < 1 .OR. G2GasTariff < 1))
          then  "Gas Territory and Tariff must be selected before performing analysis/reporting."
          ; else if (GasUtilitySelected .AND. CUAC_UtilityCompanies:IsValid( "UtilityID", GasUtility ) < 1)
          ; then  Format( "Gas Utility '%s' not found in ruleset look-up table.", EnumString( GasUtility ) )
@@ -1043,7 +1045,9 @@ RULELIST "CUAC_FinalCalcs" 1 0 1 0
 
    "Set CUAC:CUACResultsRef[*]:Allowances[11] - Water"       for:#U=(1to7)   CUAC:CUACResultsRef[#U]:Allowances[11] = {  CUACResultsRef[#U]:WaterCosts[2]  }
    "Set CUAC:CUACResultsRef[*]:Allowances[12] - Sewer"       for:#U=(1to7)   CUAC:CUACResultsRef[#U]:Allowances[12] = {  0  }
-   "Set CUAC:CUACResultsRef[*]:Allowances[13] - Trash"       for:#U=(1to7)   CUAC:CUACResultsRef[#U]:Allowances[13] = {  ValidOr( TrashMonthlyCost, 0 )  }
+   "Set CUAC:CUACResultsRef[*]:Allowances[13] - Trash"       for:#U=(1to7)   CUAC:CUACResultsRef[#U]:Allowances[13] =            ; prevent reporting of trash costs when TrashRateType = "Not Paid..." - SAC 09/14/23
+      {  if (TrashRateType < 1) then  0
+         else  ValidOr( TrashMonthlyCost, 0 )  endif  }
 
 
    ; setup path/filename of in/out CSV file here so that it can be checked for writeability before being opened and written via CUAC_WriteInputOutputCSV rules - SAC 10/20/22
@@ -1101,13 +1105,15 @@ RULELIST "CUAC_WriteInputOutputCSV" 1 0 0 0
    "Write CUAC I/O CSV inputs"                 CUAC:Action = { if (IfValidAnd( NumAffordableDwellingUnits > 0 )==0) then  UNCHANGED
                                                                else  WriteToExportFile( InOutCSVFileIdx, ",,  Total,,%g\n", NumAffordableDwellingUnits )  endif  }
 
+      ; updated ElecTerritory & ElecTariff to G2* - SAC 09/11/23
    "Write CUAC I/O CSV inputs"   CUAC:Action  = {  WriteToExportFile( InOutCSVFileIdx, ",Electric Utility:,,%c%s%c,,,,,,Territory:,%c%s%c,,,Tariff:,%c%s%c\n",
-                                                               34, EnumString( ElecUtility ), 34, 34, EnumString( ElecTerritory ), 34, 34, EnumString( ElecTariff ), 34 )  }
+                                                               34, EnumString( ElecUtility ), 34, 34, EnumString( G2ElecTerritory ), 34, 34, EnumString( G2ElecTariff ), 34 )  }
 
+      ; updated GasTerritory & GasTariff to G2* - SAC 09/11/23
    "Write CUAC I/O CSV inputs"   CUAC:Action  = {  if (GasUtility > 998)
                                                    then  WriteToExportFile( InOutCSVFileIdx, ",Gas Utility:,,%c%s%c,\n", 34, EnumString( GasUtility ), 34 )
                                                    else  WriteToExportFile( InOutCSVFileIdx, ",Gas Utility:,,%c%s%c,,,,,,Territory:,%c%s%c,,,Tariff:,%c%s%c\n",
-                                                               34, EnumString( GasUtility ), 34, 34, EnumString( GasTerritory ), 34, 34, EnumString( GasTariff ), 34 )  endif  }
+                                                               34, EnumString( GasUtility ), 34, 34, EnumString( G2GasTerritory ), 34, 34, EnumString( G2GasTariff ), 34 )  endif  }
 
    "Write CUAC I/O CSV inputs"   CUAC:Action  = {  switch (WaterRateType)
                                                       case  0 :  WriteToExportFile( InOutCSVFileIdx, ",Water Bill:,,%c%s%c,\n", 34, EnumString( WaterRateType ), 34 )
