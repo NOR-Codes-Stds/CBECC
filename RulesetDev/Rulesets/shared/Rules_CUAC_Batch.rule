@@ -1,0 +1,121 @@
+; -------------------------------------------------------------------------
+; Rules pertaining to:   CUAC Rate Batch processing
+; CEC Title-24 Residential Energy Code
+; -------------------------------------------------------------------------
+; Copyright (c) 2012-2014, California Energy Commission
+; Copyright (c) 2012-2014, Wrightsoft Corporation
+; All rights reserved.
+; Redistribution and use in source and binary forms, with or without modification,
+; are permitted provided that the following conditions are met:
+; - Redistributions of source code must retain the above copyright notice, this
+;   list of conditions and the following disclaimer.
+; - Redistributions in binary form must reproduce the above copyright notice, this
+;   list of conditions, the following disclaimer in the documentation and/or other
+;   materials provided with the distribution.
+; - Neither the name of the California Energy Commission nor the names of its
+;   contributors may be used to endorse or promote products derived from this
+;   software without specific prior written permission.
+; DISCLAIMER: THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+; "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+; THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+; NON-INFRINGEMENT ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION,
+; WRIGHTSOFT CORPORATION, ITRON, INC. OR ANY OTHER AUTHOR OR COPYRIGHT HOLDER OF
+; THIS SOFTWARE (COLLECTIVELY, THE "AUTHORS") BE LIABLE FOR ANY DIRECT, INDIRECT,
+; INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+; LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA,
+; OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+; LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
+; OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+; ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.  EACH LICENSEE AND SUBLICENSEE OF THE
+; SOFTWARE AGREES NOT TO ASSERT ANY CLAIM AGAINST ANY OF THE AUTHORS RELATING TO
+; THIS SOFTWARE, WHETHER DUE TO PERFORMANCE ISSUES, TITLE OR INFRINGEMENT ISSUES,
+;STRICT LIABILITY OR OTHERWISE.
+; -------------------------------------------------------------------------
+
+ENUM_PROPERTIES_VALUE   ; ensures retrieval/logic/us of enum properties assume numeric value (alternative is ENUM_PROPERTIES_STRING)
+
+;************************************************************************* SAC 09/27/23
+RULELIST "CUACRates_Setup"  1 0 1 0
+;*************************************************************************
+;  CUAC:BatchRateIdx already set if here
+
+   "remove any CPR_* objects"    Proj:Action = {  EvalRulelist( "CUAC_DeleteCPRRates" )  }
+
+   "Set CUAC:G2ElecTariffERN"    CUAC:G2ElecTariffERN =
+      {  switch (BatchRateIdx)
+            case  1 :  "CA_SMUD_RES_FIXED"
+            case  2 :  "CA_SMUD_RES_FIXED"
+            case  3 :  "CA_SMUD_RES_FIXED"
+            default :  UNDEFINED
+         endswitch  }
+   "Set CUAC:G2GasTariffERN"     CUAC:G2GasTariffERN  =
+      {  switch (BatchRateIdx)
+            case  1 :  "CA_PGE_R_RES_GAS_G1"
+            case  2 :  "CA_PGE_R_RES_GAS_G1"
+            case  3 :  UNDEFINED
+            default :  UNDEFINED
+         endswitch  }
+
+   "Set CUAC:ElecUtility"        CUAC:ElecUtility  =
+      {  if (LocalStatus( G2ElecTariffERN ) < 1) then  UNDEFINED
+         else  CUAC_UtilityRateGen2Data:Utility(   "Fuel", "Electric", "Gen2EncodedRateName", G2ElecTariffERN )  endif  }
+   "Set CUAC:G2ElecTerritory"    CUAC:G2ElecTerritory  =
+      {  if (LocalStatus( G2ElecTariffERN ) < 1) then  UNDEFINED
+         else  CUAC_UtilityRateGen2Data:Territory( "Fuel", "Electric", "Gen2EncodedRateName", G2ElecTariffERN )  endif  }
+   "Set CUAC:G2ElecTariff"       CUAC:G2ElecTariff  =
+      {  if (LocalStatus( G2ElecTariffERN ) < 1) then  UNDEFINED
+         else  CUAC_UtilityRateGen2Data:Rate(      "Fuel", "Electric", "Gen2EncodedRateName", G2ElecTariffERN )  endif  }
+
+   "Set CUAC:GasUtility"         CUAC:GasUtility  =
+      {  if (LocalStatus( G2GasTariffERN ) < 1) then  "no gas service"
+         else  CUAC_UtilityRateGen2Data:Utility(   "Fuel", "Gas", "Gen2EncodedRateName", G2GasTariffERN )  endif  }
+   "Set CUAC:G2GasTerritory"     CUAC:G2GasTerritory  =
+      {  if (LocalStatus( G2GasTariffERN ) < 1) then  UNCHANGED
+         else  CUAC_UtilityRateGen2Data:Territory( "Fuel", "Gas", "Gen2EncodedRateName", G2GasTariffERN )  endif  }
+   "Set CUAC:G2GasTariff"        CUAC:G2GasTariff  =
+      {  if (LocalStatus( G2GasTariffERN ) < 1) then  UNCHANGED
+         else  CUAC_UtilityRateGen2Data:Rate(      "Fuel", "Gas", "Gen2EncodedRateName", G2GasTariffERN )  endif  }
+
+   "Evaluate default rules"   Proj:Action = {  EvalRulelist( "rl_DEFAULT" )  }
+
+END
+;*************************************************************************
+
+;************************************************************************* SAC 09/27/23
+RULELIST "CUACRates_Final" 1 0 1 0
+;*************************************************************************
+   "Open CUAC InOutCSVPathFile CSV file"  CUAC:InOutCSVFileIdx  =
+      {  if (BatchRateIdx > 1) then  OpenExportFile( InOutCSVPathFile, "at" )
+                               else  OpenExportFile( InOutCSVPathFile, "wt" )  endif  }
+   "Set CUAC:ModelPathFwdSlash"                       CUAC:ModelPathFwdSlash = {  ValidOr( Proj:ModelPath, "" )  }
+   "Replace '\' w/ '/' in CUAC:ModelPathFwdSlash"     CUAC:ModelPathFwdSlash = {  ReplaceInString( "\", "/" )  }
+   "Write CUAC I/O CSV Header-1"    CUAC:Action  = {  if (BatchRateIdx > 1) then  UNCHANGED  else  WriteToExportFile( InOutCSVFileIdx, "Model File:,,%c%s%s%c\n", 34, ValidOr( ModelPathFwdSlash, "" ), ValidOr( Proj:ModelFile, "" ), 34 )  endif  }
+   "Write CUAC I/O CSV Header-2"    CUAC:Action  = {  if (BatchRateIdx > 1) then  UNCHANGED  else  WriteToExportFile( InOutCSVFileIdx, "Weather File:,,%c%s%c\n", 34, ValidOr( Proj:AnnualWeatherFileNoPath, "" ), 34 )  endif  }
+   "Write CUAC I/O CSV Header-3"    CUAC:Action  = {  if (BatchRateIdx > 1) then  UNCHANGED  else  WriteToExportFile( InOutCSVFileIdx, "Run Date/Time:,,%s\n",        ValidOr( Proj:RunDateISO,   "" ) )  endif  }
+   "Write CUAC I/O CSV Header-4"    CUAC:Action  = {  if (BatchRateIdx > 1) then  UNCHANGED  else  WriteToExportFile( InOutCSVFileIdx, ",Software:,%c%s%c\n",     34, ValidOr( Proj:SoftwareVersion,    "" ), 34 )  endif  }
+   "Write CUAC I/O CSV Header-5"    CUAC:Action  = {  if (BatchRateIdx > 1) then  UNCHANGED  else  WriteToExportFile( InOutCSVFileIdx, ",Ruleset:,%c%s%c\n",      34, ValidOr( Proj:CompManagerVersion, "" ), 34 )  endif  }
+   "Write CUAC I/O CSV Header-6"    CUAC:Action  = {  if (BatchRateIdx > 1) then  UNCHANGED  else  WriteToExportFile( InOutCSVFileIdx, ",CSE:,%c%s%c\n",          34, ValidOr( Proj:DHWSimEngVersion,   "" ), 34 )  endif  }
+
+   ; Index, Elec$/kWh, Elec$, ElecRateERN, Gas$/kWh, Gas$, GasRateERN, 
+   "Write CUAC results"    for:#R=(1-7)    CUAC:Action  =
+      {  if (LocalCompAssigned( CUACResultsRef[#R] ) < 1) then  UNCHANGED
+         else  WriteToExportFile( InOutCSVFileIdx, "%g,%c%s%c,%g,%g,%s,%g,%g,%s,%c%s%c,%c%s%c,%c%s%c,,,%c%s%c,%c%s%c,%c%s%c,\n", BatchRateIdx, 34, CUACResultsRef[#R]:Name, 34,
+                  ValidOr( CUACResultsRef[#R]:ElecCostPerEnergyUse, 0 ), ValidOr( CUACResultsRef[#R]:ElecCosts[1], 0 ), ValidOr( G2ElecTariffERN, "none" ),
+                  ValidOr( CUACResultsRef[#R]:GasCostPerEnergyUse,  0 ), ValidOr( CUACResultsRef[#R]:GasCosts[1],  0 ), ValidOr( G2GasTariffERN,  "none" ),
+                  34, EnumString( ElecUtility ), 34, 34, EnumString( G2ElecTerritory ), 34, 34, EnumString( G2ElecTariff ), 34,
+                  34, EnumString( GasUtility ), 34, 34, EnumString( G2GasTerritory ), 34, 34, EnumString( G2GasTariff ), 34 )  endif  }
+
+   "Close CUAC I/O CSV file"        CUAC:Action  = {  CloseExportFile( InOutCSVFileIdx )  }
+
+   "setup CUAC:BatchRateIdx for next run"    CUAC:BatchRateIdx =
+      {  if (BatchRateIdx >= 3) then  0
+         else  BatchRateIdx + 1  endif  }
+END
+;*************************************************************************
+
+
+
+;*************************************************************************
+;*************************************************************************
+
+ENDFILE

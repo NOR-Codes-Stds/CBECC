@@ -204,11 +204,35 @@ RULELIST "CUAC_ZoneUnitCounts" 0 0 0 0
          then  100 * PctIndivUnitPVSum / AffordablePVDCSysSize
          else  UNCHANGED  endif  }
 
+   "Set CUAC:TotCommunitySolarSize"    CUAC:TotCommunitySolarSize = 
+      {  if (CommunitySolarValid < 1) then  0
+         else  (AffordableUnitsByBedrms[1] * ValidOr( CommunitySolarSizeByBedrms[1], 0 )) +
+               (AffordableUnitsByBedrms[2] * ValidOr( CommunitySolarSizeByBedrms[2], 0 )) +
+               (AffordableUnitsByBedrms[3] * ValidOr( CommunitySolarSizeByBedrms[3], 0 )) +
+               (AffordableUnitsByBedrms[4] * ValidOr( CommunitySolarSizeByBedrms[4], 0 )) +
+               (AffordableUnitsByBedrms[5] * ValidOr( CommunitySolarSizeByBedrms[5], 0 )) +
+               (AffordableUnitsByBedrms[6] * ValidOr( CommunitySolarSizeByBedrms[6], 0 )) +
+               (AffordableUnitsByBedrms[7] * ValidOr( CommunitySolarSizeByBedrms[7], 0 ))
+         endif  }
+
+   "Set CUAC:CommunitySolarAnnCreditByBedrms[1-7]"   for:#U=(1to7)  CUAC:CommunitySolarAnnCreditByBedrms[#U]  =
+      {  if (CommunitySolarValid < 1 .OR. AffordableUnitsByBedrms[#U] < 1) then  UNDEFINED
+         else  ValidOr( CommunitySolarSizeByBedrms[#U], 0 ) * 10  endif  } 
+
    "Set CUAC:PVAllocUserMsg"     CUAC:PVAllocUserMsg =      ; SAC 12/09/22
-      {  if (IfValidAnd( Proj:PVSizeSum > 0 )==0)
-         then  "Building-wide PVArray(s) must be created before allocation to affordable housing units. From the program menu select Edit > Create Component > PhotovoltaicArray and enter data describing the building-wide system."
-         else if (IfValidAnd( AffordablePVDCSysSize > 0 )==0)
-         then  Format( "Enter the kWdc size below (up to building total %s kWdc) of the PV system designated for affordable housing units.", FltToStr( Proj:PVSizeSum, 1 ) )
+      {  if (IfValidAnd( UseCommunitySolar > 0 )==0 .AND. IfValidAnd( CmntySlrProjCZCompat > 0 ) .AND. IfValidAnd( Proj:PVSizeSum > 0 )==0)
+         then  "Select 'Use Community Solar' -or- create building PVArray(s) before defining allocation. If site PV, select Edit > Create Component > PhotovoltaicArray from the program menu and enter data describing the building-wide system."
+         else if (IfValidAnd( UseCommunitySolar > 0 )==0 .AND. IfValidAnd( CmntySlrProjCZCompat > 0 ) .AND. IfValidAnd( AffordablePVDCSysSize > 0 )==0)
+         then  Format( "Select 'Use Community Solar' -or- Enter the kWdc size below (up to building total %s kWdc) of the PV system designated for affordable housing units.", FltToStr( Proj:PVSizeSum, 1 ) )
+         else if (IfValidAnd( UseCommunitySolar > 0 ))
+         then  if (CommunitySolarProject < 1)
+               then  "Error: A valid community solar project must be selected (or toggle off 'Use Community Solar')"
+               else if (IfValidAnd( InCmntySlrProjTerritory > 0 )==0)
+               then  "Error: Confirm that this building is located within the selected Community Solar Project (or toggle off 'Use Community Solar')"
+               else if (TotCommunitySolarSize < 0.01)
+               then  Format( "Enter community solar PV size by unit type below for project '%s'.", EnumString( CommunitySolarProject ) )
+               else  Format( "%.1f kW of  '%s'  community solar specified. ", TotCommunitySolarSize, EnumString( CommunitySolarProject ) )
+               endif endif endif
          else if ( (ValidOr( Proj:PVSizeSum, 1 ) - ValidOr( AffordablePVDCSysSize, 1 )) < -0.1 )
          then  Format( "Total affordable housing tenant PV size entered below is too high. This value must be <= total building PV %s kWdc.", FltToStr( Proj:PVSizeSum, 1 ) )
          else if ( (IfValidAnd( AvgUnitAreaByBedrms[1] > 0 ) .AND. IfValidAnd( PctIndivUnitPVByBedrms[1] >= 0 )==0) .OR.
@@ -222,8 +246,7 @@ RULELIST "CUAC_ZoneUnitCounts" 0 0 0 0
          else if (IfValidAnd( PctIndivUnitPVSum < 99.96 ) .OR. IfValidAnd( PctIndivUnitPVSum > 100.04 ))
          then  "The sum listed below the % Tenant PV Serving Each Unit column must be equal to 100.0%. Values in this column must be adjusted to achieve that sum before CUAC analysis/reporting can be performed."
          else  "Allocation of affordable housing tenant PV successful!"
-         endif endif endif endif endif  }
-
+         endif endif endif endif endif endif  }
 
    ; moved CUAC error checking rules HERE to ensure all above rules processed PRIOR to error checks - SAC 12/09/22
    ; previsouly ... moved to Battery.rule from Project-Multifamily.rule to ensure PV & Batt data refreshed BEFORE error checks which also setup PV/Batt messages - SAC 11/21/22
@@ -613,6 +636,10 @@ RULELIST "CUAC_InputErrorCheck" 0 0 0 0
          else  12  ; show complete CUAC UI
          endif endif endif endif endif  }
 
+   "Set CUAC:ShowPVAllocGrid"    CUAC:ShowPVAllocGrid =        ; SAC 10/02/23
+      {  if (Proj:CUACUIFlag > 9 .AND. (IfValidAnd( Proj:PVSizeSum > 0 ) .OR. IfValidAnd( UseCommunitySolar > 0 )))
+         then  1  else  UNDEFINED  endif  }
+
    "Set Proj:CUACMsg"         Proj:CUACMsg =          ; SAC 08/19/22 (CUAC)
       {  switch (CUACUIFlag)
             case  0 :  "California Utility Allowance Calculator (CUAC) features only available for Multifamily Residential projects"
@@ -647,12 +674,24 @@ RULELIST "CUAC_InputErrorCheck" 0 0 0 0
 
    "Set CUAC:PVAllocBtnMsg"            CUAC:PVAllocBtnMsg =    ; SAC 12/08/22
       {  if (CUACUIFlag < 11) then  UNDEFINED
-         else if (IfValidAnd( Proj:PVSizeSum > 0 )==0) then  "Create building-wide PVArray(s) before defining allocation"
-         else if (AffordablePVDCSysSizeFrac == 0)      then  Format( "PV Allocation:  (up to %g kWdc PV available for allocation)", Proj:PVSizeSum )
+         else if (IfValidAnd( UseCommunitySolar > 0 )==0 .AND. IfValidAnd( CmntySlrProjCZCompat > 0 ) .AND. IfValidAnd( Proj:PVSizeSum > 0 )==0)
+         then  "Choose Community Solar -or- create bldg PVArray(s) before allocation"
+         else if (IfValidAnd( UseCommunitySolar > 0 )==0 .AND. IfValidAnd( CmntySlrProjCZCompat > 0 ) .AND. AffordablePVDCSysSizeFrac == 0)
+         then  "Choose Community Solar -or- allocate bldg PV to affordable units"
+         else if (IfValidAnd( UseCommunitySolar > 0 ))
+         then  if (CommunitySolarProject < 1)
+               then  "Click to select a valid community solar project"
+               else if (IfValidAnd( InCmntySlrProjTerritory > 0 )==0)
+               then  "Click to confirm building within Community Solar project boundary"
+               else if (TotCommunitySolarSize < 0.01)
+               then  "Click to enter community solar PV size by unit type"
+               else  Format( "%.0f kW of '%s' entered", TotCommunitySolarSize, EnumString( CommunitySolarProject ) )
+               endif endif endif
+         else if (AffordablePVDCSysSizeFrac == 0) then  Format( "PV Allocation:  (up to %g kWdc PV available for allocation)", Proj:PVSizeSum )
          else if (IfValidAnd( AffordablePVDCSysSizeFrac > 1.01 ))
          then  Format( "PV Allocation Error:  (tenant %g kWdc PV exceeds bldg total)", AffordablePVDCSysSize )
          else  Format( "PV Allocation:  (%s%% of total %g kWdc PV allocated)", FltToStr( (AffordablePVDCSysSizeFrac * 100), 0 ), Proj:PVSizeSum )
-         endif endif endif endif  }
+         endif endif endif endif endif endif  }
 
 
 ;           "PerformCalcs",                      BEMP_Int,  1,  0,  0,  NInp,  "",                 0,  0,                           1044, "PerformCalculations",  ""   ; "boolean (0/1) whether calcs/reporting are to be performed (=> no errors)",  ""    ; SAC 08/07/22
