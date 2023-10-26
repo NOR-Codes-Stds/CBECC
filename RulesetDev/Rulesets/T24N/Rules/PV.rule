@@ -39,6 +39,43 @@
 ;ENDRULE
 ;;    StoreBEMProc( "begin PV defaulting", 0 )
 
+//////////////////////////////////////////////////////////////////////////////// SAC 10/25/23
+// flags to force PV/Battery simulation on/off
+
+RULE Proj:AllowPropPVBatt
+  DESCRIPTION
+    "-1 to ignore flag, 0 to remove PV & Battery in Proposed model and 1 retain (even for EAA)"
+  INPUTCLASS
+    Prescribed
+  DEFAULT 
+    if (LocalStatus( AllowPropPVBatt ) < 1)
+    then  -1
+    else  UNCHANGED  endif
+ENDRULE
+
+RULE Proj:AllowStdPV
+  DESCRIPTION
+    "-1 to ignore flag, 0 to remove PV in Standard model(s) and 1 retain (even for EAA)"
+  INPUTCLASS
+    Prescribed
+  DEFAULT 
+    if (LocalStatus( AllowStdPV ) < 1)
+    then  -1
+    else  UNCHANGED  endif
+ENDRULE
+
+RULE Proj:AllowStdBatt
+  DESCRIPTION
+    "-1 to ignore flag, 0 to remove Battery in Standard model(s) and 1 retain (even for EAA)"
+  INPUTCLASS
+    Prescribed
+  DEFAULT 
+    if (LocalStatus( AllowStdBatt ) < 1)
+    then  -1
+    else  UNCHANGED  endif
+ENDRULE
+
+
 ////////////////////////////////////////////////////////////////////////////////
 // Project-level SARA (Solar Access Roof Area) data - SAC 04/21/22
 
@@ -96,7 +133,7 @@ ENDRULE
 
 //////////////////////////////////////////////////////////////////////////////// SAC 04/21/22
 // 2022+ Prescribed PV Requirements (for std design) - BldgType & Area rules
-   // altered logic top prevent PV/Batt for MFam Addition Alone - SAC 06/01/23
+   // altered logic top prevent PV/Batt for MFam Addition Alone - SAC 06/01/23   // account for Allow* flags - SAC 10/25/23
 RULE NEW Proj:DisableAllPVBattRequirements
   LONGFORM
     DisableAllPVBatteryRequirements
@@ -109,7 +146,13 @@ RULE NEW Proj:DisableAllPVBattRequirements
   INPUTCLASS
     NotInput
   DEFAULT
-    if (IfValidAnd( HlthCareFacility > 0 )) then  1
+    if (IfValidAnd( AllowPropPVBatt > 0 ) .AND.
+        IfValidAnd( AllowStdPV      > 0 ) .AND.
+        IfValidAnd( AllowStdBatt    > 0 ) ) then  0
+    else if (IfValidAnd( AllowPropPVBatt = 0 ) .AND.
+             IfValidAnd( AllowStdPV      = 0 ) .AND.
+             IfValidAnd( AllowStdBatt    = 0 ) ) then  4
+    else if (IfValidAnd( HlthCareFacility > 0 )) then  1
     else if (IfValidAnd( ResDwellUnits > 0 ) .AND.
              IfValidAnd( ResCompOpt = "Newly Constructed" )==0) then  2
     else if (IfValidAnd( ResDwellUnits > 0 )==0 .AND.
@@ -117,7 +160,7 @@ RULE NEW Proj:DisableAllPVBattRequirements
              IfValidAnd( IsNewMech > 0 )==0 .AND.
              IfValidAnd( IsAddOrAlt > 0)==1 ) then  3
     else  0
-    endif endif endif
+    endif endif endif endif endif
 ENDRULE
 
 RULE NEW Spc:ShowPVBattSizeBldgType
@@ -2317,10 +2360,17 @@ RULE Proj:DCSizeMultiplier
     else  1
     endif
   ANNUAL_PROPOSED 
-    if (LocalStatus( DCSizeMultiplier ) > 0) then  UNCHANGED
-    else 1 endif
+    if (IfValidAnd( AllowPropPVBatt = 0 )) then  0
+    else if (IfValidAnd( DCSizeMultiplier = 0 ) .AND.
+             IfValidAnd( AllowPropPVBatt > 0 ))
+    then  if (ValidOr( UseReducedPVReqVal, 9999 ) < PVSizeSum)
+          then ReducedPVReqVal / PVSizeSum    ; SCALE user PV to equal UseReducedPVReqVal
+          else  1  endif
+    else if (LocalStatus( DCSizeMultiplier ) > 0) then  UNCHANGED
+    else 1 endif endif endif
   ANNUAL_BASELINE 
-    1
+    if (IfValidAnd( AllowStdPV = 0 )) then  0
+    else  1  endif
 ENDRULE
 ;    if (IfValidAnd( UseReducedPVReqVal >= 0 ) .AND. IfValidAnd( SumAll(  PVArray:DCSysSize ) > 0 ))
 ;    then  if (ValidOr( UseReducedPVReqVal, 999 ) == (SumAll(  PVArray:DCSysSize )))
