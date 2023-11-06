@@ -836,15 +836,77 @@ RULELIST "CSE_SimulationPrep_EnergyMeters" 1 0 0 1
          then  if (IfValidAnd( CUACReportID > 0 ))
                then  EvalRulelist( "CSE_SimulationPrep_MetersByBedroomCount_SubMeters" )
                else  EvalRulelist( "CSE_SimulationPrep_NoMetersByBedroomCount_SubMeters" )  endif
-         else  if (IfValidAnd( CUACReportID > 0 ))
+         else  if (IfValidAnd( CustomMeterOption == 1 ))
+               then  EvalRulelist( "CSE_SimulationPrep_MetersByResDwell" )
+               else if (IfValidAnd( CUACReportID > 0 ))
                then  EvalRulelist( "CSE_SimulationPrep_MetersByBedroomCount" )
-               else  EvalRulelist( "CSE_SimulationPrep_NoMetersByBedroomCount" )  endif  endif  }
-
-
+               else  EvalRulelist( "CSE_SimulationPrep_NoMetersByBedroomCount" )  endif endif  endif  }
 
 END
 ;*************************************************************************
 
+;************************************************************************* SAC 11/01/23
+RULELIST "CSE_SimulationPrep_MetersByResDwell" 1 0 0 0
+;*************************************************************************
+
+   "Set Proj:DwellUnitBedrmLabel[1]"   Proj:DwellUnitBedrmLabel[1] = { "ResDwell" }
+
+	; Create meters for tracking electric and fuel use
+	"Create site-wide Elec meter"			Proj:CSE_ElecMETER		= {	CreateComp( cseMETER, "MtrElec" )  }
+	; Create meters for tracking electric and fuel use
+	"Create site-wide Elec2 meter"		Proj:CSE_Elec2METER		=     ; for tracking Regulated Ltg & Process Motors - SAC 04/13/22 (Com tic #3366)
+      {  if (SumAll( ResOtherZn:IntLPDRegSim ) < 0.01 .AND.
+             SumAcrossIf( ResOtherZn:CodeExhFanPwr, ResOtherZn:IsGarage ) < 0.01) then  UNDEFINED
+         else  CreateComp( cseMETER, "MtrElec2" )  endif  }
+	"Create site-wide NatGas meter"		Proj:CSE_NatGasMETER		= {	if ( IfValidAnd( Fuel_HaveNatGas > 0.5 )==0) then  UNDEFINED
+																							else  CreateComp( cseMETER, "MtrNatGas" )  endif  }
+	"Create site-wide <other> meter"		Proj:CSE_OtherFuelMETER	= {	if ( IfValidAnd( Fuel_HaveOther > 0.5 )==0) then  UNDEFINED
+																							else  CreateComp( cseMETER, "MtrOther" )  endif  }
+
+;"store BEMProc details"		Proj:Action = {  StoreBEMProc( Format( "%s-b4Mtrs", RunAbbrev ), 0 )  }
+;"dbg" Proj:Action = { PostMessageToLog( "SumAll( CUAC:AffordableUnitsByBedrms[3] ) = %g", SumAll( CUAC:AffordableUnitsByBedrms[3] ) ) }
+
+   "Create CSE_ElecMETERByRms[1]"      Proj:CSE_ElecMETERByRms[1] = {  CreateComp( cseMETER, "MtrElec_ResDwell" )  }
+
+;"store BEMProc details"		Proj:Action = {  StoreBEMProc( Format( "%s-aftrMtrs", RunAbbrev ), 0 )  }
+
+   ; shouldn't need CSE_Elec2METERByRms[*] as they are used to track uses not present in dwelling unit zones (compliance ltg & parking exhaust fan) - SAC 08/20/22 (CUAC)
+   ;     "CSE_Elec2METERByRms",               BEMP_Obj,  8,  1,  0,  NInp,  "",                 0,  1, "cseMETER",    0, "",     7010, "CSE_Elec2METERByRms",       "" 
+
+   "Create CSE_NatGasMETERByRms[1]"       Proj:CSE_NatGasMETERByRms[1] =
+      {	if (LocalCompAssigned( CSE_NatGasMETER ) < 1 .OR. LocalCompAssigned( CSE_ElecMETERByRms[1] ) < 1) then  UNCHANGED
+         else  CreateComp( cseMETER, "MtrNGas_" + DwellUnitBedrmLabel[1] )  endif  }
+
+   "Create CSE_OtherFuelMETERByRms[1]"    Proj:CSE_OtherFuelMETERByRms[1] =
+      {	if (LocalCompAssigned( CSE_OtherFuelMETER ) < 1 .OR. LocalCompAssigned( CSE_ElecMETERByRms[1] ) < 1) then  UNCHANGED
+         else  CreateComp( cseMETER, "MtrOthr_" + DwellUnitBedrmLabel[1] )  endif  }
+
+   "Set ResZn:CSE_ElecMETER"        ResZn:CSE_ElecMETER  = {  Proj:CSE_ElecMETERByRms[1]  }
+
+   "Set ResZn:CSE_Elec2METER"       ResZn:CSE_Elec2METER = {  Proj:CSE_Elec2METER  }   ; no meters by # bedrms for Elec2METER
+
+   "Set ResZn:CSE_NatGasMETER"      ResZn:CSE_NatGasMETER = {  Proj:CSE_NatGasMETERByRms[1]  }
+
+   "Set ResZn:CSE_OtherFuelMETER"   ResZn:CSE_OtherFuelMETER = {  Proj:CSE_OtherFuelMETERByRms[1]  }
+
+   "Set ResZn:CSE_ElecMETER[2]"        ResZn:CSE_ElecMETER[2]        = {  CSE_ElecMETER[1]       }  ; SAC 07/03/23 (CUAC)
+   "Set ResZn:CSE_Elec2METER[2]"       ResZn:CSE_Elec2METER[2]       = {  CSE_Elec2METER[1]      }
+   "Set ResZn:CSE_NatGasMETER[2]"      ResZn:CSE_NatGasMETER[2]      = {  CSE_NatGasMETER[1]     }
+   "Set ResZn:CSE_OtherFuelMETER[2]"   ResZn:CSE_OtherFuelMETER[2]   = {  CSE_OtherFuelMETER[1]  }
+
+   "Set ResOtherZn:CSE_ElecMETER"        ResOtherZn:CSE_ElecMETER        = {  Proj:CSE_ElecMETER  }      ; ensures proper gnMeter assignments for central laundries - SAC 12/19/22 (CUAC)
+   "Set ResOtherZn:CSE_Elec2METER"       ResOtherZn:CSE_Elec2METER       = {  Proj:CSE_Elec2METER  }
+   "Set ResOtherZn:CSE_NatGasMETER"      ResOtherZn:CSE_NatGasMETER      = {  Proj:CSE_NatGasMETER  }
+   "Set ResOtherZn:CSE_OtherFuelMETER"   ResOtherZn:CSE_OtherFuelMETER   = {  Proj:CSE_OtherFuelMETER  }
+
+   "Set DHWSolSys:cseDHWSOLARSYSRef:swElecMtr"      DHWSolSys:cseDHWSOLARSYSRef:swElecMtr  =       ; added logic for Proj:CustomMeterOption - SAC 11/02/23
+      {  if ( IfValidAnd( Proj:CustomMeterOption = 1 ) .AND. IfValidAnd( NResFloorAreaServed < 1 ) .AND. 
+              IfValidAnd( FloorAreaServed > 1 ) .AND. GlobalCompAssigned( Proj:CSE_ElecMETERByRms[1] ) )
+         then  Proj:CSE_ElecMETERByRms[1]
+         else  Proj:CSE_ElecMETER  endif  }
+
+END
+;*************************************************************************
 
 ;************************************************************************* SAC 08/19/22
 RULELIST "CSE_SimulationPrep_MetersByBedroomCount" 1 0 0 0
