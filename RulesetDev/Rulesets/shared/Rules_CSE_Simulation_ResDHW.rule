@@ -460,14 +460,16 @@ RULELIST "CSE_SimulationPrep_DHW_MFam_wsDayUse" 1 0 0 1
    ; SAC 08/21/22 (CUAC)  ; switched to 2nd Parent2 CSE_ElecMeter so that it is not multiplied - SAC 07/03/23 (CUAC)
    ; added logic to prevent assignment of ResZn meters when NOT CUAC:IncludeDHWInUtilityBills - SAC 09/25/23
    "Set DwellUnitDHW:cseDHWSYSRef:wsElecMtr"    DwellUnitDHW:cseDHWSYSRef:wsElecMtr =        ; revised to use GParent ResZn:CUAC_IncludeDHW flag - SAC 09/27/23
-      {  if (Parent2ComponentType() == "ResZn" .AND. IfValidAnd( Proj:CUACReportID > 0 ))
-         then  if (IfValidAnd( ResZn:CUAC_IncludeDHW > 0 ))
+      {  if ( Parent2ComponentType() == "ResZn" .AND.
+              (IfValidAnd( Proj:CUACReportID > 0 ) .OR. IfValidAnd( Proj:CustomMeterOption > 0 )))
+         then  if (IfValidAnd( ResZn:CUAC_IncludeDHW > 0 ) .OR. IfValidAnd( Proj:CustomMeterOption > 0 ))
                then  Parent2( CSE_ElecMeter[2] )
                else  UNCHANGED  endif
          else  UNCHANGED  endif  }
    "Set DwellUnitDHW:cseDHWSYSRef:wsFuelMtr"    DwellUnitDHW:cseDHWSYSRef:wsFuelMtr = 
-      {  if (Parent2ComponentType() == "ResZn" .AND. IfValidAnd( Proj:CUACReportID > 0 ))
-         then  if (IfValidAnd( ResZn:CUAC_IncludeDHW > 0 ))
+      {  if ( Parent2ComponentType() == "ResZn" .AND. 
+              (IfValidAnd( Proj:CUACReportID > 0 ) .OR. IfValidAnd( Proj:CustomMeterOption > 0 )))
+         then  if (IfValidAnd( ResZn:CUAC_IncludeDHW > 0 ) .OR. IfValidAnd( Proj:CustomMeterOption > 0 ))
                then  if (IfValidAnd( Proj:Fuel_HaveNatGas < 1 )==0)
                      then  Parent2( CSE_NatGasMETER[2] )
                      else if (IfValidAnd( Proj:Fuel_HaveOther  < 1 )==0)
@@ -1443,12 +1445,26 @@ END
 ;*************************************************************************
 RULELIST "Setup_cseDHWSYS_MetersAndTemperatures" 1 0 0 0
    ; revised rules to NOT reset meters if already setup - SAC 08/21/22 (CUAC)
-	"Set cseDHWSYS:wsElecMtr"			cseDHWSYS:wsElecMtr		= {	if (LocalCompAssigned( wsElecMtr )) then  UNCHANGED
-                                                                  else  Proj:CSE_ElecMETER  endif  }
-	"Set cseDHWSYS:wsFuelMtr"			cseDHWSYS:wsFuelMtr		= {	if (LocalCompAssigned( wsFuelMtr )) then  UNCHANGED
-                                                                  else if (IfValidAnd( Proj:Fuel_HaveNatGas < 1 )==0) then  Proj:CSE_NatGasMETER
-																						else if (IfValidAnd( Proj:Fuel_HaveOther  < 1 )==0) then  Proj:CSE_OtherFuelMETER
-																						else  UNDEFINED  endif endif endif  }
+	"Set cseDHWSYS:wsElecMtr"			cseDHWSYS:wsElecMtr		=
+      {  if (LocalCompAssigned( wsElecMtr )) then  UNCHANGED
+         else if ( IfValidAnd( Proj:CustomMeterOption == 1 ) .AND.
+                   IfValidAnd( SourceDHWSys:NResFloorAreaServed < 1 ) .AND.
+                   IfValidAnd( SourceDHWSys:FloorAreaServed[1]  > 1 ) )
+         then  Proj:CSE_ElecMETERByRms[1]
+         else  Proj:CSE_ElecMETER  endif endif  }
+	"Set cseDHWSYS:wsFuelMtr"			cseDHWSYS:wsFuelMtr		=
+      {  if (LocalCompAssigned( wsFuelMtr )) then  UNCHANGED
+         else if ( IfValidAnd( Proj:CustomMeterOption == 1 ) .AND.
+                   IfValidAnd( SourceDHWSys:NResFloorAreaServed < 1 ) .AND.
+                   IfValidAnd( SourceDHWSys:FloorAreaServed[1]  > 1 ) )
+         then  if (GlobalCompAssigned( Proj:CSE_NatGasMETERByRms[1] ) > 0)
+               then  Proj:CSE_NatGasMETERByRms[1]
+               else if (GlobalCompAssigned( Proj:CSE_OtherFuelMETERByRms[1] ) > 0)
+               then  Proj:CSE_OtherFuelMETERByRms[1]
+               else  UNCHANGED  endif endif
+         else if (IfValidAnd( Proj:Fuel_HaveNatGas < 1 )==0) then  Proj:CSE_NatGasMETER
+			else if (IfValidAnd( Proj:Fuel_HaveOther  < 1 )==0) then  Proj:CSE_OtherFuelMETER
+			else  UNDEFINED  endif endif endif endif  }
 
 	"Set cseDHWSYS:wsFXHwMtr"			cseDHWSYS:wsFXHwMtr		= {	if (GlobalCompAssigned( Proj:CSE_FXHwDHWMETER ) < 1) then  UNDEFINED		; SAC 4/25/16
 																						else	Proj:CSE_FXHwDHWMETER  endif  }
@@ -1614,11 +1630,12 @@ RULELIST "CSE_SimulationPrep_DHWHtr_DHWHtr" 1 0 0 1
 																default :	UNDEFINED
 															endswitch  endif  }
    "Adjust cseDHWHEATER:whFuelMtr"     cseDHWHEATER:whFuelMtr =      ; SAC 10/26/22 (CUAC)
-      {  if (ParentCompAssigned( SourceDwellUnitDHW ) > 0 .AND. Proj:IsComRuleset .AND.
+      {  if (Proj:IsComRuleset .AND.
              ParentCompAssigned( wsFuelMtr ) > 0 .AND.
              LocalCompAssigned( whFuelMtr ) > 0)
          then  Parent( wsFuelMtr )
          else  UNCHANGED  endif  }
+      ; {  if (ParentCompAssigned( SourceDwellUnitDHW ) > 0 .AND. Proj:IsComRuleset .AND.   - removed check for SourceDwellUnitDHW - SAC 11/02/23
 
    ; SAC 9/10/15   ; SAC 10/25/19 - added use of NonStdTankVolume (Sanden HPWHs in elec central systems only)   ; SAC 3/6/20 - revise logic for multiple central compressor types (Colmac)
 	"Set cseDHWHEATER:whVol"   cseDHWHEATER:whVol	=            ; revised logic for std CHPWH - SAC 07/05/21 (tic #1275)
@@ -4209,7 +4226,11 @@ RULELIST "CSE_SimulationPrep_DHW_SolarSys" 1 0 0 1
 ;*************************************************************************
    "Create a CSE DHWSOLARSYS for this DHWSolarSys"    DHWSolSys:cseDHWSOLARSYSRef  =
       {  CreateComp( cseDHWSOLARSYS, "dhwss-" + substr( Name, 0, 44 ) )  }
-   "Set DHWSolSys:cseDHWSOLARSYSRef:swElecMtr"      DHWSolSys:cseDHWSOLARSYSRef:swElecMtr  = {  Proj:CSE_ElecMETER  }
+   "Set DHWSolSys:cseDHWSOLARSYSRef:swElecMtr"      DHWSolSys:cseDHWSOLARSYSRef:swElecMtr  =       ; added logic for Proj:CustomMeterOption - SAC 11/02/23
+      {  if ( IfValidAnd( Proj:CustomMeterOption = 1 ) .AND. IfValidAnd( NResFloorAreaServed < 1 ) .AND. 
+              IfValidAnd( FloorAreaServed > 1 ) .AND. GlobalCompAssigned( Proj:CSE_ElecMETERByRms[1] ) )
+         then  Proj:CSE_ElecMETERByRms[1]
+         else  Proj:CSE_ElecMETER  endif  }
 ;           "swEndUse",          BEMP_Str,  1,  0,  1, "",                 0,  0,                          3208, "enduse to accumulate solar water heating to (default to DHW)"
 ;           "swParElec",         BEMP_Flt,  1,  0,  1, "W",                0,  0,                          3208, "electrical parasitic power to represent recirculation pumps or other system-level electrical devices" 
 ;           "swTankMult",        BEMP_Flt,  1,  0,  1, "",                 0,  0,                          3201, "tank multiplier" 
