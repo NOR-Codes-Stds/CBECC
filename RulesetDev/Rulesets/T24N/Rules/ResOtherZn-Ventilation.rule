@@ -1,0 +1,1113 @@
+// ResOtherZn - Ventilation
+//
+// -------------------------------------------------------------------------
+//  Copyright (c) 2012-2017, California Energy Commission
+//  All rights reserved.
+//  Redistribution and use in source and binary forms, with or without
+//  modification, are permitted provided that the following conditions are
+//  met:
+// 
+//    * Redistributions of source code must retain the above copyright
+//  notice, this list of conditions and the following disclaimer.
+//    * Redistributions in binary form must reproduce the above copyright
+//  notice, this list of conditions and the following disclaimer in
+//  the documentation and/or other materials provided with the
+//  distribution.
+//    * Neither the name of the California Energy Commission nor the names of its
+//  contributors may be used to endorse or promote products
+//  derived from this software without specific prior written
+//  permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+//  IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+//  TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION
+//  BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+//  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+//  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+//  BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+//  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+//  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// -------------------------------------------------------------------------
+//  
+//
+// ********************** Ventilation Space Function *********************************************
+RULE ResOtherZn:VentSpcFunc
+  DESCRIPTION
+    "The ventilation occupancy category for the ResOtherZn."
+  HELP
+    "The list of available ventialtion categories available is depends on the 
+     SpaceFunction (SpcFunc) selected. If you do not see the category that is applicable,
+     try selecting another related SpcFunc."
+  RESETS
+    ResetThisWhenTheFollowingIsModified
+      SpcFunc
+  INPUTCLASS
+    Default
+  DEFAULT : T24N
+    if(SpcFunc = "- specify -") then
+      "NA"
+    else
+      SpaceFunctionData:VentSpcFuncDef("FuncType", SpcFunc)
+    endif
+ENDRULE
+
+// ******************** Ventilation Space Function Occupancy Density ****************************
+// TO DO for Spc this value is used to calculate The code mininum amount of ventilation (outside air) per person.
+;RULE NEW ResOtherZn:VentOccDensSim
+;  DATATYPE
+;    Float
+;  LONGFORM
+;    VentilationOccupancyDensitySimulated
+;  DESCRIPTION
+;    "The occupancy density assumed in the calculation of the CodeMinVentPerArea for each
+;     VentSpcFunc."
+;  INPUTCLASS
+;    NotInput
+;  DEFAULT : T24N
+;    if(VentIsRequired = 0)
+;    then 0
+;    else VentilationSpaceFunctionData:VentOccDensSim("VentFuncType", VentSpcFunc)
+;    endif
+;ENDRULE
+
+// ************************** Code Minimum Ventilation Components ******************************
+// ----------------------------------- Per Person basis ----------------------------------------
+RULE ResOtherZn:CodeVentPerPerson
+  DESCRIPTION
+     "The code mininum amount of ventilation (outside air) per person."
+  HELP
+     "This is one component of the code minimum ventilation air calculation. 
+      Component rates are used, along with the VentilationSpecificationMethod, 
+      to determine the total code minimum ventilation air flow."
+  INPUTCLASS
+    NotInput
+  UNITS
+    cfm/person
+  DEFAULT :T24N
+    if(VentSpcFunc = "- specify -" .OR. IfValidAnd(MinOccNumSim > 0) = 0) then
+      0
+    else
+      VentilationSpaceFunctionData:CodeVentPerPerson("VentFuncType", VentSpcFunc)
+    endif
+ENDRULE
+
+// ----------------------------------- Per Area basis -------------------------------------------
+RULE ResOtherZn:CodeVentPerArea
+  DESCRIPTION
+     "The code mininum amount of ventilation (outside air) per floor area."
+  HELP
+     "This is one component of the code minimum ventilation air calculation.
+      Component rates are used, along with the VentilationSpecificationMethod, 
+      to determine the total code minimum ventilation air flow."
+  INPUTCLASS
+    NotInput
+  UNITS
+    cfm/ft2
+  DEFAULT : T24N
+    if(VentSpcFunc = "- specify -" .OR. IfValidAnd(Area > 0) = 0) then
+      0
+    else
+      VentilationSpaceFunctionData:CodeVentPerArea("VentFuncType", VentSpcFunc)
+    endif
+ENDRULE
+
+// -------------------------------------- Total --------------------------------------------------
+RULE ResOtherZn:MinIAQCFM
+  DESCRIPTION
+     "The code minimum design ventilation air flow rate for the Zone."
+  HELP
+     "The default value shall be the larger of 15 cfm times the design occupancy 
+      from Appendix 5.4A or the conditioned floor area times the applicable 
+      ventilation rate from Appendix 5.4A or Table 160.2-B of the Standards."
+  INPUTCLASS
+    NotInput
+  UNITS
+    cfm
+  DEFAULT : T24N
+    int(max((CodeVentPerPerson * ValidOr(MinOccNumSim, 0)),
+            (CodeVentPerArea   * ValidOr(Area, 0))) * 10) / 10 ; round to nearest tenth CFM
+ENDRULE
+
+RULE ResOtherZn:MinIAQCFMWithMult
+  DESCRIPTION
+     "The code minimum design ventilation air flow rate for the Zone with multiplier."
+  INPUTCLASS
+    NotInput
+  UNITS
+    cfm
+  DEFAULT : T24N
+    MinIAQCFM * Mult
+ENDRULE
+
+// ******************************* IAQ Ventilation Flags *****************************************
+RULE ResOtherZn:DisableIAQ
+  DESCRIPTION
+     "Option to toggle OFF all IAQ ventilation."
+  INPUTCLASS
+    Prescribed
+  DEFAULT : T24N
+    0
+ENDRULE
+
+RULE ResOtherZn:IAQDisabled
+  DESCRIPTION
+     "Flag indicating that IAQ vent has been toggled OFF."
+  INPUTCLASS
+    Prescribed
+  DEFAULT : T24N
+    if(ResProj:BypassRuleLimits > 0 .AND. DisableIAQ > 0) then
+      1
+    else
+      0
+    endif
+ENDRULE
+
+RULE ResOtherZn:ServedByAirSys
+  DESCRIPTION
+     "Flag indicating that the ventilation is provided by an air system."
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N
+    if(LocalCompAssigned(ActiveHVACSystem) = ComponentType("AirSys")) then
+      1
+    else
+      0
+    endif
+ENDRULE
+
+RULE ResOtherZn:AllowIAQInps
+  DESCRIPTION
+     "Flag indicating that ventilation system can be specified using IAQOption."
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N
+    if(IAQDisabled < 1 .AND. ServedByAirSys = 0 .AND.
+       SpcFunc != "Parking Garage Area (Parking Zone and Ramps)" .AND.
+       SpcFunc != "Parking Garage Area (Daylight Adaptation Zones)") then
+      1
+    else
+      0
+    endif
+ENDRULE
+
+RULE ResOtherZn:IAQOption
+  DESCRIPTION
+    "General ventilation system type"
+  RESETS
+    CentralSupplyCFM
+    CentralExhaustCFM
+  DEFAULT : T24N
+    if(ServedByAirSys > 0) then
+      "Air System"
+    else
+      "Individual IAQ Fans"
+    endif
+  SIZING_PROPOSED
+    if(ServedByAirSys > 0) then
+      "Air System"
+    else
+      UNCHANGED
+    endif
+  SIZING_BASELINE
+    if(Type = "Conditioned" .AND. CondType = "Directly") then
+      if(ResProj:RunScope = "Newly Constructed") then
+        "Air System"
+      else if(ActiveHVACSystem:Type = "Central Heating and Cooling System" .AND.
+              (HVACSysStatus = "New" .OR. HVACSysStatus = "Altered")) then
+        "Air System"
+      else
+        UNCHANGED
+      endif endif
+    else
+      UNCHANGED
+    endif
+ENDRULE
+
+// **************************** Zone Ventilation *************************************************
+// ------------------------------- Air System ----------------------------------------------------
+RULE ResOtherZn:AirSysVentCFM
+  DESCRIPTION
+     "AirSys ventilation flow rate."
+  HELP
+     "Ventilation flow rate provided by the air system."
+  INPUTCLASS
+    Default
+  UNITS
+    cfm
+  DEFAULT : T24N
+    if(ServedByAirSys > 0) then
+      MinIAQCFM
+    else
+      UNDEFINED
+    endif
+  SIZING_BASELINE
+    MinIAQCFM * ResZnGrp:CodeVentMult * ResZnGrp:ExhVentMult * Mult
+ENDRULE
+
+// ----------------------------- Individual IAQ Fans ---------------------------------------------
+RULE ResOtherZn:IAQNumFanRefs
+  DESCRIPTION
+     "number of valid IAQ fan assignments."
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N
+    if(IAQDisabled > 0 .OR. AllowIAQInps < 1 .OR.
+       IAQOption != "Individual IAQ Fans") then
+      0
+    else if(LocalCompAssigned(IAQFanRef[4])) then
+      4
+    else if(LocalCompAssigned(IAQFanRef[3])) then
+      3
+    else if(LocalCompAssigned(IAQFanRef[2])) then
+      2
+    else if(LocalCompAssigned(IAQFanRef[1])) then
+      1
+    else
+      0
+    endif endif endif endif endif
+ENDRULE
+
+RULE ResOtherZn:IAQFanCnt[1]
+  DESCRIPTION
+    "Number of IAQ fans of this type per zone"
+  DEFAULT
+    1
+ENDRULE
+
+RULE ResOtherZn:IAQFanCnt[2]
+  DESCRIPTION
+    "Number of IAQ fans of this type per zone"
+  DEFAULT
+    1
+ENDRULE
+
+RULE ResOtherZn:IAQFanCnt[3]
+  DESCRIPTION
+    "Number of IAQ fans of this type per zone"
+  DEFAULT
+    1
+ENDRULE
+
+RULE ResOtherZn:IAQFanCnt[4]
+  DESCRIPTION
+    "Number of IAQ fans of this type per zone"
+  DEFAULT
+    1
+ENDRULE
+
+RULE ResOtherZn:IAQCFM[1]
+  DESCRIPTION
+    "Total flow rate of IAQ fans of this type per zone"
+  DEFAULT
+    if(IAQDisabled > 0 .OR. AllowIAQInps < 1 .OR. LocalCompAssigned(IAQFanRef[1]) < 0.5 .OR.
+       IAQOption != "Individual IAQ Fans") then
+      0
+    else
+      IAQFanRef[1]:IAQCFM * IAQFanCnt[1]
+    endif
+ENDRULE
+
+RULE ResOtherZn:IAQCFM[2]
+  DESCRIPTION
+    "Total flow rate of IAQ fans of this type per zone"
+  DEFAULT
+    if(IAQDisabled > 0 .OR. AllowIAQInps < 1 .OR. LocalCompAssigned(IAQFanRef[2]) < 0.5 .OR.
+       IAQOption != "Individual IAQ Fans") then
+      0
+    else
+      IAQFanRef[2]:IAQCFM * IAQFanCnt[2]
+    endif
+ENDRULE
+
+RULE ResOtherZn:IAQCFM[3]
+  DESCRIPTION
+    "Total flow rate of IAQ fans of this type per zone"
+  DEFAULT
+    if(IAQDisabled > 0 .OR. AllowIAQInps < 1 .OR. LocalCompAssigned(IAQFanRef[3]) < 0.5 .OR.
+       IAQOption != "Individual IAQ Fans") then
+      0
+    else
+      IAQFanRef[3]:IAQCFM * IAQFanCnt[3]
+    endif
+ENDRULE
+
+RULE ResOtherZn:IAQCFM[4]
+  DESCRIPTION
+    "Total flow rate of IAQ fans of this type per zone"
+  DEFAULT
+    if(IAQDisabled > 0 .OR. AllowIAQInps < 1 .OR. LocalCompAssigned(IAQFanRef[4]) < 0.5 .OR.
+       IAQOption != "Individual IAQ Fans") then
+      0
+    else
+      IAQFanRef[4]:IAQCFM * IAQFanCnt[4]
+    endif
+ENDRULE
+
+// ----- Exhaust -----
+RULE ResOtherZn:IAQCFM_Exhaust
+  DEFAULT
+    if(IAQDisabled > 0 .OR. AllowIAQInps < 1) then
+      0
+    else if(IAQOption = "Minimum Exhaust IAQ Fan") then
+      MinIAQCFM
+    else if(IAQOption = "Individual IAQ Fans") then
+      switch(IAQNumFanRefs)
+        case  1 : IAQFanCnt[1] * IAQFanRef[1]:IAQCFMExh
+        case  2 : IAQFanCnt[1] * IAQFanRef[1]:IAQCFMExh + IAQFanCnt[2] * IAQFanRef[2]:IAQCFMExh
+        case  3 : IAQFanCnt[1] * IAQFanRef[1]:IAQCFMExh + IAQFanCnt[2] * IAQFanRef[2]:IAQCFMExh
+                + IAQFanCnt[3] * IAQFanRef[3]:IAQCFMExh
+        case  4 : IAQFanCnt[1] * IAQFanRef[1]:IAQCFMExh + IAQFanCnt[2] * IAQFanRef[2]:IAQCFMExh
+                + IAQFanCnt[3] * IAQFanRef[3]:IAQCFMExh + IAQFanCnt[4] * IAQFanRef[4]:IAQCFMExh
+        default : 0
+      endswitch
+    else
+      0
+    endif endif endif
+ENDRULE
+
+RULE ResOtherZn:IAQPwr_Exhaust
+  DEFAULT
+    if(IAQDisabled > 0 .OR. AllowIAQInps < 1) then
+      0
+    else if(IAQOption = "Minimum Exhaust IAQ Fan") then
+      MinIAQCFM * ResProj:DefaultIAQFanPwr
+    else if(IAQOption = "Individual IAQ Fans") then
+      switch(IAQNumFanRefs)
+        case  1 : IAQCFM[1] * IAQFanRef[1]:WperCFMExh
+        case  2 : IAQCFM[1] * IAQFanRef[1]:WperCFMExh + IAQCFM[2] * IAQFanRef[2]:WperCFMExh
+        case  3 : IAQCFM[1] * IAQFanRef[1]:WperCFMExh + IAQCFM[2] * IAQFanRef[2]:WperCFMExh
+                + IAQCFM[3] * IAQFanRef[3]:WperCFMExh
+        case  4 : IAQCFM[1] * IAQFanRef[1]:WperCFMExh + IAQCFM[2] * IAQFanRef[2]:WperCFMExh
+                + IAQCFM[3] * IAQFanRef[3]:WperCFMExh + IAQCFM[4] * IAQFanRef[4]:WperCFMExh
+        default : 0
+      endswitch
+    else 0
+    endif endif endif
+ENDRULE
+
+// ----- Supply -----
+RULE ResOtherZn:IAQCFM_Supply
+  DEFAULT
+    if(IAQDisabled > 0 .OR. AllowIAQInps < 1) then
+      0
+    else if(IAQOption = "Minimum Supply IAQ Fan") then
+      MinIAQCFM
+    else if(IAQOption = "Individual IAQ Fans") then
+      switch(IAQNumFanRefs)
+        case  1 : IAQFanCnt[1] * IAQFanRef[1]:IAQCFMSup
+        case  2 : IAQFanCnt[1] * IAQFanRef[1]:IAQCFMSup + IAQFanCnt[2] * IAQFanRef[2]:IAQCFMSup
+        case  3 : IAQFanCnt[1] * IAQFanRef[1]:IAQCFMSup + IAQFanCnt[2] * IAQFanRef[2]:IAQCFMSup
+                + IAQFanCnt[3] * IAQFanRef[3]:IAQCFMSup
+        case  4 : IAQFanCnt[1] * IAQFanRef[1]:IAQCFMSup + IAQFanCnt[2] * IAQFanRef[2]:IAQCFMSup
+                + IAQFanCnt[3] * IAQFanRef[3]:IAQCFMSup + IAQFanCnt[4] * IAQFanRef[4]:IAQCFMSup
+        default : 0
+      endswitch
+    else
+      0
+    endif endif endif
+ENDRULE
+
+RULE ResOtherZn:IAQPwr_Supply
+  DEFAULT
+    if(IAQDisabled > 0 .OR. AllowIAQInps < 1) then
+      0
+    else if(IAQOption = "Minimum Supply IAQ Fan") then
+      MinIAQCFM * ResProj:DefaultIAQFanPwr
+    else if(IAQOption = "Individual IAQ Fans") then
+      switch(IAQNumFanRefs)
+        case  1 : IAQCFM[1] * IAQFanRef[1]:WperCFMSup
+        case  2 : IAQCFM[1] * IAQFanRef[1]:WperCFMSup + IAQCFM[2] * IAQFanRef[2]:WperCFMSup
+        case  3 : IAQCFM[1] * IAQFanRef[1]:WperCFMSup + IAQCFM[2] * IAQFanRef[2]:WperCFMSup
+                + IAQCFM[3] * IAQFanRef[3]:WperCFMSup
+        case  4 : IAQCFM[1] * IAQFanRef[1]:WperCFMSup + IAQCFM[2] * IAQFanRef[2]:WperCFMSup
+                + IAQCFM[3] * IAQFanRef[3]:WperCFMSup + IAQCFM[4] * IAQFanRef[4]:WperCFMSup
+        default : 0
+      endswitch
+    else
+      0
+    endif endif endif
+ENDRULE
+
+// ----- Balanced -----
+RULE ResOtherZn:IAQHRVCFM
+  DEFAULT
+    if(IAQDisabled > 0 .OR. AllowIAQInps < 1) then
+      0
+    else if(IAQOption = "Default Minimum Balanced IAQ Fan") then
+      MinIAQCFM
+    else if(IAQOption = "Individual IAQ Fans") then
+      switch(IAQNumFanRefs)
+        case  1 : IAQFanCnt[1] * IAQFanRef[1]:IAQCFMHRV
+        case  2 : IAQFanCnt[1] * IAQFanRef[1]:IAQCFMHRV + IAQFanCnt[2] * IAQFanRef[2]:IAQCFMHRV
+        case  3 : IAQFanCnt[1] * IAQFanRef[1]:IAQCFMHRV + IAQFanCnt[2] * IAQFanRef[2]:IAQCFMHRV
+                + IAQFanCnt[3] * IAQFanRef[3]:IAQCFMHRV
+        case  4 : IAQFanCnt[1] * IAQFanRef[1]:IAQCFMHRV + IAQFanCnt[2] * IAQFanRef[2]:IAQCFMHRV
+                + IAQFanCnt[3] * IAQFanRef[3]:IAQCFMHRV + IAQFanCnt[4] * IAQFanRef[4]:IAQCFMHRV
+        default : 0
+      endswitch
+    else
+      0
+    endif endif endif
+ENDRULE
+
+RULE ResOtherZn:IAQHRVPwr
+  DEFAULT
+    if(IAQDisabled > 0 .OR. AllowIAQInps < 1)
+    then 0
+    else if(IAQOption = "Default Minimum Balanced IAQ Fan")
+    then MinIAQCFM * ResProj:DefaultIAQFanPwr
+    else if(IAQOption = "Individual IAQ Fans")
+    then switch(IAQNumFanRefs)
+         case  1 : IAQCFM[1] * IAQFanRef[1]:WperCFMHRV
+         case  2 : IAQCFM[1] * IAQFanRef[1]:WperCFMHRV + IAQCFM[2] * IAQFanRef[2]:WperCFMHRV
+         case  3 : IAQCFM[1] * IAQFanRef[1]:WperCFMHRV + IAQCFM[2] * IAQFanRef[2]:WperCFMHRV
+                 + IAQCFM[3] * IAQFanRef[3]:WperCFMHRV
+         case  4 : IAQCFM[1] * IAQFanRef[1]:WperCFMHRV + IAQCFM[2] * IAQFanRef[2]:WperCFMHRV
+                 + IAQCFM[3] * IAQFanRef[3]:WperCFMHRV + IAQCFM[4] * IAQFanRef[4]:WperCFMHRV
+         default : 0
+         endswitch
+    else 0
+    endif endif endif
+ENDRULE
+
+RULE ResOtherZn:IAQBalCFM
+  DEFAULT
+    if(IAQDisabled > 0 .OR. AllowIAQInps < 1) then
+      0
+    else if(IAQOption = "Default Minimum Balanced IAQ Fan") then
+      MinIAQCFM
+    else if(IAQOption = "Individual IAQ Fans") then
+      switch(IAQNumFanRefs)
+        case  1 : IAQFanCnt[1] * IAQFanRef[1]:IAQCFMBal
+        case  2 : IAQFanCnt[1] * IAQFanRef[1]:IAQCFMBal + IAQFanCnt[2] * IAQFanRef[2]:IAQCFMBal
+        case  3 : IAQFanCnt[1] * IAQFanRef[1]:IAQCFMBal + IAQFanCnt[2] * IAQFanRef[2]:IAQCFMBal
+                + IAQFanCnt[3] * IAQFanRef[3]:IAQCFMBal
+        case  4 : IAQFanCnt[1] * IAQFanRef[1]:IAQCFMBal + IAQFanCnt[2] * IAQFanRef[2]:IAQCFMBal
+                + IAQFanCnt[3] * IAQFanRef[3]:IAQCFMBal + IAQFanCnt[4] * IAQFanRef[4]:IAQCFMBal
+        default : 0
+      endswitch
+    else
+      0
+    endif endif endif
+ENDRULE
+
+RULE ResOtherZn:IAQBalPwr
+  DEFAULT
+    if(IAQDisabled > 0 .OR. AllowIAQInps < 1 ) then
+      0
+    else if(IAQOption = "Default Minimum Balanced IAQ Fan") then
+      MinIAQCFM * ResProj:DefaultIAQFanPwr
+    else if(IAQOption = "Individual IAQ Fans") then
+      switch(IAQNumFanRefs)
+        case  1 : IAQCFM[1] * IAQFanRef[1]:WperCFMBal
+        case  2 : IAQCFM[1] * IAQFanRef[1]:WperCFMBal + IAQCFM[2] * IAQFanRef[2]:WperCFMBal
+        case  3 : IAQCFM[1] * IAQFanRef[1]:WperCFMBal + IAQCFM[2] * IAQFanRef[2]:WperCFMBal
+                + IAQCFM[3] * IAQFanRef[3]:WperCFMBal
+        case  4 : IAQCFM[1] * IAQFanRef[1]:WperCFMBal + IAQCFM[2] * IAQFanRef[2]:WperCFMBal
+                + IAQCFM[3] * IAQFanRef[3]:WperCFMBal + IAQCFM[4] * IAQFanRef[4]:WperCFMBal
+        default : 0
+      endswitch
+    else
+      0
+    endif endif endif
+ENDRULE
+
+// ----- Heat Recovery -----
+RULE ResOtherZn:IAQHRVCFMxRcvEff
+  DEFAULT
+    if(IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND.
+       IAQOption = "Individual IAQ Fans") then
+      switch(IAQNumFanRefs)
+        case  1 : IAQFanCnt[1] * IAQFanRef[1]:IAQHRVCFMxRcvEff
+        case  2 : IAQFanCnt[1] * IAQFanRef[1]:IAQHRVCFMxRcvEff + IAQFanCnt[2] * IAQFanRef[2]:IAQHRVCFMxRcvEff
+        case  3 : IAQFanCnt[1] * IAQFanRef[1]:IAQHRVCFMxRcvEff + IAQFanCnt[2] * IAQFanRef[2]:IAQHRVCFMxRcvEff
+                + IAQFanCnt[3] * IAQFanRef[3]:IAQHRVCFMxRcvEff
+        case  4 : IAQFanCnt[1] * IAQFanRef[1]:IAQHRVCFMxRcvEff + IAQFanCnt[2] * IAQFanRef[2]:IAQHRVCFMxRcvEff
+                + IAQFanCnt[3] * IAQFanRef[3]:IAQHRVCFMxRcvEff + IAQFanCnt[4] * IAQFanRef[4]:IAQHRVCFMxRcvEff
+        default : 0
+      endswitch
+    else
+      0
+    endif
+ENDRULE
+
+RULE ResOtherZn:IAQHRVCFMxSRE
+  DEFAULT
+    if(IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND.
+       IAQOption = "Individual IAQ Fans") then
+      switch(IAQNumFanRefs)
+        case  1 : IAQFanCnt[1] * IAQFanRef[1]:IAQHRVCFMxSRE
+        case  2 : IAQFanCnt[1] * IAQFanRef[1]:IAQHRVCFMxSRE + IAQFanCnt[2] * IAQFanRef[2]:IAQHRVCFMxSRE
+        case  3 : IAQFanCnt[1] * IAQFanRef[1]:IAQHRVCFMxSRE + IAQFanCnt[2] * IAQFanRef[2]:IAQHRVCFMxSRE
+                + IAQFanCnt[3] * IAQFanRef[3]:IAQHRVCFMxSRE
+        case  4 : IAQFanCnt[1] * IAQFanRef[1]:IAQHRVCFMxSRE + IAQFanCnt[2] * IAQFanRef[2]:IAQHRVCFMxSRE
+                + IAQFanCnt[3] * IAQFanRef[3]:IAQHRVCFMxSRE + IAQFanCnt[4] * IAQFanRef[4]:IAQHRVCFMxSRE
+        default : 0
+      endswitch
+    else
+      0
+    endif
+ENDRULE
+
+RULE ResOtherZn:IAQHRVCFMxASRE
+  DEFAULT
+    if(IAQDisabled < 1 .AND. AllowIAQInps > 0 .AND.
+       IAQOption = "Individual IAQ Fans") then
+      switch(IAQNumFanRefs)
+        case  1 : IAQFanCnt[1] * IAQFanRef[1]:IAQHRVCFMxASRE
+        case  2 : IAQFanCnt[1] * IAQFanRef[1]:IAQHRVCFMxASRE + IAQFanCnt[2] * IAQFanRef[2]:IAQHRVCFMxASRE
+        case  3 : IAQFanCnt[1] * IAQFanRef[1]:IAQHRVCFMxASRE + IAQFanCnt[2] * IAQFanRef[2]:IAQHRVCFMxASRE
+                + IAQFanCnt[3] * IAQFanRef[3]:IAQHRVCFMxASRE
+        case  4 : IAQFanCnt[1] * IAQFanRef[1]:IAQHRVCFMxASRE + IAQFanCnt[2] * IAQFanRef[2]:IAQHRVCFMxASRE
+                + IAQFanCnt[3] * IAQFanRef[3]:IAQHRVCFMxASRE + IAQFanCnt[4] * IAQFanRef[4]:IAQHRVCFMxASRE
+        default : 0
+      endswitch
+    else
+      0
+    endif
+ENDRULE
+
+// ------------------------- Central Ventilation System ------------------------------------------
+RULE ResOtherZn:CentralVentSysRef
+  CHECKSIM
+    if(IAQOption = "Central Supply / Central Exhaust" .AND.
+       IfValidAnd(CentralVentSysRef:Type != "Balanced")) then
+      PostError("ResOtherZn '%s' needs to be connected to a balanced central ventilation system.", Name)
+    else if((IAQOption = "Central Supply / Individual Exhaust" .OR.
+             IAQOption = "Central Supply") .AND.
+            IfValidAnd(CentralVentSysRef:Type != "Supply")) then
+      PostError("ResOtherZn '%s' needs to be connected to a central supply ventilation system.", Name)
+    else if((IAQOption = "Central Exhaust / Individual Supply" .OR.
+             IAQOption = "Central Exhaust" ) .AND.
+            IfValidAnd( CentralVentSysRef:Type != "Exhaust")) then
+      PostError("ResOtherZn '%s' needs to be connected to a central exhaust ventilation system.", Name)
+    else
+      UNCHANGED
+    endif endif endif
+  SIZING_BASELINE
+    if(IAQOption = "Air System" .OR. IAQOPTION = "Individual IAQ Fans") then
+      UNDEFINED
+    else
+      UNCHANGED
+    endif
+ENDRULE
+
+RULE ResOtherZn:SupplyIAQFanCnt
+  DESCRIPTION
+    "The number of individual supply fan(s) paired with the central system."
+  DEFAULT
+    if(LocalCompAssigned(SupplyIAQFanRef)) then
+      1
+    else
+      UNDEFINED
+    endif
+ENDRULE
+
+RULE ResOtherZn:ExhaustIAQFanCnt
+  DESCRIPTION
+    "The number of individual exhaust fan(s) paired with the central system."
+  DEFAULT
+    if(LocalCompAssigned(ExhaustIAQFanRef)) then
+      1
+    else
+      UNDEFINED
+    endif
+ENDRULE
+
+RULE ResOtherZn:SupplyIAQCFM
+  DESCRIPTION
+    "The total flow rate of individual supply fan(s) paired with the central system."
+  DEFAULT
+    if(IAQOption = "Central Exhaust / Individual Supply" .AND.
+       LocalCompAssigned(SupplyIAQFanRef)) then
+      SupplyIAQFanRef:IAQCFM * SupplyIAQFanCnt
+    else
+      0
+    endif
+  SIZING_BASELINE
+    if(IAQOption = "Air System" .OR. IAQOPTION = "Individual IAQ Fans") then
+      0
+    else
+      SupplyIAQCFM * ResZnGrp:CodeVentMult * ResZnGrp:ExhVentMult
+    endif
+ENDRULE
+
+RULE ResOtherZn:ExhaustIAQCFM
+  DESCRIPTION
+    "The total flow rate of individual exhaust fan(s) paired with the central system."
+  DEFAULT
+    if(IAQOption = "Central Supply / Individual Exhaust" .AND.
+       LocalCompAssigned(ExhaustIAQFanRef)) then
+      ExhaustIAQFanRef:IAQCFM * ExhaustIAQFanCnt
+    else
+      0
+    endif
+  SIZING_BASELINE
+    if(IAQOption = "Air System" .OR. IAQOPTION = "Individual IAQ Fans") then
+      0
+    else
+      ExhaustIAQCFM * ResZnGrp:CodeVentMult * ResZnGrp:ExhVentMult
+    endif
+ENDRULE
+
+RULE ResOtherZn:CentralSupplyCFM
+  DESCRIPTION
+    "The supply flow rate from the central system to this zone."
+  DEFAULT
+    if(IAQOption = "Central Supply / Central Exhaust" .OR.
+       IAQOption = "Central Supply / Individual Exhaust" .OR.
+       IAQOption = "Central Supply" ) then
+      MinIAQCFM
+    else if(IAQOption = "Central Exhaust / Individual Supply") then
+       SupplyIAQCFM ; Use CentralVentSys to model individual fans
+    else
+      0
+    endif endif
+  SIZING_BASELINE
+    if(IAQOption = "Central Supply / Central Exhaust" .OR.
+       IAQOption = "Central Supply / Individual Exhaust" .OR.
+       IAQOption = "Central Exhaust / Individual Supply" .OR.
+       IAQOption = "Central Supply" ) then
+      CentralSupplyCFM * ResZnGrp:CodeVentMult * ResZnGrp:ExhVentMult
+    else
+      0
+    endif
+ENDRULE
+
+RULE ResOtherZn:CentralExhaustCFM
+  DESCRIPTION
+    "The exhaust flow rate from this zone to the central system."
+  DEFAULT
+    if(IAQOption = "Central Supply / Central Exhaust" .OR.
+       IAQOption = "Central Exhaust / Individual Supply" .OR.
+       IAQOption = "Central Exhaust") then
+      MinIAQCFM
+    else if(IAQOption = "Central Supply / Individual Exhaust") then
+      ExhaustIAQCFM
+    else
+      0
+    endif endif
+  SIZING_BASELINE
+    if(IAQOption = "Central Supply / Central Exhaust" .OR.
+       IAQOption = "Central Supply / Individual Exhaust" .OR.
+       IAQOption = "Central Exhaust / Individual Supply" .OR.
+       IAQOption = "Central Exhaust") then
+      CentralExhaustCFM * ResZnGrp:CodeVentMult * ResZnGrp:ExhVentMult
+    else
+      0
+    endif
+ENDRULE
+
+RULE NEW ResOtherZn:CentralSupplyCFMWithMult
+  DATATYPE
+    Float
+  DESCRIPTION
+    "Supply air flow rate from the central ventilation system with multiplier"
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    CentralSupplyCFM * Mult
+  SIZING_BASELINE
+    CentralSupplyCFM* Mult
+ENDRULE
+
+RULE NEW ResOtherZn:CentralExhaustCFMWithMult
+  DATATYPE
+    Float
+  DESCRIPTION
+    "Exhaust air flow rate to the central ventilation system with multiplier"
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    CentralExhaustCFM * Mult
+  SIZING_BASELINE
+    CentralExhaustCFM * Mult
+ENDRULE
+
+RULE NEW ResOtherZn:SupplyFanPwr
+  DESCRIPTION
+    "The total power of individual supply fan(s)"
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if(IAQOption = "Central Exhaust / Individual Supply" .AND.
+       LocalCompAssigned(SupplyIAQFanRef)) then
+      SupplyIAQFanRef:WPerCFMIAQ * SupplyIAQCFM
+    else
+      0
+    endif
+  SIZING_BASELINE
+    if(IAQOption = "Air System" .OR. IAQOPTION = "Individual IAQ Fans") then
+      0
+    else
+      SupplyIAQFanRef:WPerCFMIAQ * SupplyIAQCFM
+    endif
+ENDRULE
+
+RULE NEW ResOtherZn:ExhaustFanPwr
+  DESCRIPTION
+    "The total power of individual exhaust fan(s)"
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if(IAQOption = "Central Supply / Individual Exhaust" .AND.
+       LocalCompAssigned(ExhaustIAQFanRef)) then
+      ExhaustIAQFanRef:WPerCFMIAQ * ExhaustIAQCFM
+    else
+      0
+    endif
+  SIZING_BASELINE
+    if(IAQOption = "Air System" .OR. IAQOPTION = "Individual IAQ Fans") then
+      0
+    else
+      ExhaustIAQFanRef:WPerCFMIAQ * ExhaustIAQCFM
+    endif
+ENDRULE
+
+RULE NEW ResOtherZn:SupplyFanPwrWithMult
+  DATATYPE
+    Float
+  DESCRIPTION
+    "The total power of individual supply fan(s) with multiplier"
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    SupplyFanPwr * Mult
+  SIZING_BASELINE
+    SupplyFanPwr* Mult
+ENDRULE
+
+RULE NEW ResOtherZn:ExhaustFanPwrWithMult
+  DATATYPE
+    Float
+  DESCRIPTION
+    "The total power of individual exhaust fan(s) with multiplier"
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    ExhaustFanPwr * Mult
+  SIZING_BASELINE
+    ExhaustFanPwr * Mult
+ENDRULE
+
+RULE NEW ResOtherZn:CentralSupplyCFMHasPropFanPwrIdx
+  DESCRIPTION
+    "The supply flow rate from the central system to the zone where the central system fan power
+     index in the baseline is the same as proposed."
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  SIZING_BASELINE
+    if(Type = "Unconditioned" .OR.
+       (Type = "Conditioned" .AND. CondType = "Indirectly") .OR.
+       (ResProj:RunScope != "Newly Constructed" .AND. HVACSysStatus = "Existing")) then
+      CentralSupplyCFMWithMult
+    else
+      0
+    endif
+ENDRULE
+
+RULE NEW ResOtherZn:CentralExhaustCFMHasPropFanPwrIdx
+  DESCRIPTION
+    "The exhaust flow rate from the zone to the central system where the central system fan power
+     index in baseline is the same as proposed."
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  SIZING_BASELINE
+    if(Type = "Unconditioned" .OR.
+       (Type = "Conditioned" .AND. CondType = "Indirectly") .OR.
+       (ResProj:RunScope != "Newly Constructed" .AND. HVACSysStatus = "Existing")) then
+      CentralExhaustCFMWithMult
+    else
+      0
+    endif
+ENDRULE
+
+// ----------------------- Make Up Air For Imbalanced Exhaust ------------------------------------
+RULE ResOtherZn:MakeupExhSrc
+  DESCRIPTION
+    "The source of exhaust make-up air."
+  HELP
+    "The ExhaustSource defines where make-up air for the exhaust systems comes
+     from. 'TransferFromAdjacentZones' assumes the exhaust make-up air is provided
+     in the user's design to the local zone from adjacent zones by transfer openings. 
+
+     'DirectOutsideAir' indicates a louver or other means of allowing untempered, 
+     outside air to enter from the exterior to make-up for the exhaust. This results
+     in the extra exahust air to be infiltrated into the zone in the simulation.
+     'DirectOutsideAir' is the default for zones that require outside air ventilation
+     and use an exhaust fan as the VentilationSystem, or if the zone is not directly
+     or indirectly conditioned."
+  DEFAULT : T24N
+    if( MinIAQCFM > 0 ) then
+      "DirectOutsideAir"
+    else
+      "TransferFromAdjacentZones"
+    endif
+ENDRULE
+
+RULE ResOtherZn:MakeupExhCFM
+  DESCRIPTION
+    "The flow rate of exhaust make-up air."
+  DEFAULT
+    if(IAQDisabled > 0) then
+      0
+    else if(IAQOption = "Minimum Exhaust IAQ Fan") then
+      MinIAQCFM
+    else if(IfValidAnd(CentralExhaustCFM > 0)) then ; Central w/ exhaust
+      Max(CentralExhaustCFM - ValidOr(CentralSupplyCFM, 0), 0)
+    else
+      Max(IAQCFM_Exhaust - IAQCFM_Supply, 0) ; individual IAQ fans
+    endif endif endif
+ENDRULE
+
+RULE ResOtherZn:MakeupExhLbl
+  DEFAULT
+    if(MakeupExhCFM = 0) then
+      " "
+    else if(MakeupExhSrc = "DirectOutsideAir") then
+      Format("(%s CFM outdoor air is drawn by the exhaust)", FltToStr(MakeupExhCFM, 1 ))
+    else
+      Format("(%s CFM ventilation air is transfered from adjacent zones)", FltToStr(MakeupExhCFM, 1))
+    endif endif
+ENDRULE
+
+RULE ResOtherZn:ImbalancedAirCFM
+  DESCRIPTION
+    "Imbalanced air needs to be released (positive value) or drawn (negative value) through holes."
+  HELP
+    "When this value divided by the total area of opening to the zone is greater than 3200 cmf/ft2
+     , the air pressure of the zone can reach an unreasonable range and causes the termination of
+     the simulation, see ticket 3548. This value is calculated to setup a warning to users."
+  DEFAULT
+    if(IAQDisabled > 0 .OR.
+       IAQOption = "Default Minimum Balanced IAQ Fan" .OR.
+       (MakeupExhCFM > 0 .AND. MakeupExhSrc = "DirectOutsideAir")) then
+      0 ; balanced
+    else
+      switch(IAQOption)
+        case "Individual IAQ Fans"                 : IAQCFM_Supply - IAQCFM_Exhaust
+        case "Central Supply / Central Exhaust"    : CentralSupplyCFM - CentralExhaustCFM
+        case "Central Supply / Individual Exhaust" : CentralSupplyCFM - CentralExhaustCFM
+        case "Central Exhaust / Individual Supply" : CentralSupplyCFM - CentralExhaustCFM
+        case "Central Supply"                      : CentralSupplyCFM
+        case "Central Exhaust"                     : - CentralExhaustCFM
+        case "Air System"                          : AirSysVentCFM
+        default : 0
+      endswitch
+    endif
+ENDRULE
+
+// ------------------------ Total Zone Ventilation Flow Rate -------------------------------------
+RULE ResOtherZn:TotalIAQCFM
+  DESCRIPTION
+     "Total zone ventilation flow rate."
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N
+    if(IAQDisabled > 0) then
+      0
+    else if(ServedByAirSys > 0) then ; air system
+      AirSysVentCFM
+    else if(EnumValue(IAQOption) >= 11 .AND. EnumValue(IAQOption) <= 15) then ; central ventilation system
+      Max(ValidOr(CentralSupplyCFM, 0), ValidOr(CentralExhaustCFM, 0))
+    else ; individual IAQ fans / default minimum
+      Max(IAQHRVCFM + IAQCFM_Supply , IAQHRVCFM + IAQCFM_Exhaust)
+    endif endif endif
+  CHECKCODE
+    if(IAQDisabled > 0 .OR. ResProj:RunScope != "Newly Constructed") then
+      UNCHANGED
+    else if(IfValidAnd(MinIAQCFM > 0) .AND. IfValidAnd(TotalIAQCFM < (MinIAQCFM - 0.05))) then
+      PostWarning("Min IAQ Ventilation NOT MET at zone:  %s required, %s entered (CFM).  Review
+                  inputs for ReOtherZn '%s'.", FltToStr(MinIAQCFM, 1), FltToStr(TotalIAQCFM, 1), Name)
+    else if(IfValidAnd(MinIAQCFM > 0) = 0 .AND. IfValidAnd(MinExhCFM > 0) = 0 .AND.
+            (IfValidAnd(TotalIAQCFM > 0) .OR. IfValidAnd(TotalExhCFM > 0))) then
+      PostWarning("ResOtherZn '%s' has no ventilation or exhaust requirement but has
+                  ventilation/exhaust system specified. Review inputs for the zone.", Name)
+    else if(IfValidAnd(MinIAQCFM > 0) .AND. IfValidAnd(TotalIAQCFM > MinIAQCFM * 5)) then
+      PostWarning("The ventilation rate is more than 5 times of required. This might cause a
+                  simulation error. Review inputs for ReOtherZn '%s'.", Name)
+    else
+      UNCHANGED
+    endif endif endif endif
+ENDRULE
+
+RULE NEW ResOtherZn:VentFlowWithMult
+  DESCRIPTION
+    "Ventilation flow rate with multiplier."
+  DATATYPE
+    Float
+  LONGFORM 
+    VentilationFlowWithMultiplier
+  INPUTCLASS 
+    NotInput
+  UNITS
+    cfm
+  DEFAULT
+    TotalIAQCFM * Mult
+  SIZING_BASELINE
+    TotalIAQCFM * ResZnGrp:CodeVentMult * ResZnGrp:ExhVentMult * Mult
+ENDRULE
+
+RULE ResOtherZn:MinIAQCFMLbl
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if(IAQDisabled > 0) then
+      Format("IAQ Ventilation disabled (%s required but not met)", FltToStr(MinIAQCFM, 1))
+    else if(MinIAQCFM < 0.05) then ; no ventilation requirement
+      if(IfValidAnd(MinExhCFM < 0.05)) then ; no exhaust requirement
+        " "
+      else if(ValidOr(TotalExhCFM, 0) < (ValidOr(MinExhCFM, 0) - 0.05)) then ; not meeting exhaust requirement
+        if(IfValidAnd(ServedByAirSys > 0)) then
+          Format("Min Exhaust NOT MET: Air System doesn't include an exhaust fan, use a different system type and add an exhaust fan.")
+        else
+          Format("Min Exhaust NOT MET: %s CFM required, %s entered %s", FltToStr(MinExhCFM, 1), FltToStr(TotalExhCFM, 1), MakeupExhLbl)
+        endif
+      else ; meeting exhaust requirement
+        Format("Minimum Exhaust:  %s CFM (%s entered) %s", FltToStr(MinExhCFM, 1), FltToStr(TotalExhCFM, 1), MakeupExhLbl)
+      endif endif
+    else if(TotalIAQCFM < (MinIAQCFM - 0.05)) then ; not meeting ventilation requirement
+     Format("Min IAQ Vent -NOT MET- locally:  %s CFM required, %s entered", FltToStr(MinIAQCFM, 1), FltToStr(TotalIAQCFM, 1))
+    else ; meeting ventilation requirement
+      Format("Minimum IAQ Ventilation: %s CFM (%s entered)", FltToStr(MinIAQCFM, 1), FltToStr(TotalIAQCFM, 1))
+    endif endif endif
+ENDRULE
+
+RULE ResOtherZn:TotalOACFMToZn
+  DESCRIPTION
+    "Total outdoor air brought directly to this zone."
+  HELP
+    "The extra outdoor air can be transfered to other zones in the same ResZnGrp as ventilation
+     air. If this zone has exhaust requirement the air can't be transfered per air classification
+     and recirculation limitations."
+  DEFAULT
+    if(IfValidAnd(MinExhCFM > 0)) then
+      0 ; outdoor air to zones with ehxuast requirement can't be transfered to other zones
+    else if(MakeupExhSrc = "DirectOutsideAir" .AND. MakeupExhCFM > 0) then
+      TotalIAQCFM - MakeupExhCFM
+    else
+      TotalIAQCFM
+    endif endif
+ENDRULE
+
+// ------------------- Other Zone Ventilation Properties ------------------------------------------
+// TO DO mostly not used anymore. remove them?
+RULE ResOtherZn:IAQCFMIsBalanced
+  DESCRIPTION
+    "flag indicating whether or not IAQ CFM is balanced (supply & exhaust within 20%)"
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (IAQDisabled > 0) then
+      0
+    else if(IAQOption = "Default Minimum Balanced IAQ Fan") then
+      1
+    else if(IAQOption = "Minimum Exhaust IAQ Fan" .OR. 
+            IAQOption = "Minimum Supply IAQ Fan") then
+      0
+    else if(IAQOption = "Individual IAQ Fans" .AND. IAQCFM_Supply > 0 .AND. IAQCFM_Exhaust > 0) then
+      if(IAQCFM_Supply > IAQCFM_Exhaust) then
+        if (IAQCFM_Supply >= (0.8 * IAQCFM_Exhaust) .AND. IAQCFM_Supply <= (1.2 * IAQCFM_Exhaust)) then
+          1
+        else
+          0
+        endif
+      else if(IAQCFM_Exhaust >= (0.8 * IAQCFM_Supply) .AND. IAQCFM_Exhaust <= (1.2 * IAQCFM_Supply)) then
+        1
+      else
+        0
+      endif endif
+    else
+      0
+    endif endif endif endif
+ENDRULE
+
+RULE ResOtherZn:Action
+  DESCRIPTION
+    "blast StdDesignIAQ properties if user defined and no BypassRuleLimits"
+  DEFAULT
+    if(IfValidAnd( ResProj:BypassRuleLimits > 0 )) then
+      UNCHANGED
+    else if(LocalStatus(StdDesignIAQCFM) > 4 .OR. LocalStatus(MaxStdDesignIAQWperCFM) > 4) then
+      EvalRulelist("ForceReset_ResOtherZone_StdDesignIAQLimits", 1)
+    else
+      UNCHANGED
+    endif endif
+ENDRULE
+
+RULE ResOtherZn:StdDesignIAQCFM
+  DESCRIPTION
+    "Standard design IAQ flow rate"
+  INPUTCLASS
+    Prescribed
+  DEFAULT
+    if(IAQDisabled > 0) then
+      UNDEFINED
+    else
+      max(MinIAQCFM, TotalIAQCFM)
+    endif
+ENDRULE
+
+RULE ResOtherZn:IAQCFMScaleFactor
+  DESCRIPTION
+    "Multiplier on IAQ CFM to enforce std design IAQ CFM"
+  INPUTCLASS
+    Prescribed
+  DEFAULT
+    if (IfValidAnd( StdDesignIAQCFM >= 0 )==0) then
+      UNDEFINED
+    else if (IfValidAnd( IAQDisabled > 0 )) then
+      UNDEFINED
+    else if (MinIAQCFM < 0.1) then
+      UNDEFINED
+    else if (IfValidAnd( TotalIAQCFM > 0 )) then
+      StdDesignIAQCFM / TotalIAQCFM
+    else
+      UNDEFINED
+    endif endif endif endif
+ENDRULE
+
+RULE ResOtherZn:MaxStdDesignIAQWperCFM
+  DESCRIPTION
+    "Max limit on standard design IAQ power W/cfm"
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    1.2
+ENDRULE
+
+RULE ResOtherZn:MaxStdDesignIAQPower
+  DESCRIPTION
+    "Max limit on standard design IAQ power"
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    MaxStdDesignIAQWperCFM * ValidOr(StdDesignIAQCFM, 0)
+ENDRULE
+
+RULE ResOtherZn:Action
+  DESCRIPTION
+    "Backward compat for ResOtherZn if IAQFanOption was set to default."
+  DEFAULT
+    if(Proj:DefaultingRounds = 1 .AND. ServedByAirSys = 0 .AND. MinIAQCFM > 0 .AND.
+       (IfValidAnd(IAQOption = "Default Minimum Balanced IAQ Fan") .OR.
+        IfValidAnd(IAQOption = "Minimum Exhaust IAQ Fan") .OR.
+        IfValidAnd(IAQOption = "Minimum Supply IAQ Fan") .OR.
+        (LocalStatus(IAQOption) <= 4 .AND.
+         LocalCompAssigned(IAQFanRef[1]) = 0 .AND. LocalCompAssigned(IAQFanRef[2]) = 0 .AND.
+         LocalCompAssigned(IAQFanRef[3]) = 0 .AND. LocalCompAssigned(IAQFanRef[4]) = 0))) then
+      EvalRulelist("Create_Default_ResOtherZnIAQFan", 1)
+    else
+      UNCHANGED
+    endif
+ENDRULE
