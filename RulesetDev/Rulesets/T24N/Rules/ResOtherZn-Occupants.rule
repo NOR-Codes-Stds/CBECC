@@ -1,0 +1,202 @@
+// Space Use - Occupants
+//
+// -------------------------------------------------------------------------
+//  Copyright (c) 2012-2017, California Energy Commission
+//  All rights reserved.
+//  Redistribution and use in source and binary forms, with or without
+//  modification, are permitted provided that the following conditions are
+//  met:
+// 
+//    * Redistributions of source code must retain the above copyright
+//  notice, this list of conditions and the following disclaimer.
+//    * Redistributions in binary form must reproduce the above copyright
+//  notice, this list of conditions and the following disclaimer in
+//  the documentation and/or other materials provided with the
+//  distribution.
+//    * Neither the name of the California Energy Commission nor the names of its
+//  contributors may be used to endorse or promote products
+//  derived from this software without specific prior written
+//  permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+//  IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+//  TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION
+//  BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+//  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+//  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+//  BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+//  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+//  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// -------------------------------------------------------------------------
+
+// -------------- # Occupants / Density ---------------------------------------
+// Occupant number / density 
+RULE ResOtherZn:OccDens
+  DESCRIPTION
+    "The density of occupants in the Space for egress design purposes."  
+  INPUTCLASS
+    NotInput
+  UNITS 
+    people/1000ft2
+  DEFAULT
+    if( IfValidAnd( SpcFunc != "- specify -" ) )
+    then SpaceFunctionData:OccDens( "FuncType", SpcFunc )
+    else 0
+    endif
+ENDRULE
+RULE NEW ResOtherZn:OccNum
+  DATATYPE
+    Float
+  LONGFORM
+    OccupancyNumber
+  DESCRIPTION
+    "The number of occupants in the Space for egress design purposes."
+  INPUTCLASS
+    NotInput
+  UNITS 
+    people
+  DEFAULT
+    if( IfValidAnd( Area > 0 ) )
+    then OccDens * Area / 1000
+    else 0
+    endif
+ENDRULE
+
+// Occupancy Fraction
+RULE ResProj:OtherZnOccFrac
+  DESCRIPTION
+    "The expected fraction of the exiting people in OtherZones, based on SpaceFunction, which will 
+     determine the design occupancy."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    0.5
+ENDRULE
+
+RULE ResOtherZn:OccFrac
+  DESCRIPTION
+    "The expected fraction of the exiting density of people in OtherZones, based 
+     on SpaceFunction, which will determine the design occupancy."  
+  INPUTCLASS
+    Default
+  RESETS
+    ResetThisWhenTheFollowingIsModified
+      OccNumSim
+  DEFAULT
+    if( IfValidAnd( OccNumInput > 0 ) .AND. IfValidAnd( OccNumSim > 0 ) )
+    then OccNumSim / OccNum
+    else ResProj:OtherZnOccFrac
+    endif
+ENDRULE
+
+// For simulation
+RULE ResOtherZn:OccDensSim
+  DESCRIPTION
+    "The density of people of in a space for simulation and ventilation calculations." 
+  INPUTCLASS
+    NotInput
+  UNITS 
+    people/1000ft2
+  DEFAULT
+    OccDens * OccFrac
+ENDRULE
+
+RULE ResOtherZn:OccNumSim
+  DESCRIPTION
+    "The number of people in a space for simulation. It is also used in ventilation 
+     calculations."  
+  INPUTCLASS
+    Default
+  RESETS
+    ResetThisWhenTheFollowingIsModified
+      OccFrac
+  DEFAULT 
+    OccNum * OccFrac
+  CHECKSIM
+    if( OccNumInput > 0 .AND. OccFracInput > 0 )
+    then PostWarning( "Both the number of expected people and the expected fraction of the people
+                       in residential other zone, %s, are specified. The specified fraction
+                       will be ignored.",Name )
+    else UNCHANGED
+    endif
+  SIZING
+    if( OccNumInput > 0 )
+    then OccNumSim
+    else OccNum * OccFrac
+    endif
+ENDRULE
+
+// --------------- Screen Control -----------------------
+RULE NEW ResOtherZn:OccNumInput
+  DESCRIPTION
+    "The flag indicates whether expected number of people is specified by users."
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( LocalStatus( OccNumSim ) = 7 )
+    then 1
+    else 0
+    endif
+ENDRULE
+
+RULE NEW ResOtherZn:OccFracInput
+  DESCRIPTION
+    "The flag indicates whether expected fraction of people is specified by users."
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( LocalStatus( OccFrac ) = 7 )
+    then 1
+    else 0
+    endif
+ENDRULE
+
+// -------------- Occupancy Schedule --------------------
+RULE ResOtherZn:OccSchRef
+  DESCRIPTION
+    "Reference to a schedule that describes the fraction of occupancy on an 
+     hourly basis."  
+  INPUTCLASS
+    Prescribed
+  DEFAULT
+    if( FuncSchGrp = "- specify -" .OR. IfValidAnd( OccNumSim > 0) == 0 )
+    then UNDEFINED
+    else RuleLibrary( Sch, SpaceFunctionGroups:OccSchRef( "FuncGroup", FuncSchGrp ) )
+    endif
+ENDRULE
+  
+
+// -------------- Occupant Heat Rates --------------------
+RULE ResOtherZn:OccSensHtRt
+  DESCRIPTION
+    "The rate of sensible heat released per person which is a function of activity"  
+  INPUTCLASS
+    Prescribed
+  UNITS 
+    Btu/hr-person
+  DEFAULT
+    if( IfValidAnd( SpcFunc != "- specify -" ) .AND. IfValidAnd( OccNumSim > 0 ) ) 
+    then SpaceFunctionData:OccSensHtRt("FuncType",SpcFunc)
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE ResOtherZn:OccLatHtRt
+  DESCRIPTION
+    "The rate of latent heat released per person which is a function of activity"  
+  INPUTCLASS
+    Prescribed
+  UNITS 
+    Btu/hr-person
+  DEFAULT
+    if( IfValidAnd( SpcFunc != "- specify -" ) .AND. IfValidAnd( OccNumSim > 0 ) ) 
+    then SpaceFunctionData:OccLatHtRt("FuncType",SpcFunc)
+    else UNDEFINED
+    endif
+ENDRULE
