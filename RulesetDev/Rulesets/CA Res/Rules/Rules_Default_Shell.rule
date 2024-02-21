@@ -1359,6 +1359,11 @@ RULELIST "ProposedInput_SurfacesAndInterZoneAreas" 0 0 0 0
 	"Set CathedralCeiling:FlatRoofArea"		CathedralCeiling:FlatRoofArea		= {
 		if (IfValidAnd( Area > 0.1 ) .AND. IfValidAnd( SteepSlope < 0.5 )) then  Area  else  0  endif  }
 
+   "Set CathedralCeiling:SteepRoofAreaXRise"    CathedralCeiling:SteepRoofAreaXRise  =                ; SAC 02/19/24 (tic #1346)
+      {  if (IfValidAnd( SteepRoofArea > 0.1 )) then  SteepRoofArea * RoofRise  else  0  endif  }
+   "Set CathedralCeiling:FlatRoofAreaXRise"     CathedralCeiling:FlatRoofAreaXRise   =
+      {  if (IfValidAnd( FlatRoofArea  > 0.1 )) then  FlatRoofArea  * RoofRise  else  0  endif  }
+
 			;  CathedralCeiling:Orientation,       BEMP_Sym,  - defaulted vis Symbol definitions
 	"Default CathedralCeiling:OrientationValue"
 		CathedralCeiling:OrientationValue 	= {	switch (Local( Orientation ))
@@ -2323,18 +2328,22 @@ END
 ;*************************************************************************
 RULELIST "Default_Attic"  0 0 0 0
 ;*************************************************************************
-  ; SAC 1/17/13 - added default attic roof construction assignment
-	"Default Attic:Construction"		Attic:Construction	= {	if (LocalCompAssigned( Construction )) then  UNCHANGED
-																					else	RuleLibrary( Cons, "Asphalt Shingle Roof" )  endif  }
-
-  ; default rules that feed into attic edge defaults in the Cons object
+; default rules that feed into attic edge defaults in the Cons object
 	"Default Attic:RoofRise"	Attic:RoofRise		= {	5 }
 	"Set Attic:RoofPitch"		Attic:RoofPitch	= {	if (IfValidAnd( RoofRise > 0 )) then  RoofRise / 12  else  0  endif  }
    ; fix logic to set Steep to 1 if RoofRise EQUAL 2:12 (previsouly only if it was > 2:12) - SAC 12/13/22 (tic #1302)
 	"Set Attic:SteepSlope"		Attic:SteepSlope	= {	if (IfValidAnd( RoofRise >= 2 )) then  1  else  0  endif  }
-; SAC 4/28/14 - moved up here from below to ensure that Attic:RoofTilt is set prior to attic edge calcs (where it can now be referenced)
+   ; SAC 4/28/14 - moved up here from below to ensure that Attic:RoofTilt is set prior to attic edge calcs (where it can now be referenced)
 	"Set Attic:RoofTilt"			Attic:RoofTilt		= {	if (IfValidAnd( RoofPitch > 0)) then  atan( RoofPitch ) * 180 / 3.14159265
 																		else  0  endif  }
+
+   ; SAC 1/17/13 - added default attic roof construction assignment
+	"Default Attic:Construction"		Attic:Construction	=
+      {  if (LocalCompAssigned( Construction )) then  UNCHANGED
+         else if (SteepSlope > 0.5)
+         then  RuleLibrary( Cons, "Tile Roof (steep)" )
+         else  RuleLibrary( Cons, "Asphalt Shingle Roof (flat)" )
+         endif endif  }
 
 ; SAC 11/3/14 - call subordinate rulelist to evaluate certain other attic area rules used to determine when attics are cool-ventable and can be assigned to CathedralCeilings converted to CeilingBelowAttics for std design model
 	"Perform more Attic area defaulting"	Attic:Action	= {	EvalRulelist( "Default_AtticAreas", 1 )  }
@@ -2360,13 +2369,18 @@ RULELIST "Default_AtticAreas"  0 0 0 0
 
 	"Set Attic:OnlyOverUncond"			Attic:OnlyOverUncond		= {	if (IfValidAnd( FloorArea > 0.1 ) .AND. IfValidAnd( FloorAreaOverCond > 0.1 )==0) then  1  else  0  endif  }	; SAC 11/19/14
 
-; SAC 10/14/14 - added properties needed to enable multiple Attic obejcts per model
-; SAC 12/14/14 - added logic to prevent ClVentableArea > 0 if this attic not over any conditioned zones
+   ; SAC 10/14/14 - added properties needed to enable multiple Attic obejcts per model
+   ; SAC 12/14/14 - added logic to prevent ClVentableArea > 0 if this attic not over any conditioned zones
 	"Set Attic:ClVentableArea"			Attic:ClVentableArea		= {	if (Type == 0 .AND. IfValidAnd( FloorAreaOverCond > 0.1 )) then  FloorArea  else  0  endif  }
 
-; SAC 11/3/14 - added property to determine which, if any, Attic objects can be used to link to proposed model CathedralCeilings that are converted to CeilingBelowAttic for the standard design model
-	"Set Attic:StdCathClgAtticArea"	Attic:StdCathClgAtticArea	= {	if ((Status == 2 .OR. Status == 3) .AND. Type == 0)	; New or Altered -and- Ventilated Attic
-																							then  FloorArea  else  0  endif  }
+   ; SAC 11/3/14 - added property to determine which, if any, Attic objects can be used to link to proposed model CathedralCeilings that are converted to CeilingBelowAttic for the standard design model
+   ; split into 2 separate properties by steep vs. low-sloped - SAC 02/19/24 (tic #1346)
+	"Set Attic:StdCathClgAtticArea_Steep"	Attic:StdCathClgAtticArea_Steep	= {	if ( (Status == 2 .OR. Status == 3) .AND. Type == 0 .AND. 	; New or Altered -and- Ventilated Attic
+                                                                                      SteepSlope > 0 )
+																							            then  FloorArea  else  0  endif  }
+	"Set Attic:StdCathClgAtticArea_Flat"	Attic:StdCathClgAtticArea_Flat  	= {	if ( (Status == 2 .OR. Status == 3) .AND. Type == 0 .AND. 	; New or Altered -and- Ventilated Attic
+                                                                                      SteepSlope < 1 )
+																							            then  FloorArea  else  0  endif  }
 
 	; SAC 9/23/15 - properties used to setup 2016 standard design roof constructions based on roof pitch
 	"Set Attic:SteepRoofArea"			Attic:SteepRoofArea		= {	if (IfValidAnd( FloorArea > 0.1 ) .AND. IfValidAnd( SteepSlope > 0.5 )) then  FloorArea  else  0  endif  }
