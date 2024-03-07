@@ -708,9 +708,22 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
       {  if (LocalStatus( TankVolume ) < 5 .OR. HeaterType != 16 .OR. TankVolumeEditable > 0) then  UNCHANGED
          else  EvalRulelist( "ForceReset_DHWHeater_TankVolume", 1 )  endif  }
 
+   ; SAC 7/9/17 - added logic to prevent error when FloorAreaServed not yet defined (can happen first time through defaulting)
+   ; SAC 11/8/17 - added check for HPWH_NEEARated flag/checkbox to prevent reporting of non-NEEA HPWHs
+   ; moved up here from below to use in defaulting ResWtrHtr:TankVolume - SAC 03/07/24
+   "Set ResWtrHtr:IsNEEAHtPumpWtrHtr - flag triggering NEEA heat pump water heater special feature message"	; SAC 7/5/17 - tic #805
+      ResWtrHtr:IsNEEAHtPumpWtrHtr  = {
+         if ( IfValidAnd( FloorAreaServed <= 0 )==0 .AND.
+              HeaterElementType == 5 .AND. IfValidAnd( HPWH_NEEARated > 0 ) .AND. 
+              (IfValidAnd( CentralHPWHCprsrType > 0 ) .OR. (HPWHBrand > 2 .AND. HPWHModel > 1)) )
+         then  1  else  0  endif  }
+
    ; SAC 8/29/16 - moved TankVolume default up here, before EnergyFactor rule that may reference TankVolume (tic #725)
+   ; added HPWHData_NEEA:TankVolume() table look-up for NEEA HPWHs - SAC 03/07/24
 	"Default ResWtrHtr:TankVolume"		ResWtrHtr:TankVolume	= {
 		if (HeaterElementType == 5 .AND. HPWH_NEEARated < 0.5) then  50		; SAC 5/17/16 - HP2016, Generic
+      else if (IsNEEAHtPumpWtrHtr .AND. HPWHData_NEEA:TankVolume( "ModelNum", HPWHModel ) > 0)
+      then  HPWHData_NEEA:TankVolume( "ModelNum", HPWHModel )
 		else	switch (HeaterType)
 					case  0 :	50			; "Boiler"        
 					case  1 :	50			; "Indirect"      
@@ -729,7 +742,7 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
                case 15 :    0    ; "Residential-Duty Commercial Instantaneous (UEF)"
                case 16 :  int( (ValidOr( NumAssignedBRFracs, 1 ) * 3) + (ValidOr( NumAssignedDUFracs, 1 ) * 10) + 0.5 )     ; "Commercial Packaged Boiler"      ; SAC 12/19/19 - to facilitate new central gas std design DHW system (tic #862)
 					default :   50
-				endswitch  endif  }
+				endswitch  endif endif  }
    "Set ResWtrHtr:ShowTankVolume"      ResWtrHtr:ShowTankVolume  =            ; HPWH_ComProduct - SAC 02/01/21 (tic #1260)
          {   if (HeaterElementType == 1 .AND. HeaterType == 9) then  0
             else if (HeaterElementType != 5 .OR. (HPWH_NEEARated < 0.5 .AND. HPWH_ComProduct < 0.5))
@@ -1071,14 +1084,15 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
                (HeaterType == 4 .OR. HeaterType == 5 .OR. HeaterType == 6 .OR. HeaterType == 9))
       then  1  else  0  endif endif endif  }
 
-   ; SAC 7/9/17 - added logic to prevent error when FloorAreaServed not yet defined (can happen first time through defaulting)
-   ; SAC 11/8/17 - added check for HPWH_NEEARated flag/checkbox to prevent reporting of non-NEEA HPWHs
-   "Set ResWtrHtr:IsNEEAHtPumpWtrHtr - flag triggering NEEA heat pump water heater special feature message"	; SAC 7/5/17 - tic #805
-      ResWtrHtr:IsNEEAHtPumpWtrHtr  = {
-         if ( IfValidAnd( FloorAreaServed <= 0 )==0 .AND.
-              HeaterElementType == 5 .AND. HPWH_NEEARated > 0 .AND. 
-              (CentralHPWHCprsrType > 0 .OR. (HPWHBrand > 2 .AND. HPWHModel > 1)) )
-         then  1  else  0  endif  }
+   ; moved UP above to use in defaulting TankVolume - SAC 03/07/24
+   ; ; SAC 7/9/17 - added logic to prevent error when FloorAreaServed not yet defined (can happen first time through defaulting)
+   ; ; SAC 11/8/17 - added check for HPWH_NEEARated flag/checkbox to prevent reporting of non-NEEA HPWHs
+   ; "Set ResWtrHtr:IsNEEAHtPumpWtrHtr - flag triggering NEEA heat pump water heater special feature message"	; SAC 7/5/17 - tic #805
+   ;    ResWtrHtr:IsNEEAHtPumpWtrHtr  = {
+   ;       if ( IfValidAnd( FloorAreaServed <= 0 )==0 .AND.
+   ;            HeaterElementType == 5 .AND. HPWH_NEEARated > 0 .AND. 
+   ;            (CentralHPWHCprsrType > 0 .OR. (HPWHBrand > 2 .AND. HPWHModel > 1)) )
+   ;       then  1  else  0  endif  }
 
    "Set ResWtrHtr:IsNewAssignedHPWH - flag: this is a New HPWH assigned to one or more DHWSystems"    ResWtrHtr:IsNewAssignedHPWH =       ; SAC 02/05/21
       {  if (HeaterElementType == 5 .AND. IfValidAnd( NewFlrAreaServed > 0 )) then  1  else  0  endif  }
@@ -1439,6 +1453,32 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
    "Set ResDHWSys:NumElecHeaters (6)"     ResDHWSys:NumElecHeaters = {
          if (IfValidAnd( HeaterMultFlt[6] > 0 ) .AND. LocalCompAssigned( DHWHeater[6] ) .AND.
              IfValidAnd( DHWHeater[6]:HeaterElementType != 1 )) then  NumElecHeaters + 1  else  UNCHANGED  endif  }
+
+   ; to assist in error checking - ensure Fule meter/rate assigned when fuel used in building - SAC 03/06/24
+   "Set ResDHWSys:NumFuelHeaters (1)"     ResDHWSys:NumFuelHeaters = {
+         if (Proj:IsComRuleset .AND. CentralDHW > 0 .AND. CentralDHWTypeVal == 2) then  0
+    else if (IfValidAnd( HeaterMultFlt[1] > 0 ) .AND. LocalCompAssigned( DHWHeater[1] ) .AND.
+             IfValidAnd( DHWHeater[1]:HeaterElementType != 1 )) then  0  else  1  endif endif  }
+   "Set ResDHWSys:NumFuelHeaters (2)"     ResDHWSys:NumFuelHeaters = {
+         if (Proj:IsComRuleset .AND. CentralDHW > 0 .AND. CentralDHWTypeVal == 2) then  UNCHANGED
+    else if (IfValidAnd( HeaterMultFlt[2] > 0 ) .AND. LocalCompAssigned( DHWHeater[2] ) .AND.
+             IfValidAnd( DHWHeater[2]:HeaterElementType != 1 )) then  UNCHANGED  else  NumFuelHeaters + 1  endif endif  }
+   "Set ResDHWSys:NumFuelHeaters (3)"     ResDHWSys:NumFuelHeaters = {
+         if (Proj:IsComRuleset .AND. CentralDHW > 0 .AND. CentralDHWTypeVal == 2) then  UNCHANGED
+    else if (IfValidAnd( HeaterMultFlt[3] > 0 ) .AND. LocalCompAssigned( DHWHeater[3] ) .AND.
+             IfValidAnd( DHWHeater[3]:HeaterElementType != 1 )) then  UNCHANGED  else  NumFuelHeaters + 1  endif endif  }
+   "Set ResDHWSys:NumFuelHeaters (4)"     ResDHWSys:NumFuelHeaters = {
+         if (Proj:IsComRuleset .AND. CentralDHW > 0 .AND. CentralDHWTypeVal == 2) then  UNCHANGED
+    else if (IfValidAnd( HeaterMultFlt[4] > 0 ) .AND. LocalCompAssigned( DHWHeater[4] ) .AND.
+             IfValidAnd( DHWHeater[4]:HeaterElementType != 1 )) then  UNCHANGED  else  NumFuelHeaters + 1  endif endif  }
+   "Set ResDHWSys:NumFuelHeaters (5)"     ResDHWSys:NumFuelHeaters = {
+         if (Proj:IsComRuleset .AND. CentralDHW > 0 .AND. CentralDHWTypeVal == 2) then  UNCHANGED
+    else if (IfValidAnd( HeaterMultFlt[5] > 0 ) .AND. LocalCompAssigned( DHWHeater[5] ) .AND.
+             IfValidAnd( DHWHeater[5]:HeaterElementType != 1 )) then  UNCHANGED  else  NumFuelHeaters + 1  endif endif  }
+   "Set ResDHWSys:NumFuelHeaters (6)"     ResDHWSys:NumFuelHeaters = {
+         if (Proj:IsComRuleset .AND. CentralDHW > 0 .AND. CentralDHWTypeVal == 2) then  UNCHANGED
+    else if (IfValidAnd( HeaterMultFlt[6] > 0 ) .AND. LocalCompAssigned( DHWHeater[6] ) .AND.
+             IfValidAnd( DHWHeater[6]:HeaterElementType != 1 )) then  UNCHANGED  else  NumFuelHeaters + 1  endif endif  }
 
   "Look Up UEF Model Draw Variable"   ResWtrHtr:UEFModelDrawVar = {
     if( IsUEF )
