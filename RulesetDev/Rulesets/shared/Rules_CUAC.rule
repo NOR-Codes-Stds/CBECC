@@ -475,6 +475,10 @@ RULELIST "CUAC_InputErrorCheck" 0 0 0 0
          else  1  endif  }
       ;   else  CUAC_UtilityRates:IsValid( "RateID", GasTariff )   endif  }
 
+   "Set CUAC:GasTariffReqd"         CUAC:GasTariffReqd      =        ; SAC 03/08/24
+      {  if (IfValidAnd( ResProj:DwellingGasFueled[1] > 0 )) then  1
+         else  0  endif  }
+
       ;"dbg" CUAC:Action = { PostMessageToLog( "GasUtility %g / G2GasTerritory %g / G2GasTariff %g", ValidOr( GasUtility, -999 ), ValidOr( G2GasTerritory, -999 ), ValidOr( G2GasTariff, -999 ) ) }
 
    ; removed check preventing analysis of ResZns where some/all dwellings assign central laundry zones - SAC 02/08/24
@@ -528,6 +532,8 @@ RULELIST "CUAC_InputErrorCheck" 0 0 0 0
          else if (IfValidAnd( CUAC_OldAccessDB > 0 ) .AND. IfValidAnd( ElecTariffIsTOU > 0 ))
          then  "Error: Electric Tariff/Rate is not compatible (Time-of-Use rate)"
 
+         else if (GasTariffReqd > 0 .AND. (GasUtility == 0 .OR. GasUtility == 999))    ; SAC 03/08/24
+         then  "Error: Gas Tariff Required but Utility/Territory/Tariff not selected"
          else if (GasUtility == 0)
          then  "Error: Gas Utility or 'no gas service' must be selected"
          else if (GasUtilitySelected .AND. (G2GasTerritory < 1 .OR. G2GasTariff < 1))
@@ -541,7 +547,7 @@ RULELIST "CUAC_InputErrorCheck" 0 0 0 0
          else if (IfValidAnd( CUAC_OldAccessDB > 0 ) .AND. IfValidAnd( GasTariffIsTOU > 0 ))
          then  "Error: Gas Tariff/Rate is not compatible (Time-of-Use rate)"
 
-         else  UNDEFINED  endif endif endif endif   endif endif endif   endif endif endif endif   endif endif endif endif endif   endif endif endif endif endif  }
+         else  UNDEFINED  endif endif endif endif   endif endif endif   endif endif endif endif   endif endif endif endif endif   endif endif endif endif endif endif  }
 
    "Set CUAC:ErrorInfo"    CUAC:ErrorInfo =
       {  if (IfValidAnd( Proj:ResDwellUnits > 0 )==0 .OR. IfValidAnd( Proj:CUACReport > 0 )==0)
@@ -593,6 +599,8 @@ RULELIST "CUAC_InputErrorCheck" 0 0 0 0
          else if (IfValidAnd( CUAC_OldAccessDB > 0 ) .AND. IfValidAnd( ElecTariffIsTOU > 0 ))
          then  Format( "Electric Tariff/Rate '%s' is a Time-of-Use rate, and as such, is not compatible with old projects containing only monthly energy use data", EnumString( G2ElecTariff ) )
 
+         else if (GasTariffReqd > 0 .AND. (GasUtility == 0 .OR. GasUtility == 999))    ; SAC 03/08/24
+         then  UNDEFINED   ; requires RuleList eval
          else if (GasUtility == 0)
          then  "Gas Utility or 'no gas service' must be selected before performing analysis/reporting."
          else if (GasUtilitySelected .AND. (G2GasTerritory < 1 .OR. G2GasTariff < 1))
@@ -606,7 +614,11 @@ RULELIST "CUAC_InputErrorCheck" 0 0 0 0
          else if (IfValidAnd( CUAC_OldAccessDB > 0 ) .AND. IfValidAnd( GasTariffIsTOU > 0 ))
          then  Format( "Gas Tariff/Rate '%s' is a Time-of-Use rate, and as such, is not compatible with old projects containing only monthly energy use data", EnumString( G2GasTariff ) )
 
-         else  UNDEFINED  endif endif endif endif         endif endif endif   endif endif endif endif   endif endif endif endif endif   endif endif endif endif endif  }
+         else  UNDEFINED  endif endif endif endif         endif endif endif   endif endif endif endif   endif endif endif endif endif   endif endif endif endif endif endif  }
+   "Set CUAC:ErrorInfo (Gas Tariff Required but not specified)"      CUAC:Action =        ; SAC 03/08/24
+      {  if (LocalStatus( ErrorInfo ) < 1 .AND. GasTariffReqd > 0 .AND. (GasUtility == 0 .OR. GasUtility == 999))
+         then  EvalRulelist( "SetCUACErrorInfo_GasTariffReqd" )
+         else  UNCHANGED  endif  }
    "Set CUAC:HaveErrorInfo"      CUAC:HaveErrorInfo = {  if (LocalStatus( ErrorInfo ) > 0) then  1  else  UNDEFINED  endif  }
 
    "Set CUAC:TreeDescrip"  CUAC:TreeDescrip =
@@ -713,6 +725,28 @@ RULELIST "CUAC_InputErrorCheck" 0 0 0 0
 ;           "PerformCalcs",                      BEMP_Int,  1,  0,  0,  NInp,  "",                 0,  0,                           1044, "PerformCalculations",  ""   ; "boolean (0/1) whether calcs/reporting are to be performed (=> no errors)",  ""    ; SAC 08/07/22
 
 
+END
+;*************************************************************************
+
+
+;************************************************************************* SAC 03/08/24
+RULELIST "SetCUACErrorInfo_GasTariffReqd"  0 0 0 0
+   "Set CUAC:ErrorInfo"    CUAC:ErrorInfo =
+      {  if (GasUtility == 0 .OR. GasUtility == 999)
+         then  "Gas Utility must be selected before performing analysis/reporting."
+         else if (GasUtilitySelected .AND. (G2GasTerritory < 1 .OR. G2GasTariff < 1))
+         then  "Gas Territory and Tariff must be selected before performing analysis/reporting."
+         ; else if (GasUtilitySelected .AND. CUAC_UtilityCompanies:IsValid( "UtilityID", GasUtility ) < 1)
+         ; then  Format( "Gas Utility '%s' not found in ruleset look-up table.", EnumString( GasUtility ) )
+         else if (GasUtilitySelected .AND. IfValidAnd( GasTerritoryValid > 0 )==0)
+         then  Format( "Gas Territory '%s' not found in ruleset look-up table.", EnumString( G2GasTerritory ) )
+         else if (GasUtilitySelected .AND. IfValidAnd( GasTariffValid > 0 )==0)
+         then  Format( "Gas Tariff/Rate '%s' not found in ruleset look-up table.", EnumString( G2GasTariff ) )
+         else if (IfValidAnd( CUAC_OldAccessDB > 0 ) .AND. IfValidAnd( GasTariffIsTOU > 0 ))
+         then  Format( "Gas Tariff/Rate '%s' is a Time-of-Use rate, and as such, is not compatible with old projects containing only monthly energy use data.", EnumString( G2GasTariff ) )
+         else  UNDEFINED  endif endif endif endif endif  }
+   "Set CUAC:ErrorInfo - DwellUnitType listing"    CUAC:ErrorInfo =
+      {  ErrorInfo + ListRevRef( DwellUnitType:CUACRef, "\r\n%s", "\r\n%s", "\r\n%s", DwellUnitType:GasFueledErrMsg )  }
 END
 ;*************************************************************************
 
