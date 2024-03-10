@@ -130,6 +130,41 @@ RULE NEW ResZn:NumAffordableCentralLaundryAssignments
 ENDRULE
 
 
+// to facilitate CUAC error reporting - SAC 03/08/24
+RULE NEW DwellingUnit:AffordableHousing
+  DATATYPE
+    Integer
+  DESCRIPTION
+    "flag indicating parent ResZn flagged as AffordableHousing."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    Parent( AffordableHousing )
+ENDRULE
+
+RULE NEW DwellingUnitType:AffordableHousing
+  DATATYPE
+    Integer
+  DESCRIPTION
+    "flag indicating referencing DwellingUnit(s) flagged as AffordableHousing."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (SumRevRef( DwellingUnit:DwellUnitTypeRef, DwellingUnit:AffordableHousing ) > 0)
+    then  1  else  UNDEFINED  endif
+ENDRULE
+
+RULE NEW DwellingUnitType:CUACRef
+  DATATYPE
+    CUAC
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (IfValidAnd( AffordableHousing > 0 )) then  Global( CUAC:Name )
+    else  UNDEFINED  endif
+ENDRULE
+
+
 RULE CUAC:AffordablePVDCSysSize
   MINIMUM
     0 
@@ -2306,7 +2341,6 @@ ENDRULE
 ;                else  PostError(   "Residential common area '%s' includes a nonresidential water heating load but references a DHW system ('%s') that also provides residential water heating, which is not supported (systems must be all-res or all-nonres).", Name, ActiveDHWSystem:Name )
 ;                endif
 
-
 // tracks which enduses are gas fueled: 1-Any, 2-Sum, 3-SpcHtg, 4-WtrHtg, 5-Cookng, 6-Dryer -- SAC 03/06/24
 RULE DwellUnitType:GasFueled[3]
   ; space heating gas?
@@ -2321,13 +2355,12 @@ RULE DwellUnitType:GasFueled[3]
                      default :  0
                   endswitch
        case  "Other Heating and Cooling System"     :
-                     if (T24RHeatingEquipment:UseGas( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr,
+                     if (T24RHeatingEquipment:UseGas( "CodeBase", EnumValue( Proj:StdDesignBase ), "StdVer", ResProj:StdsVersionYr,
                                                       "SysType", ValidOr( HeatEqpTypeAbbrev, "type unknown" ) ) > 0.5)
                      then  1  else  0  endif
        default :  0
     endswitch
 ENDRULE
-
 RULE DwellUnitType:GasFueled[4]
   ; water heating gas?
   DEFAULT
@@ -2350,32 +2383,121 @@ RULE DwellUnitType:GasFueled[4]
       default :  0
     endswitch
 ENDRULE
-
 RULE DwellUnitType:GasFueled[5]
   ; cooking gas?
   DEFAULT
     if (IfValidAnd( HaveCook > 0 ) .AND. IfValidAnd( CookFuel = "Gas" ))
     then  1  else  0  endif
 ENDRULE
-
 RULE DwellUnitType:GasFueled[6]
   ; dryer gas?
   DEFAULT
     if (IfValidAnd( DryerOption != "- none -" ) .AND. IfValidAnd( DryerFuel = "Gas" ))
     then  1  else  0  endif
 ENDRULE
-
 RULE DwellUnitType:GasFueled[1]
   ; ANY enduse (0/1)
   DEFAULT
     if (GasFueled[3] > 0 .OR. GasFueled[4] > 0 .OR. GasFueled[5] > 0 .OR. GasFueled[6] > 0)
     then  1  else  0  endif
 ENDRULE
-
 RULE DwellUnitType:GasFueled[2]
   ; num enduses gas-fueled
   DEFAULT
     GasFueled[3] + GasFueled[4] + GasFueled[5] + GasFueled[6]
+ENDRULE
+
+// reporting of GasFueled DwellUnitType enduse(s) - SAC 03/08/24
+RULE NEW DwellUnitType:GasFueledErrMsg
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (GasFueled[1] < 1) then  UNDEFINED
+    else  Format("- '%s' enduse(s):  ", Name )  endif
+ENDRULE
+;  CHECKSIM
+;    if (Proj:GasType != "None" .OR. GasFueled[1] < 1) then  UNDEFINED
+;    else  Format("Project Fuel Type of 'None' is incompatible with ResZn '%s' gas-fueled enduse(s):  ", Name )  endif
+RULE NEW DwellUnitType:GasFueledErrMsg
+  DEFAULT
+    if (LocalStatus( GasFueledErrMsg ) < 1 .OR. GasFueled[3] < 1) then  UNCHANGED
+    else  GasFueledErrMsg + "space heating"  endif
+ENDRULE
+RULE NEW DwellUnitType:GasFueledErrMsg
+  DEFAULT
+    if (LocalStatus( GasFueledErrMsg ) < 1 .OR. GasFueled[4] < 1) then  UNCHANGED
+    else  if (GasFueled[3] < 1)
+          then  GasFueledErrMsg + "water heating"
+          else  GasFueledErrMsg + ", water heating"
+          endif endif
+ENDRULE
+RULE NEW DwellUnitType:GasFueledErrMsg
+  DEFAULT
+    if (LocalStatus( GasFueledErrMsg ) < 1 .OR. GasFueled[5] < 1) then  UNCHANGED
+    else  if (GasFueled[3] < 1 .AND. GasFueled[4] < 1)
+          then  GasFueledErrMsg + "cooking"
+          else  GasFueledErrMsg + ", cooking"
+          endif endif
+ENDRULE
+RULE NEW DwellUnitType:GasFueledErrMsg
+  DEFAULT
+    if (LocalStatus( GasFueledErrMsg ) < 1 .OR. GasFueled[6] < 1) then  UNCHANGED
+    else  if (GasFueled[3] < 1 .AND. GasFueled[4] < 1 .AND. GasFueled[5] < 1)
+          then  GasFueledErrMsg + "clothes dryer"
+          else  GasFueledErrMsg + ", clothes dryer"
+          endif endif
+ENDRULE
+; RULE NEW DwellUnitType:GasFueledErrMsg
+;   CHECKSIM
+;     if (LocalStatus( GasFueledErrMsg ) < 1) then  UNCHANGED
+;     else  PostError( GasFueledErrMsg )  endif
+; ENDRULE
+
+// reporting of scenario where Proj:GasType = "None" while ResOtherZn includes GasFueled enduse(s) - SAC 03/08/24
+RULE NEW DwellUnitType:GasFueledChkCodeMsg
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  CHECKCODE
+    if (IfValidAnd( DUFloorAreaServed > 0 )==0 .OR. Proj:GasType != "None" .OR. GasFueled[1] < 1) then  UNDEFINED
+    else  Format("Project Fuel Type of 'None' is incompatible with DwellUnitType '%s' gas-fueled enduse(s):  ", Name )  endif
+ENDRULE
+RULE NEW DwellUnitType:GasFueledChkCodeMsg
+  CHECKCODE
+    if (LocalStatus( GasFueledChkCodeMsg ) < 1 .OR. GasFueled[3] < 1) then  UNCHANGED
+    else  GasFueledChkCodeMsg + "space heating"  endif
+ENDRULE
+RULE NEW DwellUnitType:GasFueledChkCodeMsg
+  CHECKCODE
+    if (LocalStatus( GasFueledChkCodeMsg ) < 1 .OR. GasFueled[4] < 1) then  UNCHANGED
+    else  if (GasFueled[3] < 1)
+          then  GasFueledChkCodeMsg + "water heating"
+          else  GasFueledChkCodeMsg + ", water heating"
+          endif endif
+ENDRULE
+RULE NEW DwellUnitType:GasFueledChkCodeMsg
+  CHECKCODE
+    if (LocalStatus( GasFueledChkCodeMsg ) < 1 .OR. GasFueled[5] < 1) then  UNCHANGED
+    else  if (GasFueled[3] < 1 .AND. GasFueled[4] < 1)
+          then  GasFueledChkCodeMsg + "cooking"
+          else  GasFueledChkCodeMsg + ", cooking"
+          endif endif
+ENDRULE
+RULE NEW DwellUnitType:GasFueledChkCodeMsg
+  CHECKCODE
+    if (LocalStatus( GasFueledChkCodeMsg ) < 1 .OR. GasFueled[6] < 1) then  UNCHANGED
+    else  if (GasFueled[3] < 1 .AND. GasFueled[4] < 1 .AND. GasFueled[5] < 1)
+          then  GasFueledChkCodeMsg + "clothes dryer"
+          else  GasFueledChkCodeMsg + ", clothes dryer"
+          endif endif
+ENDRULE
+RULE NEW DwellUnitType:GasFueledChkCodeMsg
+  CHECKCODE
+    if (LocalStatus( GasFueledChkCodeMsg ) < 1) then  UNCHANGED
+    else  PostError( GasFueledChkCodeMsg )  endif
 ENDRULE
 
 // pass DwellUnitType GasFueled up to referencing DwellUnit
@@ -2447,7 +2569,44 @@ RULE ResZn:GasFueled[2]
     GasFueled[3] + GasFueled[4] + GasFueled[5] + GasFueled[6]
 ENDRULE
 
-// pass GasFueled data to AffordableGasFueled
+// pass ResZn GasFueled up to ResProj - SAC 03/08/24
+RULE ResProj:DwellingGasFueled[1]
+  ; ANY enduse (0/1)
+  DEFAULT
+    if (SumAll( ResZn:GasFueled[1] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResProj:DwellingGasFueled[3]
+  ; space heating gas?
+  DEFAULT
+    if (SumAll( ResZn:GasFueled[3] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResProj:DwellingGasFueled[4]
+  ; water heating gas?
+  DEFAULT
+    if (SumAll( ResZn:GasFueled[4] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResProj:DwellingGasFueled[5]
+  ; cooking gas?
+  DEFAULT
+    if (SumAll( ResZn:GasFueled[5] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResProj:DwellingGasFueled[6]
+  ; dryer gas?
+  DEFAULT
+    if (SumAll( ResZn:GasFueled[6] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResProj:DwellingGasFueled[2]
+  ; num enduses gas-fueled
+  DEFAULT
+    DwellingGasFueled[3] + DwellingGasFueled[4] + DwellingGasFueled[5] + DwellingGasFueled[6]
+ENDRULE
+
+// pass ResZn GasFueled data to AffordableGasFueled
 RULE ResZn:AffordableGasFueled[1]
   ; ANY enduse (0/1)
   DEFAULT
@@ -2488,13 +2647,51 @@ RULE ResZn:AffordableGasFueled[2]
     else  0  endif
 ENDRULE
 
+// pass ResZn AffordableGasFueled up to ResProj - SAC 03/08/24
+RULE ResProj:AffordableDwellingGasFueled[1]
+  ; ANY enduse (0/1)
+  DEFAULT
+    if (SumAll( ResZn:AffordableGasFueled[1] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResProj:AffordableDwellingGasFueled[3]
+  ; space heating gas?
+  DEFAULT
+    if (SumAll( ResZn:AffordableGasFueled[3] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResProj:AffordableDwellingGasFueled[4]
+  ; water heating gas?
+  DEFAULT
+    if (SumAll( ResZn:AffordableGasFueled[4] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResProj:AffordableDwellingGasFueled[5]
+  ; cooking gas?
+  DEFAULT
+    if (SumAll( ResZn:AffordableGasFueled[5] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResProj:AffordableDwellingGasFueled[6]
+  ; dryer gas?
+  DEFAULT
+    if (SumAll( ResZn:AffordableGasFueled[6] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResProj:AffordableDwellingGasFueled[2]
+  ; num enduses gas-fueled
+  DEFAULT
+    AffordableDwellingGasFueled[3] + AffordableDwellingGasFueled[4] +
+    AffordableDwellingGasFueled[5] + AffordableDwellingGasFueled[6]
+ENDRULE
+
 
 // tracks which ResOtherZn enduses are gas fueled: 1-Any, 2-Sum, 3-SpcHtg, 4-WtrHtg, 5-Cookng, 6-Dryer -- SAC 03/07/24
 RULE ResOtherZn:GasFueled[3]
-  ; space heating gas?
+  ; space heating gas?  (ignoring AirSys since error reporting already in place there)
   DEFAULT
-    if (EnumValue( Type ) < 10 .AND. EnumValue( CondType ) == 1 .AND.
-        LocalCompAssigned( ActiveHVACSystem ) == ComponentType( "ResHVACSys" ))
+    if (EnumValue( Type ) >= 10 .OR. EnumValue( CondType ) != 1) then  0
+    else if (LocalCompAssigned( ActiveHVACSystem ) == ComponentType( "ResHVACSys" ))
     then  switch (ActiveHVACSystem:Type)
              case  "Heat Pump Heating and Cooling System" :  0
              case  "Central Heating and Cooling System"   :
@@ -2505,78 +2702,129 @@ RULE ResOtherZn:GasFueled[3]
                            default :  0
                         endswitch
              case  "Other Heating and Cooling System"     :
-                        if (T24RHeatingEquipment:UseGas( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr,
+                        if (T24RHeatingEquipment:UseGas( "CodeBase", EnumValue( Proj:StdDesignBase ), "StdVer", ResProj:StdsVersionYr,
                                                          "SysType", ValidOr( ActiveHVACSystem:HeatSysTypeAbbrev, "type unknown" ) ) > 0.5)
                         then  1  else  0  endif
              default :  0
           endswitch
-
-
-    else  0  endif
+    else  0  endif endif
+ENDRULE
+  ; removed following from above rule since gas equipment when Proj:GasType = 'None' is already reported for each AirSys
+  ;  else if (LocalCompAssigned( ActiveHVACSystem ) == ComponentType( "AirSys" ))
+  ;  then  if (IfValidAnd( ActiveHVACSystem:HtgFuelSrc = 1 ))
+  ;        then  1  else  0  endif
+RULE ResOtherZn:GasFueled[4]
+  ; water heating gas?
+  DEFAULT
+    if (IfValidAnd( ShowDHWSysAssignment > 0 )==0) then  0
+    else if (LocalCompAssigned( ActiveDHWSystem ) == ComponentType( "ResDHWSys" ))
+    then  if (IfValidAnd( ActiveDHWSystem:NumFuelHeaters > 0 ))
+          then  1  else  0  endif
+    else  0  endif endif
+ENDRULE
+RULE ResOtherZn:GasFueled[5]
+  ; cooking gas?
+  DEFAULT
+    0
+ENDRULE
+RULE ResOtherZn:GasFueled[6]
+  ; dryer gas?
+  DEFAULT
+    0
+ENDRULE
+RULE ResOtherZn:GasFueled[1]
+  ; ANY enduse (0/1)
+  DEFAULT
+    if (GasFueled[3] > 0 .OR. GasFueled[4] > 0 .OR. GasFueled[5] > 0 .OR. GasFueled[6] > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResOtherZn:GasFueled[2]
+  ; num enduses gas-fueled
+  DEFAULT
+    GasFueled[3] + GasFueled[4] + GasFueled[5] + GasFueled[6]
 ENDRULE
 
-;     switch (HVACSysType)
-;        case  "Heat Pump Heating and Cooling System" :  0
-;        case  "Central Heating and Cooling System"   :
-;                   switch (CentralEqpType)
-;                      case  "Water source heat pump"    :  1  ; assume central boiler gas?
-;                      case  "Variable refrigerant flow" :  0
-;                      case  "Four-pipe fan coil"        :  1
-;                      default :  0
-;                   endswitch
-;        case  "Other Heating and Cooling System"     :
-;                      if (T24RHeatingEquipment:UseGas( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr,
-;                                                       "SysType", ValidOr( HeatEqpTypeAbbrev, "type unknown" ) ) > 0.5)
-;                      then  1  else  0  endif
-;        default :  0
-; 
-; 
-;     CTRL, "ozHVACSystem",       3011, TDCT_Combo,  475, 250, 200, 210, 25, FNT_STD, "",     Type < 10 And CondType = 1 And HVACSysStatus = 3,    0,  0,  "New HVAC system serving this zone"
-; 
-;     CTRL, "AltHVACSystem",      3211, TDCT_Combo,  475, 250, 200, 210, 25, FNT_STD, "",     Type < 10 And CondType = 1 And Proj:ResCompOpt > 1 And HVACSysStatus = 2,    0,  0,  "Altered HVAC system serving this zone"
-; 
-;     CTRL, "exHVACSystem",       3411, TDCT_Combo,  475, 250, 200, 210, 25, FNT_STD, "",     Type < 10 And CondType = 1 And Proj:ResCompOpt > 1 And HVACSysStatus = 1,    0,  0,  "Existing HVAC system serving this zone"
-; 
-; 
-; 
-; 
-; RULE DwellUnitType:GasFueled[4]
-;   ; water heating gas?
-;   DEFAULT
-;     switch (NumDHWSysTypes)
-;       case  1 :  if (IfValidAnd( DHWSysRef[1]:NumFuelHeaters > 0 )) then  1  else  0  endif
-;       case  2 :  if (IfValidAnd( DHWSysRef[1]:NumFuelHeaters > 0 ) .OR.
-;                      IfValidAnd( DHWSysRef[2]:NumFuelHeaters > 0 )) then  1  else  0  endif
-;       case  3 :  if (IfValidAnd( DHWSysRef[1]:NumFuelHeaters > 0 ) .OR.
-;                      IfValidAnd( DHWSysRef[2]:NumFuelHeaters > 0 ) .OR.
-;                      IfValidAnd( DHWSysRef[3]:NumFuelHeaters > 0 )) then  1  else  0  endif
-;       case  4 :  if (IfValidAnd( DHWSysRef[1]:NumFuelHeaters > 0 ) .OR.
-;                      IfValidAnd( DHWSysRef[2]:NumFuelHeaters > 0 ) .OR.
-;                      IfValidAnd( DHWSysRef[3]:NumFuelHeaters > 0 ) .OR.
-;                      IfValidAnd( DHWSysRef[4]:NumFuelHeaters > 0 )) then  1  else  0  endif
-;       case  5 :  if (IfValidAnd( DHWSysRef[1]:NumFuelHeaters > 0 ) .OR.
-;                      IfValidAnd( DHWSysRef[2]:NumFuelHeaters > 0 ) .OR.
-;                      IfValidAnd( DHWSysRef[3]:NumFuelHeaters > 0 ) .OR.
-;                      IfValidAnd( DHWSysRef[4]:NumFuelHeaters > 0 ) .OR.
-;                      IfValidAnd( DHWSysRef[5]:NumFuelHeaters > 0 )) then  1  else  0  endif
-;       default :  0
-;     endswitch
-; ENDRULE
-; 
-; RULE DwellUnitType:GasFueled[1]
-;   ; ANY enduse (0/1)
-;   DEFAULT
-;     if (GasFueled[3] > 0 .OR. GasFueled[4] > 0 .OR. GasFueled[5] > 0 .OR. GasFueled[6] > 0)
-;     then  1  else  0  endif
-; ENDRULE
-; 
-; RULE DwellUnitType:GasFueled[2]
-;   ; num enduses gas-fueled
-;   DEFAULT
-;     GasFueled[3] + GasFueled[4] + GasFueled[5] + GasFueled[6]
-; ENDRULE
+// reporting of scenario where Proj:GasType = "None" while ResOtherZn includes GasFueled enduse(s) - SAC 03/08/24
+RULE NEW ResOtherZn:GasFueledErrMsg
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  CHECKCODE
+    if (Proj:GasType != "None" .OR. GasFueled[1] < 1) then  UNDEFINED
+    else  Format("Project Fuel Type of 'None' is incompatible with ResOtherZn '%s' gas-fueled enduse(s):  ", Name )  endif
+ENDRULE
+RULE NEW ResOtherZn:GasFueledErrMsg
+  CHECKCODE
+    if (LocalStatus( GasFueledErrMsg ) < 1 .OR. GasFueled[3] < 1) then  UNCHANGED
+    else  GasFueledErrMsg + "space heating"  endif
+ENDRULE
+RULE NEW ResOtherZn:GasFueledErrMsg
+  CHECKCODE
+    if (LocalStatus( GasFueledErrMsg ) < 1 .OR. GasFueled[4] < 1) then  UNCHANGED
+    else  if (GasFueled[3] < 1)
+          then  GasFueledErrMsg + "water heating"
+          else  GasFueledErrMsg + ", water heating"
+          endif endif
+ENDRULE
+RULE NEW ResOtherZn:GasFueledErrMsg
+  CHECKCODE
+    if (LocalStatus( GasFueledErrMsg ) < 1 .OR. GasFueled[5] < 1) then  UNCHANGED
+    else  if (GasFueled[3] < 1 .AND. GasFueled[4] < 1)
+          then  GasFueledErrMsg + "cooking"
+          else  GasFueledErrMsg + ", cooking"
+          endif endif
+ENDRULE
+RULE NEW ResOtherZn:GasFueledErrMsg
+  CHECKCODE
+    if (LocalStatus( GasFueledErrMsg ) < 1 .OR. GasFueled[6] < 1) then  UNCHANGED
+    else  if (GasFueled[3] < 1 .AND. GasFueled[4] < 1 .AND. GasFueled[5] < 1)
+          then  GasFueledErrMsg + "clothes dryer"
+          else  GasFueledErrMsg + ", clothes dryer"
+          endif endif
+ENDRULE
+RULE NEW ResOtherZn:GasFueledErrMsg
+  CHECKCODE
+    if (LocalStatus( GasFueledErrMsg ) < 1) then  UNCHANGED
+    else  PostError( GasFueledErrMsg )  endif
+ENDRULE
 
-
+// pass ResOtherZn GasFueled up to ResProj - SAC 03/08/24
+RULE ResProj:OtherZnGasFueled[1]
+  ; ANY enduse (0/1)
+  DEFAULT
+    if (SumAll( ResOtherZn:GasFueled[1] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResProj:OtherZnGasFueled[3]
+  ; space heating gas?
+  DEFAULT
+    if (SumAll( ResOtherZn:GasFueled[3] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResProj:OtherZnGasFueled[4]
+  ; water heating gas?
+  DEFAULT
+    if (SumAll( ResOtherZn:GasFueled[4] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResProj:OtherZnGasFueled[5]
+  ; cooking gas?
+  DEFAULT
+    if (SumAll( ResOtherZn:GasFueled[5] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResProj:OtherZnGasFueled[6]
+  ; dryer gas?
+  DEFAULT
+    if (SumAll( ResOtherZn:GasFueled[6] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResProj:OtherZnGasFueled[2]
+  ; num enduses gas-fueled
+  DEFAULT
+    OtherZnGasFueled[3] + OtherZnGasFueled[4] + OtherZnGasFueled[5] + OtherZnGasFueled[6]
+ENDRULE
 
 
 ; porting of range checks from CBECC-Res - SAC 03/01/23
