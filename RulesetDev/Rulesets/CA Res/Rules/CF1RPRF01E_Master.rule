@@ -6770,6 +6770,15 @@ RULELIST "CF1RPRF01E_Proposed"  1 0 0 1
         endif }
 
     ; RJH 8/15/22 need Ee08_Status rule here
+    "Set IAQVentRpt:CF1R_FanIAQRow:Ee08_Status"    IAQVentRpt:CF1R_FanIAQRow:Ee08_Status  =     ; SAC 04/10/24 (tic #1304)
+      {  if (Proj:AnalysisVersion > 220000 .AND. Proj:RunScope == 2 .AND. LocalCompAssigned( IAQFanRef ) > 0)
+         then  switch (IAQFanRef:Status)
+                  case  1 :  "ExistingUnchanged"    
+                  case  2 :  "Alteration"    
+                  case  3 :  "New" 
+                  default :  UNDEFINED
+               endswitch  
+         else  UNDEFINED  endif  }
 
     ; RJH 20190410 Added Ee07 always populated with "Continuous" as per CEC direction
     "Set IAQVentRpt:CF1R_FanIAQRow:Ee07_VentilationOperationSchedule" IAQVentRpt:CF1R_FanIAQRow:Ee07_VentilationOperationSchedule  = { "Continuous" }
@@ -7990,37 +7999,34 @@ RULELIST "CF1RPRF01E_Proposed"  1 0 0 1
       cf1rSection_FanVA:Action   = {  CreateChildren( cf1rTableFanVA, 1, "TableFanVA" )  }     ; no init needed
   ; ----------------------------------------------------------------------
   ; Rules to create individual IAQ FANS VA table rows
-   "Create cf1rtblRowFanVA for all IAQVentRpt VA instances"
-      IAQVentRpt:CF1R_FanVARow   = {  if (IfValidAnd( IAQCFM > 0 )==0) 
-                                      then  UNDEFINED
-                                      else if (Proj:RunScope = 1)   ; new construction
-                                           then  UNDEFINED
-                                           else CreateComp( cf1rtblRowFanVA, Name + "FanVARow" )
-                                           endif
+   "Create cf1rtblRowFanVA for all IAQVentRpt VA instances"       ; modified to only report Verified-Existing IAQFans - SAC 04/10/24 (tic #1304)
+      IAQVentRpt:CF1R_FanVARow    = {  if (Proj:RunScope = 1 .OR. IfValidAnd( IAQVerifExFanRef:IAQCFM > 0 )==0)  ; new cons or no ex-verif fan assigned
+                                       then  UNDEFINED
+                                       else  CreateComp( cf1rtblRowFanVA, Name + "FanVARow" )
                                        endif  }
    ; ----------------------------------------------------------------------
    ; Rules to populate FANS VA table rows
-    "Set IAQVentRpt:CF1R_FanVARow:FanVA01_DwellingUnitName" IAQVentRpt:CF1R_FanVARow:FanVA01_DwellingUnitName  = {  DwellingUnit  }
-    "Set IAQVentRpt:CF1R_FanVARow:FanVA02_FanFlowCapacity" IAQVentRpt:CF1R_FanVARow:FanVA02_FanFlowCapacity  = {  IAQCFM  }
-    "Set IAQVentRpt:CF1R_FanVARow:FanVA03_FanPowerPerFlow" IAQVentRpt:CF1R_FanVARow:FanVA03_FanPowerPerFlow  = {  WperCFMIAQ  }
+    "Set IAQVentRpt:CF1R_FanVARow:FanVA01_DwellingUnitName" IAQVentRpt:CF1R_FanVARow:FanVA01_DwellingUnitName  = {  IAQVentName                 }  ; was:  DwellingUnit  }
+    "Set IAQVentRpt:CF1R_FanVARow:FanVA02_FanFlowCapacity" IAQVentRpt:CF1R_FanVARow:FanVA02_FanFlowCapacity  = {  IAQVerifExFanRef:IAQCFM       }  ; was: IAQCFM  }
+    "Set IAQVentRpt:CF1R_FanVARow:FanVA03_FanPowerPerFlow" IAQVentRpt:CF1R_FanVARow:FanVA03_FanPowerPerFlow  = {  IAQVerifExFanRef:WperCFMIAQ   }  ; was: WperCFMIAQ  }
     "Set IAQVentRpt:CF1R_FanVARow:FanVA04_VentilationSystemType" IAQVentRpt:CF1R_FanVARow:FanVA04_VentilationSystemType  =  
-            {  switch( IAQFanType )
-                  case "Exhaust"  : "ExhaustVent"   
-                  case "Supply"   : "SupplyVent"
-                  case "Balanced" : if (IfValidAnd( IAQRecovEffect > 0 ))
-                                    then  "BalancedHRV"
-                                    else  "Balanced"  endif
-                  case "Default"  : "ExhaustVent"
+            {  switch( IAQVerifExFanRef:IAQFanType )
+                  case  1 : "ExhaustVent"   
+                  case  2 : "SupplyVent"
+                  case  3 :   if (IfValidAnd( IAQVerifExFanRef:IncludesRecov > 0 ) .AND. IfValidAnd( IAQVerifExFanRef:SensRecovEff > 0 ) .AND.
+                                  IfValidAnd( IAQVerifExFanRef:AdjSensRecovEff > 0 ))
+                              then  "BalancedHRV"
+                              else  "Balanced"  endif
                   default  :  UNDEFINED
                endswitch  }         ; other options: BalancedCentralVent / BalancedERV / CentralFanIntegrated / SupplyCentralVent
    "Set IAQVentRpt:CF1R_FanVARow:FanVA05_IncludesHeatEnergyRecovery"                 IAQVentRpt:CF1R_FanVARow:FanVA05_IncludesHeatEnergyRecovery  =  
-      {  if (IAQFanRef:IncludesRecov > 0) then "true" else "false" endif  }
+      {  if (IfValidAnd( CF1R_FanVARow:FanVA04_VentilationSystemType = "BalancedHRV" )) then "true" else "false" endif  }
    "Set IAQVentRpt:CF1R_FanVARow:FanVA06_SensibleRecoveryEfficiency"           IAQVentRpt:CF1R_FanVARow:FanVA06_SensibleRecoveryEfficiency  =     ; SAC 2/10/20 (tic #1174)
-      {  if (IfValidAnd( Proj:AnalysisVersion >= 190200 ) .AND. IfValidAnd( SensRecovEff > 0 )) then  int( SensRecovEff + 0.5 )  else  UNDEFINED  endif  }
+      {  if (IfValidAnd( Proj:AnalysisVersion >= 190200 ) .AND. IfValidAnd( IAQVerifExFanRef:SensRecovEff > 0 )) then  int( IAQVerifExFanRef:SensRecovEff + 0.5 )  else  UNDEFINED  endif  }
    "Set IAQVentRpt:CF1R_FanVARow:FanVA06_NotApplicableMessage"                 IAQVentRpt:CF1R_FanVARow:FanVA06_NotApplicableMessage  =  
       {  if (LocalStatus( CF1R_FanVARow:FanVA06_SensibleRecoveryEfficiency ) < 1) then  "n/a"  else  UNDEFINED  endif  }
    "Set IAQVentRpt:CF1R_FanVARow:FanVA07_AdjustedSensibleRecoveryEfficiency"   IAQVentRpt:CF1R_FanVARow:FanVA07_AdjustedSensibleRecoveryEfficiency  =
-      {  if (IfValidAnd( Proj:AnalysisVersion >= 190200 ) .AND. IfValidAnd( AdjSensRecovEff > 0 )) then  int( AdjSensRecovEff + 0.5 )  else  UNDEFINED  endif  }
+      {  if (IfValidAnd( Proj:AnalysisVersion >= 190200 ) .AND. IfValidAnd( IAQVerifExFanRef:AdjSensRecovEff > 0 )) then  int( IAQVerifExFanRef:AdjSensRecovEff + 0.5 )  else  UNDEFINED  endif  }
    "Set IAQVentRpt:CF1R_FanVARow:FanVA07_NotApplicableMessage"                 IAQVentRpt:CF1R_FanVARow:FanVA07_NotApplicableMessage  =  
       {  if (LocalStatus( CF1R_FanVARow:FanVA07_AdjustedSensibleRecoveryEfficiency ) < 1) then  "n/a"  else  UNDEFINED  endif  }
   ; ----------------------------------------------------------------------
@@ -9228,13 +9234,14 @@ RULELIST "CF1RPRF01E_Final_SingleOrientationEUI"  1 0 0 1
         + ( StrToFlt(ValidOr(Proj:ResultSummary[1]:Enduse10[3], "0")) * 100 ) ) / Proj:CondFloorArea ) )  }
 
 ; Net EUI Margin
-   "Set cf1rSingleOrientationEUI:EuiNet03_MarginNetEUI"  cf1rSingleOrientationEUI:EuiNet03_MarginNetEUI  = 
-      {  if (IfValidAnd( EuiNet02_ProposedDesignNetEUI > 0 )==0) then  UNDEFINED
+   "Set cf1rSingleOrientationEUI:EuiNet03_MarginNetEUI"  cf1rSingleOrientationEUI:EuiNet03_MarginNetEUI  =           ; revised logic to handle negative EuiNet02_ProposedDesignNetEUI - SAC 03/27/24
+      {  if (LocalStatus( EuiNet02_ProposedDesignNetEUI ) < 1) then  UNDEFINED
          else  atof( Format( "%.2f", EuiNet01_StandardDesignNetEUI - EuiNet02_ProposedDesignNetEUI ) )  endif  }
 
 ; Net EUI Margin Percent
-   "Set cf1rSingleOrientationEUI:EuiNet04_MarginPctNetEUI"  cf1rSingleOrientationEUI:EuiNet04_MarginPctNetEUI  =
-      {  if (IfValidAnd( EuiNet01_StandardDesignNetEUI > 0 )==0) then  UNDEFINED
+   "Set cf1rSingleOrientationEUI:EuiNet04_MarginPctNetEUI"  cf1rSingleOrientationEUI:EuiNet04_MarginPctNetEUI  =     ; revised logic to handle negative EuiNet01_StandardDesignNetEUI - SAC 03/27/24
+      {  if (LocalStatus( EuiNet01_StandardDesignNetEUI ) < 1 .OR. LocalStatus( EuiNet03_MarginNetEUI ) < 1 .OR.
+             IfValidAnd(  EuiNet01_StandardDesignNetEUI = 0 )) then  UNDEFINED
          else  atof( Format( "%.2f", 100 * EuiNet03_MarginNetEUI / EuiNet01_StandardDesignNetEUI ) )  endif  }
 
 END
@@ -9302,7 +9309,7 @@ RULELIST "CF1RPRF01E_North_cf1rMultipleOrientationEUI"  1 0 0 1
 
 ; Net EUI Margin Percent
    "Set cf1rMultipleOrientationEUI:EuiNet04_MarginPctNetEUI"  cf1rMultipleOrientationEUI:EuiNet04_MarginPctNetEUI  =
-      {  if (IfValidAnd( EuiNet01_StandardDesignNetEUI > 0 )==0) then  UNDEFINED
+      {  if (IfValidAnd( EuiNet01_StandardDesignNetEUI != 0 )==0) then  UNDEFINED
          else  atof( Format( "%.2f", 100 * EuiNet03_MarginNetEUI / EuiNet01_StandardDesignNetEUI ) )  endif }
 END
 ;*************************************************************************
@@ -9351,7 +9358,7 @@ RULELIST "CF1RPRF01E_East_cf1rMultipleOrientationEUI"  1 0 0 1
 
 ; Net EUI Margin Percent
    "Set cf1rMultipleOrientationEUI:EuiNet04_MarginPctNetEUI"  cf1rMultipleOrientationEUI:EuiNet04_MarginPctNetEUI  =
-      {  if (IfValidAnd( EuiNet01_StandardDesignNetEUI > 0 )==0) then  UNDEFINED
+      {  if (IfValidAnd( EuiNet01_StandardDesignNetEUI != 0 )==0) then  UNDEFINED
          else  atof( Format( "%.2f", 100 * EuiNet03_MarginNetEUI / EuiNet01_StandardDesignNetEUI ) )  endif }
 END
 ;*************************************************************************
@@ -9400,7 +9407,7 @@ RULELIST "CF1RPRF01E_South_cf1rMultipleOrientationEUI"  1 0 0 1
 
 ; Net EUI Margin Percent
    "Set cf1rMultipleOrientationEUI:EuiNet04_MarginPctNetEUI"  cf1rMultipleOrientationEUI:EuiNet04_MarginPctNetEUI  =
-      {  if (IfValidAnd( EuiNet01_StandardDesignNetEUI > 0 )==0) then  UNDEFINED
+      {  if (IfValidAnd( EuiNet01_StandardDesignNetEUI != 0 )==0) then  UNDEFINED
          else  atof( Format( "%.2f", 100 * EuiNet03_MarginNetEUI / EuiNet01_StandardDesignNetEUI ) )  endif }
 END
 ;*************************************************************************
@@ -9449,7 +9456,7 @@ RULELIST "CF1RPRF01E_West_cf1rMultipleOrientationEUI"  1 0 0 1
 
 ; Net EUI Margin Percent
    "Set cf1rMultipleOrientationEUI:EuiNet04_MarginPctNetEUI"  cf1rMultipleOrientationEUI:EuiNet04_MarginPctNetEUI  =
-      {  if (IfValidAnd( EuiNet01_StandardDesignNetEUI > 0 )==0) then  UNDEFINED
+      {  if (IfValidAnd( EuiNet01_StandardDesignNetEUI != 0 )==0) then  UNDEFINED
          else  atof( Format( "%.2f", 100 * EuiNet03_MarginNetEUI / EuiNet01_StandardDesignNetEUI ) )  endif }
         
 END
