@@ -36,13 +36,18 @@ RULE ResOtherZn:RecptPwrDens
   DESCRIPTION
     "The use of electrical devices represented by a receptacle power density (W/ft2) and associated
      with the occupancy type selected."
+  HELP
+    "This power does not include clothes washer/dryer in the laundry area. The washer and dryer
+     power is calculated separately based on dwelling unit inputs."
   DEFAULT
     if( SpcFunc = "- specify -" .OR. IfValidAnd( Area > 0 ) = 0 )
     then 0
     else if( SpcFunc = "Computer Room" )
     then 20 ; "Computer Room" - 20 W/ft2 is Standard's definition for 'Computer Room'
+    else if( SpcFunc = "Laundry Area" )
+    then 0
     else SpaceFunctionData:RecptPwrDens( "FuncType", SpcFunc )
-    endif endif
+    endif endif endif
 ENDRULE
 
 RULE ResOtherZn:RecptRadFrac
@@ -76,6 +81,315 @@ RULE ResOtherZn:RecptSchRef
     else RuleLibrary( Sch, SpaceFunctionGroups:RecptSchRef( "FuncGroup", FuncSchGrp ) )
     endif
 ENDRULE
+
+// ********** Process Load ******************************************
+
+// -------------- Gas Equipment Power Density --------------------
+RULE ResOtherZn:GasEqpPwrDens
+  DESCRIPTION
+    "The use of gas devices represented by a gas equipment annual average 
+     power density (Btu/h-ft2) and associated with the occupancy type 
+     selected from the Area Category Method or Complete Building Method in 
+     ACM Appendix 5.4A BUT does not including laundry equipment power."
+  INPUTCLASS
+    Default
+  MINIMUM 
+    0
+  COMMONMAXIMUM
+    20
+  MAXIMUM 
+    100
+  UNITS 
+    Btu/hr-ft2
+  DEFAULT
+    if( Proj:GasType = "None" )
+    then 0
+    else if( SpcFunc = "Laundry Area" )
+    then 0
+    else SpaceFunctionData:GasEqpPwrDens("FuncType",SpcFunc)
+    endif endif
+  CHECKCODE
+    if( Proj:GasType = "None" .AND. IfValidAnd( GasEqpPwrDens > 0 ) )
+	  then PostError("Residential Other Zone '%s' specifies process gas equipment 
+	                 but the project gas type is specified as none.  Make the 
+	                 process gas equipment load zero or change the project gas 
+	                 type.", Name)
+	  else if( Proj:GasType != "None" .AND. SpcFunc != "Laundry Area" .AND.
+	           IfValidAnd( GasEqpPwrDens < SpaceFunctionData:GasEqpPwrDens("FuncType", SpcFunc) ) )
+	  then PostError("Residential Other Zone '%s' specifies process gas equipment 
+	                 power lower than the prescribed value.  Make the process gas
+	                 equipment power equal or greater than the default value.", Name) 
+	  else UNCHANGED
+    endif endif
+ENDRULE
+
+// -------------- Gas Equipment Radiation Fraction --------------------
+RULE ResOtherZn:GasEqpRadFrac
+  DESCRIPTION
+    "The fraction of radiant heat gain to a space based on appliance energy use."
+  HELP
+    "Fraction convective (sensible) is typically equal to 1.0 minus fraction
+     radiant, minus fraction latent, minus fraction lost."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( LocalStatus(GasEqpPwrDens) = 0 )
+    then UNDEFINED
+    else 0.15
+    endif
+ENDRULE
+
+// -------------- Gas Equipment Latent Fraction --------------------
+RULE ResOtherZn:GasEqpLatFrac
+  DESCRIPTION
+    "The fraction of latent heat gain to a space based on appliance energy
+     use."
+  HELP
+    "Fraction convective (sensible) is typically equal to 1.0 minus fraction
+     radiant, minus fraction latent, minus fraction lost."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( LocalStatus(GasEqpPwrDens) = 0 )
+    then UNDEFINED
+    else 0
+    endif
+ENDRULE
+
+// -------------- Gas Equipment lost Fraction --------------------
+RULE ResOtherZn:GasEqpLostFrac
+  DESCRIPTION
+    "The fraction of heat lost to the exterior based on appliance energy use."
+  HELP
+    "Fraction convective (sensible) is typically equal to 1.0 minus fraction
+     radiant, minus fraction latent, minus fraction lost."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( LocalStatus(GasEqpPwrDens) = 0 )
+    then UNDEFINED
+    else 0.85
+    endif
+  CHECKSIM
+    if( Int( ValidOr( GasEqpRadFrac ,0 ) *100 )/100 + 
+        Int( ValidOr( GasEqpLatFrac ,0 ) *100 )/100 + 
+        Int( ValidOr( GasEqpLostFrac ,0 ) *100 )/100 > 1.0 )
+    then 
+      PostError("The sum of the gas equipment radiant, latent, and lost fractions
+                 is greater than 1.0 in Residential Other Zone '%s'. Revise for 
+                 consistency with this requirement.", Name)
+    else UNCHANGED
+    endif
+ENDRULE
+
+// -------------- Gas Equipment Schedule --------------------
+RULE ResOtherZn:GasEqpSchRef
+  DESCRIPTION
+    "The use of gas equipment represented by a a 24 hour schedule
+    (fraction of density) associated with the occupancy type selected from the
+     Area Category Method or Complete Building Method in ACM Appendix 5.4B."  
+  INPUTCLASS
+    Prescribed
+  SIZING_PROPOSED
+    if( LocalStatus( GasEqpPwrDens ) > 0 ) 
+    then RuleLibrary( Schedule, SpaceFunctionGroups:GasEqpSchRef("FuncGroup", FuncSchGrp ) )
+    else UNDEFINED
+    endif
+ENDRULE
+
+// -------------- Process Electrical Power Density --------------------
+RULE ResOtherZn:ProcElecPwrDens
+  DESCRIPTION
+    "Process load is the electric energy consumption in the conditioned space
+     of a building resulting from an activity or treatment not related to the
+     space conditioning, lighting, service water heating, or ventilating of a
+     building as it relates to human occupancy.  Process load may include
+     convective (sensible) and/or latent components " 
+  INPUTCLASS
+    Optional
+  MINIMUM 
+    0
+  COMMONMAXIMUM
+    10
+  MAXIMUM 
+    100
+  UNITS 
+    W/h-ft2
+  DEFAULT
+    UNDEFINED
+ENDRULE
+
+// -------------- Process Electrical Radiation Fraction --------------------
+RULE ResOtherZn:ProcElecRadFrac
+  DESCRIPTION
+    "The fraction of radiant heat gain to a space based on appliance energy use."
+  HELP
+    "Fraction convective (sensible) is typically equal to 1.0 minus fraction
+     radiant, minus fraction latent, minus fraction lost."
+  INPUTCLASS
+    Optional
+  DEFAULT
+    UNDEFINED
+ENDRULE
+
+// -------------- Process Electrical Latent Fraction --------------------
+RULE ResOtherZn:ProcElecLatFrac
+  DESCRIPTION
+    "The fraction of latent heat gain to a space based on appliance energy
+     use."
+  HELP
+    "Fraction convective (sensible) is typically equal to 1.0 minus fraction
+     radiant, minus fraction latent, minus fraction lost." 
+  INPUTCLASS
+    Optional
+  DEFAULT
+    UNDEFINED
+ENDRULE
+
+// -------------- Process Electrical Lost Fraction --------------------
+RULE ResOtherZn:ProcElecLostFrac
+  DESCRIPTION
+    "The fraction of the equipment heat that is 'lost' to the exterior, i.e. does
+     not impact the zone energy balance."
+  HELP
+    "Fraction convective (sensible) is equal to:
+     1.0 – (Fraction Latent + Fraction Radiant + Fraction Lost).
+     Therefore, the sum of the fractions cannot exceed 1.0."
+  INPUTCLASS
+    Optional
+  DEFAULT
+    UNDEFINED
+  CHECKSIM
+    if( Int( ValidOr( ProcElecRadFrac ,0 ) *100 )/100 + 
+        Int( ValidOr( ProcElecLatFrac ,0 ) *100 )/100 + 
+        Int( ValidOr( ProcElecLostFrac ,0 ) *100 )/100 > 1.0 )
+    then 
+      PostError("The sum of the process electric radiant, latent, and lost fractions
+                 is greater than 1.0 in Residential Other Zone '%s'. Revise for 
+                 consistency with this requirement.", Name)
+    else UNCHANGED
+    endif
+ENDRULE
+
+// -------------- Process Electrical Schedule Reference --------------------
+RULE ResOtherZn:ProcElecSchRef
+  DESCRIPTION
+    "The use of process electric represented by a a 24 hour schedule
+    (fraction of density) associated with the occupancy type selected from the
+     Area Category Method or Complete Building Method in ACM Appendix 5.4B."  
+  INPUTCLASS
+    Optional
+  DEFAULT
+    UNDEFINED
+  CHECKCODE
+    if( IfValidAnd( ProcElecPwrDens > 0 ) .AND. LocalCompAssigned(ProcElecSchRef) < 1 )
+    then
+      PostError("A schedule is required for all Process Electric loads greater than 0.")
+    else UNCHANGED
+    endif
+ENDRULE
+
+// -------------- Process Gas Power Density --------------------
+RULE ResOtherZn:ProcGasPwrDens
+  DESCRIPTION
+    "Process load is the gas energy consumption in the conditioned space of a
+     building resulting from an activity or treatment not related to the space
+     conditioning, lighting, service water heating, or ventilating of a
+     building as it relates to human occupancy.  Process load may include
+     convective (sensible) and/or latent components " 
+  INPUTCLASS
+    Optional
+  MINIMUM 
+    0
+  COMMONMAXIMUM
+    20
+  MAXIMUM 
+    100
+  UNITS 
+    Btu/hr-ft2
+  DEFAULT
+    UNDEFINED
+  CHECKCODE
+    if( Proj:GasType = "None" .AND. IfValidAnd( ProcGasPwrDens > 0 ) )
+    then
+      PostError("Residential Other Zone '%s' specifies a process gas load 
+                 but the project gas type is specified as none.  Make the 
+                 process gas load zero or change the project gas 
+                 type.", Name)
+    else UNCHANGED
+    endif
+ENDRULE
+
+// -------------- Process Gas Radiation Fraction --------------------
+RULE ResOtherZn:ProcGasRadFrac
+  DESCRIPTION
+    "The fraction of radiant heat gain to a space based on appliance energy use."
+  HELP
+    "Fraction convective (sensible) is typically equal to 1.0 minus fraction
+     radiant, minus fraction latent, minus fraction lost."
+  INPUTCLASS
+    Optional
+  DEFAULT
+    UNDEFINED
+ENDRULE
+
+// -------------- Process Gas Latent Fraction --------------------
+RULE ResOtherZn:ProcGasLatFrac
+  DESCRIPTION
+    "The fraction of latent heat gain to a space based on appliance energy
+     use."
+  HELP
+    "Fraction convective (sensible) is typically equal to 1.0 minus fraction
+     radiant, minus fraction latent, minus fraction lost." 
+  INPUTCLASS
+    Optional
+  DEFAULT
+    UNDEFINED
+ENDRULE
+
+// -------------- Process Gas Lost Fraction --------------------
+RULE ResOtherZn:ProcGasLostFrac
+  DESCRIPTION
+    "The fraction of the equipment heat that is 'lost' to the exterior, i.e. does
+     not impact the zone energy balance."
+  HELP
+    "Fraction convective (sensible) is equal to:
+     1.0 – (Fraction Latent + Fraction Radiant + Fraction Lost).
+     Therefore, the sum of the fractions cannot exceed 1.0."
+  INPUTCLASS
+    Optional
+  DEFAULT
+    UNDEFINED
+  CHECKSIM
+    if( Int( ValidOr( ProcGasRadFrac ,0 ) *100 )/100 + 
+        Int( ValidOr( ProcGasLatFrac ,0 ) *100 )/100 + 
+        Int( ValidOr( ProcGasLostFrac ,0 ) *100 )/100 > 1.0 )
+    then 
+      PostError("The sum of the process gas radiant, latent, and lost fractions
+                 is greater than 1.0 in Residential Other Zone '%s'. Revise for 
+                 consistency with this requirement.", Name)
+    else UNCHANGED
+    endif
+ENDRULE
+
+// -------------- Process Gas Schedule Reference --------------------
+RULE ResOtherZn:ProcGasSchRef
+  DESCRIPTION
+    "The use of process gas equipment represented by a a 24 hour schedule
+    (fraction of density) associated with the occupancy type selected from the
+     Area Category Method or Complete Building Method in ACM Appendix 5.4B."
+  INPUTCLASS
+    Optional
+  DEFAULT
+    UNDEFINED
+  CHECKCODE
+    if( IfValidAnd( ProcGasPwrDens > 0 ) .AND. LocalCompAssigned(ProcGasSchRef) < 1 )
+    then
+      PostError("A schedule is required for all Process Gas loads greater than 0.")
+    else UNCHANGED
+    endif
+ENDRULE
+
 
 // ********** Appliances ********************************************
 ; SAC 9/20/19 (MFamProto)
@@ -141,6 +455,7 @@ RULE ResOtherZn:Appl_DryerGain[3]
   DEFAULT
     0
 ENDRULE
+
 
 // ********** Laundry ********************************************
   ; clothes washer gain - handled by assignment of OtherZones - SAC 9/10/19 (MFamProto)

@@ -942,6 +942,114 @@ RULELIST "CSE_SimulationPrep_Zones_IntGains_part2" 1 0 0 1
 	"Set ResZn:GainRESNET:gnFrLat"				ResZn:GainRESNET:gnFrLat	= { 0.1 }
 ;	"Set ResZn:GainRESNET:gnEndUse"			ResZn:GainRESNET:gnEndUse = { "RESNET" }
 
+; ********** OtherZone Process Loads **********
+  ; Gas equipment
+   "Create new ResOtherZn:GainGasEqp"  ResOtherZn:GainGasEqp =
+     { if(IfValidAnd( GasEqpPwrDens > 0 ) == 0 .OR. LocalCompAssigned( GasEqpSchRef ) < 1 ) then UNCHANGED
+       else CreateComp( cseGAIN, substr( Name, 0, 47 ) + "-znGEL" ) endif }
+   "Set ResOtherZn:GainGasEqp parent cseZONE"      ResOtherZn:GainGasEqp:Parent = { Local( CSE_ZONE ) }
+   "Set ResOtherZn:GainGasEqp gnPower_x"           ResOtherZn:GainGasEqp:gnPower_x =
+     { if( IfValidAnd( GasEqpSchRef:NumWeeks = 1 )==0 .OR. 
+           LocalCompAssigned( GasEqpSchRef:SchWeekRef[1]:SchDaySunRef ) < 1 .OR. LocalCompAssigned( GasEqpSchRef:SchWeekRef[1]:SchDaySatRef ) < 1 .OR. 
+           LocalCompAssigned( GasEqpSchRef:SchWeekRef[1]:SchDayHolRef ) < 1 .OR. LocalCompAssigned( GasEqpSchRef:SchWeekRef[1]:SchDayMonRef ) < 1 )
+       then PostError( "Invalid GasEqpSchRef for ResidentialOtherZone '%s'.", Name )
+       else Format( "%g * %g * select( $dsDay==1, 0, $dsDay==2, 1, $DOWH==1, hourval(%s), $DOWH==8, hourval(%s), $DOWH==7, hourval(%s), default hourval(%s) )",
+                    GasEqpPwrDens, ValidOr( Area, 0 ), SchDayHoursString( GasEqpSchRef:SchWeekRef[1]:SchDaySunRef ), SchDayHoursString( GasEqpSchRef:SchWeekRef[1]:SchDayHolRef ),
+                                                       SchDayHoursString( GasEqpSchRef:SchWeekRef[1]:SchDaySatRef ), SchDayHoursString( GasEqpSchRef:SchWeekRef[1]:SchDayMonRef ) )
+       endif }
+   "Set ResOtherZn:GainGasEqp:gnFrZn"     ResOtherZn:GainGasEqp:gnFrZn   = { 1- ValidOr( GasEqpLostFrac, 0 ) }
+   "Set ResOtherZn:GainGasEqp:gnFrRad"    ResOtherZn:GainGasEqp:gnFrRad  = { if( GainGasEqp:gnFrZn = 0 ) then 0 else ValidOr( GasEqpRadFrac, 0 ) / GainGasEqp:gnFrZn endif }
+   "Set ResOtherZn:GainGasEqp:gnFrLat"    ResOtherZn:GainGasEqp:gnFrLat  = { if( GainGasEqp:gnFrZn = 0 ) then 0 else ValidOr( GasEqpLatFrac, 0 ) / GainGasEqp:gnFrZn endif }
+   "Set ResOtherZn:GainGasEqp:gnEndUse"   ResOtherZn:GainGasEqp:gnEndUse = { "Proc" }
+   "Set ResOtherZn:GainGasEqp:gnMeter"    ResOtherZn:GainGasEqp:gnMeter  = { CSE_NatGasMETER }
+
+  ; Process Electrical
+   "Create new ResOtherZn:GainProcElec"  ResOtherZn:GainProcElec =
+     { if(IfValidAnd( ProcElecPwrDens > 0 ) == 0 .OR. LocalCompAssigned( ProcElecSchRef ) < 1 ) then UNCHANGED
+       else CreateComp( cseGAIN, substr( Name, 0, 47 ) + "-znPEL" ) endif }
+   "Set ResOtherZn:GainProcElec parent cseZONE"      ResOtherZn:GainProcElec:Parent = { Local( CSE_ZONE ) }
+   "Set ResOtherZn:GainProcElec gnPower_x"           ResOtherZn:GainProcElec:gnPower_x =
+     { if( IfValidAnd( ProcElecSchRef:NumWeeks = 1 )==0 )
+       then PostError( "ProcElecSch with different week schedules is not supported for ResidentialOtherZone '%s'.", Name )
+       else if( LocalCompAssigned( ProcElecSchRef:SchWeekRef[1]:SchDaySunRef ) < 1 .OR. LocalCompAssigned( ProcElecSchRef:SchWeekRef[1]:SchDaySatRef ) < 1 .OR. 
+                LocalCompAssigned( ProcElecSchRef:SchWeekRef[1]:SchDayHolRef ) < 1 .OR. LocalCompAssigned( ProcElecSchRef:SchWeekRef[1]:SchDayMonRef ) < 1 )
+       then PostError( "Invalid ProcElecSchRef for ResidentialOtherZone '%s'.", Name )
+       else Format( "%g * %g * 3.412 * select( $dsDay==1, 0, $dsDay==2, hourval(%s), $DOWH==1, hourval(%s), $DOWH==8, hourval(%s), $DOWH==7, hourval(%s), default hourval(%s) )",
+                    ProcElecPwrDens, ValidOr( Area, 0 ), SchDayHoursString( ProcElecSchRef:SchWeekRef[1]:SchDayMonRef ), ; use WD for cooling, ticket 3581
+                    SchDayHoursString( ProcElecSchRef:SchWeekRef[1]:SchDaySunRef ), SchDayHoursString( ProcElecSchRef:SchWeekRef[1]:SchDayHolRef ),
+                    SchDayHoursString( ProcElecSchRef:SchWeekRef[1]:SchDaySatRef ), SchDayHoursString( ProcElecSchRef:SchWeekRef[1]:SchDayMonRef ) )
+       endif endif }
+   "Set ResOtherZn:GainProcElec:gnFrZn"     ResOtherZn:GainProcElec:gnFrZn   = { 1- ValidOr( ProcElecLostFrac, 0 ) }
+   "Set ResOtherZn:GainProcElec:gnFrRad"    ResOtherZn:GainProcElec:gnFrRad  = { if( GainProcElec:gnFrZn = 0 ) then 0 else ValidOr( ProcElecRadFrac, 0 ) / GainProcElec:gnFrZn endif }
+   "Set ResOtherZn:GainProcElec:gnFrLat"    ResOtherZn:GainProcElec:gnFrLat  = { if( GainProcElec:gnFrZn = 0 ) then 0 else ValidOr( ProcElecLatFrac, 0 ) / GainProcElec:gnFrZn endif }
+   "Set ResOtherZn:GainProcElec:gnEndUse"   ResOtherZn:GainProcElec:gnEndUse = { "Proc" }
+   "Set ResOtherZn:GainProcElec:gnMeter"    ResOtherZn:GainProcElec:gnMeter  = { CSE_ElecMETER }
+
+  ; Process Gas
+   "Create new ResOtherZn:GainProcGas"  ResOtherZn:GainProcGas =
+     { if(IfValidAnd( ProcGasPwrDens > 0 ) == 0 .OR. LocalCompAssigned( ProcGasSchRef ) < 1 ) then UNCHANGED
+       else CreateComp( cseGAIN, substr( Name, 0, 47 ) + "-znPGL" ) endif }
+   "Set ResOtherZn:GainProcGas parent cseZONE"      ResOtherZn:GainProcGas:Parent = { Local( CSE_ZONE ) }
+   "Set ResOtherZn:GainProcGas gnPower_x"           ResOtherZn:GainProcGas:gnPower_x =
+     { if( IfValidAnd( ProcGasSchRef:NumWeeks = 1 )==0 )
+       then PostError( "ProcGasSch with different week schedules is not supported for ResidentialOtherZone '%s'.", Name )
+       else if( LocalCompAssigned( ProcGasSchRef:SchWeekRef[1]:SchDaySunRef ) < 1 .OR. LocalCompAssigned( ProcGasSchRef:SchWeekRef[1]:SchDaySatRef ) < 1 .OR. 
+                LocalCompAssigned( ProcGasSchRef:SchWeekRef[1]:SchDayHolRef ) < 1 .OR. LocalCompAssigned( ProcGasSchRef:SchWeekRef[1]:SchDayMonRef ) < 1 )
+       then PostError( "Invalid ProcGasSchRef for ResidentialOtherZone '%s'.", Name )
+       else Format( "%g * %g * select( $dsDay==1, 0, $dsDay==2, hourval(%s), $DOWH==1, hourval(%s), $DOWH==8, hourval(%s), $DOWH==7, hourval(%s), default hourval(%s) )",
+                    ProcGasPwrDens, ValidOr( Area, 0 ), SchDayHoursString( ProcGasSchRef:SchWeekRef[1]:SchDayMonRef ), ; use WD for cooling, ticket 3581
+                    SchDayHoursString( ProcGasSchRef:SchWeekRef[1]:SchDaySunRef ), SchDayHoursString( ProcGasSchRef:SchWeekRef[1]:SchDayHolRef ),
+                    SchDayHoursString( ProcGasSchRef:SchWeekRef[1]:SchDaySatRef ), SchDayHoursString( ProcGasSchRef:SchWeekRef[1]:SchDayMonRef ) )
+       endif endif }
+   "Set ResOtherZn:GainProcGas:gnFrZn"     ResOtherZn:GainProcGas:gnFrZn   = { 1- ValidOr( ProcGasLostFrac, 0 ) }
+   "Set ResOtherZn:GainProcGas:gnFrRad"    ResOtherZn:GainProcGas:gnFrRad  = { if( GainProcGas:gnFrZn = 0 ) then 0 else ValidOr( ProcGasRadFrac, 0 ) / GainProcGas:gnFrZn endif }
+   "Set ResOtherZn:GainProcGas:gnFrLat"    ResOtherZn:GainProcGas:gnFrLat  = { if( GainProcGas:gnFrZn = 0 ) then 0 else ValidOr( ProcGasLatFrac, 0 ) / GainProcGas:gnFrZn endif }
+   "Set ResOtherZn:GainProcGas:gnEndUse"   ResOtherZn:GainProcGas:gnEndUse = { "Proc" }
+   "Set ResOtherZn:GainProcGas:gnMeter"    ResOtherZn:GainProcGas:gnMeter  = { CSE_NatGasMETER }
+
+; ********** OtherZone Elevator/Escalator **********
+  ; Elevator
+   "Create new ResOtherZn:GainElev"  ResOtherZn:GainElev =
+     { if(IfValidAnd( ElevPwr > 0 ) == 0 .OR. LocalCompAssigned( ElevSchRef ) < 1 ) then UNCHANGED
+       else CreateComp( cseGAIN, substr( Name, 0, 47 ) + "-znELEV" ) endif }
+   "Set ResOtherZn:GainElev parent cseZONE"      ResOtherZn:GainElev:Parent = { Local( CSE_ZONE ) }
+   "Set ResOtherZn:GainElev gnPower_x"           ResOtherZn:GainElev:gnPower_x =
+     { if( IfValidAnd( ElevSchRef:NumWeeks = 1 )==0 .OR.
+           LocalCompAssigned( ElevSchRef:SchWeekRef[1]:SchDaySunRef ) < 1 .OR. LocalCompAssigned( ElevSchRef:SchWeekRef[1]:SchDaySatRef ) < 1 .OR. 
+           LocalCompAssigned( ElevSchRef:SchWeekRef[1]:SchDayHolRef ) < 1 .OR. LocalCompAssigned( ElevSchRef:SchWeekRef[1]:SchDayMonRef ) < 1 )
+       then PostError( "Invalid ElevSchRef for ResidentialOtherZone '%s'.", Name )
+       else Format( "%g * 3.412 * select( $dsDay==1, 0, $dsDay==2, 1, $DOWH==1, hourval(%s), $DOWH==8, hourval(%s), $DOWH==7, hourval(%s), default hourval(%s) )",
+                    ElevPwr, 
+                    SchDayHoursString( ElevSchRef:SchWeekRef[1]:SchDaySunRef ), SchDayHoursString( ElevSchRef:SchWeekRef[1]:SchDayHolRef ),
+                    SchDayHoursString( ElevSchRef:SchWeekRef[1]:SchDaySatRef ), SchDayHoursString( ElevSchRef:SchWeekRef[1]:SchDayMonRef ) )
+       endif }
+   "Set ResOtherZn:GainElev:gnFrZn"     ResOtherZn:GainElev:gnFrZn   = { 1- ValidOr( ElevLostFrac, 0 ) }
+   "Set ResOtherZn:GainElev:gnFrRad"    ResOtherZn:GainElev:gnFrRad  = { if( GainElev:gnFrZn = 0 ) then 0 else ValidOr( ElevRadFrac, 0 ) / GainElev:gnFrZn endif }
+   "Set ResOtherZn:GainElev:gnFrLat"    ResOtherZn:GainElev:gnFrLat  = { if( GainElev:gnFrZn = 0 ) then 0 else ValidOr( ElevLatFrac, 0 ) / GainElev:gnFrZn endif }
+   "Set ResOtherZn:GainElev:gnEndUse"   ResOtherZn:GainElev:gnEndUse = { "Proc" }
+   "Set ResOtherZn:GainElev:gnMeter"    ResOtherZn:GainElev:gnMeter  = { CSE_ElecMETER }
+
+  ; Escalator
+   "Create new ResOtherZn:GainEscal"  ResOtherZn:GainEscal =
+     { if(IfValidAnd( EscalPwr > 0 ) == 0 .OR. LocalCompAssigned( EscalSchRef ) < 1 ) then UNCHANGED
+       else CreateComp( cseGAIN, substr( Name, 0, 47 ) + "-znESCL" ) endif }
+   "Set ResOtherZn:GainEscal parent cseZONE"      ResOtherZn:GainEscal:Parent = { Local( CSE_ZONE ) }
+   "Set ResOtherZn:GainEscal gnPower_x"           ResOtherZn:GainEscal:gnPower_x =
+     { if( IfValidAnd( EscalSchRef:NumWeeks = 1 )==0 .OR.
+           LocalCompAssigned( EscalSchRef:SchWeekRef[1]:SchDaySunRef ) < 1 .OR. LocalCompAssigned( EscalSchRef:SchWeekRef[1]:SchDaySatRef ) < 1 .OR. 
+           LocalCompAssigned( EscalSchRef:SchWeekRef[1]:SchDayHolRef ) < 1 .OR. LocalCompAssigned( EscalSchRef:SchWeekRef[1]:SchDayMonRef ) < 1 )
+       then PostError( "Invalid EscalSchRef for ResidentialOtherZone '%s'.", Name )
+       else Format( "%g * 3.412 * select( $dsDay==1, 0, $dsDay==2, 1, $DOWH==1, hourval(%s), $DOWH==8, hourval(%s), $DOWH==7, hourval(%s), default hourval(%s) )",
+                    EscalPwr, 
+                    SchDayHoursString( EscalSchRef:SchWeekRef[1]:SchDaySunRef ), SchDayHoursString( EscalSchRef:SchWeekRef[1]:SchDayHolRef ),
+                    SchDayHoursString( EscalSchRef:SchWeekRef[1]:SchDaySatRef ), SchDayHoursString( EscalSchRef:SchWeekRef[1]:SchDayMonRef ) )
+       endif }
+   "Set ResOtherZn:GainEscal:gnFrZn"     ResOtherZn:GainEscal:gnFrZn   = { 1- ValidOr( EscalLostFrac, 0 ) }
+   "Set ResOtherZn:GainEscal:gnFrRad"    ResOtherZn:GainEscal:gnFrRad  = { if( GainEscal:gnFrZn = 0 ) then 0 else ValidOr( EscalRadFrac, 0 ) / GainEscal:gnFrZn endif }
+   "Set ResOtherZn:GainEscal:gnFrLat"    ResOtherZn:GainEscal:gnFrLat  = { if( GainEscal:gnFrZn = 0 ) then 0 else ValidOr( EscalLatFrac, 0 ) / GainEscal:gnFrZn endif }
+   "Set ResOtherZn:GainEscal:gnEndUse"   ResOtherZn:GainEscal:gnEndUse = { "Proc" }
+   "Set ResOtherZn:GainEscal:gnMeter"    ResOtherZn:GainEscal:gnMeter  = { CSE_ElecMETER }
+
 ; SAC 5/11/16 - now handled via DwellUnitDHW object
 ;	"Set DwellUnit:GainCtrlDHWSYS"		DwellUnit:GainCtrlDHWSYS		= {			; SAC 4/15/16 - T24-2016 gains
 ;				if ( ResProj:IntGainsMethod <= 2013 .OR. ResProj:IsMultiFamily < 0.5) then  UNDEFINED		; won't be needed to setup DHW-linked Gains
