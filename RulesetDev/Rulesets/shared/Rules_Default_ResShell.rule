@@ -2617,27 +2617,52 @@ RULELIST  "Set_ResExtWallAz_WinAreaByOrientation"  1 0 0 0
       {  if (ParentComponentType() != "ResZn" .AND. ParentComponentType() != "ResOtherZn") then  UNCHANGED
          else  Azimuth + ValidOr( ZnAzm, 0 )  endif  }
    "Correct Azimuth for radial deg"    ResExtWall:Azimuth   =
-      {  if (Azimuth >= 360) then  Azimuth - 360
-         else  UNCHANGED  endif  }
-   "Set ResExtWall:TrueOrientationIdx - (1-N, 2-E, 3-S, 4-W)"     ResExtWall:TrueOrientationIdx =        ; SAC 7/12/20
-      {  if (     Azimuth >  45 .AND. Azimuth <= 135) then  2
-         else if (Azimuth > 135 .AND. Azimuth <= 225) then  3
-         else if (Azimuth > 225 .AND. Azimuth <= 315) then  4
-         else  1  endif endif endif  }
+      {  if (     Azimuth >= 360) then  Azimuth - 360
+         else if (Azimuth <    0) then  Azimuth + 360
+         else  UNCHANGED  endif endif  }
    "Sum window area into parent ResExtWall objects[1] - total"    ResExtWall:TotWinArea[1]  = {  SumChildren( ResWin:TotAreaInclMult[1] )  }
 
-   "Set Zone:WinAreaByOrientation[1]-N"   Zone:WinAreaByOrientation[1] =
-      {  SumChildrenIf( ResExtWall:TotWinArea[1], ResExtWall:TrueOrientationIdx = 1 )  }
-   "Set Zone:WinAreaByOrientation[2]-E"   Zone:WinAreaByOrientation[2] =
-      {  SumChildrenIf( ResExtWall:TotWinArea[1], ResExtWall:TrueOrientationIdx = 2 )  }
-   "Set Zone:WinAreaByOrientation[3]-S"   Zone:WinAreaByOrientation[3] =
-      {  SumChildrenIf( ResExtWall:TotWinArea[1], ResExtWall:TrueOrientationIdx = 3 )  }
-   "Set Zone:WinAreaByOrientation[4]-W"   Zone:WinAreaByOrientation[4] =
-      {  SumChildrenIf( ResExtWall:TotWinArea[1], ResExtWall:TrueOrientationIdx = 4 )  }
-   "Set Zone:NumWinOrientations - 1 (N)"     Zone:NumWinOrientations = {  if (WinAreaByOrientation[1] > 0.1) then  1  else  0  endif  }
-   "Set Zone:NumWinOrientations - 2 (E)"     Zone:NumWinOrientations = {  if (WinAreaByOrientation[2] > 0.1) then  NumWinOrientations + 1  else  UNCHANGED  endif  }
-   "Set Zone:NumWinOrientations - 3 (S)"     Zone:NumWinOrientations = {  if (WinAreaByOrientation[3] > 0.1) then  NumWinOrientations + 1  else  UNCHANGED  endif  }
-   "Set Zone:NumWinOrientations - 4 (W)"     Zone:NumWinOrientations = {  if (WinAreaByOrientation[4] > 0.1) then  NumWinOrientations + 1  else  UNCHANGED  endif  }
+   ; calc adjustments to wall/win area orientation for models where surfaces stradle 45deg orientations - SAC 04/18/24 (tic #3554)
+   "Set 'testing' ResExtWall:TrueOrientationIdx - (0 or 1-2 for close to 45deg)"    ResExtWall:TrueOrientationIdx = 
+      {  if (     Azimuth <=  45 .AND. Azimuth >  42) then  1
+         else if (Azimuth >   45 .AND. Azimuth <  48) then  2
+         else if (Azimuth <= 135 .AND. Azimuth > 132) then  1
+         else if (Azimuth >  135 .AND. Azimuth < 138) then  2
+         else if (Azimuth <= 225 .AND. Azimuth > 222) then  1
+         else if (Azimuth >  225 .AND. Azimuth < 228) then  2
+         else if (Azimuth <= 315 .AND. Azimuth > 312) then  1
+         else if (Azimuth >  315 .AND. Azimuth < 318) then  2
+         else  0  endif endif endif endif endif endif endif endif  }
+   "Set ResProj:WinOrientAdj"    ResProj:WinOrientAdj =              ; SAC 04/18/24 (tic #3554)
+      {  if ( SumAcrossIf( ResExtWall:TotWinArea[1], ResExtWall:TrueOrientationIdx = 1 ) < 1 .AND.
+              SumAcrossIf( ResExtWall:TotWinArea[1], ResExtWall:TrueOrientationIdx = 2 ) < 1 )
+         then   0
+         else if ( SumAcrossIf( ResExtWall:TotWinArea[1], ResExtWall:TrueOrientationIdx = 1 ) >
+                   SumAcrossIf( ResExtWall:TotWinArea[1], ResExtWall:TrueOrientationIdx = 2 ) )
+         then  -5
+         else   5  endif endif  }
+               "dbg" ResProj:Action = { if (IfValidAnd( DefaultingRounds = 2 )) then  PostMessageToLog( "   WinOrientAdj = %g based on %gSF windows <= 45 vs. %gSF wins > 45", WinOrientAdj, SumAcrossIf( ResExtWall:TotWinArea[1], ResExtWall:TrueOrientationIdx = 1 ), SumAcrossIf( ResExtWall:TotWinArea[1], ResExtWall:TrueOrientationIdx = 2 ) )  else UNCHANGED endif }
+
+   "Set ResExtWall:TrueOrientationIdx - (1-N, 2-E, 3-S, 4-W)"     ResExtWall:TrueOrientationIdx =        ; SAC 7/12/20
+      {  if (     (Azimuth + ResProj:WinOrientAdj) >  45 .AND. (Azimuth + ResProj:WinOrientAdj) <= 135) then  2
+         else if ((Azimuth + ResProj:WinOrientAdj) > 135 .AND. (Azimuth + ResProj:WinOrientAdj) <= 225) then  3
+         else if ((Azimuth + ResProj:WinOrientAdj) > 225 .AND. (Azimuth + ResProj:WinOrientAdj) <= 315) then  4
+         else  1  endif endif endif  }
+
+   "Set Zone:WinAreaByOrientation[1-4]-NESW"  for:#O=(1to4)  Zone:WinAreaByOrientation[#O] = {  SumChildrenIf( ResExtWall:TotWinArea[1], ResExtWall:TrueOrientationIdx = #O )  }
+   "Set Zone:NumWinOrientations - 1 (N)"                     Zone:NumWinOrientations = {  if (WinAreaByOrientation[1]  > 0.1) then  1  else  0  endif  }
+   "Set Zone:NumWinOrientations - 2-4 (ESW)"  for:#O=(2to4)  Zone:NumWinOrientations = {  if (WinAreaByOrientation[#O] > 0.1) then  NumWinOrientations + 1  else  UNCHANGED  endif  }
+
+   ; second round of NumWinOrientations defaulting ignoring orientations w/ little area - SAC 04/18/24 (tic #3554)
+   "Set Zone:MinWinOrientArea"      Zone:MinWinOrientArea = {  max( 0.1, (SumChildren( ResExtWall:TotWinArea[1] ) / NumWinOrientations) / 5 )  }
+   ; "Set Zone:MinWinOrientArea"      Zone:MinWinOrientArea = {  max( 0.1, SumChildren( ResExtWall:TotWinArea[1] ) / (NumWinOrientations + 4) )  }
+               "dbg" Zone:Action = { if (IfValidAnd( Proj:DefaultingRounds = 2 ) .AND. 
+                           ( (WinAreaByOrientation[1] > 0.1 .AND. WinAreaByOrientation[1] <= MinWinOrientArea) .OR. (WinAreaByOrientation[2] > 0.1 .AND. WinAreaByOrientation[2] <= MinWinOrientArea) .OR.
+                             (WinAreaByOrientation[3] > 0.1 .AND. WinAreaByOrientation[3] <= MinWinOrientArea) .OR. (WinAreaByOrientation[4] > 0.1 .AND. WinAreaByOrientation[4] <= MinWinOrientArea) ))
+                        then  PostMessageToLog( "   Zone '%s' reducing # win orientations from %g:  min area  %g  vs. areas  %g,  %g,  %g,  %g", Name, NumWinOrientations, MinWinOrientArea, WinAreaByOrientation[1], WinAreaByOrientation[2], WinAreaByOrientation[3], WinAreaByOrientation[4] )  else UNCHANGED endif }
+   "Set Zone:NumWinOrientations - 1 (N) rnd2"                     Zone:NumWinOrientations = {  if (WinAreaByOrientation[1]  > MinWinOrientArea) then  1  else  0  endif  }
+   "Set Zone:NumWinOrientations - 2-4 (ESW) rnd2"  for:#O=(2to4)  Zone:NumWinOrientations = {  if (WinAreaByOrientation[#O] > MinWinOrientArea) then  NumWinOrientations + 1  else  UNCHANGED  endif  }
+
    "Set Zone:NatVentWindPresCoefMult - mult on natural vent wind pressure coefficient"    Zone:NatVentWindPresCoefMult =      ; SAC 7/13/20
       {  switch (NumWinOrientations)
             case  1 :  ValidOr( ResProj:NatVentWindPresCoefMult[1], 0.25 )
