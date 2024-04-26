@@ -4369,11 +4369,12 @@ RULELIST "Default_HVACDist_OtherThanType" 0 0 0 0
 ; mjb 1/12/15 - use new T24RClimateZoneCodeBaseTable for code level lookups
 ; SAC 11/9/15 - switched T24RClimateZoneCodeBase:DuctRval() to ...:AltDuctRval() (ALTERED analysis)
 ; SAC 5/7/18 - added reference to new ExistDuctsInVerifSys property to prevent reset of DuctInsRvalue for Existing Ducts assigned to Altered & Verified HVACSystems (tic #986)
+; added logic to post exDuctInsRvalue to DuctInsRvalue for Altered-Verified Ducts in Existing system - SAC 04/25/24 (tic #1363)
 ;"dbg" HVACDist:Action = { PostMessageToLog( "about to set HVACDist '%s' DuctInsRvalue for %s run:  DuctDesign %g / Proj:RunScope %g / Proj:IsAddAlone %g / Status %g / IsVerified %g / Status( exDuctInsRvalue ) %g / FloorAreaServed %g / exFloorAreaServed %g / DuctInsRvalOpt %g", Name, Proj:RunAbbrev, DuctDesign, Proj:RunScope, Proj:IsAddAlone, Status, IsVerified, LocalStatus( exDuctInsRvalue ), FloorAreaServed, ValidOr( exFloorAreaServed, -999 ), DuctInsRvalOpt ) }
 	"Default HVACDist:DuctInsRvalue"			HVACDist:DuctInsRvalue	= {
          if (IfValidAnd( DuctDesign < 0.5 ) ) then
 				if ( Proj:RunScope == 2 .AND. Status == 2 .AND. IsVerified .AND. LocalStatus( exDuctInsRvalue ) > 0 ) then
-					if (IfValidAnd( ExistDuctsInVerifSys > 0 )) then  exDuctInsRvalue
+					if (IfValidAnd( ExistDuctsInVerifSys > 0 ) .OR. IfValidAnd( Proj:IsStdOrSMFRun > 0 )) then  exDuctInsRvalue
 					else if ( IfValidAnd( DuctInsRvalue >= T24RClimateZoneCodeBase:AltDuctRval( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr ) ) ) then exDuctInsRvalue 
 					else T24RClimateZoneCodeBase:AltDuctRval( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr ) endif endif
 				else if ( (Proj:RunScope == 2 .OR. Proj:IsAddAlone > 0.5) .AND. Status == 1 .AND. LocalStatus( exDuctInsRvalue ) > 0 ) then exDuctInsRvalue
@@ -4382,7 +4383,7 @@ RULELIST "Default_HVACDist_OtherThanType" 0 0 0 0
 				else if ( IfValidAnd( DuctInsRvalOpt > -.1 ) ) then  DuctInsRvalOpt / 100	else  UNDEFINED  endif endif endif endif
 			else
 				if ( Proj:RunScope == 2 .AND. Status == 2 .AND. IsVerified .AND. LocalStatus( exDuctInsRvalue ) > 0 ) then
-					if (IfValidAnd( ExistDuctsInVerifSys > 0 )) then  exDuctInsRvalue
+					if (IfValidAnd( ExistDuctsInVerifSys > 0 ) .OR. IfValidAnd( Proj:IsStdOrSMFRun > 0 )) then  exDuctInsRvalue
 					else if ( IfValidAnd( DuctDesignInsRvalue >= T24RClimateZoneCodeBase:AltDuctRval( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr ) ) ) then exDuctInsRvalue 
 					else T24RClimateZoneCodeBase:AltDuctRval( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr ) endif endif
 				else if ( (Proj:RunScope == 2 .OR. Proj:IsAddAlone > 0.5) .AND. Status == 1 .AND. LocalStatus( exDuctInsRvalue ) > 0 ) then exDuctInsRvalue
@@ -4589,6 +4590,20 @@ RULELIST "Default_HVACDist_OtherThanType" 0 0 0 0
 																									case  1 :	ReturnDuctAttic    ; "Attic"
 																									default :	ReturnDuctLoc      ; any other
 																								endswitch  }
+
+   "Set HVACDist:MinDuctInsRval - Mandatory min R-val (x00)"      HVACDist:MinDuctInsRval =        ; SAC 04/25/24 (tic #1363)
+      {  if (DuctsPresent < 1 .OR. (Proj:ShowStatus > 0 .AND. Status == 1) .OR.
+             IfValidAnd( Proj:EnergyCodeYearNum >= 2022 )==0) then  0
+         else if ( (Type >= 1 .AND. Type <= 4) .OR.   ; attic, crawl space or garage
+                    Type == 9 )                       ; outdoors
+         then  600
+         else if (type == 13)    ; multiple places
+         then  if ( LocalCompAssigned( SupplyDuctLocUse ) = ComponentType( "Zone" ) .OR.
+                    LocalCompAssigned( SupplyDuctLocUse ) = ComponentType( "OtherZone" ) )
+               then  0
+               else  600
+               endif
+         else  0  endif endif endif  }
 
    "Default HVACDist:SupplyDuctDiam"		HVACDist:SupplyDuctDiam	= {	 8  }
    "Default HVACDist:ReturnDuctDiam"		HVACDist:ReturnDuctDiam	= {	16  }
