@@ -76,61 +76,6 @@ RULE Proj:AllowStdBatt
 ENDRULE
 
 
-////////////////////////////////////////////////////////////////////////////////
-// Project-level SARA (Solar Access Roof Area) data - SAC 04/21/22
-
-RULE Proj:SolAccessRfArea
-  DESCRIPTION
-    "SARA includes the area of the building's roof space capable of structurally 
-    supporting a PV system, and the area of all roof space on covered parking 
-    areas, carports, and all other newly constructed structures on the site that 
-    are compatible with supporting a PV system per Title 24, Part 2, Section 1511.2.
-    (program default to all roof area)
-
-    Excludes:
-
-    A) Any area that has less than 70 percent annual solar access.
-
-    B) Occupied roofs as specified by CBC Section 503.1.4.
-
-    C) Roof space that is otherwise not available due to compliance with other 
-    building code requirements if confirmed by the Executive Director."
-  INPUTCLASS
-    Optional
-  DEFAULT 
-    SumAll( Roof:Area ) + SumAll( ResCathedralCeiling:Area ) +
-    SumAll( ResAttic:DeckArea )
-ENDRULE
-
-RULE Proj:T24StdPVPwrDens
-  DESCRIPTION
-    "min/default PV power density from Std sec 140.10"
-  INPUTCLASS
-    NotInput
-  DEFAULT 
-    14
-ENDRULE
-
-RULE Proj:SolAccessRfAreaPVPwr
-  DESCRIPTION
-    "min PV system capacity based on SARA (Std sec 140.10)"
-  INPUTCLASS
-    NotInput
-  DEFAULT 
-    SolAccessRfArea * T24StdPVPwrDens / 1000
-ENDRULE
-
-RULE Proj:SolAccessRfAreaPVMsg
-  DEFAULT 
-    if (SolAccessRfAreaPVPwr < 4) then  UNDEFINED
-    else if (SumAll( Bldg:TotCondFlrArea ) > 0)
-    then  Format( "(implies PV capacity of %s kW @ %.0f W/ft2 | SARA %.1f% of building cond area)",
-               FltToStr( SolAccessRfAreaPVPwr, 1 ), T24StdPVPwrDens, (SolAccessRfArea * 100 / SumAll( Bldg:TotCondFlrArea )) )
-    else  Format( "(implies PV capacity of %s kW @ %.0f W/ft2)", FltToStr( SolAccessRfAreaPVPwr, 1 ), T24StdPVPwrDens )
-    endif endif
-ENDRULE
-
-
 //////////////////////////////////////////////////////////////////////////////// SAC 04/21/22
 // 2022+ Prescribed PV Requirements (for std design) - BldgType & Area rules
    // altered logic top prevent PV/Batt for MFam Addition Alone - SAC 06/01/23   // account for Allow* flags - SAC 10/25/23
@@ -1095,6 +1040,182 @@ ENDRULE
 
 
 ////////////////////////////////////////////////////////////////////////////////
+// Project-level SARA (Solar Access Roof Area) data - SAC 04/21/22   ; moved down here from above to rely on PVBattClass info - SAC 05/01/24 (tic #3596)
+
+RULE Proj:SolAccessRfArea
+  DESCRIPTION
+    "SARA includes the area of the building's roof space capable of structurally 
+    supporting a PV system, and the area of all roof space on covered parking 
+    areas, carports, and all other newly constructed structures on the site that 
+    are compatible with supporting a PV system per Title 24, Part 2, Section 1511.2.
+    (program default to all roof area)
+
+    Excludes:
+
+    A) Any area that has less than 70 percent annual solar access.
+
+    B) Occupied roofs as specified by CBC Section 503.1.4.
+
+    C) Roof space that is otherwise not available due to compliance with other 
+    building code requirements if confirmed by the Executive Director."
+  INPUTCLASS
+    Optional
+  DEFAULT 
+      switch (PrscrpPVBattClass)
+         case "LowRiseRes"          :  0
+         case "LowRiseRes/MixedUse" :  ( NResPVBattAreaPct/100 ) *
+                                       ( SumAll( Roof:Area ) + SumAll( ResCathedralCeiling:Area ) +
+                                         SumAll( ResAttic:DeckArea ) )
+         default                    :    SumAll( Roof:Area ) + SumAll( ResCathedralCeiling:Area ) +
+                                         SumAll( ResAttic:DeckArea )
+      endswitch
+ENDRULE
+
+RULE Proj:T24StdPVPwrDens
+  DESCRIPTION
+    "min/default PV power density from Std sec 140.10"
+  INPUTCLASS
+    NotInput
+  DEFAULT 
+    14
+ENDRULE
+
+RULE Proj:SolAccessRfAreaPVPwr
+  DESCRIPTION
+    "min PV system capacity based on SARA (Std sec 140.10)"
+  INPUTCLASS
+    NotInput
+  DEFAULT 
+    SolAccessRfArea * T24StdPVPwrDens / 1000
+ENDRULE
+
+RULE Proj:SolAccessRfAreaPVMsg
+  DEFAULT 
+    if (SolAccessRfAreaPVPwr < 4) then  UNDEFINED
+    else  switch (PrscrpPVBattClass)
+             case "LowRiseRes"          :  UNDEFINED
+             case "LowRiseRes/MixedUse" : 
+                        if (SumAll( Bldg:NonResFlrArea ) > 0 .AND. NResPVBattAreaPct > 0)
+                        then  Format( "(implies PV capacity of %s kW @ %.0f W/ft2 | SARA %.1f% of nonres building cond area)",
+                                   FltToStr( SolAccessRfAreaPVPwr, 1 ), T24StdPVPwrDens, (SolAccessRfArea * 100 / ((NResPVBattAreaPct/100) * SumAll( Bldg:NonResFlrArea ))) )
+                        else if (SumAll( Bldg:TotCondFlrArea ) > 0 .AND. NResPVBattAreaPct > 0)
+                        then  Format( "(implies PV capacity of %s kW @ %.0f W/ft2 | SARA %.1f% of building cond area)",
+                                   FltToStr( SolAccessRfAreaPVPwr, 1 ), T24StdPVPwrDens, (SolAccessRfArea * 100 / ((NResPVBattAreaPct/100) * SumAll( Bldg:TotCondFlrArea ))) )
+                        else  Format( "(implies PV capacity of %s kW @ %.0f W/ft2)", FltToStr( SolAccessRfAreaPVPwr, 1 ), T24StdPVPwrDens )
+                        endif endif
+             default  : if (SumAll( Bldg:TotCondFlrArea ) > 0)
+                        then  Format( "(implies PV capacity of %s kW @ %.0f W/ft2 | SARA %.1f% of building cond area)",
+                                   FltToStr( SolAccessRfAreaPVPwr, 1 ), T24StdPVPwrDens, (SolAccessRfArea * 100 / SumAll( Bldg:TotCondFlrArea )) )
+                        else  Format( "(implies PV capacity of %s kW @ %.0f W/ft2)", FltToStr( SolAccessRfAreaPVPwr, 1 ), T24StdPVPwrDens )
+                        endif
+          endswitch
+    endif
+ENDRULE
+
+RULE Proj:SolAccessRfAreaPVLbl
+  DEFAULT 
+      switch (PrscrpPVBattClass)
+         case "LowRiseRes"          :  UNDEFINED
+         case "LowRiseRes/MixedUse" :  "Nonresidential Solar Access Roof Area:"
+         default                    :  "Solar Access Roof Area:"
+      endswitch
+ENDRULE
+
+RULE Proj:ShowSolAccessRfArea
+  DEFAULT 
+      switch (PrscrpPVBattClass)
+         case "LowRiseRes"          :  0
+         default                    :  1
+      endswitch
+ENDRULE
+
+
+; duplicate SARA properties (above) for lowrise MFam (below), and classify SARAPVPwr editable by user - SAC 05/01/24 (tic #3596)
+RULE Proj:LowRiseResSolAccessRfArea
+  DESCRIPTION
+    "Low-rise residential SARA includes the area of the building's 
+    residential roof space capable of structurally 
+    supporting a PV system, and the area of all roof space on covered parking 
+    areas, carports, and all other newly constructed structures on the site that 
+    are compatible with supporting a PV system per Title 24, Part 2, Section 1511.2.
+    (program defaults to all low-rise residential roof area)
+
+    Excludes:
+
+    A) Any area that has less than 70 percent annual solar access.
+
+    B) Occupied roofs as specified by CBC Section 503.1.4.
+
+    C) Roof space that is otherwise not available due to compliance with other 
+    building code requirements if confirmed by the Executive Director."
+  INPUTCLASS
+    Optional
+  DEFAULT 
+      switch (PrscrpPVBattClass)
+         case "LowRiseRes/MixedUse" :  ( 1 - (NResPVBattAreaPct/100) ) *
+                                       ( SumAll( Roof:Area ) + SumAll( ResCathedralCeiling:Area ) +
+                                         SumAll( ResAttic:DeckArea ) )
+         case "LowRiseRes"          :    SumAll( Roof:Area ) + SumAll( ResCathedralCeiling:Area ) +
+                                         SumAll( ResAttic:DeckArea )
+         default  :  0
+      endswitch
+ENDRULE
+
+RULE Proj:LowRiseResSolAccessRfAreaPVPwr
+  DESCRIPTION
+    "min PV system capacity based on low-rise residential SARA"
+  INPUTCLASS
+    NotInput
+  DEFAULT 
+    LowRiseResSolAccessRfArea * T24StdPVPwrDens / 1000
+ENDRULE
+
+RULE Proj:LowRiseResSolAccessRfAreaPVMsg
+  DEFAULT 
+    if (LowRiseResSolAccessRfAreaPVPwr < 4 .OR.
+        LowRiseResSolAccessRfArea < 1) then  UNDEFINED
+    else  switch (PrscrpPVBattClass)
+             case "LowRiseRes"          : 
+                        if (SumAll( Bldg:TotCondFlrArea ) > 0)
+                        then  Format( "(%.1f W/ft2 | SARA %.1f% of building cond area)",
+                                   (LowRiseResSolAccessRfAreaPVPwr * 1000 / LowRiseResSolAccessRfArea),
+                                   (SolAccessRfArea * 100 / SumAll( Bldg:TotCondFlrArea )) )
+                        else  Format( "(%.1f W/ft2)", (LowRiseResSolAccessRfAreaPVPwr * 1000 / LowRiseResSolAccessRfArea) )
+                        endif
+             case "LowRiseRes/MixedUse" : 
+                        if (SumAll( Bldg:TotCondFlrArea ) > 0 .AND. NResPVBattAreaPct < 100)
+                        then  Format( "(%.1f W/ft2 | SARA %.1f% of residential cond area)",
+                                   (LowRiseResSolAccessRfAreaPVPwr * 1000 / LowRiseResSolAccessRfArea),
+                                   (SolAccessRfArea * 100 / ((1 - (NResPVBattAreaPct/100)) * SumAll( Bldg:TotCondFlrArea ))) )
+                        else  Format( "(%.1f W/ft2)", (LowRiseResSolAccessRfAreaPVPwr * 1000 / LowRiseResSolAccessRfArea) )
+                        endif
+             default  : UNDEFINED
+          endswitch
+    endif
+ENDRULE
+
+RULE Proj:ShowLowRiseResSolAccessRfArea
+  DEFAULT 
+      switch (PrscrpPVBattClass)
+         case "LowRiseRes"          :  1
+         case "LowRiseRes/MixedUse" :  1
+         default                    :  0
+      endswitch
+ENDRULE
+
+
+RULE Proj:TotSolAccessRfArea
+  DEFAULT 
+    (SolAccessRfArea * ShowSolAccessRfArea) + (LowRiseResSolAccessRfArea * ShowLowRiseResSolAccessRfArea)
+ENDRULE
+
+RULE Proj:TotSolAccessRfAreaPVPwr
+  DEFAULT 
+    (SolAccessRfAreaPVPwr * ShowSolAccessRfArea) + (LowRiseResSolAccessRfAreaPVPwr * ShowLowRiseResSolAccessRfArea)
+ENDRULE
+
+
+////////////////////////////////////////////////////////////////////////////////
 // 2022+ Prescribed PV Requirements (for std design) - PV capacity rules
 
 // Spc Prescribed PV Requirements
@@ -1216,6 +1337,10 @@ ENDRULE
 ;    if (DisableAllPVBattRequirements)
 ;    then  0
 
+;RULE Proj:PVSARATestDebugMsg
+;  DEFAULT 
+;    Format( "PVBatt Class: '%s'  /  Prescrip PV: %g kW  /  NResPVBattAreaPct: %.1f %%", ValidOr( PrscrpPVBattClass, "unknown" ), ValidOr( PrscrpPVSize, 0 ), ValidOr( NResPVBattAreaPct, 0 ) )
+;ENDRULE
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1249,25 +1374,22 @@ RULE Proj:ReducedPVReqExcpt
     else if (IfValidAnd( IsLowRiseMFam > 0 ))
     then if (IfValidAnd( PrscrpPVSize < 1.8 ))
          then  "(R Exc.2) No PV required when prescribed system < 1.8 kWdc"
-         else if (IfValidAnd( PrscrpPVSize > SolAccessRfAreaPVPwr ))
+         else if (IfValidAnd( PrscrpPVSize > TotSolAccessRfAreaPVPwr ))
          then  "Limited by SARA provided"
          else  "- select applicable reason for PV reduction -"
          endif endif
     else if (IfValidAnd( PrscrpPVSize < 4 ))
          then  "(NR Exc.2) No PV required when prescribed system < 4 kWdc"
-         else if (IfValidAnd( SolAccessRfArea < (SumAll( Bldg:TotCondFlrArea ) * 0.03) ))
+         else if (IfValidAnd( TotSolAccessRfArea < (SumAll( Bldg:TotCondFlrArea ) * 0.03) ))
          then  "(NR Exc.1) No PV required when SARA < 3% cond floor area"
-         else if (IfValidAnd( SolAccessRfArea < 80 ))
+         else if (IfValidAnd( TotSolAccessRfArea < 80 ))
          then  "(NR Exc.3) No PV required when SARA < 80 contiguous SF"
-         else if (IfValidAnd( PrscrpPVSize > SolAccessRfAreaPVPwr ))
+         else if (IfValidAnd( PrscrpPVSize > TotSolAccessRfAreaPVPwr ))
          then  "Limited by SARA provided"
          else  "- select applicable reason for PV reduction -"
          endif endif endif endif
     endif endif
 ENDRULE
-; reset REMOVED from above - SAC 05/26/22
-;    ResetThisWhenTheFollowingIsModified
-;      Proj:SolAccessRfArea
 
 RULE Proj:ReducedPVReq
   DESCRIPTION
@@ -1281,11 +1403,6 @@ RULE Proj:ReducedPVReq
     else 0
     endif
 ENDRULE
-;  RESETS   - removed - SAC 05/26/22
-;    ResetThisWhenTheFollowingIsModified
-;      Proj:SolAccessRfArea
-;    ResetTheFollowingWhenThisIsModified
-;      Proj:ReducedPVReqExcpt
 
 RULE Proj:ReducedPVReqExcptDesc
   DESCRIPTION
@@ -1316,7 +1433,7 @@ RULE Proj:ReducedPVReqMinVal
   DEFAULT 
     if (IfValidAnd( ReducedPVReq > 0 )==0) then  0
     else if (FindInString( ReducedPVReqExcpt, "Limited by SARA" ) >= 0)
-    then  SolAccessRfAreaPVPwr
+    then  TotSolAccessRfAreaPVPwr
     else  0
     endif endif
 ENDRULE
@@ -1353,7 +1470,7 @@ RULE Proj:ReducedPVReqVal
              FindInString( ReducedPVReqExcpt, "snow load" ) > 0)
         then  0
         else if (FindInString( ReducedPVReqExcpt, "Limited by SARA" ) >= 0)
-        then  SolAccessRfAreaPVPwr
+        then  TotSolAccessRfAreaPVPwr
         else UNDEFINED
         endif endif
     else if (ReducedPVReqMinVal > 0.01)
@@ -2384,9 +2501,9 @@ RULE Proj:ReducedPVReqMsg1
   DEFAULT 
     if (DisableAllPVBattRequirements)
     then  ""
-    else if (IfValidAnd( SumAll(  PVArray:DCSysSize ) > SolAccessRfAreaPVPwr ))
+    else if (IfValidAnd( SumAll(  PVArray:DCSysSize ) > TotSolAccessRfAreaPVPwr ))
     then  Format( "Proposed PV capacity of %s kW > cap. based on SARA (%s kW).",
-               FltToStr( SumAll(  PVArray:DCSysSize ), 1 ), FltToStr( SolAccessRfAreaPVPwr, 1 ) )
+               FltToStr( SumAll(  PVArray:DCSysSize ), 1 ), FltToStr( TotSolAccessRfAreaPVPwr, 1 ) )
     else  ""
     endif endif
 ENDRULE
@@ -2396,7 +2513,7 @@ RULE Proj:ReducedPVReqMsg2
   DEFAULT 
     if (DisableAllPVBattRequirements)
     then  ""
-    else if (IfValidAnd( SumAll(  PVArray:DCSysSize ) > SolAccessRfAreaPVPwr ))
+    else if (IfValidAnd( SumAll(  PVArray:DCSysSize ) > TotSolAccessRfAreaPVPwr ))
     then  if (ReducedPVReq = 1)
           then  if (EnumValue(ReducedPVReqExcpt) = 100)  ; "Limited by SARA provided"
                 then "Proposed kW will be adjusted to match the capacity based on SARA."
@@ -2409,7 +2526,7 @@ ENDRULE
 
 ;RULE Proj:ReducedPVReqMsg3
 ;  DEFAULT 
-;    if (IfValidAnd( SumAll(  PVArray:DCSysSize ) > SolAccessRfAreaPVPwr ))
+;    if (IfValidAnd( SumAll(  PVArray:DCSysSize ) > TotSolAccessRfAreaPVPwr ))
 ;    then  if (ReducedPVReq = 0)
 ;        then "Standard PV & Battery = Prescriptive tables w/ no reduced PV requirement."
 ;        else ""
