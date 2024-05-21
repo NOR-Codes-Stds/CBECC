@@ -93,6 +93,7 @@ RULELIST "HVACSys_CSE_Defaulting" 0 0 0 1
 
 
 	"Blast all cseRSYS components"		Proj:Action		= {	DeleteAllComps( cseRSYS )  }
+	"Delete all csePERFORMANCEMAP components"		Proj:Action = {	DeleteAllComps( csePERFORMANCEMAP )  }    ; SAC 05/21/24 (tic #1379)
 
   ; CSE RSYS creation & setup
 	"Create a CSE RSYS for each HVACSys"	HVACSys:cseRSYS					= {	if (Local( FloorAreaServed[1] ) > 1 .AND.
@@ -234,11 +235,15 @@ RULELIST "HVACSys_CSE_Defaulting" 0 0 0 1
 	"Set HVACSys:cseRSYS:rsFxCapH"			HVACSys:cseRSYS:rsFxCapH		=     ; added logic from VCHP2 enabling default of rsFxCapH based on HtPumpSystem[1]:HtgSizingFactor - SAC 03/03/22
       {  if (HtPumpCap47AutoSz > 0.5)
          then  if (Proj:IsStdOrSMFRun .OR. Proj:RunAbbrev == "dr") 
-               then  0.75
+               then  if (Proj:EnergyCodeYearNum < 2025)
+                     then  0.75
+                     else  1.1   endif
                else if (IfValidAnd( Proj:EnableResearchMode > 0.5 ) .AND.
                         IfValidAnd( HtPumpSystem[1]:HtgSizingFactor > 0 ))
                then  HtPumpSystem[1]:HtgSizingFactor
-               else  ValidOr( HtSysSizingFactor, 1.2 )  endif endif
+               else  if (Proj:EnergyCodeYearNum < 2025)
+                     then  ValidOr( HtSysSizingFactor, 1.2 )
+                     else  ValidOr( HtSysSizingFactor, 1.1 )  endif endif endif
 			else if (AutoSizeHeat[1] == 0) then  UNDEFINED
 			else if (IfValidAnd( HtSysSizingFactor > 0 ))
 			then  HtSysSizingFactor
@@ -507,8 +512,9 @@ RULELIST "HVACSys_CSE_Defaulting" 0 0 0 1
                else  UNCHANGED  endif
          else  UNCHANGED  endif  }
 
-   "Create & setup csePERFORMANCEMAP objects for VCHP3 HVACHtPump"   HVACHtPump:Action  =       ; VCHP3 - SAC 05/16/24 (tic #1379)
+   "Create & setup csePERFORMANCEMAP objects for VCHP3 HVACHtPump"   HVACHtPump:Action  =       ; VCHP3 - SAC 05/16/24 (tic #1379)  ; mod to prevent perf map output for std design systems still referencing VCHP3s - SAC 05/21/24 (tic #1379)
       {  if (Type == 36 .AND. SumRevRef( HVACSys:HtPumpSystem, HVACSys:HtPmpFlrAreaServed ) > 1 .AND.
+             SumRevRef( HVACSys:HtPumpSystem, HVACSys:HtPumpSysType ) > 35 .AND.
              (LocalCompAssigned( VCHP3PerfMapHtgRef ) < 1 .OR. LocalCompAssigned( VCHP3PerfMapClgRef ) < 1))
          then  EvalRulelist( "VCHP3_CreatePerformanceMaps", 1 )
          else  UNCHANGEd  endif  }
@@ -1152,16 +1158,16 @@ END
 RULELIST "HVACSys_SetupRSYS_VCHP3" 1 0 0 1
 ;*************************************************************************
    "Set HVACSys:cseRSYS:rsFEffC_x"     HVACSys:cseRSYS:rsFEffC_x    = {  UNDEFINED  }   ; for VCHP2 was: "1/FVCHPC" 
-   "Set HVACSys:cseRSYS:rsFanPwrC"     HVACSys:cseRSYS:rsFanPwrC    =      ; SAC 05/17/24 (tic #1379)
+   "Set HVACSys:cseRSYS:rsFanPwrC"     HVACSys:cseRSYS:rsFanPwrC    =      ; SAC 05/17/24 (tic #1379)  ; leave fan pwr alone for ducted - SAC 05/21/24 (tic #1379)
       {  if (IfValidAnd( HtOrClDucted > 0 ))
-         then  0.281  
+         then  UNCHANGED  ; 0.281  
          else  0.171  endif  }
    "Set HVACSys:cseRSYS:rsFanPwrC_x"   HVACSys:cseRSYS:rsFanPwrC_x  = {  UNDEFINED  }   ; for VCHP2 was: "0.35*FVCHPC" 
 
    "Set HVACSys:cseRSYS:rsFEffH_x"     HVACSys:cseRSYS:rsFEffH_x    = {  UNDEFINED  }   ; for VCHP2 was: "1"      ; don't use VCHP mult for htg - was: 1/FVCHPH - SAC 11/01/20
-   "Set HVACSys:cseRSYS:rsFanPwrH"     HVACSys:cseRSYS:rsFanPwrH    =      ; SAC 05/17/24 (tic #1379)
+   "Set HVACSys:cseRSYS:rsFanPwrH"     HVACSys:cseRSYS:rsFanPwrH    =      ; SAC 05/17/24 (tic #1379)  ; leave fan pwr alone for ducted - SAC 05/21/24 (tic #1379)
       {  if (IfValidAnd( HtOrClDucted > 0 ))
-         then  0.281  
+         then  UNCHANGED  ; 0.281  
          else  0.171  endif  }
    "Set HVACSys:cseRSYS:rsFanPwrH_x"   HVACSys:cseRSYS:rsFanPwrH_x  = {  UNDEFINED  }   ; for VCHP2 was: "0.35*FVCHPH" 
 
@@ -1349,20 +1355,23 @@ RULELIST "HVACSys_SetupRSYS_VCHP3" 1 0 0 1
 
    ; removed 0.75 denominator & default to 1.1 - SAC 02/11/22 (VCHP2)
    "Set HVACSys:cseRSYS:rsFxCapH"      HVACSys:cseRSYS:rsFxCapH      =        ; VCHP2 - SAC 11/10/20  ; default 1.1->1.2 - SAC 02/25/22  ; disable when not autosizing and specify only when EnableResearchMode activated - SAC 03/03/22
-      {  1.5  }      ; VCHP3 - SAC 05/16/24 (tic #1379)
-      ;{  if (IfValidAnd( HtPumpSystem[1]:AutoSize > 0 )==0) then  UNDEFINED
-      ;   else if (Proj:IsStdOrSMFRun .OR. Proj:RunAbbrev == "dr") 
-      ;   then  0.75
-      ;   else if (IfValidAnd( Proj:EnableResearchMode > 0.5 ) .AND.
-      ;            IfValidAnd( HtPumpSystem[1]:HtgSizingFactor > 0 ))
-      ;   then  HtPumpSystem[1]:HtgSizingFactor
-      ;   else  1.2  endif endif endif  }
+      {  if (IfValidAnd( HtPumpSystem[1]:AutoSize > 0 )==0) then  UNDEFINED
+         else if (Proj:IsStdOrSMFRun .OR. Proj:RunAbbrev == "dr") 
+         then  if (Proj:EnergyCodeYearNum < 2025)
+               then  0.75
+               else  1.1   endif
+         else if (IfValidAnd( Proj:EnableResearchMode > 0.5 ) .AND.
+                  IfValidAnd( HtPumpSystem[1]:HtgSizingFactor > 0 ))
+         then  HtPumpSystem[1]:HtgSizingFactor
+         else  1.1  endif endif endif  }
+      ;{  1.5  }      ; VCHP3 - SAC 05/16/24 (tic #1379)  ; removed and restored prior logic w/ mods to 1.1 for 2025 std + prop - SAC 05/21/24 (tic #1379)
+
 	"Set HVACSys:cseRSYS:rsParElec_x"	HVACSys:cseRSYS:rsParElec_x   =        ; VCHP2 - SAC 11/10/20
       {  if (LocalStatus( HtPumpSystem[1]:ParElecExprs ))
          then  HtPumpSystem[1]:ParElecExprs
          else  UNCHANGED  endif  }
 
-   ;"Set HVACSys:cseRSYS:rsDefrostModel"   HVACSys:cseRSYS:rsDefrostModel  = {  "REVCYCLE"  }
+   "Set HVACSys:cseRSYS:rsDefrostModel"   HVACSys:cseRSYS:rsDefrostModel  = {  "REVCYCLE"  }    ; turned back on - SAC 05/21/24 (tic #1379)
 
    "Remove HVACSys:cseRSYS:rsEER"         HVACSys:cseRSYS:rsEER      = {  UNDEFINED  }
    "Hardwire HVACSys:cseRSYS:rsCapAuxH"   HVACSys:cseRSYS:rsCapAuxH  = {  25000  }
