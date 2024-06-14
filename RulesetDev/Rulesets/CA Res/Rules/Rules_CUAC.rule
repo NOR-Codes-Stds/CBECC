@@ -34,20 +34,9 @@
 
 ENUM_PROPERTIES_VALUE   ; ensures retrieval/logic/us of enum properties assume numeric value (alternative is ENUM_PROPERTIES_STRING)
 
-;************************************************************************* SAC 08/06/22
-RULELIST "CUAC_ZoneUnitCounts" 0 0 0 0
+;************************************************************************* SAC 06/14/24 (tic #1378)
+RULELIST "CUAC_Default_Always" 0 0 0 0
 ;*************************************************************************
-; these rules only evaluated if:  IfValidAnd( Proj:AffordableHousing > 0 ) .AND. IfValidAnd( Proj:CUACReport > 0 )
-
-   "Set CUAC:CommunitySolarValid"      CUAC:CommunitySolarValid =          ; other comm slr properties remain in Proj - SAC 05/23/24 (tic #1378)
-      {  if (IfValidAnd( Proj:UseCommunitySolar > 0 ) .AND.
-             IfValidAnd( Proj:CommunitySolarProject != 0 ) .AND.
-             IfValidAnd( Proj:InCmntySlrProjTerritory > 0 ))
-         then  1
-         else  0
-         endif  }
-
-   "default CUAC:AffordablePVDCSysSize"      CUAC:AffordablePVDCSysSize = {  Proj:PVWDCSysTotal  }
 
    "default CUAC:TariffDate"        CUAC:TariffDate      = {  "12/18/2023"  }
 
@@ -139,12 +128,42 @@ RULELIST "CUAC_ZoneUnitCounts" 0 0 0 0
    "default CUAC:WaterVolumeCost"   CUAC:WaterVolumeCost    = {  0  }
    "default CUAC:TrashMonthlyCost"  CUAC:TrashMonthlyCost   = {  0  }
 
+   "default CUAC:UnitType"          CUAC:UnitType  = {  "Affordable Housing"  }
+
+   "remove restricted CUAC user inputs if not in research mode"   CUAC:Action =
+      {  if (IfValidAnd( Proj:EnableResearchMode > 0 )==0 .AND. 
+             ( LocalStatus( ElecBillReconBeginMo ) > 5 .OR. LocalStatus( ElecBillMinMoCharge ) > 5 .OR.
+               LocalStatus( ElecBillMinAnnCharge ) > 5 ))
+         then  EvalRulelist( "BlastInputs_CUACOptions" )
+         else  UNCHANGED  endif  }
+   "Default CUAC:ElecBillReconBeginMo"    CUAC:ElecBillReconBeginMo  = {  "Mar"  }        ; SAC 12/14/23
+   "Default CUAC:ElecBillMinMoCharge"     CUAC:ElecBillMinMoCharge   = {  -999   }   ; -999 ignore / -1 calced by rate, regardless of NetSurplusCompensation / >=0 this value
+   "Default CUAC:ElecBillMinAnnCharge"    CUAC:ElecBillMinAnnCharge  = {     0   }   ; -999 ignore / >-999 this value
+
+END
+
+;************************************************************************* SAC 08/06/22
+RULELIST "CUAC_ZoneUnitCounts" 0 0 0 0
+;*************************************************************************
+; these rules only evaluated if:  IfValidAnd( Proj:AffordableHousing > 0 ) .AND. IfValidAnd( Proj:CUACReport > 0 )
+
+   "default main/fundamental CUAC stuff regardless of New vs. Old CUAC"    Proj:Action = {  EvalRulelist( "CUAC_Default_Always" )  }      ; SAC 06/14/24
+
+   "Set CUAC:CommunitySolarValid"      CUAC:CommunitySolarValid =          ; other comm slr properties remain in Proj - SAC 05/23/24 (tic #1378)
+      {  if (IfValidAnd( Proj:UseCommunitySolar > 0 ) .AND.
+             IfValidAnd( Proj:CommunitySolarProject != 0 ) .AND.
+             IfValidAnd( Proj:InCmntySlrProjTerritory > 0 ))
+         then  1
+         else  0
+         endif  }
+
+   "default CUAC:AffordablePVDCSysSize"      CUAC:AffordablePVDCSysSize = {  Proj:PVWDCSysTotal  }
+
    "default CUAC:Locality"          CUAC:Locality  =
       {  if (GLobalStatus( Proj:City ) < 1) then  UNDEFINED
          else if (find( Proj:City, "," ) > 1)
          then  substr( Proj:City, 0, find( Proj:City, "," )-1 )
          else  Proj:City  endif endif  }
-   "default CUAC:UnitType"          CUAC:UnitType  = {  "Affordable Housing"  }
 
    "set CUAC:OwnerDetailsLbl"       CUAC:OwnerDetailsLbl =
       {  if (LocalStatus( OwnerName ) > 0)
@@ -154,7 +173,6 @@ RULELIST "CUAC_ZoneUnitCounts" 0 0 0 0
       {  if (LocalStatus( ContactName ) > 0)
          then  "Contact Details:  " + substr( ContactName, 0, 20 ) + "..." 
          else  "Contact Details..."  endif  }
-
 
 ;   "default ResZn:CUAC_IncludeDHW"     ResZn:CUAC_IncludeDHW =       ; moved from CUAC object - SAC 09/27/23
 ;      {  if (IfValidAnd( AffordableHousing > 0 )) then  1
@@ -323,6 +341,11 @@ RULELIST "CUAC_ZoneUnitCounts" 0 0 0 0
    "Set CUAC:UseCommunitySolar"        CUAC:UseCommunitySolar      = {  CommunitySolarValid  }     ; SAC 06/03/24
    "Set CUAC:CommunitySolarProject"    CUAC:CommunitySolarProject  = {  Proj:CommunitySolarProject  }
 
+   "default CUAC:CommunitySolarSize"   CUAC:CommunitySolarSize     = {  if (UseCommunitySolar .AND. CommunitySolarValid) then  0  else  UNDEFINED  endif  }    ; SAC 06/10/24 (tic #1378)
+   "set CUAC:CommunitySolarSizeByBedrms[1-7]"   for:#U=(1to7)    CUAC:CommunitySolarSizeByBedrms[#U] =      ; SAC 06/10/24
+      {  if (ValidOr( Proj:NumBedrooms, -1 ) == (#U-1)) then  ValidOr( CommunitySolarSize, 0 )
+         else  0  endif  }
+
    "Set CUAC:TotCommunitySolarSize"    CUAC:TotCommunitySolarSize = 
       {  if (CommunitySolarValid < 1) then  0
          else  (AffordableUnitsByBedrms[1] * ValidOr( CommunitySolarSizeByBedrms[1], 0 )) +
@@ -371,16 +394,6 @@ RULELIST "CUAC_ZoneUnitCounts" 0 0 0 0
          else  "Allocation of affordable housing tenant PV successful!"
          endif endif endif endif endif endif endif endif  }
 
-   "remove restricted CUAC user inputs if not in research mode"   CUAC:Action =
-      {  if (IfValidAnd( Proj:EnableResearchMode > 0 )==0 .AND. 
-             ( LocalStatus( ElecBillReconBeginMo ) > 5 .OR. LocalStatus( ElecBillMinMoCharge ) > 5 .OR.
-               LocalStatus( ElecBillMinAnnCharge ) > 5 ))
-         then  EvalRulelist( "BlastInputs_CUACOptions" )
-         else  UNCHANGED  endif  }
-   "Default CUAC:ElecBillReconBeginMo"    CUAC:ElecBillReconBeginMo  = {  "Mar"  }        ; SAC 12/14/23
-   "Default CUAC:ElecBillMinMoCharge"     CUAC:ElecBillMinMoCharge   = {  -999   }   ; -999 ignore / -1 calced by rate, regardless of NetSurplusCompensation / >=0 this value
-   "Default CUAC:ElecBillMinAnnCharge"    CUAC:ElecBillMinAnnCharge  = {     0   }   ; -999 ignore / >-999 this value
-
    ; moved CUAC error checking rules HERE to ensure all above rules processed PRIOR to error checks - SAC 12/09/22
    ; previsouly ... moved to Battery.rule from Project-Multifamily.rule to ensure PV & Batt data refreshed BEFORE error checks which also setup PV/Batt messages - SAC 11/21/22
    ; WAS previously data model Proj:Action rule ->
@@ -396,6 +409,8 @@ END
 RULELIST "CUAC_ZoneUnitCounts_OldCUAC" 0 0 0 0
 ;*************************************************************************
 ; these rules only evaluated if:  IfValidAnd( Proj:AffordableHousing > 0 ) .AND. IfValidAnd( Proj:CUACReport > 0 ) .AND. IfValidAnd( CUAC_OldAccessDB > 0 )
+
+   "default main/fundamental CUAC stuff regardless of New vs. Old CUAC"    Proj:Action = {  EvalRulelist( "CUAC_Default_Always" )  }      ; SAC 06/14/24
 
    "Set CUAC:AffordableUnitsByBedrms[1] - Studio"     CUAC:AffordableUnitsByBedrms[1] = {  SumAcrossIf( OldCUACApt:NumAffordableUnits, OldCUACApt:NumBedrooms = 0 )  }      ; SAC 09/18/23
    "Set CUAC:AffordableUnitsByBedrms[2] - 1 Bdrm"     CUAC:AffordableUnitsByBedrms[2] = {  SumAcrossIf( OldCUACApt:NumAffordableUnits, OldCUACApt:NumBedrooms = 1 )  }
@@ -558,6 +573,17 @@ RULELIST "CUAC_ZoneUnitCounts_OldCUAC" 0 0 0 0
 ;         else  "Allocation of affordable housing tenant PV successful!"
 ;         endif endif endif endif endif  }
 
+   "Default Proj:SoftwareVendor"    Proj:SoftwareVendor =            ; SAC 05/31/24 (tic #1378)   ; copied here to ensure present for OldCUAC analysis - SAC 06/14/24
+      {  if (LocalStatus( SoftwareVendor ) > 0) then  UNCHANGED
+         else  "CBECC"  endif  }
+      ;   else if (LocalStatus( SoftwareVersion ) > 0)                   XXXXXXXXXX TO DO - Restore logic once CBECC-Res recognized as SoftwareVendor XXXXXXXXXXXXXXXXX
+      ;   then  if (strlen( SoftwareVersion ) > 0 .AND.
+      ;             find(   SoftwareVersion, " " ) > 1 .AND.
+      ;             find(   SoftwareVersion, " " ) < strlen( SoftwareVersion ))
+      ;         then  substr( SoftwareVersion, 0, find( SoftwareVersion, " " )-1 )
+      ;         else  SoftwareVersion  endif
+      ;   else  UNCHANGED  endif endif  }
+
    "Perform CUAC error checking"    Proj:Action = {  EvalRulelist( "CUAC_InputErrorCheck" )  }
 
 END
@@ -601,6 +627,9 @@ RULELIST "CUAC_InputErrorCheck" 0 0 0 0
          else  0  endif  }
 
       ;"dbg" CUAC:Action = { PostMessageToLog( "GasUtility %g / G2GasTerritory %g / G2GasTariff %g", ValidOr( GasUtility, -999 ), ValidOr( G2GasTerritory, -999 ), ValidOr( G2GasTariff, -999 ) ) }
+      ;"dbg" CUAC:Action = { if (ElecUtility < 1 .OR. G2ElecTerritory < 1 .OR. G2ElecTariff < 1) then  PostMessageToLog( "     CUAC Electric Utility, Territory and/or Tariff not selected" )
+      ;                      else  PostMessageToLog( "     CUAC Electric Utility (%g) '%s' / Territory (%g) '%s' / Tariff (%g) '%s'", ElecUtility, EnumString( ElecUtility ),
+      ;                                 G2ElecTerritory, EnumString( G2ElecTerritory ), G2ElecTariff, EnumString( G2ElecTariff ) )  endif  }
 
    ; removed check preventing analysis of ResZns where some/all dwellings assign central laundry zones - SAC 02/08/24
    "Set CUAC:ErrorMsg"     CUAC:ErrorMsg =      ; add central laundry check - SAC 12/20/22  ; prevent Utility valid errors on utilities added in Gen2 - SAC 09/13/23
@@ -633,9 +662,11 @@ RULELIST "CUAC_InputErrorCheck" 0 0 0 0
          else if (IfValidAnd( Proj:ZipCode > 90000 )==0)
          then  "Error: Project Zip code not specified or valid"
 
-         else if (IfValidAnd( AffordablePVDCSysSizeFrac > 1.01 ))
+         else if (IfValidAnd( CommunitySolarSize > 0 )==0 .AND. IfValidAnd( CommunitySolarValid > 0 ))
+         then  "Error: Community Solar Size (>0) must be specified"
+         else if (IfValidAnd( AffordablePVDCSysSizeFrac > 1.01 ) .AND. IfValidAnd( CommunitySolarValid > 0 )==0)
          then  Format( "Error: Affordable portion of PV system (%g kW) is too large", AffordablePVDCSysSize )
-         else if ( IfValidAnd( AffordablePVDCSysSizeFrac > 0 ) .AND.
+         else if ( IfValidAnd( AffordablePVDCSysSizeFrac > 0 ) .AND. IfValidAnd( CommunitySolarValid > 0 )==0 .AND.
                    ( (IfValidAnd( AvgUnitAreaByBedrms[1] > 0 ) .AND. IfValidAnd( PctIndivUnitPVByBedrms[1] >= 0 )==0) .OR.
                      (IfValidAnd( AvgUnitAreaByBedrms[2] > 0 ) .AND. IfValidAnd( PctIndivUnitPVByBedrms[2] >= 0 )==0) .OR.
                      (IfValidAnd( AvgUnitAreaByBedrms[3] > 0 ) .AND. IfValidAnd( PctIndivUnitPVByBedrms[3] >= 0 )==0) .OR.
@@ -644,7 +675,8 @@ RULELIST "CUAC_InputErrorCheck" 0 0 0 0
                      (IfValidAnd( AvgUnitAreaByBedrms[6] > 0 ) .AND. IfValidAnd( PctIndivUnitPVByBedrms[6] >= 0 )==0) .OR.
                      (IfValidAnd( AvgUnitAreaByBedrms[7] > 0 ) .AND. IfValidAnd( PctIndivUnitPVByBedrms[7] >= 0 )==0) ) )
          then  "Error: One or more tenant PV allocation inputs are missing"
-         else if (IfValidAnd( AffordablePVDCSysSizeFrac > 0 ) .AND. IfValidAnd( PctIndivUnitPVSum < 99.96 ) .OR. IfValidAnd( PctIndivUnitPVSum > 100.04 ))
+         else if (IfValidAnd( AffordablePVDCSysSizeFrac > 0 ) .AND. IfValidAnd( CommunitySolarValid > 0 )==0 .AND.
+                  (IfValidAnd( PctIndivUnitPVSum < 99.96 ) .OR. IfValidAnd( PctIndivUnitPVSum > 100.04 )))
          then  "Error: Tenant PV allocation inputs are invalid"
          else if (IfValidAnd( AffordableBattMaxCapFrac > 1.01 ))
          then  Format( "Error: Affordable portion of Battery system (%g kWh) is too large", AffordableBattMaxCap )
@@ -677,10 +709,10 @@ RULELIST "CUAC_InputErrorCheck" 0 0 0 0
          else if (IfValidAnd( CUAC_OldAccessDB > 0 ) .AND. IfValidAnd( GasTariffIsTOU > 0 ))
          then  "Error: Gas Tariff/Rate is not compatible (Time-of-Use rate)"
 
-         else if (IfValidAnd( Proj:PVWDCSysTotal > 0 ) .AND. Proj:PVSizeOption != 0 .AND. Proj:PVSizeOption != 10)
+         else if (IfValidAnd( Proj:PVWDCSysTotal > 0 ) .AND. IfValidAnd( CommunitySolarValid > 0 )==0 .AND. Proj:PVSizeOption != 0 .AND. Proj:PVSizeOption != 10)
          then  "Error: Invalid PV System Scaling selected"
 
-         else  UNDEFINED  endif endif endif endif endif   endif endif endif   endif endif endif endif   endif endif endif endif endif   endif endif endif endif endif endif  endif  }
+         else  UNDEFINED  endif endif endif endif endif   endif endif endif   endif endif endif endif endif   endif endif endif endif endif   endif endif endif endif endif endif  endif  }
 
    "Set CUAC:ErrorInfo"    CUAC:ErrorInfo =
       {  if (IfValidAnd( Proj:CUACReport > 0 )==0)
@@ -712,9 +744,11 @@ RULELIST "CUAC_InputErrorCheck" 0 0 0 0
          else if (IfValidAnd( Proj:ZipCode > 90000 )==0)
          then  "A valid project Zip code (on 'Project' tab) must be specified"
 
-         else if (IfValidAnd( AffordablePVDCSysSizeFrac > 1.01 ))
+         else if (IfValidAnd( CommunitySolarSize > 0 )==0 .AND. IfValidAnd( CommunitySolarValid > 0 ))
+         then  "Error: Community Solar Size (greater than zero) must be specified"
+         else if (IfValidAnd( AffordablePVDCSysSizeFrac > 1.01 ) .AND. IfValidAnd( CommunitySolarValid > 0 )==0)
          then  Format( "Affordable portion of PV system (%g kW) cannot exceed overall building PV system size of %g kW. Correct this via the PV Allocation... button below.", AffordablePVDCSysSize, Proj:PVWDCSysTotal )
-         else if ( IfValidAnd( AffordablePVDCSysSizeFrac > 0 ) .AND.
+         else if ( IfValidAnd( AffordablePVDCSysSizeFrac > 0 ) .AND. IfValidAnd( CommunitySolarValid > 0 )==0 .AND.
                    ( (IfValidAnd( AvgUnitAreaByBedrms[1] > 0 ) .AND. IfValidAnd( PctIndivUnitPVByBedrms[1] >= 0 )==0) .OR.
                      (IfValidAnd( AvgUnitAreaByBedrms[2] > 0 ) .AND. IfValidAnd( PctIndivUnitPVByBedrms[2] >= 0 )==0) .OR.
                      (IfValidAnd( AvgUnitAreaByBedrms[3] > 0 ) .AND. IfValidAnd( PctIndivUnitPVByBedrms[3] >= 0 )==0) .OR.
@@ -723,7 +757,8 @@ RULELIST "CUAC_InputErrorCheck" 0 0 0 0
                      (IfValidAnd( AvgUnitAreaByBedrms[6] > 0 ) .AND. IfValidAnd( PctIndivUnitPVByBedrms[6] >= 0 )==0) .OR.
                      (IfValidAnd( AvgUnitAreaByBedrms[7] > 0 ) .AND. IfValidAnd( PctIndivUnitPVByBedrms[7] >= 0 )==0) ) )
          then  "One or more tenant PV allocation inputs are missing. Correct this via the PV Allocation... button below."
-         else if (IfValidAnd( AffordablePVDCSysSizeFrac > 0 ) .AND. IfValidAnd( PctIndivUnitPVSum < 99.96 ) .OR. IfValidAnd( PctIndivUnitPVSum > 100.04 ))
+         else if (IfValidAnd( AffordablePVDCSysSizeFrac > 0 ) .AND. IfValidAnd( CommunitySolarValid > 0 )==0 .AND.
+                  (IfValidAnd( PctIndivUnitPVSum < 99.96 ) .OR. IfValidAnd( PctIndivUnitPVSum > 100.04 )))
          then  "Tenant PV allocation inputs are invalid. Correct this via the PV Allocation... button below."
          else if (IfValidAnd( AffordableBattMaxCapFrac > 1.01 ))
          then  Format( "Affordable portion of Battery system (%g kWh) cannot exceed overall building battery system size of %g kWh", AffordableBattMaxCap, Proj:BattMaxCap )
@@ -736,7 +771,7 @@ RULELIST "CUAC_InputErrorCheck" 0 0 0 0
          else if (CUAC_UtilityRateGen2Data:WhichGen( "Fuel", "Electric", "Utility", EnumString( ElecUtility ), "Territory", EnumString( G2ElecTerritory ) ) < 1 .AND.
                   CUAC_UtilityTerritories:IsValid( "TerritoryID", G2ElecTerritory ) < 1)
          then  Format( "Electric Territory '%s' not found in ruleset look-up table.", EnumString( G2ElecTerritory ) )
-         else if (ElecTariffGen < 1)
+         else if (IfValidAnd( ElecTariffGen > 0 )==0)
          then  Format( "Electric Tariff/Rate '%s' not found in ruleset look-up table.", EnumString( G2ElecTariff ) )
          else if (IfValidAnd( CUAC_OldAccessDB > 0 ) .AND. IfValidAnd( ElecTariffIsTOU > 0 ))
          then  Format( "Electric Tariff/Rate '%s' is a Time-of-Use rate, and as such, is not compatible with old projects containing only monthly energy use data", EnumString( G2ElecTariff ) )
@@ -756,10 +791,10 @@ RULELIST "CUAC_InputErrorCheck" 0 0 0 0
          else if (IfValidAnd( CUAC_OldAccessDB > 0 ) .AND. IfValidAnd( GasTariffIsTOU > 0 ))
          then  Format( "Gas Tariff/Rate '%s' is a Time-of-Use rate, and as such, is not compatible with old projects containing only monthly energy use data", EnumString( G2GasTariff ) )
 
-         else if (IfValidAnd( Proj:PVWDCSysTotal > 0 ) .AND. Proj:PVSizeOption != 0 .AND. Proj:PVSizeOption != 10)
+         else if (IfValidAnd( Proj:PVWDCSysTotal > 0 ) .AND. IfValidAnd( CommunitySolarValid > 0 )==0 .AND. Proj:PVSizeOption != 0 .AND. Proj:PVSizeOption != 10)
          then  "PV System Scaling option 'Use Specified Sizes' must be selected before performing analysis/reporting."
 
-         else  UNDEFINED  endif endif endif endif endif         endif endif endif   endif endif endif endif   endif endif endif endif endif   endif endif endif endif endif endif  endif  }
+         else  UNDEFINED  endif endif endif endif endif         endif endif endif   endif endif endif endif endif   endif endif endif endif endif   endif endif endif endif endif endif  endif  }
    "Set CUAC:ErrorInfo (Gas Tariff Required but not specified)"      CUAC:Action =        ; SAC 03/08/24
       {  if (LocalStatus( ErrorInfo ) < 1 .AND. GasTariffReqd > 0 .AND. (GasUtility == 0 .OR. GasUtility == 999))
          then  EvalRulelist( "SetCUACErrorInfo_GasTariffReqd" )
@@ -794,10 +829,12 @@ RULELIST "CUAC_InputErrorCheck" 0 0 0 0
          ; else if (SumAll( ResZn:NumAffordableCentralLaundryAssignments ) > 0)
          ; then  Format( "Res dwelling units of %g zone(s) use central laundry facilities", SumAll( ResZn:NumAffordableCentralLaundryAssignments ) )
 
-         else if (IfValidAnd( AffordablePVDCSysSizeFrac > 1.01 ))
+         else if (IfValidAnd( CommunitySolarSize > 0 )==0 .AND. IfValidAnd( CommunitySolarValid > 0 ))
+         then  "Community Solar Size not specified"
+         else if (IfValidAnd( AffordablePVDCSysSizeFrac > 1.01 ) .AND. IfValidAnd( CommunitySolarValid > 0 )==0)
          then  Format( "Affordable portion of PV system (%g kW) exceeds building total", AffordablePVDCSysSize )
-         else if (IfValidAnd( AffordableBattMaxCapFrac > 1.01 ))
-         then  Format( "Affordable portion of Battery system (%g kWh) exceeds building total", AffordableBattMaxCap )
+         ; else if (IfValidAnd( AffordableBattMaxCapFrac > 1.01 ) .AND. IfValidAnd( CommunitySolarValid > 0 )==0)
+         ; then  Format( "Affordable portion of Battery system (%g kWh) exceeds building total", AffordableBattMaxCap )
 
          else  Format( "%s ft2", FltToStr( Proj:CondFloorArea, 0 ) )
                ; Format( "%g zones, %g dwellings, %s ft2", SumAcrossIf( ResZn:AffordableHousing, ResZn:NumAffordableUnitTypes = 1 ),
@@ -878,10 +915,11 @@ RULELIST "CUAC_InputErrorCheck" 0 0 0 0
                ; then  "Click to select a valid community solar project"
                ; else if (IfValidAnd( InCmntySlrProjTerritory > 0 )==0)
                ; then  "Click to confirm building within Community Solar project boundary"
-               else if (TotCommunitySolarSize < 0.01)
-               then  "Enter community solar PV size"
-               else  Format( "%.0f kW of '%s' entered", TotCommunitySolarSize, EnumString( CommunitySolarProject ) )
-               endif endif
+               ; else if (TotCommunitySolarSize < 0.01)
+               ; then  "Enter community solar PV size"
+               ; else  Format( "%.0f kW of '%s' entered", TotCommunitySolarSize, EnumString( CommunitySolarProject ) )
+               ; endif endif
+               else  "Community Solar PV size:"  endif
          else if (IfValidAnd( Proj:PVWDCSysTotal > 0 )==0)    then  "PV: No PVArray(s) specified"
          else if (PVSizeOption != 0 .AND. PVSizeOption != 10) then  "PV: Invalid PV System Scaling selected"
          ; else if (AffordablePVDCSysSizeFrac == 0)             then  Format( "PV Allocation:  (%g kWdc)", Proj:PVWDCSysTotal )
