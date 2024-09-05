@@ -70,7 +70,6 @@ RULELIST "VCHP3_Defaulting" 1 0 0 0
          else  UNCHANGED  endif  }
 
    ; Inputs/Constants
-   "Set HVACHtPump:VCHP3_Tmin"      HVACHtPump:VCHP3_Tmin     = { -30 }
    "Set HVACHtPump:VCHP3_Tdefrost"  HVACHtPump:VCHP3_Tdefrost = {  40 }
    "Set HVACHtPump:VCHP3_Tmax"      HVACHtPump:VCHP3_Tmax     = { 125 }
 
@@ -81,14 +80,64 @@ RULELIST "VCHP3_Defaulting" 1 0 0 0
             case  9 :  EvalRulelist( "VCHP3_Defaulting_Variable", 1 ) 
             default :  UNCHANGED
          endswitch  }
-
-
 END
 ;*************************************************************************
 
-;************************************************************************* SAC 08/25/24 (tic #1379)
+;************************************************************************* SAC 09/05/24 (tic #1379)
 RULELIST "VCHP3_Defaulting_Single" 1 0 0 0
 ;*************************************************************************
+
+   "Set HVACHtPump:VCHP3_Tmin"      HVACHtPump:VCHP3_Tmin      = {  0  }
+   "Set HVACHtPump:HP3_Cd"          HVACHtPump:HP3_Cd          = {  0.15  }
+   "Set HVACHtPump:HasHPLockout - has lockout temp for HP"        HVACHtPump:HasHPLockout  = {  1  }
+   "Set HVACHtPump:HPLockoutTemp - lockout temperature for HP"    HVACHtPump:HPLockoutTemp = {  VCHP3_Tmin  }
+
+   ; HtPumpV3 2D interpolation - SAC 09/05/24 (VCHP3)
+   "Set HVACHtPump:HP3_HSPF2Min"          HVACHtPump:HP3_HSPF2Min          = {  HtPump3_Interp_Single_Full_HeatCapRatio_COP:HSPF2Limit( "2DInterpolate", "Min", "HSPF2", -999 )  }
+   "Set HVACHtPump:HP3_HSPF2Max"          HVACHtPump:HP3_HSPF2Max          = {  HtPump3_Interp_Single_Full_HeatCapRatio_COP:HSPF2Limit( "2DInterpolate", "Max", "HSPF2", -999 )  }
+   "Set HVACHtPump:HP3_HeatCapRatio"      HVACHtPump:HP3_HeatCapRatio      = {  if (IfValidAnd( Cap47 > 0 ) .AND. IfValidAnd( Cap17 > 0 )) then  Cap17 / Cap47  else  0  endif  }
+   "Set HVACHtPump:HP3_HeatCapRatioMin"   HVACHtPump:HP3_HeatCapRatioMin   = {  HtPump3_Interp_Single_Full_HeatCapRatio_COP:HeatCapRatio( "2DInterpolate", "Min", "HSPF2", -999 )  }
+   "Set HVACHtPump:HP3_HeatCapRatioMax"   HVACHtPump:HP3_HeatCapRatioMax   = {  HtPump3_Interp_Single_Full_HeatCapRatio_COP:HeatCapRatio( "2DInterpolate", "Max", "HSPF2", -999 )  }
+
+   ; Regression Values
+   "Set HVACHtPump:COP47rated - COP Rated 47F vs HSPF2"                       HVACHtPump:COP47rated =
+      {  if (IfValidAnd( HSPF2 >= HP3_HSPF2Min ) .AND. IfValidAnd( HSPF2 <= HP3_HSPF2Max ) .AND.
+             IfValidAnd( HP3_HeatCapRatio >= HP3_HeatCapRatioMin ) .AND. IfValidAnd( HP3_HeatCapRatio <= HP3_HeatCapRatioMax ))
+         then  HtPump3_Interp_Single_Full_HeatCapRatio_COP:2DInterpolate( "HeatCapRatio", HP3_HeatCapRatio, "HSPF2", HSPF2 )
+         else    VCHP3_NEEPRegressions:intercept( "quantity", "COP47rated" ) +
+               ( VCHP3_NEEPRegressions:slope(     "quantity", "COP47rated" ) * ValidOr( HSPF2, 7.5 ) )  endif  }
+
+   ; Cutler Correlations - calcs in spreadsheet col.s AD-AH, rows 1-20
+   "Set HVACHtPump:Qm95rated - Capacity Maintenance at 95°F Rated"   HVACHtPump:Qm95rated    = {  1 / 1.0686  }   ; AE19/AE18
+   "Set HVACHtPump:EIRm17rated - EIR Maintenance at 17°F Rated"      HVACHtPump:EIRm17rated  = {  1.3557 / 1  }   ; AH19/AH20
+
+   ; Intermediate Calculation Quantites
+   "Set HVACHtPump:EER2B82"                  HVACHtPump:EER2B82      = {  ValidOr( SEER2, 14.3 ) / (1 - (0.5 * HP3_Cd))  } 
+   "Set HVACHtPump:Pm17rated"                HVACHtPump:Pm17rated    = {  EIRm17rated * ValidOr( Cap17, 2000 ) / ValidOr( Cap47, 4000 )  } 
+;   "Set HVACHtPump:RatedSpecificFanPower"    HVACHtPump:RatedSpecificFanPower = {    }                         
+;   "Set HVACHtPump:RatedFlow"                HVACHtPump:RatedFlow             = {    }                 
+;   "Set HVACHtPump:RatedFanPower"            HVACHtPump:RatedFanPower         = {    }                     
+
+   ; Cap* (Q*rated)
+   "Set HVACHtPump:Cap40rtd"        HVACHtPump:Cap40rtd        = {  Cap17    + (((Cap47    - Cap17   )/(47 - 17))*(40 - 17))  }
+   "Set HVACHtPump:Cap05"           HVACHtPump:Cap05           = {  Cap17    - (((Cap40rtd - Cap17   )/(40 - 17))*(17 -  5))  }
+   "Set HVACHtPump:Capm30rtd"       HVACHtPump:Capm30rtd       = {  Cap05    - (((Cap17    - Cap05   )/(17 -  5))*( 5 - VCHP3_Tmin))  }
+
+   "Set HVACHtPump:Cap82rtd"        HVACHtPump:Cap82rtd        = {  Cap95    / Qm95rated  }
+   "Set HVACHtPump:Cap60rtd"        HVACHtPump:Cap60rtd        = {  Cap82rtd - (((Cap95    - Cap82rtd)/(95 - 82))*(82 - 60))  }
+   "Set HVACHtPump:Cap125rtd"       HVACHtPump:Cap125rtd       = {  Cap95    + (((Cap95    - Cap82rtd)/(95 - 82))*(VCHP3_Tmax - 95))  }
+
+   ; Net Power
+   "Set HVACHtPump:NetPwr47rtd"     HVACHtPump:NetPwr47rtd     = {  Cap47       / ValidOr( COP47rated, 3.64 )  }
+   "Set HVACHtPump:NetPwr17rtd"     HVACHtPump:NetPwr17rtd     = {  NetPwr47rtd * Pm17rated  }
+   "Set HVACHtPump:NetPwr40rtd"     HVACHtPump:NetPwr40rtd     = {  NetPwr17rtd + (((NetPwr47rtd - NetPwr17rtd)/(47 - 17))*(40 - 17))  }
+   "Set HVACHtPump:NetPwr05rtd"     HVACHtPump:NetPwr05rtd     = {  NetPwr17rtd - (((NetPwr40rtd - NetPwr17rtd)/(47 - 17))*(17 -  5))  }
+   "Set HVACHtPump:NetPwrm30rtd"    HVACHtPump:NetPwrm30rtd    = {  NetPwr05rtd - (((NetPwr17rtd - NetPwr05rtd)/(17 -  5))*( 5 - VCHP3_Tmin))  }
+
+   "Set HVACHtPump:NetPwr95rtd"     HVACHtPump:NetPwr95rtd     = {  Cap95    / (ValidOr( EER2,    10 ) / 3.41214)  }
+   "Set HVACHtPump:NetPwr82rtd"     HVACHtPump:NetPwr82rtd     = {  Cap82rtd / (ValidOr( EER2B82, 15 ) / 3.41214)  }
+   "Set HVACHtPump:NetPwr60rtd"     HVACHtPump:NetPwr60rtd     = {  max( NetPwr82rtd - (((NetPwr95rtd - NetPwr82rtd)/(95 - 82))*(82 - 60)), NetPwr82rtd/2 )  }
+   "Set HVACHtPump:NetPwr125rtd"    HVACHtPump:NetPwr125rtd    = {  NetPwr95rtd + (((NetPwr95rtd - NetPwr82rtd)/(95 - 82))*(VCHP3_Tmax - 95))  }
 
 END
 ;*************************************************************************
@@ -97,12 +146,20 @@ END
 RULELIST "VCHP3_Defaulting_Two" 1 0 0 0
 ;*************************************************************************
 
+   "Set HVACHtPump:VCHP3_Tmin"      HVACHtPump:VCHP3_Tmin     = {  0  }
+   "Set HVACHtPump:HasHPLockout - has lockout temp for HP"        HVACHtPump:HasHPLockout  = {  1  }
+   "Set HVACHtPump:HPLockoutTemp - lockout temperature for HP"    HVACHtPump:HPLockoutTemp = {  VCHP3_Tmin  }
+
 END
 ;*************************************************************************
 
 ;************************************************************************* SAC 08/25/24 (tic #1379)
 RULELIST "VCHP3_Defaulting_Variable" 1 0 0 0
 ;*************************************************************************
+
+   "Set HVACHtPump:VCHP3_Tmin"      HVACHtPump:VCHP3_Tmin     = { -30 }
+   "Set HVACHtPump:HasHPLockout - has lockout temp for HP"        HVACHtPump:HasHPLockout  = {  1  }
+   "Set HVACHtPump:HPLockoutTemp - lockout temperature for HP"    HVACHtPump:HPLockoutTemp = {  VCHP3_Tmin  }
 
    ; HtPumpV3 2D interpolation - SAC 08/21/24 (VCHP3)
    "Set HVACHtPump:HP3_SEER2Min"          HVACHtPump:HP3_SEER2Min          = {  HtPump3_Interp_VarSpeed_Low_SEER2EER2ratio_COP:SEER2Limit( "2DInterpolate", "Min", "SEER2", -999 )  }
@@ -125,38 +182,34 @@ RULELIST "VCHP3_Defaulting_Variable" 1 0 0 0
          else    VCHP3_NEEPRegressions:intercept( "quantity", "COP47rated" ) +
                ( VCHP3_NEEPRegressions:slope(     "quantity", "COP47rated" ) * ValidOr( HSPF2, 7.5 ) )  endif  }
 
-   "Set HVACHtPump:Qr95rated - Capacity Ratio at 95°F Rated"                  HVACHtPump:Qr95rated = {  VCHP3_NEEPStatistics:mean( "quantity", "Qr95rated"  )  } 
-   "Set HVACHtPump:Qm95max - Capacity Maintenance at 95°F Max"                HVACHtPump:Qm95max   = {  VCHP3_NEEPStatistics:mean( "quantity", "Qm95max"  )  } 
+   "Set HVACHtPump:Qr95rated - Capacity Ratio at 95°F Rated"         HVACHtPump:Qr95rated    = {  VCHP3_NEEPStatistics:mean( "quantity", "Qr95rated"    )  } 
+   "Set HVACHtPump:Qm95max - Capacity Maintenance at 95°F Max"       HVACHtPump:Qm95max      = {  VCHP3_NEEPStatistics:mean( "quantity", "Qm95max"      )  } 
+   "Set HVACHtPump:EIRr95rated - EIR Ratio at 95°F Rated"            HVACHtPump:EIRr95rated  = {  VCHP3_NEEPStatistics:mean( "quantity", "EIRr95rated"  )  } 
+   "Set HVACHtPump:Pr95rated"                                        HVACHtPump:Pr95rated    = {  ValidOr( Qr95rated,   0 ) * ValidOr( EIRr95rated, 1 )  } 
+   "Set HVACHtPump:EIRm95max - EIR Maintenance at 95°F Max"          HVACHtPump:EIRm95max    = {  VCHP3_NEEPStatistics:mean( "quantity", "EIRm95max"  )  } 
+   "Set HVACHtPump:Pm95max"                                          HVACHtPump:Pm95max      = {  ValidOr( Qm95max,  2000 ) * ValidOr( EIRm95max,   1 )  }
 
+   "Set HVACHtPump:HP3_Var_Clg_NetCap_Max82__W4"                     HVACHtPump:HP3_Var_Clg_NetCap_Max82__W4 =
+      {  if (IfValidAnd( Cap95 > 0 )==0 .OR. IfValidAnd( Qr95rated > 0 )==0 .OR. IfValidAnd( Qm95max > 0 )==0) then  6800
+         else  ((Cap95 / Qr95rated) / Qm95max)  endif  }
+
+   "Set HVACHtPump:HP3_Var_Clg_NetPwr_Max82__W7"                     HVACHtPump:HP3_Var_Clg_NetPwr_Max82__W7 =
+      {  if (IfValidAnd( Cap95 > 0 )==0 .OR. IfValidAnd( EER2 > 0 )==0 .OR.
+             IfValidAnd( Pr95rated > 0 )==0 .OR. IfValidAnd( Pm95max > 0 )==0) then  2400
+         else  ((Cap95 / (EER2 / 3.41214)) / Pr95rated) / Pm95max  endif  }
+
+   "Set HVACHtPump:COP82min - COP at 82F Min vs SEER2 over EER2"        HVACHtPump:COP82min =
+      {  if (IfValidAnd( SEER2 >= HP3_SEER2Min ) .AND. IfValidAnd( SEER2 <= HP3_SEER2Max ) .AND.
+             IfValidAnd( HP3_SEER2EER2Ratio >= HP3_SEER2EER2RatioMin ) .AND. IfValidAnd( HP3_SEER2EER2Ratio <= HP3_SEER2EER2RatioMax ))
+         then  HtPump3_Interp_VarSpeed_Low_SEER2EER2ratio_COP:2DInterpolate( "SEER2EER2Ratio", HP3_SEER2EER2Ratio, "SEER2", SEER2 )
+         else    VCHP3_NEEPRegressions:intercept( "quantity", "EIRr82min"  ) +
+               ( VCHP3_NEEPRegressions:slope(     "quantity", "EIRr82min"  ) * ValidOr( SEER2, 14.3 ) / ValidOr( EER2, 11.7 ) )  endif  }
 
    "Set HVACHtPump:Qr95min - Capacity Ratio at 95F Min vs SEER2 over EER2"    HVACHtPump:Qr95min =
-      {    VCHP3_NEEPRegressions:intercept( "quantity", "Qr95min"    ) +
-         ( VCHP3_NEEPRegressions:slope(     "quantity", "Qr95min"    ) * ValidOr( SEER2, 14.3 ) / ValidOr( EER2, 11.7 ) )  }
-;    "Set HVACHtPump:Qr95min - Capacity Ratio at 95F Min vs SEER2 over EER2"    HVACHtPump:Qr95min =
-;       {  if ()
-; 
-; W4:  ((Cap95 / Qr95rated) / Qm95max)
-; W7:  ((Cap95 / (EER2 / 3.41214)) / Pr95rated) / Pm95max
-; 
-;          then  min( max(    , 0.1 ), Qr95rated )
-; 
-;          else   VCHP3_NEEPRegressions:intercept( "quantity", "Qr95min"    ) +
-;               ( VCHP3_NEEPRegressions:slope(     "quantity", "Qr95min"    ) * ValidOr( SEER2, 14.3 ) / ValidOr( EER2, 11.7 ) )  }
-; 
-
-   "Set HVACHtPump:EIRr82min - EIR Ratio at 82F Min vs SEER2 over EER2"       HVACHtPump:EIRr82min =
-      {    VCHP3_NEEPRegressions:intercept( "quantity", "EIRr82min"  ) +
-         ( VCHP3_NEEPRegressions:slope(     "quantity", "EIRr82min"  ) * ValidOr( SEER2, 14.3 ) / ValidOr( EER2, 11.7 ) )  }
-
-
-
-
-; 
-;       {  if (IfValidAnd( SEER2 >= HP3_SEER2Min ) .AND. IfValidAnd( SEER2 <= HP3_SEER2Max ) .AND.
-;              IfValidAnd( HP3_SEER2EER2Ratio >= HP3_SEER2EER2RatioMin ) .AND. IfValidAnd( HP3_SEER2EER2Ratio <= HP3_SEER2EER2RatioMax ))
-;          then  HtPump3_Interp_VarSpeed_Low_SEER2EER2ratio_COP:2DInterpolate( "SEER2EER2Ratio", HP3_SEER2EER2Ratio, "SEER2", SEER2 )
-; 
-
+      {  if (IfValidAnd( HP3_Var_Clg_NetPwr_Max82__W7 > 0 )==0 .OR. IfValidAnd( COP82min > 0 )==0) then  0.18
+         else  min( max( ( VCHP3_NEEPRegressions:intercept( "quantity", "Cap95ratVsEIR82" ) +
+                          (VCHP3_NEEPRegressions:slope(     "quantity", "Cap95ratVsEIR82" ) *
+                              (HP3_Var_Clg_NetCap_Max82__W4 / HP3_Var_Clg_NetPwr_Max82__W7) / COP82min )), 0.1 ), ValidOr( Qr95rated, 0.934 ) )  endif  }
 
    ; VCHP3 NEEP Statistical Quantities
    "Set HVACHtPump:Qr47rated - Capacity Ratio at 47°F Rated"                 HVACHtPump:Qr47rated        = {  VCHP3_NEEPStatistics:mean( "quantity", "Qr47rated"  )  } 
@@ -180,31 +233,37 @@ RULELIST "VCHP3_Defaulting_Variable" 1 0 0 0
    "Set HVACHtPump:EIRr5min - EIR Ratio at 5°F Min"                          HVACHtPump:EIRr5min         = {  VCHP3_NEEPStatistics:mean( "quantity", "EIRr5min"  )  } 
    "Set HVACHtPump:EIRmslopeLCTmax - EIR Maintenance Slope at LCT°F Max"     HVACHtPump:EIRmslopeLCTmax  = {  VCHP3_NEEPStatistics:mean( "quantity", "EIRmslopeLCTmax"  )  } 
    "Set HVACHtPump:EIRmslopeLCTmin - EIR Maintenance Slope at LCT°F Min"     HVACHtPump:EIRmslopeLCTmin  = {  VCHP3_NEEPStatistics:mean( "quantity", "EIRmslopeLCTmin"  )  } 
-   "Set HVACHtPump:EIRr95rated - EIR Ratio at 95°F Rated"                    HVACHtPump:EIRr95rated      = {  VCHP3_NEEPStatistics:mean( "quantity", "EIRr95rated"  )  } 
-   "Set HVACHtPump:EIRm95max - EIR Maintenance at 95°F Max"                  HVACHtPump:EIRm95max        = {  VCHP3_NEEPStatistics:mean( "quantity", "EIRm95max"  )  } 
    "Set HVACHtPump:EIRm95min - EIR Maintenance at 95°F Min"                  HVACHtPump:EIRm95min        = {  VCHP3_NEEPStatistics:mean( "quantity", "EIRm95min"  )  } 
 
    ; Cap* (Q*rated/max/min)
-   "Set HVACHtPump:Cap95max"                 HVACHtPump:Cap95max     = {  ValidOr( Cap95,    2000 ) / ValidOr( Qr95rated, 1.2 )  }
-   "Set HVACHtPump:Cap95min"                 HVACHtPump:Cap95min     = {  ValidOr( Cap95max, 2000 ) * ValidOr( Qr95min,   0.3 )  }
-   "Set HVACHtPump:Cap82max"                 HVACHtPump:Cap82max     = {  ValidOr( Cap95max, 2000 ) / ValidOr( Qm95max,   1.3 )  }
-   "Set HVACHtPump:Cap82min"                 HVACHtPump:Cap82min     = {  ValidOr( Cap95min, 2000 ) / ValidOr( Qm95min,   1.1 )  }
-   "Set HVACHtPump:Cap17max"                 HVACHtPump:Cap17max     = {  ValidOr( Cap17,    2000 ) / ValidOr( Qr17rated, 1.2 )  }
-   "Set HVACHtPump:Cap17min"                 HVACHtPump:Cap17min     = {  ValidOr( Cap17max, 2000 ) * ValidOr( Qr17min,   0.25 )  }
-   "Set HVACHtPump:Cap05max"                 HVACHtPump:Cap05max     = {  ValidOr( Cap17max, 2000 ) * ValidOr( Qm5max,    0.75 )  }
-   "Set HVACHtPump:Cap05"                    HVACHtPump:Cap05        = {  ValidOr( Cap05max, 2000 ) * ValidOr( Qr5rated,  0.90 )  }
-   "Set HVACHtPump:Cap05min"                 HVACHtPump:Cap05min     = {  ValidOr( Cap05max, 2000 ) * ValidOr( Qr5min,    0.25 )  }
+   "Set HVACHtPump:Cap95max"        HVACHtPump:Cap95max        = {  ValidOr( Cap95,    2000 ) / ValidOr( Qr95rated, 1.2 )  }
+   "Set HVACHtPump:Cap95min"        HVACHtPump:Cap95min        = {  ValidOr( Cap95max, 2000 ) * ValidOr( Qr95min,   0.3 )  }
+   "Set HVACHtPump:Cap82max"        HVACHtPump:Cap82max        = {  ValidOr( Cap95max, 2000 ) / ValidOr( Qm95max,   1.3 )  }
+   "Set HVACHtPump:Cap82min"        HVACHtPump:Cap82min        = {  ValidOr( Cap95min, 2000 ) / ValidOr( Qm95min,   1.1 )  }
+   "Set HVACHtPump:Cap47max"        HVACHtPump:Cap47max        = {  ValidOr( Cap47,    2000 ) / ValidOr( Qr47rated, 1.2  )  }
+   "Set HVACHtPump:Cap47min"        HVACHtPump:Cap47min        = {  ValidOr( Cap47max, 2000 ) * ValidOr( Qr47min,   0.25 )  }
+   "Set HVACHtPump:Cap17max"        HVACHtPump:Cap17max        = {  ValidOr( Cap17,    2000 ) / ValidOr( Qr17rated, 1.2  )  }
+   "Set HVACHtPump:Cap17min"        HVACHtPump:Cap17min        = {  ValidOr( Cap17max, 2000 ) * ValidOr( Qr17min,   0.25 )  }
+   "Set HVACHtPump:Cap05max"        HVACHtPump:Cap05max        = {  ValidOr( Cap17max, 2000 ) * ValidOr( Qm5max,    0.75 )  }
+   "Set HVACHtPump:Cap05"           HVACHtPump:Cap05           = {  ValidOr( Cap05max, 2000 ) * ValidOr( Qr5rated,  0.90 )  }
+   "Set HVACHtPump:Cap05min"        HVACHtPump:Cap05min        = {  ValidOr( Cap05max, 2000 ) * ValidOr( Qr5min,    0.25 )  }
+
+   "Set HVACHtPump:Cap82rtd"        HVACHtPump:Cap82rtd        = {  Cap82min + (((Cap95    - Cap95min)/(Cap95max - Cap95min))*(Cap82max - Cap82min))  }  ; SAC 09/02/24
+   "Set HVACHtPump:Cap125max"       HVACHtPump:Cap125max       = {  Cap95max + (((Cap95max - Cap82max)/(95 - 82))*(VCHP3_Tmax - 95))  }
+   "Set HVACHtPump:Cap125rtd"       HVACHtPump:Cap125rtd       = {  Cap95    + (((Cap95    - Cap82rtd)/(95 - 82))*(VCHP3_Tmax - 95))  }
+   "Set HVACHtPump:Cap125min"       HVACHtPump:Cap125min       = {  Cap95min + (((Cap95min - Cap82min)/(95 - 82))*(VCHP3_Tmax - 95))  }
+   "Set HVACHtPump:Cap60max"        HVACHtPump:Cap60max        = {  Cap82max - (((Cap95max - Cap82max)/(95 - 82))*(82 - 60))  }
+   "Set HVACHtPump:Cap60rtd"        HVACHtPump:Cap60rtd        = {  Cap82rtd - (((Cap95    - Cap82rtd)/(95 - 82))*(82 - 60))  }
+   "Set HVACHtPump:Cap60min"        HVACHtPump:Cap60min        = {  Cap82min - (((Cap95min - Cap82min)/(95 - 82))*(82 - 60))  }
 
    ; VCHP3 Intermediate Calculation Quantites
    "Set HVACHtPump:QmLCTmax"                 HVACHtPump:QmLCTmax     = {  1 / (1 - ValidOr( QmslopeLCTmax, 0 ) * (5-VCHP3_Tmin))  }
    "Set HVACHtPump:QmLCTmin"                 HVACHtPump:QmLCTmin     = {  1 / (1 - ValidOr( QmslopeLCTmin, 0 ) * (5-VCHP3_Tmin))  }
-   "Set HVACHtPump:Capm20max"                HVACHtPump:Capm20max    = {  Cap05max * QmLCTmax  }   ; 
-   "Set HVACHtPump:Capm20min"                HVACHtPump:Capm20min    = {  Cap05min * QmLCTmin  }
+   "Set HVACHtPump:Capm30max"                HVACHtPump:Capm30max    = {  Cap05max * QmLCTmax  }   ; 
+   "Set HVACHtPump:Capm30min"                HVACHtPump:Capm30min    = {  Cap05min * QmLCTmin  }
    "Set HVACHtPump:Pr47rated"                HVACHtPump:Pr47rated    = {  ValidOr( EIRr47rated, 0 ) * ValidOr( Qr47rated,   0 )  } 
    "Set HVACHtPump:Pr47min"                  HVACHtPump:Pr47min      = {  ValidOr( EIRr47min,   0 ) * ValidOr( Qr47min,     0 )  }
-   "Set HVACHtPump:Pr95rated"                HVACHtPump:Pr95rated    = {  ValidOr( Qr95rated,   0 ) * ValidOr( EIRr95rated, 1 )  } 
-   "Set HVACHtPump:Pr82min"                  HVACHtPump:Pr82min      = {  ValidOr( Cap82min, 2000 ) / ValidOr( Cap82max, 2000 ) * ValidOr( EIRr82min, 1 )  }
-   "Set HVACHtPump:Pm95max"                  HVACHtPump:Pm95max      = {  ValidOr( Qm95max,  2000 ) * ValidOr( EIRm95max,   1 )  }
+   ; "Set HVACHtPump:Pr82min"                  HVACHtPump:Pr82min      = {  ValidOr( Cap82min, 2000 ) / ValidOr( Cap82max, 2000 ) * ValidOr( COP82min, 1 )  }
    "Set HVACHtPump:Pm95min"                  HVACHtPump:Pm95min      = {  ValidOr( Qm95min,  2000 ) * ValidOr( EIRm95min,   1 )  }
    "Set HVACHtPump:Pm17rated"                HVACHtPump:Pm17rated    = {  ValidOr( EIRm17rated, 1 ) * (ValidOr( Cap17, 2000 ) / max( 1, ValidOr( Cap47, 2000 ) ))  } 
    "Set HVACHtPump:Pr17rated"                HVACHtPump:Pr17rated    = {  ValidOr( EIRr17rated, 1 ) * ValidOr( Qr17rated, 2000 )  } 
@@ -213,14 +272,44 @@ RULELIST "VCHP3_Defaulting_Variable" 1 0 0 0
    "Set HVACHtPump:Pr5min"                   HVACHtPump:Pr5min       = {  ValidOr( EIRr5min,    1 ) * (ValidOr( Cap05min, 2000 ) / ValidOr( Cap05max, 2000 ))  }
    "Set HVACHtPump:EIRmLCTmax"               HVACHtPump:EIRmLCTmax   = {  1 / (1 - ValidOr( EIRmslopeLCTmax, 0.8 ) * (5-VCHP3_Tmin))  }  
    "Set HVACHtPump:EIRmLCTmin"               HVACHtPump:EIRmLCTmin   = {  1 / (1 - ValidOr( EIRmslopeLCTmin, 0.3 ) * (5-VCHP3_Tmin))  }  
-   "Set HVACHtPump:PmLCTmax"                 HVACHtPump:PmLCTmax     = {  ValidOr( EIRmLCTmax,  1 ) * (Capm20max / Cap05max)  }
-   "Set HVACHtPump:PmLCTmin"                 HVACHtPump:PmLCTmin     = {  ValidOr( EIRmLCTmin,  1 ) * (Capm20min / Cap05min)  }
+   "Set HVACHtPump:PmLCTmax"                 HVACHtPump:PmLCTmax     = {  ValidOr( EIRmLCTmax,  1 ) * (Capm30max / Cap05max)  }
+   "Set HVACHtPump:PmLCTmin"                 HVACHtPump:PmLCTmin     = {  ValidOr( EIRmLCTmin,  1 ) * (Capm30min / Cap05min)  }
 ;   "Set HVACHtPump:RatedSpecificFanPower"    HVACHtPump:RatedSpecificFanPower = {    }                         
 ;   "Set HVACHtPump:RatedFlow"                HVACHtPump:RatedFlow             = {    }                 
 ;   "Set HVACHtPump:RatedFanPower"            HVACHtPump:RatedFanPower         = {    }                     
 
+   "Set HVACHtPump:Capm30rtd"       HVACHtPump:Capm30rtd       = {  Capm30min + (((Cap05 - Cap05min)/(Cap05max - Cap05min))*(Capm30max - Capm30min))  }     ; SAC 09/01/24
+
+   "Set HVACHtPump:NetPwr95rtd"     HVACHtPump:NetPwr95rtd     = {  Cap95 / (ValidOr( EER2, 13 ) / 3.41214)  }
+   "Set HVACHtPump:NetPwr95max"     HVACHtPump:NetPwr95max     = {  NetPwr95rtd / Pr95rated  }
+   "Set HVACHtPump:NetPwr82max"     HVACHtPump:NetPwr82max     = {  NetPwr95max / Pm95max    }
+   "Set HVACHtPump:NetPwr82min"     HVACHtPump:NetPwr82min     = {  Cap82min    / COP82min   }
+   "Set HVACHtPump:NetPwr95min"     HVACHtPump:NetPwr95min     = {  NetPwr82min * Pm95min  }
+   "Set HVACHtPump:NetPwr82rtd"     HVACHtPump:NetPwr82rtd     = {  NetPwr82min + (((NetPwr95rtd - NetPwr95min)/(NetPwr95max - NetPwr95min))*(NetPwr82max - NetPwr82min))  }
+   "Set HVACHtPump:NetPwr125max"    HVACHtPump:NetPwr125max    = {  NetPwr95max + (((NetPwr95max - NetPwr82max)/(95 - 82))*(VCHP3_Tmax - 95))  }
+   "Set HVACHtPump:NetPwr125rtd"    HVACHtPump:NetPwr125rtd    = {  NetPwr95rtd + (((NetPwr95rtd - NetPwr82rtd)/(95 - 82))*(VCHP3_Tmax - 95))  }
+   "Set HVACHtPump:NetPwr125min"    HVACHtPump:NetPwr125min    = {  NetPwr95min + (((NetPwr95min - NetPwr82min)/(95 - 82))*(VCHP3_Tmax - 95))  }
+   "Set HVACHtPump:NetPwr60max"     HVACHtPump:NetPwr60max     = {  max( NetPwr82max - (((NetPwr95max - NetPwr82max)/(95 - 82))*(82 - 60)), NetPwr82max/2 )  }
+   "Set HVACHtPump:NetPwr60rtd"     HVACHtPump:NetPwr60rtd     = {  max( NetPwr82rtd - (((NetPwr95rtd - NetPwr82rtd)/(95 - 82))*(82 - 60)), NetPwr82rtd/2 )  }
+   "Set HVACHtPump:NetPwr60min"     HVACHtPump:NetPwr60min     = {  max( NetPwr82min - (((NetPwr95min - NetPwr82min)/(95 - 82))*(82 - 60)), NetPwr82min/2 )  }
+   "Set HVACHtPump:NetPwr47rtd"     HVACHtPump:NetPwr47rtd     = {  Cap47       / ValidOr( COP47rated, 3.37 )  }
+   "Set HVACHtPump:NetPwr47max"     HVACHtPump:NetPwr47max     = {  NetPwr47rtd / ValidOr( Pr47rated,  0.85 )  }
+   "Set HVACHtPump:NetPwr47min"     HVACHtPump:NetPwr47min     = {  NetPwr47max * ValidOr( Pr47min,    0.20 )  }
+
+   "Set HVACHtPump:NetPwr17rtd"     HVACHtPump:NetPwr17rtd     = {  NetPwr47rtd * Pm17rated  }
+   "Set HVACHtPump:NetPwr17max"     HVACHtPump:NetPwr17max     = {  NetPwr17rtd / Pr17rated  }
+   "Set HVACHtPump:NetPwr17min"     HVACHtPump:NetPwr17min     = {  NetPwr17max * Pr17min    }
+   "Set HVACHtPump:NetPwr05max"     HVACHtPump:NetPwr05max     = {  NetPwr17max * EIRm5max   }
+   "Set HVACHtPump:NetPwr05rtd"     HVACHtPump:NetPwr05rtd     = {  NetPwr05max * Pr5rated   }
+   "Set HVACHtPump:NetPwr05min"     HVACHtPump:NetPwr05min     = {  NetPwr05max * Pr5min     }
+   "Set HVACHtPump:NetPwrm30max"    HVACHtPump:NetPwrm30max    = {  NetPwr05max * PmLCTmax   }
+   "Set HVACHtPump:NetPwrm30min"    HVACHtPump:NetPwrm30min    = {  NetPwr05min * PmLCTmin   }
+   "Set HVACHtPump:NetPwrm30rtd"    HVACHtPump:NetPwrm30rtd    = {  NetPwrm30min + (((NetPwr05rtd - NetPwr05min)/(NetPwr05max - NetPwr05min))*(NetPwrm30max - NetPwrm30min))  }
+
+;   "Set HVACHtPump:VCHP3_Tmin"      HVACHtPump:VCHP3_Tmin     = { -30 }
+
       ; Excel Key:
-      ;     D14 - EIRr82min
+      ;     D14 - COP82min
       ;     D15 - Qr47rated
       ;     D16 - Qr47min
       ;     D17 - Qr17rated
@@ -264,7 +353,7 @@ END
 
 
 ;************************************************************************* SAC 05/14/24 (tic #1379)
-RULELIST "VCHP3_CreatePerformanceMaps" 1 0 0 0
+RULELIST "VCHP3_CreatePerformanceMaps_Variable" 1 0 0 0
 ;*************************************************************************
 "debug" HVACHtPump:Action = {  PostMessageToLog( Format( "   creating CSE PerfMap objects for run %s, HVACHtPump %s", Proj:RunAbbrev, Name ) )  }
 
@@ -300,18 +389,18 @@ RULELIST "VCHP3_CreatePerformanceMaps" 1 0 0 0
    "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:PMLUValuesLabels[3]" HVACHtPump:VCHP3PerfMapHtgDataRef[1]:PMLUValuesLabels[3] = {  "17F"  }
    "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:PMLUValuesLabels[4]" HVACHtPump:VCHP3PerfMapHtgDataRef[1]:PMLUValuesLabels[4] = {  "47F"  }
    "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:PMLUValuesLabels[5]" HVACHtPump:VCHP3PerfMapHtgDataRef[1]:PMLUValuesLabels[5] = {  "60F"  }
-   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[1]"       HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[1]  = {  Capm20min /  Cap47  }  ; VCHP3_Tmin
-   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[2]"       HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[2]  = {  (Capm20min + (((Cap05 - Cap05min)/(Cap05max - Cap05min)) * (Capm20max - Capm20min)))  /  Cap47  }
-   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[3]"       HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[3]  = {  Capm20max /  Cap47  }
+   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[1]"       HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[1]  = {  Capm30min /  Cap47  }  ; VCHP3_Tmin
+   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[2]"       HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[2]  = {  Capm30rtd /  Cap47  }
+   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[3]"       HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[3]  = {  Capm30max /  Cap47  }
    "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[4]"       HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[4]  = {  Cap05min  /  Cap47  }  ;   5
    "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[5]"       HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[5]  = {  Cap05     /  Cap47  }
    "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[6]"       HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[6]  = {  Cap05max  /  Cap47  }
    "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[7]"       HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[7]  = {  Cap17min  /  Cap47  }  ;  17
    "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[8]"       HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[8]  = {  Cap17     /  Cap47  }
    "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[9]"       HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[9]  = {  Cap17max  /  Cap47  }
-   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[10]"      HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[10] = {  Qr47min * Cap47 / Qr47rated  /  Cap47  }  ;  47
-   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[11]"      HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[11] = {  Cap47                        /  Cap47  }
-   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[12]"      HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[12] = {  Cap47 / Qr47rated            /  Cap47  }
+   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[10]"      HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[10] = {  Cap47min  /  Cap47  }  ;  47
+   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[11]"      HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[11] = {  Cap47     /  Cap47  }
+   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[12]"      HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[12] = {  Cap47max  /  Cap47  }
    "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[13]"      HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[13] = {  VCHP3PerfMapHtgDataRef[1]:pmLUValues[10]  }  ;  60
    "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[14]"      HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[14] = {  VCHP3PerfMapHtgDataRef[1]:pmLUValues[11]  }
    "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[15]"      HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[15] = {  VCHP3PerfMapHtgDataRef[1]:pmLUValues[12]  }
@@ -325,38 +414,18 @@ RULELIST "VCHP3_CreatePerformanceMaps" 1 0 0 0
    "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:PMLUValuesLabels[3]" HVACHtPump:VCHP3PerfMapHtgDataRef[2]:PMLUValuesLabels[3] = {  "17F"  }
    "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:PMLUValuesLabels[4]" HVACHtPump:VCHP3PerfMapHtgDataRef[2]:PMLUValuesLabels[4] = {  "47F"  }
    "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:PMLUValuesLabels[5]" HVACHtPump:VCHP3PerfMapHtgDataRef[2]:PMLUValuesLabels[5] = {  "60F"  }
-   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[1]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[1]  =          ; VCHP3_Tmin
-      {  ((((Cap17 / Qr17rated) * Qm5max) * Qr5min) * QmLCTmin)  /
-         ((((((Cap47 / COP47rated) * Pm17rated) / Pr17rated) * EIRm5max) * Pr5min) * PmLCTmin)  }
-   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[2]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[2]  = 
-      {  (      ((((Cap17 / Qr17rated) * Qm5max)  * Qr5min  ) * QmLCTmin)  + 
-            ( ( ( ((Cap17 / Qr17rated) * Qm5max)  * Qr5rated) -
-                 (((Cap17 / Qr17rated) * Qm5max)  * Qr5min  )  ) / 
-              (   ((Cap17 / Qr17rated) * Qm5max)   -
-                 (((Cap17 / Qr17rated) * Qm5max)  * Qr5min  ) ) * 
-              ( ( ((Cap17 / Qr17rated) * Qm5max)  * QmLCTmax) -
-                ((((Cap17 / Qr17rated) * Qm5max)  * Qr5min  ) * QmLCTmin)  ) )  )    / 
-         (  (   ( ((((Cap47 / COP47rated) * Pm17rated) / Pr17rated) * EIRm5max) * Pr5min   ) * PmLCTmin )  + 
-            (   ( ((((Cap47 / COP47rated) * Pm17rated) / Pr17rated) * EIRm5max) * Pr5rated ) -
-                ( ((((Cap47 / COP47rated) * Pm17rated) / Pr17rated) * EIRm5max) * Pr5min   )  ) /
-            (     ((((Cap47 / COP47rated) * Pm17rated) / Pr17rated) * EIRm5max)   - 
-                ( ((((Cap47 / COP47rated) * Pm17rated) / Pr17rated) * EIRm5max) * Pr5min   )  ) *
-            (   ( ((((Cap47 / COP47rated) * Pm17rated) / Pr17rated) * EIRm5max) * PmLCTmax ) -
-              ( ( ((((Cap47 / COP47rated) * Pm17rated) / Pr17rated) * EIRm5max) * Pr5min   ) * PmLCTmin ) ))  }
-   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[3]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[3]  =
-      {  (((Cap17 / Qr17rated) * Qm5max) * QmLCTmax) / (((((Cap47 / COP47rated) * Pm17rated) / Pr17rated) * EIRm5max) * PmLCTmax)  }
-   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[4]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[4]  =
-      {  (((Cap17 / Qr17rated) * Qm5max) * Qr5min) / (((((Cap47 / COP47rated) * Pm17rated) / Pr17rated) * EIRm5max) * Pr5min)  }  ;   5
-   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[5]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[5]  =
-      {  Cap05 / (((((Cap47 / COP47rated) * Pm17rated) / Pr17rated) * EIRm5max) * Pr5rated)                                    }
-   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[6]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[6]  =
-      {  ((Cap17 / Qr17rated) * Qm5max) / ((((Cap47 / COP47rated) * Pm17rated) / Pr17rated) * EIRm5max)                        }
-   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[7]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[7]  = {  Cap17min / ((((Cap47 / COP47rated) * Pm17rated) / Pr17rated) * Pr17min)  }  ;  17
-   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[8]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[8]  = {  Cap17 / ((Cap47 / COP47rated) * Pm17rated)                               }
-   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[9]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[9]  = {  (Cap17 / Qr17rated) / (((Cap47 / COP47rated) * Pm17rated) / Pr17rated)   }
-   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[10]"      HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[10] = {  (((Cap47 / Qr47rated) * Qr47min) / (((Cap47 / COP47rated) / Pr47rated) * Pr47min))  }  ;  47
-   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[11]"      HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[11] = {  Cap47 / (Cap47 / COP47rated)                                 }
-   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[12]"      HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[12] = {  (Cap47 / Qr47rated) / ((Cap47 / COP47rated) / Pr47rated)     }
+   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[1]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[1]  = {  Capm30min / NetPwrm30min  }   ; VCHP3_Tmin
+   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[2]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[2]  = {  Capm30rtd / NetPwrm30rtd  }
+   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[3]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[3]  = {  Capm30max / NetPwrm30max  }
+   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[4]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[4]  = {  Cap05min  / NetPwr05min   }   ;   5
+   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[5]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[5]  = {  Cap05     / NetPwr05rtd   }
+   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[6]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[6]  = {  Cap05max  / NetPwr05max   }
+   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[7]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[7]  = {  Cap17min  / NetPwr17min   }   ;  17
+   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[8]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[8]  = {  Cap17     / NetPwr17rtd   }
+   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[9]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[9]  = {  Cap17max  / NetPwr17max   }
+   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[10]"      HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[10] = {  Cap47min  / NetPwr47min   }   ;  47
+   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[11]"      HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[11] = {  Cap47     / NetPwr47rtd   }
+   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[12]"      HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[12] = {  Cap47max  / NetPwr47max   }
    "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[13]"      HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[13] = {  VCHP3PerfMapHtgDataRef[2]:pmLUValues[10]  }  ;  60
    "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[14]"      HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[14] = {  VCHP3PerfMapHtgDataRef[2]:pmLUValues[11]  }
    "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[15]"      HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[15] = {  VCHP3PerfMapHtgDataRef[2]:pmLUValues[12]  }
@@ -393,53 +462,18 @@ RULELIST "VCHP3_CreatePerformanceMaps" 1 0 0 0
    "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:PMLUValuesLabels[3]" HVACHtPump:VCHP3PerfMapClgDataRef[1]:PMLUValuesLabels[3] = {  "95F"  }
    "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:PMLUValuesLabels[4]" HVACHtPump:VCHP3PerfMapClgDataRef[1]:PMLUValuesLabels[4] = {  format( "%.0fF", VCHP3_Tmax )  }
 
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[8]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[8]  = {  1.0  }  ; 95
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[9]-max"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[9]  = {   (Cap95 / Qr95rated)             /  Cap95  }
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[7]-min"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[7]  = {  ((Cap95 / Qr95rated) * Qr95min)  /  Cap95  }
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[6]-max"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[6]  = {   ((Cap95 / Qr95rated)            / Qm95max)  /  Cap95  }  ; 82
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[4]-min"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[4]  = {  (((Cap95 / Qr95rated) * Qr95min) / Qm95min)  /  Cap95  }
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[5]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[5]  =
-      {  ( (((Cap95 / Qr95rated) * Qr95min) / Qm95min)  +
-                (   Cap95               -  ((Cap95 / Qr95rated) * Qr95min) ) / 
-                (  (Cap95 / Qr95rated)  -  ((Cap95 / Qr95rated) * Qr95min) ) *
-                ( ((Cap95 / Qr95rated) / Qm95max)  -  (((Cap95 / Qr95rated) * Qr95min) / Qm95min) ))  /  Cap95  }
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[2]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[2]  =       ; 60
-      {  ( (VCHP3PerfMapClgDataRef[1]:pmLUValues[5] * Cap95) - ( Cap95 - (VCHP3PerfMapClgDataRef[1]:pmLUValues[5] * Cap95) ) / (95-82)*(82-60) )  /  Cap95  }
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[3]-max"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[3]  =
-      {  ( (VCHP3PerfMapClgDataRef[1]:pmLUValues[6] * Cap95) - ((VCHP3PerfMapClgDataRef[1]:pmLUValues[9] * Cap95) - (VCHP3PerfMapClgDataRef[1]:pmLUValues[6] * Cap95) ) / (95-82)*(82-60) )  /  Cap95  }
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[1]-min"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[1]  =
-      {  ( (VCHP3PerfMapClgDataRef[1]:pmLUValues[4] * Cap95) - ((VCHP3PerfMapClgDataRef[1]:pmLUValues[7] * Cap95) - (VCHP3PerfMapClgDataRef[1]:pmLUValues[4] * Cap95) ) / (95-82)*(82-60) )  /  Cap95  }
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[11]-mid"  HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[11] =       ; Tmax
-      {  (                                            Cap95  + (                                            Cap95  - (VCHP3PerfMapClgDataRef[1]:pmLUValues[5] * Cap95) ) / (95-82)*( VCHP3_Tmax -95) )  /  Cap95  }
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[12]-max"  HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[12] =
-      {  ( (VCHP3PerfMapClgDataRef[1]:pmLUValues[9] * Cap95) + ( (VCHP3PerfMapClgDataRef[1]:pmLUValues[9] * Cap95) - (VCHP3PerfMapClgDataRef[1]:pmLUValues[6] * Cap95) ) / (95-82)*( VCHP3_Tmax -95) )  /  Cap95  }
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[10]-min"  HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[10] =
-      {  ( (VCHP3PerfMapClgDataRef[1]:pmLUValues[7] * Cap95) + ( (VCHP3PerfMapClgDataRef[1]:pmLUValues[7] * Cap95) - (VCHP3PerfMapClgDataRef[1]:pmLUValues[4] * Cap95) ) / (95-82)*( VCHP3_Tmax -95) )  /  Cap95  }
-
-;   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[8]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[8]  = {  Cap95  }  ; 95
-;   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[9]-max"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[9]  = {   (Cap95 / Qr95rated)             /  1  }
-;   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[7]-min"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[7]  = {  ((Cap95 / Qr95rated) * Qr95min)  /  1  }
-;   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[6]-max"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[6]  = {   ((Cap95 / Qr95rated)            / Qm95max)  /  1  }  ; 82
-;   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[4]-min"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[4]  = {  (((Cap95 / Qr95rated) * Qr95min) / Qm95min)  /  1  }
-;   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[5]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[5]  =
-;      {  ( (((Cap95 / Qr95rated) * Qr95min) / Qm95min)  +
-;                (   Cap95               -  ((Cap95 / Qr95rated) * Qr95min) ) / 
-;                (  (Cap95 / Qr95rated)  -  ((Cap95 / Qr95rated) * Qr95min) ) *
-;                ( ((Cap95 / Qr95rated) / Qm95max)  -  (((Cap95 / Qr95rated) * Qr95min) / Qm95min) ))  /  1  }
-;   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[2]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[2]  =       ; 60
-;      {  ( (VCHP3PerfMapClgDataRef[1]:pmLUValues[5] * 1) - ( Cap95 - (VCHP3PerfMapClgDataRef[1]:pmLUValues[5] * 1) ) / (95-82)*(82-60) )  /  1  }
-;   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[3]-max"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[3]  =
-;      {  ( (VCHP3PerfMapClgDataRef[1]:pmLUValues[6] * 1) - ((VCHP3PerfMapClgDataRef[1]:pmLUValues[9] * 1) - (VCHP3PerfMapClgDataRef[1]:pmLUValues[6] * 1) ) / (95-82)*(82-60) )  /  1  }
-;   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[1]-min"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[1]  =
-;      {  ( (VCHP3PerfMapClgDataRef[1]:pmLUValues[4] * 1) - ((VCHP3PerfMapClgDataRef[1]:pmLUValues[7] * 1) - (VCHP3PerfMapClgDataRef[1]:pmLUValues[4] * 1) ) / (95-82)*(82-60) )  /  1  }
-;
-;   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[11]-mid"  HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[11] =       ; Tmax
-;      {  (                                            Cap95  + (                                            Cap95  - (VCHP3PerfMapClgDataRef[1]:pmLUValues[5] * 1) ) / (95-82)*( VCHP3_Tmax -95) )  /  1  }
-;   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[12]-max"  HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[12] =
-;      {  ( (VCHP3PerfMapClgDataRef[1]:pmLUValues[9] * 1) + ( (VCHP3PerfMapClgDataRef[1]:pmLUValues[9] * 1) - (VCHP3PerfMapClgDataRef[1]:pmLUValues[6] * 1) ) / (95-82)*( VCHP3_Tmax -95) )  /  1  }
-;   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[10]-min"  HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[10] =
-;      {  ( (VCHP3PerfMapClgDataRef[1]:pmLUValues[7] * 1) + ( (VCHP3PerfMapClgDataRef[1]:pmLUValues[7] * 1) - (VCHP3PerfMapClgDataRef[1]:pmLUValues[4] * 1) ) / (95-82)*( VCHP3_Tmax -95) )  /  1  }
-
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[1]-min"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[1]  = {  Cap60min / Cap95  }     ; 60
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[2]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[2]  = {  Cap60rtd / Cap95  }
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[3]-max"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[3]  = {  Cap60max / Cap95  }
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[4]-min"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[4]  = {  Cap82min / Cap95  }     ; 82
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[5]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[5]  = {  Cap82rtd / Cap95  }
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[6]-max"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[6]  = {  Cap82max / Cap95  }
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[7]-min"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[7]  = {  Cap95min / Cap95  }     ; 95
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[8]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[8]  = {  1.0  }
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[9]-max"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[9]  = {  Cap95max / Cap95  }
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[10]-min"  HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[10] = {  Cap125min / Cap95  }    ; Tmax
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[11]-mid"  HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[11] = {  Cap125rtd / Cap95  }
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[12]-max"  HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[12] = {  Cap125max / Cap95  }
 
    "Create HVACHtPump:VCHP3PerfMapClgDataRef[2]"                  HVACHtPump:VCHP3PerfMapClgDataRef[2] = {  CreateComp( csePMLOOKUPDATA,   Name + "-clgcopdata" )  }
    "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:Parent"              HVACHtPump:VCHP3PerfMapClgDataRef[2]:Parent              = {  VCHP3PerfMapClgRef:Name  }
@@ -450,132 +484,21 @@ RULELIST "VCHP3_CreatePerformanceMaps" 1 0 0 0
    "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:PMLUValuesLabels[3]" HVACHtPump:VCHP3PerfMapClgDataRef[2]:PMLUValuesLabels[3] = {  "95F"  }
    "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:PMLUValuesLabels[4]" HVACHtPump:VCHP3PerfMapClgDataRef[2]:PMLUValuesLabels[4] = {  format( "%.0fF", VCHP3_Tmax )  }
 
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[1]-min"   HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[1]  =          ; 60
-      {  ( ( (((Cap95 / Qr95rated) * Qr95min) / Qm95min)  -
-             (((Cap95 / Qr95rated) * Qr95min) -  
-             (((Cap95 / Qr95rated) * Qr95min) / Qm95min) ) / (95-82)*(82-60) )  / 
-           (    ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min)  -
-             ( (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)  - 
-                ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min)   ) / (95-82)*(82-60)) )  }
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[2]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[2]  = 
-      {  ( (((((Cap95 / Qr95rated) * Qr95min) / Qm95min) + ( Cap95 - ((Cap95 / Qr95rated) * Qr95min)) / ((Cap95 / Qr95rated) - ((Cap95 / Qr95rated) * Qr95min)) *
-                 (((Cap95 / Qr95rated) / Qm95max) - (((Cap95 / Qr95rated) * Qr95min) / Qm95min))) -
-            ( Cap95 -                   ((((Cap95 / Qr95rated) * Qr95min) / Qm95min) + ( Cap95 - ((Cap95 / Qr95rated) * Qr95min)) /
-                  ((Cap95 / Qr95rated) - ((Cap95 / Qr95rated) * Qr95min)) *
-                 (((Cap95 / Qr95rated) / Qm95max) - (((Cap95 / Qr95rated) * Qr95min) / Qm95min))) ) / (95-82)*(82-60) ) /
-           ((((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) + ((Cap95 / (EER2/3.41214)) - (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) /
-                 (((Cap95 / (EER2/3.41214)) / Pr95rated) - (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) *
-                ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) -
-                 ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min))) -
-            ((Cap95 / (EER2/3.41214)) - (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) + ((Cap95 / (EER2/3.41214)) -
-             (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) /
-              (((Cap95 / (EER2/3.41214)) / Pr95rated) -
-               (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) *
-                ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) -
-                 ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min))) ) / (95-82)*(82-60) ) )  }
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[3]-max"   HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[3]  = 
-      {  ( ( ((Cap95 / Qr95rated) / Qm95max) -
-             ((Cap95 / Qr95rated) -
-             ((Cap95 / Qr95rated) / Qm95max)) / (95-82)*(82-60) ) /
-           ( (((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) -
-             (((Cap95 / (EER2/3.41214)) / Pr95rated) - 
-             (((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max)) / (95-82)*(82-60) ) )  }
-
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[4]-min"   HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[4]  =          ; 82
-      {  ( (((Cap95 / Qr95rated) * Qr95min) / Qm95min)                 /
-          ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) )  }
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[5]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[5]  = 
-      {  ( ((((Cap95 / Qr95rated) * Qr95min) / Qm95min) + (Cap95 - ((Cap95 / Qr95rated) * Qr95min)) / ((Cap95 / Qr95rated) - ((Cap95 / Qr95rated) * Qr95min)) *
-            (((Cap95 / Qr95rated) / Qm95max) - (((Cap95 / Qr95rated) * Qr95min) / Qm95min)))    /
-          (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) + ((Cap95 / (EER2/3.41214)) - (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) /
-            (((Cap95 / (EER2/3.41214)) / Pr95rated) - (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) * ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) -
-            ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min)))   )  }
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[6]-max"   HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[6]  = 
-      {  (   ((Cap95 / Qr95rated) / Qm95max)                  /
-             (((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) )  }
-
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[7]-min"   HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[7]  =          ; 95
-      {  (   ((Cap95 / Qr95rated) * Qr95min)    /  (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)   )  }
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[8]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[8]  = 
-      {  (     Cap95                            /  (Cap95 / (EER2/3.41214))   )  }
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[9]-max"   HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[9]  = 
-      {  (    (Cap95 / Qr95rated)               /  ((Cap95 / (EER2/3.41214)) / Pr95rated)   )  }
-
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[10]-min"  HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[10] =          ; Tmax
-      {  ( (((Cap95 / Qr95rated) * Qr95min) + (((Cap95 / Qr95rated) * Qr95min) -
-           (((Cap95 / Qr95rated) * Qr95min) / Qm95min)) / (95-82)*(VCHP3_Tmax-95) ) /
-           ((((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min) +
-           ((((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min) -
-             ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min)) / (95-82)*(VCHP3_Tmax-95) ) )  }
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[11]-mid"  HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[11] = 
-      {  ( (Cap95                    + (Cap95                    - ((((Cap95 / Qr95rated) * Qr95min) / Qm95min) + ( Cap95 - ((Cap95 / Qr95rated) * Qr95min)) / 
-           ((Cap95 / Qr95rated) - ((Cap95 / Qr95rated) * Qr95min)) * (((Cap95 / Qr95rated) / Qm95max) - (((Cap95 / Qr95rated) * Qr95min) / Qm95min)))) / (95-82)*(VCHP3_Tmax-95) ) /
-           ((Cap95 / (EER2/3.41214)) + ((Cap95 / (EER2/3.41214)) - (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) + 
-           ((Cap95 / (EER2/3.41214)) - (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) / (((Cap95 / (EER2/3.41214)) / Pr95rated) -
-           (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) * ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) -
-           ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min)))) / (95-82)*(VCHP3_Tmax-95) ) )  }
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[12]-max"  HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[12] = 
-      {  ( ((Cap95 / Qr95rated)                    + ((Cap95 / Qr95rated)                    - ((Cap95 / Qr95rated) / Qm95max))                    / (95-82)*(VCHP3_Tmax-95) ) /
-           (((Cap95 / (EER2/3.41214)) / Pr95rated) + (((Cap95 / (EER2/3.41214)) / Pr95rated) - (((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max)) / (95-82)*(VCHP3_Tmax-95) ) )  }
-
-
-;  (X$3-W$3)*(Y$3-X$3)  ==>>  (95-82)*(VCHP3_Tmax-95)
-;  (X$3-W$3)*(W$3-V$3)  ==>>  (95-82)*(82-60)
-
-;   "Set HVACHtPump:Cap95max"                 HVACHtPump:Cap95max     = {  ValidOr( Cap95,    2000 ) / ValidOr( Qr95rated, 1.2 )  }
-;   "Set HVACHtPump:Cap95min"                 HVACHtPump:Cap95min     = {  ValidOr( Cap95max, 2000 ) * ValidOr( Qr95min,   0.3 )  }
-;   "Set HVACHtPump:Cap82max"                 HVACHtPump:Cap82max     = {  ValidOr( Cap95max, 2000 ) / ValidOr( Qm95max,   1.3 )  }
-;   "Set HVACHtPump:Cap82min"                 HVACHtPump:Cap82min     = {  ValidOr( Cap95min, 2000 ) / ValidOr( Qm95min,   1.1 )  }
-;
-;   "Set HVACHtPump:VCHP3PerfMapClgAxesRef[1]:pmGXValues[1]" HVACHtPump:VCHP3PerfMapClgAxesRef[1]:pmGXValues[1] = {  60  }
-;   "Set HVACHtPump:VCHP3PerfMapClgAxesRef[1]:pmGXValues[2]" HVACHtPump:VCHP3PerfMapClgAxesRef[1]:pmGXValues[2] = {  82  }
-;   "Set HVACHtPump:VCHP3PerfMapClgAxesRef[1]:pmGXValues[3]" HVACHtPump:VCHP3PerfMapClgAxesRef[1]:pmGXValues[3] = {  95  }
-;   "Set HVACHtPump:VCHP3PerfMapClgAxesRef[1]:pmGXValues[4]" HVACHtPump:VCHP3PerfMapClgAxesRef[1]:pmGXValues[4] = {  VCHP3_Tmax  }
-
-
-
-;   1,           "VCHP3PerfMapHtgRef",       BEMP_Obj,  1,  0,  0,  Pres,  "",             0,  1, "csePERFORMANCEMAP", 0, "",  8006, "VCHP3 Heating performance map",  ""   ; SAC 05/14/24 (tic #1379)
-;   1,           "VCHP3PerfMapHtgAxesRef",   BEMP_Obj,  2,  1,  0,  Pres,  "",             0,  1, "csePMGRIDAXIS",     0, "",  8006, "VCHP3 Heating performance map Axes",  "" 
-;   1,           "VCHP3PerfMapHtgDataRef",   BEMP_Obj,  2,  1,  0,  Pres,  "",             0,  1, "csePMLOOKUPDATA",   0, "",  8006, "VCHP3 Heating performance map Data",  "" 
-;   1,           "VCHP3PerfMapClgRef",       BEMP_Obj,  1,  0,  0,  Pres,  "",             0,  1, "csePERFORMANCEMAP", 0, "",  8006, "VCHP3 Cooling performance map",  ""    
-;   1,           "VCHP3PerfMapClgAxesRef",   BEMP_Obj,  2,  1,  0,  Pres,  "",             0,  1, "csePMGRIDAXIS",     0, "",  8006, "VCHP3 Cooling performance map Axes",  "" 
-;   1,           "VCHP3PerfMapClgDataRef",   BEMP_Obj,  2,  1,  0,  Pres,  "",             0,  1, "csePMLOOKUPDATA",   0, "",  8006, "VCHP3 Cooling performance map Data",  "" 
-;   
-;   
-;   0,  "csePERFORMANCEMAP",  "csePERFORMANCEMAP",   "CSE PerfMap <pi>-<i>",      0,  0,  0, "",        "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",  -1,  1,  0,  0,  0,  0,   3000
-;   ;
-;   ;                                 VType     NV  WA  SP    US    UL                UT  NO  OC            CV  CP              HI    LName                  
-;   ;                                -------------------------------------------------------------------------------------------------
-;   ;------------------------------------------------------------------------------------------------
-;   
-;   ;------------------------------------------------------------------------------------------------
-;   ;                      LName              Template                     MD  MR  AC   Parent1              P2  P3  P4  P5  P6  P7  P8  P9  P10 P11 P12 P13 P14 P15 P16 P17 P18 P19 P20  MC  MS  bP  CF  SR  IN     HI 
-;   ;                     -------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-;   0,  "csePMGRIDAXIS",  "csePMGRIDAXIS",   "CSE PerfMapAxis <pi>-<i>",    0,  0,  0, "csePERFORMANCEMAP",  "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",  -1,  1,  0,  0,  0,  0,   3000
-;   ;
-;   ;                                 VType     NV  WA  SP    US    UL                UT  NO  OC            CV  CP              HI    LName                  
-;   ;                                -------------------------------------------------------------------------------------------------
-;   1,           "pmGXName",          BEMP_Str,  1,  0,  1,  Pres,  "",                 0,  0,                          8002, "",  ""    
-;   1,           "pmGXValues",        BEMP_Flt, 10,  1,  1,  Pres,  "",                 0,  0,                          8002, "",  ""    
-;   1,           "pmGXRefValue",      BEMP_Flt,  1,  0,  1,  Pres,  "",                 0,  0,                          8002, "",  ""    
-;   ;------------------------------------------------------------------------------------------------
-;   
-;   ;------------------------------------------------------------------------------------------------
-;   ;                        LName                Template                     MD  MR  AC   Parent1              P2  P3  P4  P5  P6  P7  P8  P9  P10 P11 P12 P13 P14 P15 P16 P17 P18 P19 P20  MC  MS  bP  CF  SR  IN     HI 
-;   ;                       -------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-;   0,  "csePMLOOKUPDATA",  "csePMLOOKUPDATA",   "CSE PerfMapData <pi>-<i>",    0,  0,  0, "csePERFORMANCEMAP",  "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",  -1,  1,  0,  0,  0,  0,   3000
-;   ;
-;   ;                                 VType     NV  WA  SP    US    UL                UT  NO  OC            CV  CP              HI    LName                  
-;   ;                                -------------------------------------------------------------------------------------------------
-;   1,           "pmLUName",          BEMP_Str,  1,  0,  1,  Pres,  "",                 0,  0,                          8002, "",  ""    
-;   1,           "pmLUValues",        BEMP_Flt, 30,  1,  1,  Pres,  "",                 0,  0,                          8002, "",  ""    
-;   
-;   1,           "PMLUValuesPerRow",  BEMP_Int,  1,  0,  0,  Pres,  "",                 0,  0,                          8002, "ValuesPerRow",  ""    
-;   1,           "PMLUValuesLabels",  BEMP_Str, 10,  1,  0,  Pres,  "",                 0,  0,                          8002, "RowLabels",  ""    
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[1]-min"   HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[1]  = {  Cap60min / NetPwr60min  }        ; 60
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[2]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[2]  = {  Cap60rtd / NetPwr60rtd  }
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[3]-max"   HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[3]  = {  Cap60max / NetPwr60max  }
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[4]-min"   HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[4]  = {  Cap82min / NetPwr82min  }        ; 82
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[5]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[5]  = {  Cap82rtd / NetPwr82rtd  }
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[6]-max"   HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[6]  = {  Cap82max / NetPwr82max  }
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[7]-min"   HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[7]  = {  Cap95min / NetPwr95min  }        ; 95
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[8]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[8]  = {  Cap95    / NetPwr95rtd  }
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[9]-max"   HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[9]  = {  Cap95max / NetPwr95max  }
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[10]-min"  HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[10] = {  Cap125min / NetPwr125min  }      ; Tmax
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[11]-mid"  HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[11] = {  Cap125rtd / NetPwr125rtd  }
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[12]-max"  HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[12] = {  Cap125max / NetPwr125max  }
 
 END
 ;*************************************************************************
-
 
 ;************************************************************************* SAC 07/21/24 (VCHP3)
 RULELIST "VCHP3_CreatePerformanceMaps_SingleSpeed" 1 0 0 0
@@ -612,10 +535,10 @@ RULELIST "VCHP3_CreatePerformanceMaps_SingleSpeed" 1 0 0 0
    "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:PMLUValuesLabels[3]" HVACHtPump:VCHP3PerfMapHtgDataRef[1]:PMLUValuesLabels[3] = {  "17F"  }
    "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:PMLUValuesLabels[4]" HVACHtPump:VCHP3PerfMapHtgDataRef[1]:PMLUValuesLabels[4] = {  "47F"  }
    "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:PMLUValuesLabels[5]" HVACHtPump:VCHP3PerfMapHtgDataRef[1]:PMLUValuesLabels[5] = {  "60F"  }
-   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[1]"       HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[1]  = {  (Capm20min + (((Cap05 - Cap05min)/(Cap05max - Cap05min)) * (Capm20max - Capm20min)))  /  Cap47  }  ; VCHP3_Tmin
+   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[1]"       HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[1]  = {  Capm30rtd /  Cap47  }  ; VCHP3_Tmin
    "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[2]"       HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[2]  = {  Cap05     /  Cap47  }  ;   5
    "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[3]"       HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[3]  = {  Cap17     /  Cap47  }  ;  17
-   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[4]"       HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[4]  = {  Cap47     /  Cap47  }  ;  47
+   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[4]"       HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[4]  = {  1.0                 }  ;  47
    "Set HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[5]"       HVACHtPump:VCHP3PerfMapHtgDataRef[1]:pmLUValues[5]  = {  VCHP3PerfMapHtgDataRef[1]:pmLUValues[4]  }  ;  60
 
    "Create HVACHtPump:VCHP3PerfMapHtgDataRef[2]"                  HVACHtPump:VCHP3PerfMapHtgDataRef[2] = {  CreateComp( csePMLOOKUPDATA,   Name + "-htgcopdata" )  }
@@ -627,26 +550,33 @@ RULELIST "VCHP3_CreatePerformanceMaps_SingleSpeed" 1 0 0 0
    "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:PMLUValuesLabels[3]" HVACHtPump:VCHP3PerfMapHtgDataRef[2]:PMLUValuesLabels[3] = {  "17F"  }
    "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:PMLUValuesLabels[4]" HVACHtPump:VCHP3PerfMapHtgDataRef[2]:PMLUValuesLabels[4] = {  "47F"  }
    "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:PMLUValuesLabels[5]" HVACHtPump:VCHP3PerfMapHtgDataRef[2]:PMLUValuesLabels[5] = {  "60F"  }
-   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[1]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[1]  =          ; VCHP3_Tmin
-      {  (      ((((Cap17 / Qr17rated) * Qm5max)  * Qr5min  ) * QmLCTmin)  + 
-            ( ( ( ((Cap17 / Qr17rated) * Qm5max)  * Qr5rated) -
-                 (((Cap17 / Qr17rated) * Qm5max)  * Qr5min  )  ) / 
-              (   ((Cap17 / Qr17rated) * Qm5max)   -
-                 (((Cap17 / Qr17rated) * Qm5max)  * Qr5min  ) ) * 
-              ( ( ((Cap17 / Qr17rated) * Qm5max)  * QmLCTmax) -
-                ((((Cap17 / Qr17rated) * Qm5max)  * Qr5min  ) * QmLCTmin)  ) )  )    / 
-         (  (   ( ((((Cap47 / COP47rated) * Pm17rated) / Pr17rated) * EIRm5max) * Pr5min   ) * PmLCTmin )  + 
-            (   ( ((((Cap47 / COP47rated) * Pm17rated) / Pr17rated) * EIRm5max) * Pr5rated ) -
-                ( ((((Cap47 / COP47rated) * Pm17rated) / Pr17rated) * EIRm5max) * Pr5min   )  ) /
-            (     ((((Cap47 / COP47rated) * Pm17rated) / Pr17rated) * EIRm5max)   - 
-                ( ((((Cap47 / COP47rated) * Pm17rated) / Pr17rated) * EIRm5max) * Pr5min   )  ) *
-            (   ( ((((Cap47 / COP47rated) * Pm17rated) / Pr17rated) * EIRm5max) * PmLCTmax ) -
-              ( ( ((((Cap47 / COP47rated) * Pm17rated) / Pr17rated) * EIRm5max) * Pr5min   ) * PmLCTmin ) ))  }
-   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[2]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[2]  =
-                                                                              {  Cap05 / (((((Cap47 / COP47rated) * Pm17rated) / Pr17rated) * EIRm5max) * Pr5rated)    }  ;   5
-   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[3]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[3]  = {  Cap17 / ((Cap47 / COP47rated) * Pm17rated)  }  ;  17
-   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[4]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[4]  = {  Cap47 / (Cap47 / COP47rated)                }  ;  47
-   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[5]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[5]  = {  VCHP3PerfMapHtgDataRef[2]:pmLUValues[4]     }  ;  60
+
+   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[1]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[1]  = {  Capm30rtd / NetPwrm30rtd  }   ; VCHP3_Tmin
+   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[2]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[2]  = {  Cap05     / NetPwr05rtd   }   ;   5
+   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[3]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[3]  = {  Cap17     / NetPwr17rtd   }   ;  17
+   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[4]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[4]  = {  Cap47     / NetPwr47rtd   }   ;  47
+   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[5]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[5]  = {  VCHP3PerfMapHtgDataRef[2]:pmLUValues[4]  }  ;  60
+
+;   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[1]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[1]  =          ; VCHP3_Tmin
+;      {  (      ((((Cap17 / Qr17rated) * Qm5max)  * Qr5min  ) * QmLCTmin)  + 
+;            ( ( ( ((Cap17 / Qr17rated) * Qm5max)  * Qr5rated) -
+;                 (((Cap17 / Qr17rated) * Qm5max)  * Qr5min  )  ) / 
+;              (   ((Cap17 / Qr17rated) * Qm5max)   -
+;                 (((Cap17 / Qr17rated) * Qm5max)  * Qr5min  ) ) * 
+;              ( ( ((Cap17 / Qr17rated) * Qm5max)  * QmLCTmax) -
+;                ((((Cap17 / Qr17rated) * Qm5max)  * Qr5min  ) * QmLCTmin)  ) )  )    / 
+;         (  (   ( ((((Cap47 / COP47rated) * Pm17rated) / Pr17rated) * EIRm5max) * Pr5min   ) * PmLCTmin )  + 
+;            (   ( ((((Cap47 / COP47rated) * Pm17rated) / Pr17rated) * EIRm5max) * Pr5rated ) -
+;                ( ((((Cap47 / COP47rated) * Pm17rated) / Pr17rated) * EIRm5max) * Pr5min   )  ) /
+;            (     ((((Cap47 / COP47rated) * Pm17rated) / Pr17rated) * EIRm5max)   - 
+;                ( ((((Cap47 / COP47rated) * Pm17rated) / Pr17rated) * EIRm5max) * Pr5min   )  ) *
+;            (   ( ((((Cap47 / COP47rated) * Pm17rated) / Pr17rated) * EIRm5max) * PmLCTmax ) -
+;              ( ( ((((Cap47 / COP47rated) * Pm17rated) / Pr17rated) * EIRm5max) * Pr5min   ) * PmLCTmin ) ))  }
+;   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[2]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[2]  =
+;                                                                              {  Cap05 / (((((Cap47 / COP47rated) * Pm17rated) / Pr17rated) * EIRm5max) * Pr5rated)    }  ;   5
+;   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[3]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[3]  = {  Cap17 / ((Cap47 / COP47rated) * Pm17rated)  }  ;  17
+;   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[4]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[4]  = {  Cap47 / (Cap47 / COP47rated)                }  ;  47
+;   "Set HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[5]"       HVACHtPump:VCHP3PerfMapHtgDataRef[2]:pmLUValues[5]  = {  VCHP3PerfMapHtgDataRef[2]:pmLUValues[4]     }  ;  60
 
    ; COOLING
    "Create HVACHtPump:VCHP3PerfMapClgRef"                   HVACHtPump:VCHP3PerfMapClgRef          = {  CreateComp( csePERFORMANCEMAP, Name + "-clgperfmap" )  }
@@ -678,17 +608,21 @@ RULELIST "VCHP3_CreatePerformanceMaps_SingleSpeed" 1 0 0 0
    "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:PMLUValuesLabels[3]" HVACHtPump:VCHP3PerfMapClgDataRef[1]:PMLUValuesLabels[3] = {  "95F"  }
    "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:PMLUValuesLabels[4]" HVACHtPump:VCHP3PerfMapClgDataRef[1]:PMLUValuesLabels[4] = {  format( "%.0fF", VCHP3_Tmax )  }
 
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[3]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[3]  = {  1.0  }  ; 95
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[2]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[2]  =
-      {  ( (((Cap95 / Qr95rated) * Qr95min) / Qm95min)  +
-                (   Cap95               -  ((Cap95 / Qr95rated) * Qr95min) ) / 
-                (  (Cap95 / Qr95rated)  -  ((Cap95 / Qr95rated) * Qr95min) ) *
-                ( ((Cap95 / Qr95rated) / Qm95max)  -  (((Cap95 / Qr95rated) * Qr95min) / Qm95min) ))  /  Cap95  }  ; 82
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[1]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[1]  =     
-      {  ( (VCHP3PerfMapClgDataRef[1]:pmLUValues[2] * Cap95) - ( Cap95 - (VCHP3PerfMapClgDataRef[1]:pmLUValues[2] * Cap95) ) / (95-82)*(82-60) )  /  Cap95  }  ; 60
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[4]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[4]  =     
-      {  (                                            Cap95  + (                                            Cap95  - (VCHP3PerfMapClgDataRef[1]:pmLUValues[2] * Cap95) ) / (95-82)*( VCHP3_Tmax -95) )  /  Cap95  }  ; Tmax
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[1]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[1]  = {  Cap60rtd  /  Cap95  }  ; 60
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[2]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[2]  = {  Cap82rtd  /  Cap95  }  ; 82
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[3]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[3]  = {  1.0                 }  ; 95
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[4]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[4]  = {  Cap125rtd /  Cap95  }  ; Tmax
 
+;   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[3]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[3]  = {  1.0  }  ; 95
+;   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[2]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[2]  =
+;      {  ( (((Cap95 / Qr95rated) * Qr95min) / Qm95min)  +
+;                (   Cap95               -  ((Cap95 / Qr95rated) * Qr95min) ) / 
+;                (  (Cap95 / Qr95rated)  -  ((Cap95 / Qr95rated) * Qr95min) ) *
+;                ( ((Cap95 / Qr95rated) / Qm95max)  -  (((Cap95 / Qr95rated) * Qr95min) / Qm95min) ))  /  Cap95  }  ; 82
+;   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[1]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[1]  =     
+;      {  ( (VCHP3PerfMapClgDataRef[1]:pmLUValues[2] * Cap95) - ( Cap95 - (VCHP3PerfMapClgDataRef[1]:pmLUValues[2] * Cap95) ) / (95-82)*(82-60) )  /  Cap95  }  ; 60
+;   "Set HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[4]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[1]:pmLUValues[4]  =     
+;      {  (                                            Cap95  + (                                            Cap95  - (VCHP3PerfMapClgDataRef[1]:pmLUValues[2] * Cap95) ) / (95-82)*( VCHP3_Tmax -95) )  /  Cap95  }  ; Tmax
 
    "Create HVACHtPump:VCHP3PerfMapClgDataRef[2]"                  HVACHtPump:VCHP3PerfMapClgDataRef[2] = {  CreateComp( csePMLOOKUPDATA,   Name + "-clgcopdata" )  }
    "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:Parent"              HVACHtPump:VCHP3PerfMapClgDataRef[2]:Parent              = {  VCHP3PerfMapClgRef:Name  }
@@ -699,37 +633,42 @@ RULELIST "VCHP3_CreatePerformanceMaps_SingleSpeed" 1 0 0 0
    "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:PMLUValuesLabels[3]" HVACHtPump:VCHP3PerfMapClgDataRef[2]:PMLUValuesLabels[3] = {  "95F"  }
    "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:PMLUValuesLabels[4]" HVACHtPump:VCHP3PerfMapClgDataRef[2]:PMLUValuesLabels[4] = {  format( "%.0fF", VCHP3_Tmax )  }
 
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[1]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[1]  =          ; 60
-      {  ( (((((Cap95 / Qr95rated) * Qr95min) / Qm95min) + ( Cap95 - ((Cap95 / Qr95rated) * Qr95min)) / ((Cap95 / Qr95rated) - ((Cap95 / Qr95rated) * Qr95min)) *
-                 (((Cap95 / Qr95rated) / Qm95max) - (((Cap95 / Qr95rated) * Qr95min) / Qm95min))) -
-            ( Cap95 -                   ((((Cap95 / Qr95rated) * Qr95min) / Qm95min) + ( Cap95 - ((Cap95 / Qr95rated) * Qr95min)) /
-                  ((Cap95 / Qr95rated) - ((Cap95 / Qr95rated) * Qr95min)) *
-                 (((Cap95 / Qr95rated) / Qm95max) - (((Cap95 / Qr95rated) * Qr95min) / Qm95min))) ) / (95-82)*(82-60) ) /
-           ((((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) + ((Cap95 / (EER2/3.41214)) - (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) /
-                 (((Cap95 / (EER2/3.41214)) / Pr95rated) - (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) *
-                ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) -
-                 ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min))) -
-            ((Cap95 / (EER2/3.41214)) - (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) + ((Cap95 / (EER2/3.41214)) -
-             (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) /
-              (((Cap95 / (EER2/3.41214)) / Pr95rated) -
-               (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) *
-                ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) -
-                 ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min))) ) / (95-82)*(82-60) ) )  }
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[2]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[2]  =          ; 82
-      {  ( ((((Cap95 / Qr95rated) * Qr95min) / Qm95min) + (Cap95 - ((Cap95 / Qr95rated) * Qr95min)) / ((Cap95 / Qr95rated) - ((Cap95 / Qr95rated) * Qr95min)) *
-            (((Cap95 / Qr95rated) / Qm95max) - (((Cap95 / Qr95rated) * Qr95min) / Qm95min)))    /
-          (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) + ((Cap95 / (EER2/3.41214)) - (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) /
-            (((Cap95 / (EER2/3.41214)) / Pr95rated) - (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) * ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) -
-            ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min)))   )  }
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[3]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[3]  =          ; 95
-      {  (     Cap95                            /  (Cap95 / (EER2/3.41214))   )  }
-   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[4]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[4]  =          ; Tmax
-      {  ( (Cap95                    + (Cap95                    - ((((Cap95 / Qr95rated) * Qr95min) / Qm95min) + ( Cap95 - ((Cap95 / Qr95rated) * Qr95min)) / 
-           ((Cap95 / Qr95rated) - ((Cap95 / Qr95rated) * Qr95min)) * (((Cap95 / Qr95rated) / Qm95max) - (((Cap95 / Qr95rated) * Qr95min) / Qm95min)))) / (95-82)*(VCHP3_Tmax-95) ) /
-           ((Cap95 / (EER2/3.41214)) + ((Cap95 / (EER2/3.41214)) - (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) + 
-           ((Cap95 / (EER2/3.41214)) - (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) / (((Cap95 / (EER2/3.41214)) / Pr95rated) -
-           (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) * ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) -
-           ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min)))) / (95-82)*(VCHP3_Tmax-95) ) )  }
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[1]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[1]  = {  Cap60rtd  / NetPwr60rtd   }   ; 60
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[2]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[2]  = {  Cap82rtd  / NetPwr82rtd   }   ; 82
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[3]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[3]  = {  Cap95     / NetPwr95rtd   }   ; 95
+   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[4]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[4]  = {  Cap125rtd / NetPwr125rtd  }   ; Tmax
+
+;   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[1]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[1]  =          ; 60
+;      {  ( (((((Cap95 / Qr95rated) * Qr95min) / Qm95min) + ( Cap95 - ((Cap95 / Qr95rated) * Qr95min)) / ((Cap95 / Qr95rated) - ((Cap95 / Qr95rated) * Qr95min)) *
+;                 (((Cap95 / Qr95rated) / Qm95max) - (((Cap95 / Qr95rated) * Qr95min) / Qm95min))) -
+;            ( Cap95 -                   ((((Cap95 / Qr95rated) * Qr95min) / Qm95min) + ( Cap95 - ((Cap95 / Qr95rated) * Qr95min)) /
+;                  ((Cap95 / Qr95rated) - ((Cap95 / Qr95rated) * Qr95min)) *
+;                 (((Cap95 / Qr95rated) / Qm95max) - (((Cap95 / Qr95rated) * Qr95min) / Qm95min))) ) / (95-82)*(82-60) ) /
+;           ((((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) + ((Cap95 / (EER2/3.41214)) - (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) /
+;                 (((Cap95 / (EER2/3.41214)) / Pr95rated) - (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) *
+;                ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) -
+;                 ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min))) -
+;            ((Cap95 / (EER2/3.41214)) - (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) + ((Cap95 / (EER2/3.41214)) -
+;             (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) /
+;              (((Cap95 / (EER2/3.41214)) / Pr95rated) -
+;               (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) *
+;                ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) -
+;                 ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min))) ) / (95-82)*(82-60) ) )  }
+;   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[2]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[2]  =          ; 82
+;      {  ( ((((Cap95 / Qr95rated) * Qr95min) / Qm95min) + (Cap95 - ((Cap95 / Qr95rated) * Qr95min)) / ((Cap95 / Qr95rated) - ((Cap95 / Qr95rated) * Qr95min)) *
+;            (((Cap95 / Qr95rated) / Qm95max) - (((Cap95 / Qr95rated) * Qr95min) / Qm95min)))    /
+;          (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) + ((Cap95 / (EER2/3.41214)) - (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) /
+;            (((Cap95 / (EER2/3.41214)) / Pr95rated) - (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) * ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) -
+;            ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min)))   )  }
+;   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[3]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[3]  =          ; 95
+;      {  (     Cap95                            /  (Cap95 / (EER2/3.41214))   )  }
+;   "Set HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[4]-mid"   HVACHtPump:VCHP3PerfMapClgDataRef[2]:pmLUValues[4]  =          ; Tmax
+;      {  ( (Cap95                    + (Cap95                    - ((((Cap95 / Qr95rated) * Qr95min) / Qm95min) + ( Cap95 - ((Cap95 / Qr95rated) * Qr95min)) / 
+;           ((Cap95 / Qr95rated) - ((Cap95 / Qr95rated) * Qr95min)) * (((Cap95 / Qr95rated) / Qm95max) - (((Cap95 / Qr95rated) * Qr95min) / Qm95min)))) / (95-82)*(VCHP3_Tmax-95) ) /
+;           ((Cap95 / (EER2/3.41214)) + ((Cap95 / (EER2/3.41214)) - (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) + 
+;           ((Cap95 / (EER2/3.41214)) - (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) / (((Cap95 / (EER2/3.41214)) / Pr95rated) -
+;           (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) * ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) -
+;           ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min)))) / (95-82)*(VCHP3_Tmax-95) ) )  }
 
 END
 ;*************************************************************************
