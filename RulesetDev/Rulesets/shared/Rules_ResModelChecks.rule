@@ -282,6 +282,32 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 								else if (ActiveHVACSystem:Type == 2) then  PostError( "Zonal control credit (Building tab of Project dialog) is not compatible with zones, such as '%s', conditioned by a heat pump system.", Name )
 								else  UNCHANGED  endif endif  }
 
+   "Check for HPDHWCombo systems assigned for zone DHW + HVAC"    ResOtherZn:Action =     ; SAC 03/31/23 (tic #1349)   ; fix typo - SAC 04/06/23 (tic #1349)  ; SAC 09/26/24 (tic #3629)
+      {  if (CondFloorArea < 0.1 .OR. LocalCompAssigned( ActiveHVACSystem ) < 0.5 .OR. Proj:StandardsVersion < 2022) then  UNCHANGED
+         else if (IfValidAnd( ActiveHVACSystem:Type = 2 ) .AND. IfValidAnd( ActiveHVACSystem:HtPumpSysType = 35 ))
+         then  if ( (DHWSysStatus = 3 .AND. LocalCompAssigned(  ozDHWSys:DHWHeater[1] ) != ComponentType( "ResHVACSys" )) .OR.
+                    (DHWSysStatus = 2 .AND. LocalCompAssigned( AltDHWSys:DHWHeater[1] ) != ComponentType( "ResHVACSys" )) .OR.
+                    (DHWSysStatus = 1 .AND. LocalCompAssigned(  exDHWSys:DHWHeater[1] ) != ComponentType( "ResHVACSys" )) )
+               then  PostError( "Inconsistent HVAC and DHW system assignments in Zone '%s': when HeatPumpDHWCombo is selected for HVAC, a DHW system that references that same HVAC system as the DHW heater must be selected for DHW.", Name )
+               else if ( (DHWSysStatus = 3 .AND. IfValidAnd(  ozDHWSys:DHWHeater[1] = ActiveHVACSystem )==0) .OR.
+                         (DHWSysStatus = 2 .AND. IfValidAnd( AltDHWSys:DHWHeater[1] = ActiveHVACSystem )==0) .OR.
+                         (DHWSysStatus = 1 .AND. IfValidAnd(  exDHWSys:DHWHeater[1] = ActiveHVACSystem )==0) )
+               then  PostError( "Inconsistent HVAC and DHW system assignments in Zone '%s': when HeatPumpDHWCombo is selected for HVAC, a DHW system that references that same HVAC system as the DHW heater must be selected for DHW.", Name )
+               else  UNCHANGED  endif endif
+         else if ( (DHWSysStatus = 3 .AND. LocalCompAssigned(  ozDHWSys:DHWHeater[1] ) == ComponentType( "ResHVACSys" )) .OR.
+                   (DHWSysStatus = 2 .AND. LocalCompAssigned( AltDHWSys:DHWHeater[1] ) == ComponentType( "ResHVACSys" )) .OR.
+                   (DHWSysStatus = 1 .AND. LocalCompAssigned(  exDHWSys:DHWHeater[1] ) == ComponentType( "ResHVACSys" )) )
+         then  if ( (DHWSysStatus = 3 .AND. IfValidAnd(  ozDHWSys:DHWHeater[1]:Type = 2 ) .AND. IfValidAnd(  ozDHWSys:DHWHeater[1]:HtPumpSysType = 35 )) .OR.
+                    (DHWSysStatus = 2 .AND. IfValidAnd( AltDHWSys:DHWHeater[1]:Type = 2 ) .AND. IfValidAnd( AltDHWSys:DHWHeater[1]:HtPumpSysType = 35 )) .OR.
+                    (DHWSysStatus = 1 .AND. IfValidAnd(  exDHWSys:DHWHeater[1]:Type = 2 ) .AND. IfValidAnd(  exDHWSys:DHWHeater[1]:HtPumpSysType = 35 )) )
+               then  if ( (DHWSysStatus = 3 .AND. IfValidAnd(  ozDHWSys:DHWHeater[1] = ActiveHVACSystem )==0) .OR.
+                          (DHWSysStatus = 2 .AND. IfValidAnd( AltDHWSys:DHWHeater[1] = ActiveHVACSystem )==0) .OR.
+                          (DHWSysStatus = 1 .AND. IfValidAnd(  exDHWSys:DHWHeater[1] = ActiveHVACSystem )==0) )
+                     then  PostError( "Inconsistent DHW and HVAC system assignments in Zone '%s': when a HeatPumpDHWCombo system is selected for DHW, the same system must be selected for HVAC.", Name )
+                     else  UNCHANGED  endif
+               else  UNCHANGED  endif
+         else  UNCHANGED  endif endif endif  }
+
 ; SAC 1/15/14 - removed check - testing analysis for validity... (GC issue #258)
 ;  ; mjb 1/8/14 - check for combination of zonal control credit & combined hydronic systems
 ;	"Check for combination of zonal control credit & combined hydronic systems"
@@ -929,19 +955,58 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 									else	PostError( "Centrally ducted HVAC system '%s' must have consistent counts of heating and cooling unit type #10 (%.0f <> %.0f).", Name, HeatSystemCount[10], CoolSystemCount[10] )  endif  }
 
 
+   "Check for HVACHtPump missing EER/EER2"      ResHtPumpSys:Action	=        ; SAC 08/02/23 (2025)  ; SAC 09/26/24 (tic #3629)
+      {  if ( FloorAreaServed < 0.1 .OR. IfValidAnd( IsAvailable > 0 )==0 .OR. IfValidAnd( IncludesCooling > 0 )==0 .OR.
+              IfValidAnd( ShowCEER > 0 ) .OR. IfValidAnd( Type = 34 ) ) then  UNCHANGED
+         else if (EffMetric = 1 .AND. IfValidAnd( EER  > 0 )==0)
+         then  PostError( "EER must be specified for Heat Pump '%s' before analysis can be performed.", Name )
+         else if (EffMetric = 2 .AND. IfValidAnd( EER2 > 0 )==0)
+         then  PostError( "EER2 must be specified for Heat Pump '%s' before analysis can be performed.", Name )
+         else  UNCHANGED  endif endif endif  }
+
+	"Check for HVACHtPump perf metrics via HSPF2/SEER2/EER2 for 2025+ analysis"	ResHtPumpSys:Action	=     ; SAC 07/20/23
+      {  if (IfValidAnd( FloorAreaServed > 0 )==0 .OR. IfValidAnd( ShowEffMetric > 0 )==0 .OR.
+             EffMetric > 1 .OR. IfValidAnd( Proj:AnalysisVersion < 250002 ) .OR. 
+             (IfValidAnd( Status < 2 ) .AND. (ResProj:RunScope > 1 .OR. ResProj:IsAddAlone > 0))) then  UNCHANGED
+         else if (IfValidAnd( Proj:EnableResearchMode > 0 ))
+         then  if (Type == 26 .OR. Type == 24 .OR. Type == 11 .OR. Type == 12 .OR. Type == 6)
+               then  PostWarning( "Heat pump '%s' efficiency metric must be switched to 'EER2' for analysis in this code vintage.", Name )
+               else  PostWarning( "Heat pump '%s' efficiency metric must be switched to 'HSPF2/SEER2/EER2' for analysis in this code vintage.", Name )  endif
+         else  if (Type == 26 .OR. Type == 24 .OR. Type == 11 .OR. Type == 12 .OR. Type == 6)
+               then  PostError( "Heat pump '%s' efficiency metric must be switched to 'EER2' for analysis in this code vintage.", Name )
+               else  PostError( "Heat pump '%s' efficiency metric must be switched to 'HSPF2/SEER2/EER2' for analysis in this code vintage.", Name )  endif
+         endif endif  }
+
 	; SAC 11/14/13 - added check for heat pumps including valid capacities     ; SAC 9/22/17 - enable HP autosizing    ; VCHP2 - SAC 11/01/20
 ;	"debug HP CAP check"									ResHtPumpSys:Action	= {	PostWarning( "HVACHtPump '%s' Type = %g  Cap47 = %g  Cap47 = %g", Name, Type, Cap47, Cap17 )	}
-	"Check for valid HVACHtPump capacities"		ResHtPumpSys:Action	= {	if (FloorAreaServed < 0.1 .OR. IfValidAnd( AutoSize > 0 )) then  UNCHANGED
-																								else if (Type == 22 .OR. IsPackaged > 0 .OR. Type == 7)              ; SAC 11/2/18 - VCHP    ; SAC 6/24/20 - PTHP systems    ; RoomHP - SAC 09/01/20
-																								then  if (IfValidAnd(Cap47 > 0.1)==0)   ; SAC 11/13/18 - removed check on Cap17
-																								      then	PostError( "Heat pump '%s' must have valid Cap47 input in order to be simulated.", Name )
-																								      else  UNCHANGED  endif
-																								else  if (LocalStatus( Cap47 ) < 1 .OR. (LocalStatus( Cap17 ) < 1 .AND. (Type < 12 .OR. Type == 33)))
-																								      then	PostError( "Heat pump '%s' must have valid Cap47 & Cap17 inputs in order to be simulated.", Name )
-																								      else if (IfValidAnd(Cap47 > 0.1) .AND. (IfValidAnd(Cap17 > 0.1) .OR. Type == 12)) then  UNCHANGED
-																								      else	PostError( "Heat pump '%s' must have valid Cap47 & Cap17 inputs in order to be simulated.", Name )
-																								      endif endif
-																								endif endif  }
+	"Check for valid HVACHtPump capacities"		ResHtPumpSys:Action	=               ; no cap checks for HeatPumpDHWCombo - SAC 04/02/23 (tic #1349)
+      {  if (FloorAreaServed < 0.1 .OR. IfValidAnd( AutoSize > 0 ) .OR. Type == 35) then  UNCHANGED
+			else if (Type == 22 .OR. IsPackaged > 0 .OR. Type == 7 .OR. Type == 34)              ; SAC 11/2/18 - VCHP    ; SAC 6/24/20 - PTHP systems    ; RoomHP - SAC 09/01/20   ; AWHP - SAC 12/13/22
+			then  if (IfValidAnd(Cap47 > 0.1)==0)   ; SAC 11/13/18 - removed check on Cap17
+			      then	PostError( "Heat pump '%s' must have valid Cap47 input in order to be simulated.", Name )
+			      else  UNCHANGED  endif
+			else if (Type == 36)                ; VCHP3 - SAC 05/18/24 (tic #1379)
+			then  if (IfValidAnd(Cap47 > 0.1)==0 .OR. IfValidAnd(Cap17 > 0.1)==0 .OR. IfValidAnd(Cap95 > 0.1)==0)
+			      then	PostError( "Heat pump '%s' must have valid Cap47, Cap17 and Cap95 inputs in order to be simulated.", Name )
+			      else  UNCHANGED  endif
+			else  if (LocalStatus( Cap47 ) < 1 .OR. (LocalStatus( Cap17 ) < 1 .AND. (Type < 12 .OR. Type == 33)))
+			      then	PostError( "Heat pump '%s' must have valid Cap47 & Cap17 inputs in order to be simulated.", Name )
+			      else if (IfValidAnd(Cap47 > 0.1) .AND. (IfValidAnd(Cap17 > 0.1) .OR. Type == 12)) then  UNCHANGED
+			      else	PostError( "Heat pump '%s' must have valid Cap47 & Cap17 inputs in order to be simulated.", Name )
+			      endif endif
+			endif endif endif  }
+; WAS:
+;      {	if (FloorAreaServed < 0.1 .OR. IfValidAnd( AutoSize > 0 )) then  UNCHANGED
+;																								else if (Type == 22 .OR. IsPackaged > 0 .OR. Type == 7)              ; SAC 11/2/18 - VCHP    ; SAC 6/24/20 - PTHP systems    ; RoomHP - SAC 09/01/20
+;																								then  if (IfValidAnd(Cap47 > 0.1)==0)   ; SAC 11/13/18 - removed check on Cap17
+;																								      then	PostError( "Heat pump '%s' must have valid Cap47 input in order to be simulated.", Name )
+;																								      else  UNCHANGED  endif
+;																								else  if (LocalStatus( Cap47 ) < 1 .OR. (LocalStatus( Cap17 ) < 1 .AND. (Type < 12 .OR. Type == 33)))
+;																								      then	PostError( "Heat pump '%s' must have valid Cap47 & Cap17 inputs in order to be simulated.", Name )
+;																								      else if (IfValidAnd(Cap47 > 0.1) .AND. (IfValidAnd(Cap17 > 0.1) .OR. Type == 12)) then  UNCHANGED
+;																								      else	PostError( "Heat pump '%s' must have valid Cap47 & Cap17 inputs in order to be simulated.", Name )
+;																								      endif endif
+;																								endif endif  }
 
    "Check for all required Capacity & COP inputs for VCHP2 systems"     ResHtPumpSys:Action =        ; VCHP2 - SAC 07/26/21   ; SAC 09/23/21
       {  if (FloorAreaServed < 0.1 .OR. Type != 33 .OR.
@@ -1102,7 +1167,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 											then	PostError( "Zone '%s' has incompatible altered and existing heating systems.  Altered system uses AFUE and existing does not.  To get compliance credit, altered and verified heating system types must be consistent.", Name )
 											else if (T24RCoolingEquipment:SEERValid( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", AltHVACSystem:CoolSysTypeAbbrev ) > 0 .AND. 
 														T24RCoolingEquipment:SEERValid( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType",  exHVACSystem:CoolSysTypeAbbrev ) < 1)
-											then	PostError( "Zone '%s' has incompatible altered and existing cooling systems.  Altered system uses SEE/SEER2 and existing does not.  To get compliance credit, altered and verified cooling system types must be consistent.", Name )
+											then	PostError( "Zone '%s' has incompatible altered and existing cooling systems.  Altered system uses SEER/SEER2 and existing does not.  To get compliance credit, altered and verified cooling system types must be consistent.", Name )
 											else if (T24RCoolingEquipment:EERValid(  "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", AltHVACSystem:CoolSysTypeAbbrev ) > 0 .AND. 
 														T24RCoolingEquipment:EERValid(  "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType",  exHVACSystem:CoolSysTypeAbbrev ) < 1)
 											then	PostError( "Zone '%s' has incompatible altered and existing cooling systems.  Altered system uses EER/EER2 and existing does not.  To get compliance credit, altered and verified cooling system types must be consistent.", Name )
@@ -1400,6 +1465,14 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
                      endswitch
                else  UNCHANGED  endif endif endif
          else  UNCHANGED  endif endif  }
+
+   "Prevent simulation of New/Alt DHWHeaters in 2022+ analysis of type non-UEF HPWH"   ResWtrHtr:Action  =        ; SAC 02/16/23 (tic #1347)  ; ported - SAC 09/26/24
+      {  if (IfValidAnd( ResProj:EnergyCodeYearNum >= 2022 ) .AND. (IfValidAnd( Proj:RunAbbrev = "pp" ) .OR. IfValidAnd( Proj:RunAbbrev = "p" ) .OR. IfValidAnd( Proj:RunAbbrev = "u" )))
+         then  if (IfValidAnd( HeaterElementType = 5 ) .AND. IfValidAnd( HPWHCategory = 4 ) .AND. IfValidAnd( IsExisting = 0 ) .AND. IfValidAnd( FloorAreaServed > 0 ))
+               then  PostError( "%s ResWtrHtr '%s' is specified as a non-UEF rated HPWH which is only valid for Existing equipment.", EnumString( Status ), Name )
+               else  UNCHANGED  endif
+         else  UNCHANGED  endif  }
+;      {  PostMessageToLog( "EnergyCodeYearNum %g / RunAbbrev %s / DHWHeater %s / HeaterElementType %g / HPWHCategory %g / IsExisting %g / FloorAreaServed %g", Proj:EnergyCodeYearNum, Proj:RunAbbrev, Name, HeaterElementType, HPWHCategory, IsExisting, FloorAreaServed )  }
 
 	; SAC 3/18/16 - check for valid inputs for new HPWH model
 	; SAC 7/19/17 - removed check preventing analysis using Sanden models
@@ -1852,13 +1925,16 @@ RULELIST "ProposedModelSimulationCheck" 1 0 0 0
 								then  PostError( "Zonal Control Credit is not an available analysis option for multifamily buildings." )  else  UNCHANGED  endif  }
 
 ;"debug" ResProj:Action = { PostMessageToLog( "Max Res flr mult: %g / CondWinAreaCFARat: %g", MaxAll( ResZnGrp:Mult ), CondWinAreaCFARat ) }
-   "global check for sufficient Window area - ResProj:CondWinAreaCFARat > 0.05"     ResProj:Action =     ; SAC 09/30/21
+   "global check for sufficient Window area - ResProj:CondWinAreaCFARat > 0.05"     ResProj:Action =     ; SAC 09/30/21  ; revise to throw only warning for add/alter - SAC 05/10/23
       {  if (IfValidAnd( IsComRuleset > 0 ) .AND. IfValidAnd( Proj:ResDwellUnits > 0 )==0) then  UNCHANGED
          else if (RunScope = 1 .AND. IfValidAnd( IsAddAlone > 0 )) then  UNCHANGED
          else if (IfValidAnd( CondWinAreaCFARat >= 0 )==0)
          then  PostError( "Error calculating building-wide ratio of conditioned zone window area & floor area ( ResProj:CondWinAreaCFARat)" )
          else if (IfValidAnd( CondWinAreaCFARat < 0.05 ))
-         then  PostError( "Ratio of conditioned zone window area / floor area (%0.3f) deemed too small, must be >= 0.05", CondWinAreaCFARat )
+         then  if (RunScope == 2 .OR. IsAddAlone > 0)
+               then  PostWarning( "Ratio of conditioned zone window area / floor area (%0.3f) is unusually small, typically >= 0.05", CondWinAreaCFARat )
+               else  PostError(   "Ratio of conditioned zone window area / floor area (%0.3f) deemed too small, must be >= 0.05", CondWinAreaCFARat )
+               endif
          else  UNCHANGED  endif endif endif endif  }
 
    "global check for conditioned area and sufficient ratio of conditioned volume / floor area"     ResProj:Action =     ; SAC 09/30/21
