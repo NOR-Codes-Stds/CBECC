@@ -580,17 +580,22 @@ RULELIST  "Reporting_HERS_SpecialFeaturesSummary" 1 0 0 0
          if (IfValidAnd( FloorAreaServed > 0.5 )==0 .OR. Status != 2 .OR.
              IfValidAnd( HtOrClDucted > 0 )==0 .OR. LocalCompAssigned( DistribSystem )==0)
          then  0  else  1  endif  }
+   ; added logic to check 40' for <2022 codes and 25' for 2022+ - SAC 09/23/22 (tic #1296)
    "Set ResHVACSys:TriggerHERS"        ResHVACSys:TriggerHERS  = {
          if (IsAltSrvdDucted > 0 .AND.
              ( DistribSystem:Status == 1 .OR.
-              (DistribSystem:Status == 4 .AND. IfValidAnd( DistribSystem:IsLessThanFortyFt > 0 ))))
+              (DistribSystem:Status == 4 .AND. 
+               ( (Proj:StdDesignBase <  2022 .AND. IfValidAnd( DistribSystem:IsLessThanFortyFt > 0 )) .OR.
+                 (Proj:StdDesignBase >= 2022 .AND. IfValidAnd( DistribSystem:IsLessThan25Ft    > 0 )) )) ))
          then  1  ; ensure HERS is triggered for Altered systems w/ Existing or Exist+New < 40 combos
          else  0  endif  }
+   ; added logic to check 40' for <2022 codes and 25' for 2022+ - SAC 09/23/22 (tic #1296)
    "Set ResHVACSys:DuctStatusFlag[1]"     ResHVACSys:DuctStatusFlag[1]  = {
          if (IfValidAnd( FloorAreaServed > 0.5 )==0 .OR. 
              IfValidAnd( HtOrClDucted > 0 )==0 .OR. LocalCompAssigned( DistribSystem )==0) then  0
          else if (DistribSystem:Status == 4)  ; "Existing + New"
-         then  if (DistribSystem:IsLessThanFortyFt) then  4  else  5  endif
+         then  if ( (Proj:StdDesignBase <  2022 .AND. DistribSystem:IsLessThanFortyFt) .OR.
+                    (Proj:StdDesignBase >= 2022 .AND. DistribSystem:IsLessThan25Ft   ) ) then  4  else  5  endif
          else  DistribSystem:Status
          endif endif  }
    "Set ResHVACSys:DuctStatusFlag[2]"   ResHVACSys:DuctStatusFlag[2]  = {  DuctStatusFlag[1]  }
@@ -783,7 +788,9 @@ RULELIST  "Reporting_HERS_SpecialFeaturesSummary" 1 0 0 0
          else  ; 2019+
                   if ( Type = 8 ) then  0
                   else if ( IsNew .OR. IsAltered ) then  1
-                  else if ( Status = 4 .AND. IsLessThanFortyFt = 0 ) then  1
+                  else if ( Status = 4 .AND. 
+                            ( (ResProj:EnergyCodeYearNum <  2022 .AND. IsLessThanFortyFt = 0) .OR.
+                              (ResProj:EnergyCodeYearNum >= 2022 .AND. IsLessThan25Ft    = 0) ) ) then  1
                   else  0  endif endif endif
          endif endif endif  }
 ;	mjb	7/17/14 - need to set duct leakage flag even if NoCooling; using DuctsCreatedForAnalysis instead of TypeRpt
@@ -812,14 +819,22 @@ RULELIST  "Reporting_HERS_SpecialFeaturesSummary" 1 0 0 0
 																												else FltToStr( DuctLeakageValRpt, 1, 0, 3 ) endif endif endif												
 																											 else UNDEFINED endif }
 ;	mjb	8/1/14	- reset ResDistSys:DuctLeakage enumeration for CF1R reporting of Existing Ducts
-	"Reset DuctLeakage enumeration if Existing"		ResDistSys:Action	= {	if ( FloorAreaServed  > 0 .AND. (Status == 1 .OR. (Status == 4 .AND. IfValidAnd(IsLessThanFortyFt > 0.5))) ) then EvalRulelist( "Force_Existing_HVACDist_DuctLeakage", 1 ) else UNCHANGED endif	}
+   ; added logic to check 40' for <2022 codes and 25' for 2022+ - SAC 09/23/22 (tic #1296)
+	"Reset DuctLeakage enumeration if Existing"		ResDistSys:Action	= {	if ( FloorAreaServed  > 0 .AND. 
+                                                                                ( Status == 1 .OR.
+                                                                                  (Proj:StdDesignBase <  2022 .AND. Status == 4 .AND. IfValidAnd(IsLessThanFortyFt > 0.5)) .OR.
+                                                                                  (Proj:StdDesignBase >= 2022 .AND. Status == 4 .AND. IfValidAnd(IsLessThan25Ft    > 0.5)) ) )
+                                                                            then EvalRulelist( "Force_Existing_HVACDist_DuctLeakage", 1 ) else UNCHANGED endif	}
 
 ;	mjb	8/5/14	- added check for proposed duct location before setting HERS flag
 ;  mjb   9/10/14  - changed > to < for proper checking of DuctsCreatedForAnalysis flag
 ; SAC 12/31/15 - added logic to prevent flagging HERS DuctLocation for Existing ducts (tic 498)
 ; SAC 1/4/16 - added more logic to prevent HERS DuctLocation flag for Existing+New status where IsLessThanFortyFt is checked (tic 498)
+   ; added logic to check 40' for <2022 codes and 25' for 2022+ - SAC 09/23/22 (tic #1296)
 	"Check for HERS Req'd Duct Location"		ResDistSys:HERSCheck:DuctLocation = { if ( FloorAreaServed  > 0 .AND. IfValidAnd(DuctsCreatedForAnalysis < 0.5) .AND.
-																												  (IsNew .OR. IsAltered .OR. (Status == 4 .AND. IfValidAnd( IsLessThanFortyFt > 0 )==0)) ) then
+																												  (IsNew .OR. IsAltered .OR.
+                                                                                        (Proj:StdDesignBase <  2022 .AND. Status == 4 .AND. IfValidAnd( IsLessThanFortyFt > 0 )==0) .OR.
+                                                                                        (Proj:StdDesignBase >= 2022 .AND. Status == 4 .AND. IfValidAnd( IsLessThan25Ft    > 0 )==0) ) ) then
 																												if ( Type == 6 .OR. Type == 7 .OR. Type == 12 ) then 1 else 0 endif
 											      														else 0 endif  }
 	"Write Duct Location Msg" 						ResDistSys:HERSCheck:DuctLocRptMsg = { if ( HERSCheck:DuctLocation > 0.5 ) then Type else UNDEFINED endif }
@@ -1112,10 +1127,12 @@ RULELIST  "Reporting_HERS_SpecialFeaturesSummary" 1 0 0 0
          else  "Refrigerant Charge verification required if a refrigerant containing component is altered"  endif  }
 
   ; SAC 3/9/17 - logic for new Altered Duct Leakage HERS message (tic #764)
+   ; added logic to check 40' for <2022 codes and 25' for 2022+ - SAC 09/23/22 (tic #1296)
    "Set HERS flag for Altered Ducts"      ResDistSys:HERSCheck:AltDuctLeakage  = {
 	      if ( IfValidAnd( HERSCheck:DuctLeakage = 0 ) .AND.
               ( Status == 1 .OR.
-               (Status == 4 .AND. IfValidAnd( IsLessThanFortyFt > 0 ))) )
+               (Proj:StdDesignBase <  2022 .AND. Status == 4 .AND. IfValidAnd( IsLessThanFortyFt > 0 )) .OR.
+               (Proj:StdDesignBase >= 2022 .AND. Status == 4 .AND. IfValidAnd( IsLessThan25Ft    > 0 )) ) )
 	      then  if ( ResProj:ShowNotRegWatermark > 0 .AND. 
 	                 SumRevRef( ResHVACSys:DistribSystem, ResHVACSys:HtOrClDucted ) > 0 .AND.
 	                 SumRevRef( ResHVACSys:DistribSystem, ResHVACSys:IsExisting   ) > 0 )
@@ -1433,12 +1450,19 @@ RULELIST  "Reporting_HERS_SpecialFeaturesSummary" 1 0 0 0
 ;	mjb	8/22/14	- needs to work for HtPumps too...
 ;	mjb	10/30/14	- mods to make all reporting rules work without special reporting parameters that are no longer needed
 ;	"Check for No Cooling in HVACSys" 							ResHVACSys:NoCoolingRpt 			= { if ( IfValidAnd( CoolSystem:TypeRpt < 2 ) .AND. IfValidAnd( NumHtPumpSystemTypes < 1 ) .AND. IfValidAnd( FloorAreaServed > 0.5 ) ) then 1 else 0 endif }
-	"Check for No Cooling in HVACSys" 							ResHVACSys:NoCoolingRpt 			= { if ( IfValidAnd( CoolSystem:Type < 2 ) .AND. IfValidAnd( NumHtPumpSystemTypes < 1 ) .AND. IfValidAnd( FloorAreaServed > 0.5 ) ) then 1 else 0 endif }
+	; revised logic to include HeatPumpDHWCombo systems w/ no cooling - SAC 09/21/24 (tic #3629)
+	"Check for No Cooling in HVACSys" 							ResHVACSys:NoCoolingRpt 			=
+      {  if ( IfValidAnd( CoolSystem:Type < 2 ) .AND. IfValidAnd( NumHtPumpSystemTypes < 1 ) .AND. IfValidAnd( FloorAreaServed > 0.5 ) ) then 1
+         else if ( IfValidAnd( FloorAreaServed > 0.5 ) .AND. Type == 2 .AND. IfValidAnd( NumHtPumpSystemTypes > 0 ) .AND.
+                   IfValidAnd( HtPumpSysType = 35 ) .AND. IfValidAnd( HtPumpSystem[1]:IncludesCooling = 0 ) ) then 1
+         else 0 endif endif }
 	"Check for No Cooling in Project" 							ResProj:SpeclFeatrs:NoCooling 	= { if ( MaxAll( ResHVACSys:NoCoolingRpt ) > 0.5 ) then 1 else 0 endif }
 	"Write No Cooling Msg" 											ResProj:SpeclFeatrs:NoCoolingMsg = { if ( SpeclFeatrs:NoCooling > 0.5 ) then 1 else 0 endif }
 ;	"debug"		ResHVACSys:Action	= {	MessageBox( "reporting -- HVACSys '%s':  CoolSystem:TypeRpt = %g  NoCoolingRpt = %g", Name, CoolSystem:TypeRpt, NoCoolingRpt )  }
 ;	mjb	7/29/14	added Special Feature message for les than 40ft of added duct
-	"Check for Short Ducts in Project" 							ResProj:SpeclFeatrs:AddedShortDuct 		= { if ( SumAcrossIf(ResDistSys:IsLessThanFortyFt, ResDistSys:FloorAreaServed > 0 ) > 0.5 ) then 1 else 0 endif }
+   ; added logic to check 40' for <2022 codes and 25' for 2022+ - SAC 09/23/22 (tic #1296)
+	"Check for Short Ducts in Project" 							ResProj:SpeclFeatrs:AddedShortDuct 		= { if ( (EnergyCodeYearNum <  2022 .AND. SumAcrossIf(HVACDist:IsLessThanFortyFt, ResDistSys:FloorAreaServed > 0 ) > 0.5) .OR.
+                                                                                                         (EnergyCodeYearNum >= 2022 .AND. SumAcrossIf(HVACDist:IsLessThan25Ft,    ResDistSys:FloorAreaServed > 0 ) > 0.5) ) then 1 else 0 endif }
 	"Write Short Duct Msg" 											ResProj:SpeclFeatrs:AddedShortDuctMsg 	= { if ( SpeclFeatrs:AddedShortDuct > 0.5 ) then 1 else 0 endif }
 
 ;       Updated based on changes to address (tic #707)
@@ -1689,9 +1713,11 @@ RULELIST  "CreateAndAssignAsUserDefined_HVACHtPump_HERSCoolHeat_Populate" 1 0 0 
 ; SAC 3/14/17 - added logic to ensure AHUAirFlow IS set for HtPump of Alt or Exist HVACSys combined w/ Alt or New Ducts (tic #764, runs 4,5,10,11)
 ; SAC 3/14/17 - added logic to ensure AHUAirFlow NOT set for HtPumps of New HVACSys combined w/ Existing Ducts (tic #764, run #6)
 ; SAC 6/12/18 - added logic to ensure AHUAirFlow NOT set for Cool of New HVACSys combined w/ Existing+New Ducts (tic #1022, DAR comment 6/7/18)
+   ; prevent AHUAirFlow flag for HeatPumpDHWCombo w/ no cooling - SAC 09/21/24 (tic #3629)
 	"Check for CFM per Ton" 	ResHtPumpSys:HERSCheck:AHUAirFlow = {
 	      if ( MaxRevRef( ResHVACSys:HtPumpSystem, ResHVACSys:HtPmpFlrAreaServed ) > 0.5 .AND.
 			     MaxRevRef( ResHVACSys:HtPumpSystem, ResHVACSys:CoolDuctedRpt ) > 0.5 .AND.
+              (Type != 35 .OR.  IfValidAnd( IncludesCooling > 0 )) .AND.
               ( IfValidAnd( IsClSysCFMperTon > 0.5 ) .OR. 
                 ( MaxRevRef( ResHVACSys:HtPumpSystem, ResHVACSys:DuctStatusFlag ) < 3.5 .AND.
                   MinRevRef( ResHVACSys:HtPumpSystem, ResHVACSys:DuctStatusFlag ) > 1.5 ) ) )
@@ -1748,10 +1774,12 @@ RULELIST  "CreateAndAssignAsUserDefined_HVACHtPump_HERSCoolHeat_Populate" 1 0 0 
 ; SAC 5/4/15 - replaced check of T24RCoolingEquipment:PropEqStd() w/ simple check for GSHP system type, since that is the only system type that refrigerant charge reporting is disabled for (issue 502)
 ; SAC 6/18/18 - ROLL BACK this mod which broke some tic #764 runs - SAC 6/15/18 - restrict cases where this msg occurs to ONLY NEW HVACSys objects (HVACSys:StatusArray ) > 1.5 -->> = 3) (tic #981)
 ; added logic to prevent systems of specific (packaged & room) types from being flagged - SAC 09/04/20 (tic #1003)
+   ; prevent ACCharge flag for HeatPumpDHWCombo w/ no cooling - SAC 09/21/24 (tic #3629)
 	"HtPump - Check for AC Charge"			ResHtPumpSys:HERSCheck:ACCharg = {
          if ( MaxRevRef( ResHVACSys:HtPumpSystem, ResHVACSys:HtPmpFlrAreaServed ) > 0 .AND. ACCharge > 1.5 .AND.
               MaxRevRef( ResHVACSys:HtPumpSystem, ResHVACSys:StatusArray ) > 1.5 .AND.
-              Type != 26 .AND. Type != 24 .AND. Type != 7 .AND. Type != 12 )     ; NOT PkgTermHeatPump, SglPkgVertHeatPump, RoomHeatPump or GroundSourceHeatPump
+              Type != 26 .AND. Type != 24 .AND. Type != 7 .AND. Type != 12 .AND.     ; NOT PkgTermHeatPump, SglPkgVertHeatPump, RoomHeatPump or GroundSourceHeatPump
+              (Type != 35 .OR. IfValidAnd( IncludesCooling > 0 )) )
          then  1  else  0  endif }
 	"HtPump - Write AC Charge Msg" 			ResHtPumpSys:HERSCheck:ACChargRptMsg = { if (IfValidAnd( HERSCheck:ACCharg > 0.5 )) then ACCharge else 0 endif }
 
@@ -1785,9 +1813,11 @@ RULELIST  "CreateAndAssignAsUserDefined_HVACHtPump_HERSHtPump_Populate" 1 0 0 0
 
 ; DUPLICATED FROM HERSCool/Heat RULELIST ABOVE
 
+   ; prevent AHUAirFlow flag for HeatPumpDHWCombo w/ no cooling - SAC 09/21/24 (tic #3629)
 	"Check for CFM per Ton" 	ResHtPumpSys:HERSHtPumpRef:AHUAirFlow = {
 	      if ( MaxRevRef( ResHVACSys:HtPumpSystem, ResHVACSys:HtPmpFlrAreaServed ) > 0.5 .AND.
 			     MaxRevRef( ResHVACSys:HtPumpSystem, ResHVACSys:CoolDuctedRpt ) > 0.5 .AND.
+              (Type != 35 .OR.  IfValidAnd( IncludesCooling > 0 )) .AND.
               ( IfValidAnd( IsClSysCFMperTon > 0.5 ) .OR. 
                 ( MaxRevRef( ResHVACSys:HtPumpSystem, ResHVACSys:DuctStatusFlag ) < 3.5 .AND.
                   MinRevRef( ResHVACSys:HtPumpSystem, ResHVACSys:DuctStatusFlag ) > 1.5 ) ) )
@@ -1822,11 +1852,13 @@ RULELIST  "CreateAndAssignAsUserDefined_HVACHtPump_HERSHtPump_Populate" 1 0 0 0
 	"HtPump - Write EER above Std Msg" 		ResHtPumpSys:HERSHtPumpRef:EERRptMsg = { if (IfValidAnd( HERSHtPumpRef:EER > 0.5 )) then FltToStr( EER, 1, 0, 4 ) else UNDEFINED endif }
 
    ; added logic to prevent systems of specific (packaged & room) types from being flagged - SAC 09/04/20 (tic #1003)
+   ; prevent ACCharge flag for HeatPumpDHWCombo w/ no cooling - SAC 09/21/24 (tic #3629)
 	"HtPump - Check for AC Charge"			ResHtPumpSys:HERSHtPumpRef:ACCharg = {
          if ( MaxRevRef( ResHVACSys:HtPumpSystem, ResHVACSys:HtPmpFlrAreaServed ) > 0 .AND. ACCharge > 1.5 .AND.
               MaxRevRef( ResHVACSys:HtPumpSystem, ResHVACSys:StatusArray ) > 1.5 .AND.
-              Type != 26 .AND. Type != 24 .AND. Type != 7 .AND. Type != 12 )     ; NOT PkgTermHeatPump, SglPkgVertHeatPump, RoomHeatPump or GroundSourceHeatPump
-         then  1  else  0  endif }
+              Type != 26 .AND. Type != 24 .AND. Type != 7 .AND. Type != 12 .AND.
+              (Type != 35 .OR.  IfValidAnd( IncludesCooling > 0 )) )
+         then  1  else  0  endif }                 ; NOT PkgTermHeatPump, SglPkgVertHeatPump, RoomHeatPump or GroundSourceHeatPump
 	"HtPump - Write AC Charge Msg" 			ResHtPumpSys:HERSHtPumpRef:ACChargRptMsg = { if (IfValidAnd( HERSHtPumpRef:ACCharg > 0.5 )) then ACCharge else 0 endif }
 
    ; SAC 5/10/19 - revised 2019 logic to trigger HtPump HSPF nad/or Capacity verif for any HP where PopEqStd = 0
@@ -1842,16 +1874,17 @@ RULELIST  "CreateAndAssignAsUserDefined_HVACHtPump_HERSHtPump_Populate" 1 0 0 0
          if ( IfValidAnd( HERSHtPumpRef:HSPF > 0.5 ) ) then  "Verified HSPF"
          else  UNDEFINED  endif }
    ; switched logic for 2019.2.0+ to trigger flag for ALL HP types, not just those explicitly simulated - SAC 02/09/21 (tic #1254)
+   ; mods to prevent Capacity(17) HERS checks for HeatPumpDHWCombo (Type=35) equipment - SAC 09/21/24 (tic #3629)
    "Check for Pkg or Split heating capacity - ResHtPumpSys:HERSHtPumpRef:Capacity"   ResHtPumpSys:HERSHtPumpRef:Capacity = {
          if ( FloorAreaServed > 0.5 .AND. (IfValidAnd(IsNew > 0) .OR. IfValidAnd(IsAltered > 0)) .AND. 
               ( (IfValidAnd( Proj:AnalysisVersion >= 190200 )==0 .AND. T24RHeatingEquipment:PropEqStd( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", TypeAbbrevStr ) == 0) .OR.
-                (IfValidAnd( Proj:AnalysisVersion >= 190200 )    .AND. Type > 0) )  .AND.
+                (IfValidAnd( Proj:AnalysisVersion >= 190200 )    .AND. Type > 0 .AND. Type != 35) )  .AND.
               IfValidAnd( AutoSize > 0 )==0 )
          then  1  else  0  endif  }
    ; added logic to prevent systems of specific (packaged & room) types from being flagged for Capacity17 verification - SAC 09/04/20 (tic #1003)
    "Check for Pkg or Split heating capacity - ResHtPumpSys:HERSHtPumpRef:Capacity17"  ResHtPumpSys:HERSHtPumpRef:Capacity17 =
       {  if ( HERSHtPumpRef:Capacity > 0 .AND.
-              Type != 26 .AND. Type != 24 .AND. Type != 7 .AND. Type != 12 )     ; NOT PkgTermHeatPump, SglPkgVertHeatPump, RoomHeatPump or GroundSourceHeatPump
+              Type != 26 .AND. Type != 24 .AND. Type != 7 .AND. Type != 12 .AND. Type != 34 .AND. Type != 35 )     ; NOT PkgTermHeatPump, SglPkgVertHeatPump, RoomHeatPump or GroundSourceHeatPump or AirToWaterHeatPump
          then  1  else  0  endif  }
    "Write heating capacity Msg - ResHtPumpSys:HERSHtPumpRef:CapacityRptMsg"          ResHtPumpSys:HERSHtPumpRef:CapacityRptMsg = {
          if ( IfValidAnd( HERSHtPumpRef:Capacity > 0.5 ) ) then  "Verified heat pump rated heating capacity"
@@ -2029,9 +2062,16 @@ RULELIST  "ReportMaster_Building_Summary_csv" 1 0 0 0
 								  										WriteToFile( ",PV Credit Available,%c%s%c,\n",	34, "Yes"  , 34 )
 								  									else  WriteToFile( ",PV Credit Available,%c%s%c,\n",34, "No"  , 34 )  
 								  									endif  }                                                
-  "Write PVGenCredit"			ResProj:Action = {   WriteToFile( ",PV Generation - Maximum Credit,%0.1f,kTDV,\n",    PVGenCredit  )  }
-  "Write PVPrelimCredit"		ResProj:Action = {   WriteToFile( ",Credit Available for PV,%0.1f,kTDV,\n",    PVPrelimCredit  )  }		; SAC 4/2/15 - no longer document cooling vs. total credit available - or could split out by code vintage
-  "Write PVCredit"				ResProj:Action = {   WriteToFile( ",Final PV Credit,%0.1f,kTDV/ft2-yr,\n\n",    PVCredit[1]  )  }
+   ; revisions for new SLCC units - SAC 12/02/22                                               
+  "Write PVGenCredit"			ResProj:Action = {   if (StandardsVersion >= 2025 )
+                                                   then  WriteToFile( ",PV Generation - Maximum Credit,%0.1f,%s $,\n",  PVGenCredit, CompMetricLbl_Short  )   ; 01/29/23
+                                                   else  WriteToFile( ",PV Generation - Maximum Credit,%0.1f,kTDV,\n",  PVGenCredit  )  endif  }
+  "Write PVPrelimCredit"		ResProj:Action = {   if (StandardsVersion >= 2025 )
+                                                   then  WriteToFile( ",Credit Available for PV,%0.1f,%s $,\n",  PVPrelimCredit, CompMetricLbl_Short  )
+                                                   else  WriteToFile( ",Credit Available for PV,%0.1f,kTDV,\n",  PVPrelimCredit  )  endif  }		; SAC 4/2/15 - no longer document cooling vs. total credit available - or could split out by code vintage
+  "Write PVCredit"				ResProj:Action = {   if (StandardsVersion >= 2025 )
+                                                   then  WriteToFile( ",Final PV Credit,%0.1f,%s $/ft2,\n\n",    PVCredit[1], CompMetricLbl_Short  )
+                                                   else  WriteToFile( ",Final PV Credit,%0.1f,kTDV/ft2-yr,\n\n", PVCredit[1]  )  endif  }
 
   "Write ZonalControl"			ResProj:Action = {   if ( ZonalControl > 0.5 ) then  
 								  	WriteToFile( ",Zonal Control,%c%s%c,\n",	34, "Yes"  , 34 )
@@ -8539,11 +8579,17 @@ RULELIST  "HVACSys_Data_Report" 0 0 0 1
 																						else UNCHANGED endif 
 																					else UNCHANGED endif }
 
-   "Write column headings for CoolSystem Data"	ResHVACSys:Action = {  if ( HaveCooling .AND. FloorAreaServed > 0.5  ) then 
-									if ( Type == 2 .AND. HaveHtPump ) then WriteToFile( "\n,,Heat Pump (Cooling):, Type, SEER, EER, CFM/Ton, AC Charge, Ducted,\n" )
-										else WriteToFile( "\n,,Cooling System:, Type, SEER, EER, CFM/Ton, AC Charge, Ducted,\n" )
-										endif
-									else UNCHANGED endif  }
+   "Write column headings for CoolSystem Data"	ResHVACSys:Action =     ; SAC 09/16/22 (tic #1331)
+      {  if ( HaveCooling .AND. FloorAreaServed > 0.5  )
+         then  if ( Type == 2 .AND. HaveHtPump )
+               then  if (EffMetric < 2)
+                     then  WriteToFile( "\n,,Heat Pump (Cooling):, Type, SEER, EER, CFM/Ton, AC Charge, Ducted,\n" )
+                     else  WriteToFile( "\n,,Heat Pump (Cooling):, Type, SEER2, EER2, CFM/Ton, AC Charge, Ducted,\n" )  endif
+					else  if (EffMetric < 2)
+                     then  WriteToFile( "\n,,Cooling System:, Type, SEER, EER, CFM/Ton, AC Charge, Ducted,\n" )
+                     else  WriteToFile( "\n,,Cooling System:, Type, SEER2, EER2, CFM/Ton, AC Charge, Ducted,\n" )  endif
+					endif
+			else UNCHANGED endif  }
 
    ; copy of rule setting ResHVACSys:NoCoolingRpt to ensure it is set prior to being referenced below (tic #947) - SAC 1/3/18
 	"Check for No Cooling in HVACSys" 	ResHVACSys:NoCoolingRpt = { if ( IfValidAnd( CoolSystem:Type < 2 ) .AND. IfValidAnd( NumHtPumpSystemTypes < 1 ) .AND. IfValidAnd( FloorAreaServed > 0.5 ) ) then 1 else 0 endif }
@@ -8567,18 +8613,34 @@ RULELIST  "HVACSys_Data_Report" 0 0 0 1
 																	  else UNCHANGED endif  }
    "Write HVACCool SEER"			ResHVACSys:Action = {  if ( HaveCooling .AND. FloorAreaServed > 0.5  ) then 
    																		if ( ResProj:RunAbbrev != "s" .AND. ResProj:RunAbbrev != "zb" .AND. ResProj:RunAbbrev != "smf" ) then 
-																				if ( Type == 2 .AND. HaveHtPump ) then WriteToFile( "%0.3f,", HtPumpSystem[1]:SEER )
-																				else 
-																					if ( NoCoolingRpt < 0.5 ) then WriteToFile( "%0.3f,", CoolSystem[1]:SEER ) else WriteToFile( "%s,", "NA" ) endif endif
-																			else WriteToFile( "%0.3f,", ClSysSEER ) endif
-																	  else UNCHANGED endif  }
+																				if ( Type == 2 .AND. HaveHtPump ) 
+                                                            then  if (EffMetric < 2)
+                                                                  then  WriteToFile( "%0.3f,", HtPumpSystem[1]:SEER )
+                                                                  else  WriteToFile( "%0.3f,", HtPumpSystem[1]:SEER2 )  endif
+																				else if ( NoCoolingRpt < 0.5 )
+                                                            then  if (EffMetric < 2)
+                                                                  then  WriteToFile( "%0.3f,", CoolSystem[1]:SEER )
+                                                                  else  WriteToFile( "%0.3f,", CoolSystem[1]:SEER2 )  endif
+                                                            else  WriteToFile( "%s,", "NA" ) endif endif
+																			else  if (EffMetric < 2)
+                                                               then  WriteToFile( "%0.3f,", ClSysSEER ) 
+                                                               else  WriteToFile( "%0.3f,", ClSysSEER2 )  endif  endif
+																	  else UNCHANGED endif  }     ; SAC 09/16/22 (tic #1331)
    "Write HVACCool EER"				ResHVACSys:Action = {  if ( HaveCooling .AND. FloorAreaServed > 0.5  ) then 
    																		if ( ResProj:RunAbbrev != "s" .AND. ResProj:RunAbbrev != "zb" .AND. ResProj:RunAbbrev != "smf" ) then 
-									 											if ( Type == 2 .AND. HaveHtPump ) then WriteToFile( "%0.3f,", HtPumpSystem[1]:EER )
-																				else  
-																					if ( NoCoolingRpt < 0.5 ) then WriteToFile( "%0.3f,", CoolSystem[1]:EER ) else WriteToFile( "%s,", "NA" ) endif endif
-																			else WriteToFile( "%0.3f,", ClSysEER ) endif
-																	  else UNCHANGED endif  } 
+									 											if ( Type == 2 .AND. HaveHtPump )
+                                                            then  if (EffMetric < 2)
+                                                                  then  WriteToFile( "%0.3f,", HtPumpSystem[1]:EER )
+                                                                  else  WriteToFile( "%0.3f,", HtPumpSystem[1]:EER2 )  endif
+																				else if ( NoCoolingRpt < 0.5 )
+                                                            then  if (EffMetric < 2)
+                                                                  then  WriteToFile( "%0.3f,", CoolSystem[1]:EER )
+                                                                  else  WriteToFile( "%0.3f,", CoolSystem[1]:EER2 )  endif
+                                                            else  WriteToFile( "%s,", "NA" ) endif endif
+																			else  if (EffMetric < 2)
+                                                               then  WriteToFile( "%0.3f,", ClSysEER ) 
+                                                               else  WriteToFile( "%0.3f,", ClSysEER2 )  endif  endif
+																	  else UNCHANGED endif  }     ; SAC 09/16/22 (tic #1331)
    "Write HVACCool CFMperTon"			ResHVACSys:Action = {  if ( HaveCooling .AND. FloorAreaServed > 0.5  ) then 
    																			if ( ResProj:RunAbbrev != "s" .AND. ResProj:RunAbbrev != "zb" .AND. ResProj:RunAbbrev != "smf" ) then 
 									 												if ( Type == 2 .AND. HaveHtPump ) then WriteToFile( "%0.3f,", HtPumpSystem[1]:CFMperTon )
