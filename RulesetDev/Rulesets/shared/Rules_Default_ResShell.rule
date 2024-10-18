@@ -719,7 +719,10 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
 
 	; HW consumption based on Res ACM, App E, Sec E3.1
 	; SAC 10/26/15 - added '* DHWSysAssignFrac'
-	"Set DwellUnitType:DHWDailyConsPerSys"			DwellUnitType:DHWDailyConsPerSys	= {	(21.4 + (0.00679 * min( CondFlrArea, 2500 ))) * ValidOr( DHWSysAssignFrac, 1 )  }
+	"Set DwellUnitType:DHWDailyConsPerSys"			DwellUnitType:DHWDailyConsPerSys	=     ; revised for DHWCombo (where DHWSysAssignFrac can = 0) - SAC 10/15/24 (tic #3629)
+      {	if (IfValidAnd( HtEqpUsedAsDHWHtr > 0 ))
+         then   21.4 + (0.00679 * min( CondFlrArea, 2500 ))
+         else  (21.4 + (0.00679 * min( CondFlrArea, 2500 ))) * ValidOr( DHWSysAssignFrac, 1 )  endif  }
 
 	"Set DwellUnitType:ServedByDHWSys"		; boolean (0/1) whether or not this DUT is served by one or more valid DHWSys objects"    
 			DwellUnitType:ServedByDHWSys	= {	if (IfValidAnd( NumDHWSysAssigns > 0 )) then  1  else  0  endif  }
@@ -962,10 +965,13 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
          then  1
          else  UNDEFINED  endif  }
 
+   ; revised for DwellUnitTypeRef:HtEqpUsedAsDHWHtr (DHWCombo) - SAC 10/15/24 (tic #3629)
 	"Set DwellUnit:TotalDHWFlrArea"			DwellUnit:TotalDHWFlrArea	= {	if (LocalCompAssigned( DwellUnitTypeRef ) == 0) then  0
+                                                                           else if (ParentComponentType() == "ResZn" .AND. IfValidAnd( DwellUnitTypeRef:HtEqpUsedAsDHWHtr > 0 ))
+                                                                           then  Count * ValidOr( CondFlrArea, 0 )
 																									else if (ParentComponentType() == "ResZn" .AND. IfValidAnd( DwellUnitTypeRef:DHWSysAssignFrac > 0 ))
 																									then  Count * DwellUnitTypeRef:DHWFlrAreaPerSys / DwellUnitTypeRef:DHWSysAssignFrac
-																									else  0  endif endif  }
+																									else  0  endif endif endif  }
 																					;				else if (IfValidAnd( DwellUnitTypeRef:ServedByDHWSys > 0.5 )) then  TotalCondFlrArea  else  0  endif endif  }
 
    "Set DwellUnit:Description"				DwellUnit:Description		= {	if (LocalCompAssigned( DwellUnitTypeRef ) == 0) then  "No DwellUnitType assigned"
@@ -1139,9 +1145,10 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
 	"Set Zone:UncondFloorArea"		Zone:UncondFloorArea		= {	if (Local( Type ) == 10) then  Local( FloorArea )  else  0  endif  }
    "Set Zone:LvgCondFloorArea"	Zone:LvgCondFloorArea   = {   if (Local( Type ) ==  2) then  Local( FloorArea )  else  0  endif  }
    "Set Zone:SlpCondFloorArea"	Zone:SlpCondFloorArea   = {   if (Local( Type ) ==  3) then  Local( FloorArea )  else  0  endif  }
-;   "Set OtherZone:CondFloorArea"    OtherZone:CondFloorArea  = {  if (Type < 10) then  Area  else  0  endif  }       ; SAC 9/10/19 (MFamProto)
-;	"Set OtherZone:CondFloorAreaWithMult" OtherZone:CondFloorAreaWithMult = {	CondFloorArea * ValidOr( Mult, 1 )  }    ; SAC 04/27/23 (3392)
-;   "Set OtherZone:NewOrAltHVACFloorArea" OtherZone:NewOrAltHVACFloorArea = {  if (IfValidAnd( HVACSysStatus = 1 )==0) then  CondFloorArea  else  0  endif  }      ; SAC 06/28/23 (tic #3479)
+   ; restored removed OtherZone rules to prevent incorrect setting of ResProj properties - SAC 10/09/24 (tic #3630)
+   "Set OtherZone:CondFloorArea"    OtherZone:CondFloorArea  = {  if (Type < 10) then  Area  else  0  endif  }       ; SAC 9/10/19 (MFamProto)
+	"Set OtherZone:CondFloorAreaWithMult" OtherZone:CondFloorAreaWithMult = {	CondFloorArea * ValidOr( Mult, 1 )  }    ; SAC 04/27/23 (3392)
+   "Set OtherZone:NewOrAltHVACFloorArea" OtherZone:NewOrAltHVACFloorArea = {  if (IfValidAnd( HVACSysStatus = 1 )==0) then  CondFloorArea  else  0  endif  }      ; SAC 06/28/23 (tic #3479)
 ; SAC 4/8/15 - moved up again to set prior to ResProj:PVDwellUnitSize
 ;	mjb	4/14/14	moved CondFloorArea rule up - needed for CoolVent rules
 	"Set ResProj:CondFloorArea"		ResProj:CondFloorArea		= {	SumAll( Zone:CondFloorArea ) + SumAll( OtherZone:CondFloorArea )  }
@@ -1220,11 +1227,12 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
 																								else if (ResProj:RunScope == 2 .AND. HVACSysStatus == 2) then  AltHVACSystem
 																								else if ((ResProj:RunScope == 2 .OR. ResProj:IsAddAlone > 0.5) .AND. HVACSysStatus == 1) then  exHVACSystem
 																								else  UNDEFINED  endif endif endif  }
-;	"Set OtherZone:ActiveHVACSystem"		OtherZone:ActiveHVACSystem	=           ; {  ozHVACSystem  } - restored logic defaulting of ActiveHVACSystem - SAC 06/25/23 (tic #3479)
-;	   {                                                                 if      (Type < 10 .AND. CondType = 1 .AND. Proj:ResCompOpt > 1 .AND. HVACSysStatus == 2) then  AltHVACSystem
-;																								else if (Type < 10 .AND. CondType = 1 .AND. Proj:ResCompOpt > 1 .AND. HVACSysStatus == 1) then  exHVACSystem
-;                                                                        else if (Type < 10 .AND. CondType = 1) then  ozHVACSystem
-;                                                                        else  UNDEFINED  endif endif endif  }
+   ; restored copy of ResOtherZn:ActiveHVACSystem rule here to ensure it is valid prior to following rules related to DHW - SAC 10/14/24 (tic #3629)
+	"Set ResOtherZn:ActiveHVACSystem"   ResOtherZn:ActiveHVACSystem  =            ; {  ozHVACSystem  } - restored logic defaulting of ActiveHVACSystem - SAC 06/25/23 (tic #3479)
+	   {  if      (Type < 10 .AND. CondType = 1 .AND. Proj:ResCompOpt > 1 .AND. HVACSysStatus == 2) then  AltHVACSystem
+			else if (Type < 10 .AND. CondType = 1 .AND. Proj:ResCompOpt > 1 .AND. HVACSysStatus == 1) then  exHVACSystem
+         else if (Type < 10 .AND. CondType = 1) then  ozHVACSystem
+         else  UNDEFINED  endif endif endif  }
 	                                                               ;      if ((ResProj:RunScope != 2 .AND. ResProj:IsAddAlone < 0.5) .OR. HVACSysStatus == 3) then  HVACSystem
 																						;		else if (ResProj:RunScope == 2 .AND. HVACSysStatus == 2) then  UNDEFINED  ; AltHVACSystem
 																						;		else if ((ResProj:RunScope == 2 .OR. ResProj:IsAddAlone > 0.5) .AND. HVACSysStatus == 1) then  UNDEFINED  ; exHVACSystem
@@ -2833,25 +2841,40 @@ RULELIST "Default_DHWHeater_AreaServedAndHydronic"  0 0 0 0
          else if (SpcFunc < 200) then  0
          else  SpaceFunctionData:HotWtrHrlyUsePerPers("FuncType",EnumString(SpcFunc))      
          endif endif  }
-   "Set OtherZone:ShowDHWSysAssignment"   OtherZone:ShowDHWSysAssignment  =      ; SAC 02/21/23 (tic #3418)
-      {  if ( SpcFunc == 231 .OR. SpcFunc == 342 .OR.      ; 231, "Laundry Area"
-              HotWtrHrlyUsePerPers > 0 )
+   "Set ResOtherZn:HotWtrUsePerDay"       ResOtherZn:HotWtrUsePerDay =           ; SAC 10/10/24 (tic #3630)
+      {  HotWtrHrlyUsePerPers * ValidOr( OccNumSim, 1 ) * 24  }
+
+   "Set ResOtherZn:HtEqpUsedAsDHWHtr flag"      ResOtherZn:HtEqpUsedAsDHWHtr  =     ; SAC 10/14/24 (tic #3629)
+      {  if (IfValidAnd( ActiveHVACSystem:Type = 2 ) .AND. IfValidAnd( ActiveHVACSystem:NumHtPumpSystemTypes > 0 ) .AND.
+             IfValidAnd( ActiveHVACSystem:HtPumpSystem[1]:CanBeDHWHtr > 0.1 ) .AND. IfValidAnd( ActiveHVACSystem:ServesAsDHWHtr > 0.1 ))
          then  1  else  0  endif  }
 
-	"Set OtherZone:ActiveDHWSystem"		OtherZone:ActiveDHWSystem	=           ; SAC 06/25/23 (tic #3479)
-	   {                                                                 if      (ShowDHWSysAssignment > 0 .AND. Proj:ResCompOpt > 1 .AND. DHWSysStatus == 2) then  AltDHWSys
-																								else if (ShowDHWSysAssignment > 0 .AND. Proj:ResCompOpt > 1 .AND. DHWSysStatus == 1) then  exDHWSys
-                                                                        else if (ShowDHWSysAssignment > 0) then  ozDHWSys
-                                                                        else  UNDEFINED  endif endif endif  }
+   "Set ResOtherZn:HVACSysDHWFlrArea flag"      ResOtherZn:HVACSysDHWFlrArea  =     ; SAC 10/15/24 (tic #3629)
+      {  if (HtEqpUsedAsDHWHtr > 0 .AND. HotWtrUsePerDay > 0.1) then  CondFloorAreaWithMult
+         else  UNDEFINED  endif  }
+
+   "Set OtherZone:ShowDHWSysAssignment"   OtherZone:ShowDHWSysAssignment  =      ; SAC 02/21/23 (tic #3418)
+      {  if (HtEqpUsedAsDHWHtr > 0.1) then  0
+         else if ( SpcFunc == 231 .OR. SpcFunc == 342 .OR.      ; 231, "Laundry Area"
+                   HotWtrHrlyUsePerPers > 0 )
+         then  1  else  0  endif endif  }
+
+;   "Force reset of DwellUnitType:DHWSysRef[1]"		DwellUnitType:Action		=
+;      {  if (HtEqpUsedAsDHWHtr < 1 .OR. LocalCompAssigned( DHWSysRef[1] ) < 1) then  UNCHANGED
+;         else	EvalRulelist( "ForceReset_DwellUnitType_DHWSysRef_1", 1 )  endif  }
+
+   "Set OtherZone:ActiveDHWSystem"		OtherZone:Action	=                 ; SAC 06/25/23 (tic #3479)
+      {  EvalRulelist( "Default_ResOtherZn_ActiveDHWSystem", 1 )  }        ; SAC 10/16/24 (tic #3629)
 
    "Set OtherZone:HotWtrUseDUEquiv"    OtherZone:HotWtrUseDUEquiv  =       ; SAC 03/16/23 (tic #3418)
       {  HotWtrHrlyUsePerPers * ValidOr( OccNumSim, 0 ) * ValidOr( Mult, 1 ) * 8 / 50  }
          ; gal/h-person * #people * multiplier * est'd GPD/GPH / est'd DU GPD/pers
 
-   "Set OtherZone:DHWFloorArea"           OtherZone:DHWFloorArea        = {   if (LocalCompAssigned( ActiveDHWSystem ) == 0) then  0  else  Area  endif  }
+   "Set OtherZone:DHWFloorArea"           OtherZone:DHWFloorArea        =
+      {  if (LocalCompAssigned( ActiveDHWSystem ) > 0 .OR. HtEqpUsedAsDHWHtr > 0.1) then  Area  else  0  endif  }
    ; removed CondFloorArea & LaundryArea conditions and added conditions that ActiveDHWSystem be assigned & SpaceFunctionData:HotWtrHrlyUsePerPers > 0 - SAC 08/30/20 (MFamProto)
 	"Set OtherZone:HasDHWUse"					OtherZone:HasDHWUse				=                          ; SAC 9/20/19 - OtherZone (MFamProto)
-      {	if (LocalCompAssigned( ActiveDHWSystem ) < 1 .OR. SpcFunc < 200) then  0
+      {	if ((HtEqpUsedAsDHWHtr < 1 .AND. LocalCompAssigned( ActiveDHWSystem ) < 1) .OR. SpcFunc < 200) then  0
          else if (SpaceFunctionData:HotWtrHrlyUsePerPers( "FuncType", EnumString( SpcFunc ) ) < 0.001) then  0
          else  1  endif endif  }     
 	"Set OtherZone:DHWDailyConsPerSys"		OtherZone:DHWDailyConsPerSys	= {	0  }
@@ -2923,7 +2946,7 @@ RULELIST "Default_DHWHeater_AreaServedAndHydronic"  0 0 0 0
 
    "Init DHWSys:NResFloorAreaServed"      DHWSys:NResFloorAreaServed = {  0  }      ; SAC 02/24/23 (tic #3418)
    "Set DHWSys:NResFloorAreaServed from ResOtherZn"   ResOtherZn:ActiveDHWSystem:NResFloorAreaServed =       ; Mult - SAC 04/27/23 (tic #3392)
-      {  if (Proj:IsComRuleset .AND. IfValidAnd( HotWtrHrlyUsePerPers > 0 ))
+      {  if (Proj:IsComRuleset .AND. IfValidAnd( HotWtrHrlyUsePerPers > 0 ) .AND. HtEqpUsedAsDHWHtr < 0.1)
          then  ActiveDHWSystem:NResFloorAreaServed + (ValidOr( Area, 0 ) * ValidOr( Mult, 1 ))
          else  UNCHANGED  endif  }     ; further mods needed for EAA!
 
@@ -3151,12 +3174,32 @@ RULELIST "Default_DHWHeater_AreaServedAndHydronic"  0 0 0 0
 	"Set DHWHeater:StdEqProp"		DHWHeater:StdEqProp  = {	SumRevRef( DHWSys:DHWHeater, DHWSys:StdEqProp )  }
 
 	; SAC 7/7/15
-	"Set DHWSys:DailyHWConsumption - Init"		DHWSys:DailyHWConsumption	= {	0  }
-	"Set DHWSys:DailyHWConsumption - MFam-1"	DwellUnit:DwellUnitTypeRef:DHWSysRef[1]:DailyHWConsumption	= {	if (DwellUnitTypeRef:NumDHWSysTypes > 0) then  (DwellUnitTypeRef:DHWDailyConsPerSys * Count * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[1]:DailyHWConsumption  else  UNCHANGED  endif  }
-	"Set DHWSys:DailyHWConsumption - MFam-2"	DwellUnit:DwellUnitTypeRef:DHWSysRef[2]:DailyHWConsumption	= {	if (DwellUnitTypeRef:NumDHWSysTypes > 1) then  (DwellUnitTypeRef:DHWDailyConsPerSys * Count * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[2]:DailyHWConsumption  else  UNCHANGED  endif  }
-	"Set DHWSys:DailyHWConsumption - MFam-3"	DwellUnit:DwellUnitTypeRef:DHWSysRef[3]:DailyHWConsumption	= {	if (DwellUnitTypeRef:NumDHWSysTypes > 2) then  (DwellUnitTypeRef:DHWDailyConsPerSys * Count * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[3]:DailyHWConsumption  else  UNCHANGED  endif  }
-	"Set DHWSys:DailyHWConsumption - MFam-4"	DwellUnit:DwellUnitTypeRef:DHWSysRef[4]:DailyHWConsumption	= {	if (DwellUnitTypeRef:NumDHWSysTypes > 3) then  (DwellUnitTypeRef:DHWDailyConsPerSys * Count * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[4]:DailyHWConsumption  else  UNCHANGED  endif  }
-	"Set DHWSys:DailyHWConsumption - MFam-5"	DwellUnit:DwellUnitTypeRef:DHWSysRef[5]:DailyHWConsumption	= {	if (DwellUnitTypeRef:NumDHWSysTypes > 4) then  (DwellUnitTypeRef:DHWDailyConsPerSys * Count * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[5]:DailyHWConsumption  else  UNCHANGED  endif  }
+	"Set DHWSys:DailyHWConsumption - Init"		   DHWSys:DailyHWConsumption	= {	0  }
+	"Set DHWSys:DailyHWConsumption - MFam-1-5"	for:#DS=(1to5)  DwellUnit:DwellUnitTypeRef:DHWSysRef[#DS]:DailyHWConsumption	=
+      {  if (DwellUnitTypeRef:NumDHWSysTypes >= #DS) then  (DwellUnitTypeRef:DHWDailyConsPerSys * Count * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[#DS]:DailyHWConsumption
+         else  UNCHANGED  endif  }
+     ; {  if (IfValidAnd( DwellUnitTypeRef:HtEqpUsedAsDHWHtr > 0 )) then  UNCHANGED
+	; "Set DHWSys:DailyHWConsumption - MFam-2"	DwellUnit:DwellUnitTypeRef:DHWSysRef[2]:DailyHWConsumption	= {	if (DwellUnitTypeRef:NumDHWSysTypes > 1) then  (DwellUnitTypeRef:DHWDailyConsPerSys * Count * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[2]:DailyHWConsumption  else  UNCHANGED  endif  }
+	; "Set DHWSys:DailyHWConsumption - MFam-3"	DwellUnit:DwellUnitTypeRef:DHWSysRef[3]:DailyHWConsumption	= {	if (DwellUnitTypeRef:NumDHWSysTypes > 2) then  (DwellUnitTypeRef:DHWDailyConsPerSys * Count * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[3]:DailyHWConsumption  else  UNCHANGED  endif  }
+	; "Set DHWSys:DailyHWConsumption - MFam-4"	DwellUnit:DwellUnitTypeRef:DHWSysRef[4]:DailyHWConsumption	= {	if (DwellUnitTypeRef:NumDHWSysTypes > 3) then  (DwellUnitTypeRef:DHWDailyConsPerSys * Count * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[4]:DailyHWConsumption  else  UNCHANGED  endif  }
+	; "Set DHWSys:DailyHWConsumption - MFam-5"	DwellUnit:DwellUnitTypeRef:DHWSysRef[5]:DailyHWConsumption	= {	if (DwellUnitTypeRef:NumDHWSysTypes > 4) then  (DwellUnitTypeRef:DHWDailyConsPerSys * Count * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[5]:DailyHWConsumption  else  UNCHANGED  endif  }
+
+   ; added to track DHW use for space heating (DHWCombo) HPs (serving as wtr htrs) - SAC 10/15/24 (tic #3629)
+   "Set DwellUnit:DailyHtEqpHWConsumption"      DwellUnit:DailyHtEqpHWConsumption =
+      {  if (IfValidAnd( DwellUnitTypeRef:HtEqpUsedAsDHWHtr > 0 ))
+         then  DwellUnitTypeRef:DHWDailyConsPerSys * Count * Parent( Mult )
+         else  0  endif  }
+
+	"Set DHWSys:DailyCommonHWConsumption - Init"    DHWSys:DailyCommonHWConsumption  = {  0  }      ; SAC 10/10/24 (tic #3630)
+	"Set DHWSys:DailyCommonHWConsumption"     ResOtherZn:ActiveDHWSystem:DailyCommonHWConsumption  =
+      {  if (IfValidAnd( ShowDHWSysAssignment > 0)==0) then  UNCHANGED
+         else  ActiveDHWSystem:DailyCommonHWConsumption + (ValidOr( HotWtrUsePerDay, 0 ) * Parent( Mult ))  endif  }
+
+	"Set DHWSys:NumAssignedCommonDUEquiv - Init"    DHWSys:NumAssignedCommonDUEquiv  = {  0  }      ; SAC 10/10/24 (tic #3630)
+	"Set DHWSys:NumAssignedCommonDUEquiv"     ResOtherZn:ActiveDHWSystem:NumAssignedCommonDUEquiv  =
+      {  if (IfValidAnd( ShowDHWSysAssignment > 0)==0) then  UNCHANGED
+         else  ActiveDHWSystem:NumAssignedCommonDUEquiv + ValidOr( HotWtrUseDUEquiv, 0 )  endif  }
+
 	"Set DHWSys:DailyHWConsumption - SFam"		DHWSys:DailyHWConsumption	= {	if (Proj:IsComRuleset)	then  UNCHANGED
 																										else	SumRevRef( Zone:DHWSys1,	Zone:DHWDailyConsPerSys ) + SumRevRef( Zone:AltDHWSys1, Zone:DHWDailyConsPerSys ) +
 																												SumRevRef( Zone:ExDHWSys1,	Zone:DHWDailyConsPerSys ) +
@@ -3179,7 +3222,8 @@ RULELIST "Default_DHWHeater_AreaServedAndHydronic"  0 0 0 0
          then  EvalRulelist( "AdjustCom_ResDHWSys_ConsumptionAndNumDUsServed" )
          else  UNCHANGED  endif  }
 
-	"Set ResProj:DailyHWConsumption"			ResProj:DailyHWConsumption		= {	SumAll( DHWSys:DailyHWConsumption )  }
+	"Set ResProj:DailyHWConsumption"			ResProj:DailyHWConsumption		=        ; added DwellUnit:DailyHtEqpHWConsumption (DHWCombo) - SAC 10/15/24 (tic #3629)
+      {  SumAll( DHWSys:DailyHWConsumption ) + SumAll( DwellUnit:DailyHtEqpHWConsumption )  }
 
 	"Set DHWSys:NumDUsServed - SFam"		DHWSys:NumDUsServed	= {	if (Proj:IsComRuleset .OR. IfValidAnd( DailyHWConsumption > 0 )==0)	then  UNCHANGED
 																						else  1  endif  }
@@ -3316,6 +3360,17 @@ RULELIST "Default_DHWHeater_AreaServedAndHydronic"  0 0 0 0
 
    "Check for, initiate and log/notify user of forced updates to DHWHeater:TankType"  ResProj:Action  =   ; SAC 5/27/19 (tic #1096)
       {  EvalRulelist( "CheckForUpdateNeeded_DHWHeater_OldTankType" )  }
+END
+;*************************************************************************
+
+; moved into separate rulelist to facilitate calling from elsewhere - SAC 10/16/24 (tic #3629)
+;*************************************************************************
+RULELIST "Default_ResOtherZn_ActiveDHWSystem"  0 0 0 0
+   "Set ResOtherZn:ActiveDHWSystem"		ResOtherZn:ActiveDHWSystem	=           ; SAC 06/25/23 (tic #3479)
+      {  if      ((ShowDHWSysAssignment > 0 .OR. HtEqpUsedAsDHWHtr > 0.1) .AND. Proj:ResCompOpt > 1 .AND. DHWSysStatus == 2) then  AltDHWSys
+         else if ((ShowDHWSysAssignment > 0 .OR. HtEqpUsedAsDHWHtr > 0.1) .AND. Proj:ResCompOpt > 1 .AND. DHWSysStatus == 1) then  exDHWSys
+         else if ((ShowDHWSysAssignment > 0 .OR. HtEqpUsedAsDHWHtr > 0.1)) then  ozDHWSys
+         else  UNDEFINED  endif endif endif  }
 END
 ;*************************************************************************
 

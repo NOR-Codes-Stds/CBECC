@@ -52,23 +52,27 @@ RULELIST "ProposedInput_HVAC" 0 0 0 0
 ;            MaxAll( ResZn:Top ), MaxAll( ResOtherZn:Top ), MinAll( ResZn:Bottom ), MinAll( ResOtherZn:Bottom ), SumAll( ResZn:CeilingHeight ), SumAll( ResOtherZn:CeilingHeight ), ComponentCount( Zone ) + ComponentCount( OtherZone ) ) }
 	; SAC 10/22/12 - should work reasonably well for floors < 4-5 and floor & ceiling heights fairly close to each other
 	; SAC 4/8/13 - added "2 +" into formulaa to resolve issue believed to be decimal precision related, causing ResProj:NumStories to truncate to 0
-	"Set ResProj:NumStories"			ResProj:NumStories		= {
-		if (ComponentCount( Zone ) < 1 .AND. ComponentCount( OtherZone ) < 1) then  1
+	"Set ResProj:NumStories"			ResProj:NumStories		=                             ; revised to handle scenario where ResZn count = 0 and ResOtherZn count > 0 - SAC 10/08/24 (tic #3630)
+	{  if (ComponentCount( Zone ) < 1 .AND. ComponentCount( OtherZone ) < 1) then  1
 		else if (SumAll( ResZn:CeilingHeight ) < 1 .AND. SumAll( ResOtherZn:CeilingHeight ) < 1) then  1
 		else if (ComponentCount( Zone ) > 0 .AND. ComponentCount( OtherZone ) > 0)
 		then  (2 + max( MaxAll( ResZn:Top    ), MaxAll( ResOtherZn:Top    ) ) -
 		           min( MinAll( ResZn:Bottom ), MinAll( ResOtherZn:Bottom ) )) / 
 		       ((SumAll( ResZn:CeilingHeight ) + SumAll( ResOtherZn:CeilingHeight )) /
 		        (ComponentCount( Zone ) + ComponentCount( OtherZone )))
+		else if (ComponentCount( OtherZone ) > 0)
+      then  (2 + MaxAll( ResOtherZn:Top ) - MinAll( ResOtherZn:Bottom )) / 
+		       (SumAll( ResOtherZn:CeilingHeight ) / ComponentCount( ResOtherZn ))
 		else  (2 + MaxAll( ResZn:Top ) - MinAll( ResZn:Bottom )) / 
 		       (SumAll( ResZn:CeilingHeight ) / ComponentCount( Zone ))
-		endif endif endif  }
+		endif endif endif endif  }
 
    "Set ResZn:Top_HasDHW"            ResZn:Top_HasDHW         = {   if (HasDHWUse) then  Top    + ((FloorHeight/2) * (Mult - 1))  else  UNDEFINED  endif  }    ; SAC 08/30/20
    "Set ResOtherZn:Top_HasDHW"       ResOtherZn:Top_HasDHW    = {   if (HasDHWUse) then  Top    + ((FloorHeight/2) * (Mult - 1))  else  UNDEFINED  endif  }    ; adjusted for flr mults - SAC 04/26/23 (tic #3392)
    "Set ResZn:Bottom_HasDHW"         ResZn:Bottom_HasDHW      = {   if (HasDHWUse) then  Bottom - ((FloorHeight/2) * (Mult - 1))  else  UNDEFINED  endif  }
    "Set ResOtherZn:Bottom_HasDHW"    ResOtherZn:Bottom_HasDHW = {   if (HasDHWUse) then  Bottom - ((FloorHeight/2) * (Mult - 1))  else  UNDEFINED  endif  }
-	"Set ResProj:NumStories_HasDHW"		ResProj:NumStories_HasDHW	=                                ; added for DHW-related calcs - SAC 08/30/20
+   ; added for DHW-related calcs - SAC 08/30/20
+	"Set ResProj:NumStories_HasDHW"		ResProj:NumStories_HasDHW	=                       ; revised to handle scenario where ResZn count = 0 and ResOtherZn count > 0 - SAC 10/08/24 (tic #3630)
 	{	if (ComponentCount( Zone ) < 1 .AND. ComponentCount( OtherZone ) < 1) then  1
 		else if (SumAll( ResZn:Top_HasDHW ) < 1 .AND. SumAll( ResOtherZn:Top_HasDHW ) < 1) then  1
 		else if (ComponentCount( Zone ) > 0 .AND. ComponentCount( OtherZone ) > 0)
@@ -76,9 +80,12 @@ RULELIST "ProposedInput_HVAC" 0 0 0 0
 		           min( MinAll( ResZn:Bottom_HasDHW ), MinAll( ResOtherZn:Bottom_HasDHW ) )) / 
 		       ((SumAcrossIf( ResZn:CeilingHeight, ResZn:HasDHWUse ) + SumAcrossIf( ResOtherZn:CeilingHeight, ResOtherZn:HasDHWUse )) /
 		        (SumAll( ResZn:HasDHWUse ) + SumAll( ResOtherZn:HasDHWUse )))
+		else if (ComponentCount( OtherZone ) > 0)
+      then  (2 + MaxAll( ResOtherZn:Top_HasDHW ) - MinAll( ResOtherZn:Bottom_HasDHW )) / 
+		       (SumAcrossIf( ResOtherZn:CeilingHeight, ResOtherZn:HasDHWUse ) / SumAll( ResOtherZn:HasDHWUse ))
 		else  (2 + MaxAll( ResZn:Top_HasDHW ) - MinAll( ResZn:Bottom_HasDHW )) / 
 		       (SumAcrossIf( ResZn:CeilingHeight, ResZn:HasDHWUse ) / SumAll( ResZn:HasDHWUse ))
-		endif endif endif  }
+		endif endif endif endif  }
 
    "Call rulelist to UN-assign HVACSys objects from Zones in MFam models"     ResZn:Action =        ; SAC 04/09/21
       {  if (ResProj:IsMultiFamily < 0.5 .OR. ResProj:RunAbbrev != "u" .OR. IfValidAnd( Proj:DefaultingRounds > 2 )) then  UNCHANGED   
@@ -1132,6 +1139,9 @@ RULELIST "Default_AllHVAC" 0 0 0 0
 ;EF = RE/(1 + 0.1175 x RE)
 ; so EF = (.9376 x COP - .7032) / (1.086 - 0.1102 x COP)
 	"Set ResHVACSys:DHWFloorAreaServed"		ResHVACSys:DHWFloorAreaServed 	= {	SumRevRef( ResDHWSys:DHWHeater, ResDHWSys:FloorAreaServed )  }		; SAC 5/7/14 - added to facilitate error checks
+   "add in HVAC-assigned area for DHWCombo systems"   ResHVACSys:DHWFloorAreaServed =     ; added to prevent need to assign DHWSys referencing the 
+      {  if (IfValidAnd( CanBeDHWHtr > 0.1 )==0) then  UNCHANGED
+         else  DHWFloorAreaServed + SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:HVACSysDHWFlrArea )  endif  }
 
 
    ;--------------------------------------------------------------------
@@ -1288,7 +1298,7 @@ RULELIST "Default_AllHVAC" 0 0 0 0
 																														 (HVACSysType == 1 .OR. HVACSysType == 3) .AND. CoolEqpType == 1)		; "NoCooling - No cooling equipment"
 																													then  1  else  0  endif  }
 
-
+      ;"dbg" ResProj:Action = { PostMessageToLog( "about to evaluate 'SetupDwellUnitType_Round2_HeatPump' rulelist" ) }
   ; More DwellUnitType heating/cooling equipment summarization
 	"Round2 of DwellUnitType Heat/Cool/HtPump property init"		DwellUnitType:Action	= {	if (HVACSysType == 1 .OR. HVACSysType == 3)
 																														then  EvalRulelist( "SetupDwellUnitType_Round2_HeatCool", 1 )
@@ -4398,6 +4408,22 @@ RULELIST "SetupDwellUnitType_Round2_HeatPump" 0 0 0 0
 	"Set DwellUnitType:HtEqpUsedAsDHWHtr flag"			DwellUnitType:HtEqpUsedAsDHWHtr	= {	if (HtEqpCanBeDHWHtr < 1 .OR. ServesAsDHWHtr < 1) then  0  else  1  endif  }
 	"Default other DwellUnitType DHW heating properties"		DwellUnitType:Action			= {	if (HtEqpUsedAsDHWHtr < 1) then  UNCHANGED
 																															else	EvalRulelist( "DefaultDwellUnitType_DHWHeating", 1 )  endif  }
+"dbg" ResProj:Action = { PostMessageToLog( "evaluating 'SetupDwellUnitType_Round2_HeatPump' rulelist / possibly resetting DwellUnitType:DHWSysRef[*]" ) }
+   "Force reset of DwellUnitType:DHWSysRef[1]"		DwellUnitType:Action		=
+      {  if (HtEqpUsedAsDHWHtr < 1 .OR. IfValidAnd( DHWSysRef[1]:DUTHtEqpUsedAsDHWHtr > 0 ) .OR. LocalCompAssigned( DHWSysRef[1] ) < 1) then  UNCHANGED
+         else	EvalRulelist( "ForceReset_DwellUnitType_DHWSysRef_1", 1 )  endif  }
+   "Force reset of DwellUnitType:DHWSysRef[2]"		DwellUnitType:Action		=
+      {  if (HtEqpUsedAsDHWHtr < 1 .OR. IfValidAnd( DHWSysRef[2]:DUTHtEqpUsedAsDHWHtr > 0 ) .OR. LocalCompAssigned( DHWSysRef[2] ) < 1) then  UNCHANGED
+         else	EvalRulelist( "ForceReset_DwellUnitType_DHWSysRef_2", 1 )  endif  }
+   "Force reset of DwellUnitType:DHWSysRef[3]"		DwellUnitType:Action		=
+      {  if (HtEqpUsedAsDHWHtr < 1 .OR. IfValidAnd( DHWSysRef[3]:DUTHtEqpUsedAsDHWHtr > 0 ) .OR. LocalCompAssigned( DHWSysRef[3] ) < 1) then  UNCHANGED
+         else	EvalRulelist( "ForceReset_DwellUnitType_DHWSysRef_3", 1 )  endif  }
+   "Force reset of DwellUnitType:DHWSysRef[4]"		DwellUnitType:Action		=
+      {  if (HtEqpUsedAsDHWHtr < 1 .OR. IfValidAnd( DHWSysRef[4]:DUTHtEqpUsedAsDHWHtr > 0 ) .OR. LocalCompAssigned( DHWSysRef[4] ) < 1) then  UNCHANGED
+         else	EvalRulelist( "ForceReset_DwellUnitType_DHWSysRef_4", 1 )  endif  }
+   "Force reset of DwellUnitType:DHWSysRef[5]"		DwellUnitType:Action		=
+      {  if (HtEqpUsedAsDHWHtr < 1 .OR. IfValidAnd( DHWSysRef[5]:DUTHtEqpUsedAsDHWHtr > 0 ) .OR. LocalCompAssigned( DHWSysRef[5] ) < 1) then  UNCHANGED
+         else	EvalRulelist( "ForceReset_DwellUnitType_DHWSysRef_5", 1 )  endif  }
 
 ;		"Initialize other generic properties (common to Ht/Cl/HP)"		DwellUnitType:Action	= {	EvalRulelist( "SetupHVACSys_Round2_common", 1 )  }
 END
@@ -6826,6 +6852,7 @@ END
 ;*************************************************************************
 RULELIST "Setup_DHWSysReportingObjects" 1 0 1 0
 ;*************************************************************************
+;"dbg" ResProj:Action = { PostMessageToLog( "about to call CreateDHWRptObjects()" ) }
 	"Delete all DHWSysRpt objects currently in building description"									ResProj:Action		= {	DeleteAllComps( ResDHWSysRpt )  }
 	"Create new DHWSysRpt objects and populate w/ initial object references & indexes/counts"	ResProj:Action		= {	CreateDHWRptObjects()  }
 	"Evaluate rules to summarize building model for reporting purposes"		ResProj:Action	= {	EvalRulelist( "Reporting_SummarizeModel" )  }
@@ -9675,11 +9702,19 @@ RULELIST "OneTimeAnalysisPrep" 1 0 0 0
 											then  UNCHANGED
 											else	ResProj:MaxDHWSysByCateg[3]  endif endif  }
 
+      ;"dbg" Proj:Action = { PostMessageToLog( "in 'OneTimeAnalysisPrep' rules - about to evaluate 'OneTimeAnalysisPrep_DwellUnitDHW' if DwellUnitType:HtEqpUsedAsDHWHtr (%g) > 0", SumAcrossIf( DwellUnitType:HtEqpUsedAsDHWHtr, DwellUnitType:AssignedDUFlrArea > 1 ) ) }
+      ;"dbg - store BEMProc details"  ResProj:Action = {  StoreBEMProc( "before OneTimeAnalysisPrep_DwellUnitDHW-9703", 0 )  }
 	; SAC 9/3/15 - added new rules to prep model for DHW - DwellUnitType objects that have HVAC htg equip serving as DHW heaters
 	"Special prep for DwellUnitType objects that have HVAC htg equip serving as DHW heaters"
 			ResProj:Action		= {	if (IsMultiFamily < 0.5) then  UNCHANGED
 										else if (SumAcrossIf( DwellUnitType:HtEqpUsedAsDHWHtr, DwellUnitType:AssignedDUFlrArea > 1 ) < 0.5) then  UNCHANGED
 										else	EvalRulelist( "OneTimeAnalysisPrep_DwellUnitDHW" )  endif endif  }
+      ;"dbg - store BEMProc details"  ResProj:Action = {  StoreBEMProc( "after OneTimeAnalysisPrep_DwellUnitDHW-9708", 0 )  }
+
+	"Special prep for ResOtherZn objects that have HVAC htg equip serving as DHW heaters"     ; SAC 10/16/24 (tic #3629)
+			ResProj:Action		= {	if (IsMultiFamily < 0.5) then  UNCHANGED
+										   else if (SumAcrossIf( ResOtherZn:HtEqpUsedAsDHWHtr, ResOtherZn:HVACSysDHWFlrArea > 1 ) < 0.5) then  UNCHANGED
+										   else	EvalRulelist( "OneTimeAnalysisPrep_ResOtherZnDHW" )  endif endif  }
 
    ; SAC 6/27/18 - ensure valid DHW InputRating data for use by HERS providers (tic #940)
    ; SAC 6/28/18 - further mods to leave InputRating UNCHANGED in scenarios where user input accepted (so that status not changed to Rule-defined) (tic #940)
@@ -9733,8 +9768,11 @@ RULELIST "OneTimeAnalysisPrep" 1 0 0 0
 			default :	UNCHANGED
 		endswitch  }
 
+      ;"dbg" Proj:Action = { PostMessageToLog( "in 'OneTimeAnalysisPrep' rules - about to evaluate 'ProposedReportPrep'" ) }
+      ;"dbg - store BEMProc details"  ResProj:Action = {  StoreBEMProc( "before ProposedReportPrep-9763", 0 )  }
 	; SAC 10/23/14 - moved evaluation of  rulelist out of source code and into this spot to solve other reporting issues
 	"Eval ProposedReportPrep rules"	ResProj:Action	= {	EvalRulelist( "ProposedReportPrep" )  }
+      ;"dbg - store BEMProc details"  ResProj:Action = {  StoreBEMProc( "after ProposedReportPrep-9766", 0 )  }
 
 ; SAC 10/23/14 - moved these rules from PostProposedInput_HVAC to OneTimeAnalysisPrep rulelist to be set prior to Proposed model reporting export
    ;--------------------------------------------------------------------
@@ -9862,8 +9900,10 @@ END
 ;*************************************************************************
 RULELIST "OneTimeAnalysisPrep_CreateDwellUnitDHW" 1 0 1 0
 ;*************************************************************************
+;"dbg" DwellUnitType:Action = { PostMessageToLog( "evaluating 'OneTimeAnalysisPrep_CreateDwellUnitDHW' rulelist / creating ResDHWSys object(s) on DUT '%s'", Name ) }
 	"Set DwellUnitType:NumDHWSysTypes to 1"		DwellUnitType:NumDHWSysTypes	= {	1  }
 	"Create new DHWSys to serve this DUT"			DwellUnitType:DHWSysRef[1]		= {	CreateComp( ResDHWSys, Name + "-dhwsys" )  }
+	"Set DUT DHWSys DUTHtEqpUsedAsDHWHtr"        DwellUnitType:DHWSysRef[1]:DUTHtEqpUsedAsDHWHtr  = {  1  }     ; SAC 10/15/24 (tic #3629)
 
 	"Set new DUT DHWSys:SystemType"			DwellUnitType:DHWSysRef[1]:SystemType		= {	DHWSystemType  }
 	"Set new DUT DHWSys:SolFracType"			DwellUnitType:DHWSysRef[1]:SolFracType		= {	DHWSolFracType  }
@@ -9944,6 +9984,128 @@ RULELIST "OneTimeAnalysisPrep_CreateDwellUnitDHW_Normal" 1 0 1 0
 		;	1,           "EfficiencyUnits",    BEMP_Str,  1,  0,  0, "",             0,  0,                        1003, "DHW heater energy factor or efficiency units"   
 		;	1,           "AltEnergyFactor",    BEMP_Flt,  1,  0,  0, "",             0,  0,                        1003, "Altered reqs. for DHW system energy factor or efficiency"   
 END
+;*************************************************************************
+
+; rules to prep model for DHW - ResOtherZn objects that have HVAC htg equip serving as DHW heaters - SAC 10/16/24 (tic #3629)
+;*************************************************************************
+RULELIST "OneTimeAnalysisPrep_ResOtherZnDHW" 1 0 0 0
+	"Initiate creation of DHWSys & DHWHeater for ResOtherZn objects that have HVAC heating-based DHW"
+			ResOtherZn:Action		= {	if (IfValidAnd( HtEqpUsedAsDHWHtr > 0.5 )==0 .OR. IfValidAnd( HVACSysDHWFlrArea > 1 )==0) then  UNCHANGED
+												else	EvalRulelist( "OneTimeAnalysisPrep_CreateResOtherZnDHW", 1 )  endif  }
+
+	"Eval ProposedInput rules to re-default all DHWSys properties effected by the above DHWSys/Heater creation/assignment"
+			ResProj:Action	= {	EvalRulelist( "rl_DEFAULT" )  }     ; was: "ProposedInput" - SAC 09/30/24 (tic #3629)
+END
+;*************************************************************************
+RULELIST "OneTimeAnalysisPrep_CreateResOtherZnDHW" 1 0 1 0
+;"dbg" ResOtherZn:Action = { PostMessageToLog( "evaluating 'OneTimeAnalysisPrep_CreateResOtherZnDHW' rulelist / creating ResDHWSys object(s) on ResOtherZn '%s'", Name ) }
+   "Set ResOtherZn:DHWSysStatus to HVACSysStatus"     ResOtherZn:DHWSysStatus  = {  HVACSysStatus  }
+	"Create new Existing DHWSys to serve this DUT"     ResOtherZn:exDHWSys      = {  if (Proj:ResCompOpt < 2 .OR. DHWSysStatus != 1) then  UNCHANGED
+                                                                                    else  CreateComp( ResDHWSys, Name + "-ex-dhwsys"  )  endif  }
+	"Create new Altered DHWSys to serve this DUT"      ResOtherZn:AltDHWSys     = {  if (Proj:ResCompOpt < 2 .OR. DHWSysStatus != 2) then  UNCHANGED
+                                                                                    else  CreateComp( ResDHWSys, Name + "-alt-dhwsys" )  endif  }
+	"Create new New DHWSys to serve this DUT"          ResOtherZn:ozDHWSys      = {  if (Proj:ResCompOpt > 1 .AND. DHWSysStatus != 3) then  UNCHANGED
+                                                                                    else  CreateComp( ResDHWSys, Name + "-new-dhwsys" )  endif  }
+   "Default ResOtherZn:ActiveDHWSystem"         ResOtherZn:Action  = {  EvalRulelist( "Default_ResOtherZn_ActiveDHWSystem", 1 )  }
+
+	"Set DUT DHWSys DUTHtEqpUsedAsDHWHtr"        ResOtherZn:ActiveDHWSystem:DUTHtEqpUsedAsDHWHtr  = {  1  }     ; SAC 10/15/24 (tic #3629)
+
+	"Set new DUT DHWSys:SystemType"			ResOtherZn:ActiveDHWSystem:SystemType		= {	"Standard"  }
+;	"Set new DUT DHWSys:SolFracType"			ResOtherZn:ActiveDHWSystem:SolFracType		= {	DHWSolFracType  }
+;	"Set new DUT DHWSys:SolFracAnn"			ResOtherZn:ActiveDHWSystem:SolFracAnn		= {	DHWSolFracAnn   }
+;	"Set new DUT DHWSys:SolFracMon[1]"		ResOtherZn:ActiveDHWSystem:SolFracMon[1]	= {	DHWSolFracMon[1]   }
+;	"Set new DUT DHWSys:SolFracMon[2]"		ResOtherZn:ActiveDHWSystem:SolFracMon[2]	= {	DHWSolFracMon[2]   }
+;	"Set new DUT DHWSys:SolFracMon[3]"		ResOtherZn:ActiveDHWSystem:SolFracMon[3]	= {	DHWSolFracMon[3]   }
+;	"Set new DUT DHWSys:SolFracMon[4]"		ResOtherZn:ActiveDHWSystem:SolFracMon[4]	= {	DHWSolFracMon[4]   }
+;	"Set new DUT DHWSys:SolFracMon[5]"		ResOtherZn:ActiveDHWSystem:SolFracMon[5]	= {	DHWSolFracMon[5]   }
+;	"Set new DUT DHWSys:SolFracMon[6]"		ResOtherZn:ActiveDHWSystem:SolFracMon[6]	= {	DHWSolFracMon[6]   }
+;	"Set new DUT DHWSys:SolFracMon[7]"		ResOtherZn:ActiveDHWSystem:SolFracMon[7]	= {	DHWSolFracMon[7]   }
+;	"Set new DUT DHWSys:SolFracMon[8]"		ResOtherZn:ActiveDHWSystem:SolFracMon[8]	= {	DHWSolFracMon[8]   }
+;	"Set new DUT DHWSys:SolFracMon[9]"		ResOtherZn:ActiveDHWSystem:SolFracMon[9]	= {	DHWSolFracMon[9]   }
+;	"Set new DUT DHWSys:SolFracMon[10]"		ResOtherZn:ActiveDHWSystem:SolFracMon[10]	= {	DHWSolFracMon[10]  }
+;	"Set new DUT DHWSys:SolFracMon[11]"		ResOtherZn:ActiveDHWSystem:SolFracMon[11]	= {	DHWSolFracMon[11]  }
+;	"Set new DUT DHWSys:SolFracMon[12]"		ResOtherZn:ActiveDHWSystem:SolFracMon[12]	= {	DHWSolFracMon[12]  }
+
+	"Create new DHWHeater to serve this DUT"		ResOtherZn:ActiveDHWSystem:DHWHeater[1]	=
+      {	if (IfValidAnd( ActiveHVACSystem:Type == 2 ) .AND. IfValidAnd( ActiveHVACSystem:HtPumpSystem[1]:Type == 35 ) .AND.
+             IfValidAnd( ActiveHVACSystem:ServesAsDHWHtr > 0.5 ) )
+         then  ActiveHVACSystem
+         else  CreateComp( ResWtrHtr, Name + "-dhwhtr" )  endif  }
+
+	"Set DHWHeater properties for this ResOtherZn's DHWSys"	ResOtherZn:Action		=
+      {	if (IfValidAnd( ActiveHVACSystem:Type == 2 ) .AND. IfValidAnd( ActiveHVACSystem:HtPumpSystem[1]:Type == 11 ) .AND.
+             IfValidAnd( ActiveHVACSystem:ServesAsDHWHtr > 0.5 ) )
+         then  EvalRulelist( "OneTimeAnalysisPrep_CreateResOtherZnDHW_AWHP",   1 )
+         else if (IfValidAnd( ActiveHVACSystem:Type == 2 ) .AND. IfValidAnd( ActiveHVACSystem:HtPumpSystem[1]:Type == 35 ) .AND.
+                  IfValidAnd( ActiveHVACSystem:ServesAsDHWHtr > 0.5 ) )
+         then  UNCHANGED   ; EvalRulelist( "OneTimeAnalysisPrep_CreateResOtherZnDHW_HeatPumpDHWCombo", 1 )
+         else  EvalRulelist( "OneTimeAnalysisPrep_CreateResOtherZnDHW_Normal", 1 )  endif endif  }
+END
+;*************************************************************************
+RULELIST "OneTimeAnalysisPrep_CreateResOtherZnDHW_AWHP" 1 0 1 0
+	"Set new DUT DHWHeater:HeaterElementType"		ResOtherZn:ActiveDHWSystem:DHWHeater[1]:HeaterElementType		= {	5  }	; "Heat Pump"     ; SAC 10/29/19 - switch AWHP sim type from 3 (old) to 5 (new model) (tic #1134)
+	"Set new DUT DHWHeater:HPWH_NEEARated flag"	ResOtherZn:ActiveDHWSystem:DHWHeater[1]:HPWH_NEEARated			= {	0  }	; fixes problem where NEEA Brand & Model required - SAC 6/14/20 (tic #1185)
+	"Set new DUT DHWHeater:IsHydronic flag"		ResOtherZn:ActiveDHWSystem:DHWHeater[1]:IsHydronic					= {	1  }	; setting this flag should cause proper setup of CSE input for AWHP DHW
+	"Set new DUT DHWHeater:TankType"					ResOtherZn:ActiveDHWSystem:DHWHeater[1]:TankType					= {	1  }	; "Indirect"
+;	"Set new DUT DHWHeater:InputRating"				ResOtherZn:ActiveDHWSystem:DHWHeater[1]:InputRating				= {	DHWInputRating  }
+;;	"Set new DUT DHWHeater:InputRatingUnits"		ResOtherZn:ActiveDHWSystem:DHWHeater[1]:InputRatingUnits			= {	DHWInputRatingUnits  }
+;	"Set new DUT DHWHeater:EnergyFactor"			ResOtherZn:ActiveDHWSystem:DHWHeater[1]:EnergyFactor				= {	DHWEnergyFactor  }
+	"Set new DUT DHWHeater:TankVolume"				ResOtherZn:ActiveDHWSystem:DHWHeater[1]:TankVolume					= {	if (IfValidAnd( ActiveHVACSystem:DHWTankVolume > 0 )) then  ActiveHVACSystem:DHWTankVolume  else  UNDEFINED  endif  }
+;	"Set new DUT DHWHeater:IntInsulRVal"			ResOtherZn:ActiveDHWSystem:DHWHeater[1]:IntInsulRVal				= {	DHWIntInsulRVal  }
+;	"Set new DUT DHWHeater:ExtInsulRVal"			ResOtherZn:ActiveDHWSystem:DHWHeater[1]:ExtInsulRVal				= {	DHWExtInsulRVal  }
+	"Set new DUT DHWHeater:AmbientCond"				ResOtherZn:ActiveDHWSystem:DHWHeater[1]:AmbientCond				= {	if (LocalStatus( ActiveHVACSystem:DHWAmbientCond ) > 0) then  ActiveHVACSystem:DHWAmbientCond  else  UNDEFINED  endif  }
+;	"Set new DUT DHWHeater:StandbyLossFrac"		ResOtherZn:ActiveDHWSystem:DHWHeater[1]:StandbyLossFrac			= {	DHWStandbyLossFrac  }
+END
+;*************************************************************************
+RULELIST "OneTimeAnalysisPrep_CreateResOtherZnDHW_HeatPumpDHWCombo" 1 0 1 0
+	"Set new DUT DHWHeater:HeaterElementType"		ResOtherZn:ActiveDHWSystem:DHWHeater[1]:HeaterElementType		= {	5  }	; "Heat Pump"     ; SAC 10/29/19 - switch AWHP sim type from 3 (old) to 5 (new model) (tic #1134)
+	"Set new DUT DHWHeater:HPWH_NEEARated flag"	ResOtherZn:ActiveDHWSystem:DHWHeater[1]:HPWH_NEEARated			= {	0  }	; fixes problem where NEEA Brand & Model required - SAC 6/14/20 (tic #1185)
+	"Set new DUT DHWHeater:IsHydronic flag"		ResOtherZn:ActiveDHWSystem:DHWHeater[1]:IsHydronic					= {	1  }	; setting this flag should cause proper setup of CSE input for AWHP DHW
+	"Set new DUT DHWHeater:TankType"					ResOtherZn:ActiveDHWSystem:DHWHeater[1]:TankType					= {	1  }	; "Indirect"
+;	"Set new DUT DHWHeater:InputRating"				ResOtherZn:ActiveDHWSystem:DHWHeater[1]:InputRating				= {	DHWInputRating  }
+;;	"Set new DUT DHWHeater:InputRatingUnits"		ResOtherZn:ActiveDHWSystem:DHWHeater[1]:InputRatingUnits			= {	DHWInputRatingUnits  }
+;	"Set new DUT DHWHeater:EnergyFactor"			ResOtherZn:ActiveDHWSystem:DHWHeater[1]:EnergyFactor				= {	DHWEnergyFactor  }
+	"Set new DUT DHWHeater:TankVolume"				ResOtherZn:ActiveDHWSystem:DHWHeater[1]:TankVolume					= {	if (IfValidAnd( ActiveHVACSystem:HtPumpSystem[1]:DHWComboTankVol > 0 )) then  ActiveHVACSystem:HtPumpSystem[1]:DHWComboTankVol  else  UNDEFINED  endif  }
+;	"Set new DUT DHWHeater:IntInsulRVal"			ResOtherZn:ActiveDHWSystem:DHWHeater[1]:IntInsulRVal				= {	DHWIntInsulRVal  }
+;	"Set new DUT DHWHeater:ExtInsulRVal"			ResOtherZn:ActiveDHWSystem:DHWHeater[1]:ExtInsulRVal				= {	DHWExtInsulRVal  }
+;	"Set new DUT DHWHeater:AmbientCond"				ResOtherZn:ActiveDHWSystem:DHWHeater[1]:AmbientCond				= {	if (LocalStatus( ActiveHVACSystem:DHWAmbientCond ) > 0) then  ActiveHVACSystem:DHWAmbientCond  else  UNDEFINED  endif  }
+	"Set new DUT DHWHeater:AmbientCond"				ResOtherZn:ActiveDHWSystem:DHWHeater[1]:AmbientCond				= 
+      {  if (IfValidAnd( ActiveHVACSystem:HtPumpSystem[1]:DHWComboTankVol > 0 ))
+         then  if (IfValidAnd( ActiveHVACSystem:HtPumpSystem[1]:DHWComboTankOutside > 0 )) then  "Outside"
+               else if (LocalCompAssigned( ActiveHVACSystem:HtPumpSystem[1]:DHWComboTankZone ) == ComponentType( "ResZn" ))
+               then  if (IfValidAnd( ActiveHVACSystem:HtPumpSystem[1]:DHWComboTankZone:Type < 10 ))
+                     then  "Conditioned"
+                     else  "Unconditioned"  endif
+               else if (LocalCompAssigned( ActiveHVACSystem:HtPumpSystem[1]:DHWComboTankZone ) == ComponentType( "ResAttic" ))
+               then  "Attic"
+               else if (LocalCompAssigned( ActiveHVACSystem:HtPumpSystem[1]:DHWComboTankZone ) == ComponentType( "ResGarage" ))
+               then  "Garage"
+               else if (LocalCompAssigned( ActiveHVACSystem:HtPumpSystem[1]:DHWComboTankZone ) == ComponentType( "ResCrawlSpc" ))
+               then  "CrawlSpace"
+               else  "Unconditioned"
+               endif endif endif endif endif
+         else  "Unconditioned"  endif  }
+;	"Set new DUT DHWHeater:StandbyLossFrac"		ResOtherZn:ActiveDHWSystem:DHWHeater[1]:StandbyLossFrac			= {	DHWStandbyLossFrac  }
+	"Set new DUT DHWHeater:IsHeatPumpDHWCombo"	ResOtherZn:ActiveDHWSystem:DHWHeater[1]:IsHeatPumpDHWCombo		= {	1  }
+END
+;*************************************************************************
+RULELIST "OneTimeAnalysisPrep_CreateResOtherZnDHW_Normal" 1 0 1 0
+	"Set new DUT DHWHeater:HeaterElementType"		ResOtherZn:ActiveDHWSystem:DHWHeater[1]:HeaterElementType		= {	if (LocalStatus( ActiveHVACSystem:DHWHeaterElementType ) > 0) then  EnumString( ActiveHVACSystem:DHWHeaterElementType )  else  UNDEFINED  endif  }
+	"Set new DUT DHWHeater:TankType"					ResOtherZn:ActiveDHWSystem:DHWHeater[1]:TankType					= {	if (LocalStatus( ActiveHVACSystem:DHWTankType ) > 0) then  EnumString( ActiveHVACSystem:DHWTankType )  else  UNDEFINED  endif  }
+	"Set new DUT DHWHeater:InputRating"				ResOtherZn:ActiveDHWSystem:DHWHeater[1]:InputRating				= {	if (IfValidAnd( ActiveHVACSystem:DHWInputRating > 0 )) then  ActiveHVACSystem:DHWInputRating  else  UNDEFINED  endif  }
+;	"Set new DUT DHWHeater:InputRatingUnits"		ResOtherZn:ActiveDHWSystem:DHWHeater[1]:InputRatingUnits			= {	DHWInputRatingUnits  }
+	"Set new DUT DHWHeater:EnergyFactor"			ResOtherZn:ActiveDHWSystem:DHWHeater[1]:EnergyFactor				= {	if (IfValidAnd( ActiveHVACSystem:DHWEnergyFactor > 0 )) then  ActiveHVACSystem:DHWEnergyFactor  else  UNDEFINED  endif  }
+	"Set new DUT DHWHeater:TankVolume"				ResOtherZn:ActiveDHWSystem:DHWHeater[1]:TankVolume					= {	if (IfValidAnd( ActiveHVACSystem:DHWTankVolume > 0 )) then  ActiveHVACSystem:DHWTankVolume  else  UNDEFINED  endif  }
+;	"Set new DUT DHWHeater:IntInsulRVal"			ResOtherZn:ActiveDHWSystem:DHWHeater[1]:IntInsulRVal				= {	DHWIntInsulRVal  }
+;	"Set new DUT DHWHeater:ExtInsulRVal"			ResOtherZn:ActiveDHWSystem:DHWHeater[1]:ExtInsulRVal				= {	DHWExtInsulRVal  }
+	"Set new DUT DHWHeater:AmbientCond"				ResOtherZn:ActiveDHWSystem:DHWHeater[1]:AmbientCond				= {	if (LocalStatus( ActiveHVACSystem:DHWAmbientCond ) > 0) then  ActiveHVACSystem:DHWAmbientCond  else  UNDEFINED  endif  }
+	"Set new DUT DHWHeater:StandbyLossFrac"		ResOtherZn:ActiveDHWSystem:DHWHeater[1]:StandbyLossFrac			= {	if (IfValidAnd( ActiveHVACSystem:DHWStandbyLossFrac > 0 )) then  ActiveHVACSystem:DHWStandbyLossFrac  else  UNDEFINED  endif  }
+		;	0,  "DHWHeater",  "Water Heater",  "Water Heater <i>",      0,  0,  0, "",        "", "", "", "", "", "", "", "", "", "", "", "", "", "",  -1,  1,  0,  0,  0,  0,   8000
+		;	1,           "Status",             BEMP_Sym,  1,  0,  0, "",             0,  0,                        3008, "Status"                                      
+		;	1,           "EfficiencyUnits",    BEMP_Str,  1,  0,  0, "",             0,  0,                        1003, "DHW heater energy factor or efficiency units"   
+		;	1,           "AltEnergyFactor",    BEMP_Flt,  1,  0,  0, "",             0,  0,                        1003, "Altered reqs. for DHW system energy factor or efficiency"   
+END
+;*************************************************************************
 
 ;*************************************************************************
 RULELIST "SetupHVACSysDWHeater_GSHP" 1 0 1 1

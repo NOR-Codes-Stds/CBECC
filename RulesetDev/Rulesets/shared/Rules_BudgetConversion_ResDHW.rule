@@ -472,14 +472,15 @@ RULELIST  "BudgetConversion_DHW" 1 0 1 0
    "Set ResProj:CSE_HPWHSizUseSSF - whether HPWH sizing runs need to use annual/constant SSFs (rather than DHWSolarSys) during sizing process"     ; SAC 2/11/20 (tic #862)
       ResProj:CSE_HPWHSizUseSSF   = {  if (MaxAll( DHWSolarSys:NumHPWHNeedingSizing ) > 1) then  1  else  UNDEFINED  endif  }
 
-   "Set DHWSys:HPWHSizeMultGuess (based on # dwelling units served and how many heaters in system)"    DHWSys:HPWHSizeMultGuess  = {
-         if (IfValidAnd( HPWHSizingReqd > 0 ))
-         then  if (IfValidAnd( NumAssignedDUFracs > 0 ) .AND. IfValidAnd( TotNumDHWHeaters > 0 ))
-               then  max( 2, ValidOr( ResProj:CSE_HPWHSzGuessMlt, 1/3 ) * NumAssignedDUFracs / TotNumDHWHeaters )
-               else if (IfValidAnd( NumAssignedDUFracs > 0 ))
-               then  max( 2, ValidOr( ResProj:CSE_HPWHSzGuessMlt, 1/3 ) * NumAssignedDUFracs )
+   "Set DHWSys:HPWHSizeMultGuess (based on # dwelling units served and how many heaters in system)"    DHWSys:HPWHSizeMultGuess  =     ; NumAssignedCommonDUEquiv - SAC 10/10/24 (tic #3630)
+      {  if (IfValidAnd( HPWHSizingReqd > 0 ))
+         then  if ((IfValidAnd( NumAssignedDUFracs > 0 ) .OR. IfValidAnd( NumAssignedCommonDUEquiv > 0 )) .AND. IfValidAnd( TotNumDHWHeaters > 0 ))
+               then  max( 2, ValidOr( ResProj:CSE_HPWHSzGuessMlt, 1/3 ) * (ValidOr( NumAssignedDUFracs, 0 ) + ValidOr( NumAssignedCommonDUEquiv, 0 )) / TotNumDHWHeaters )
+               else if (IfValidAnd( NumAssignedDUFracs > 0 ) .OR. IfValidAnd( NumAssignedCommonDUEquiv > 0 ))
+               then  max( 2, ValidOr( ResProj:CSE_HPWHSzGuessMlt, 1/3 ) * (ValidOr( NumAssignedDUFracs, 0 ) + ValidOr( NumAssignedCommonDUEquiv, 0 )) )
                else  3  endif endif
          else  UNDEFINED  endif  }
+
       ;DHWSys:HPWHSizeMult,   NotInput,   BEMP_Flt,  1,  0,  0,  "HPWH size multiplier (resulting from sizing runs triggered by HPWHSizingReqd)" 
 
    ; SAC 1/1/19 - revised HPWHSIZE properties to drive new 3-run curve fit sizing mechanism
@@ -498,13 +499,15 @@ RULELIST  "BudgetConversion_DHW" 1 0 1 0
          else if (CSE_HPWHSizingReqd < 0.5) then  UNDEFINED
          else  ((ClimateZone-1) * 3) + 1  endif endif  }
    ; SAC 1/3/19 - revisions to multiplier guess formulas // SAC 1/4/19 - readjust mins: none for StdHPWHSzRunMlts[2] and 0.2 for [1]
-   "Set DHWSys:StdHPWHSzRunMlts[2] (best guess)"      DHWSys:StdHPWHSzRunMlts[2]  = {
-         if (IfValidAnd( ResProj:BypassRuleLimits > 0 ) .AND. LocalStatus( StdHPWHSzRunMlts[2] ) > 5) then  UNCHANGED
+   "Set DHWSys:StdHPWHSzRunMlts[2] (best guess)"      DHWSys:StdHPWHSzRunMlts[2]  =                ; NumAssignedCommonDUEquiv - SAC 10/10/24 (tic #3630)
+      {  if (IfValidAnd( ResProj:BypassRuleLimits > 0 ) .AND. LocalStatus( StdHPWHSzRunMlts[2] ) > 5) then  UNCHANGED
          else if (IfValidAnd( HPWHSizingReqd > 0 )==0) then  UNDEFINED
-         else  if (IfValidAnd( NumAssignedDUFracs >= 2 ) .AND. IfValidAnd( NumAssignedBRFracs >= 0 ) .AND. IfValidAnd( TotNumDHWHeaters > 0 ))
-               then  (1 + ((NumAssignedDUFracs - 2) * 0.33) + (NumAssignedBRFracs * 0.0125)) / TotNumDHWHeaters
-               else if (IfValidAnd( NumAssignedDUFracs >= 2 ) .AND. IfValidAnd( NumAssignedBRFracs >= 0 ))
-               then  (1 + ((NumAssignedDUFracs - 2) * 0.33) + (NumAssignedBRFracs * 0.0125))
+         else  if ((ValidOr( NumAssignedDUFracs, 0 ) + ValidOr( NumAssignedCommonDUEquiv, 0 )) >= 2 .AND.
+                   IfValidAnd( NumAssignedBRFracs >= 0 ) .AND. IfValidAnd( TotNumDHWHeaters > 0 ))
+               then  (1 + ((ValidOr( NumAssignedDUFracs, 0 ) + ValidOr( NumAssignedCommonDUEquiv, 0 ) - 2) * 0.33) + (NumAssignedBRFracs * 0.0125)) / TotNumDHWHeaters
+               else if ((ValidOr( NumAssignedDUFracs, 0 ) + ValidOr( NumAssignedCommonDUEquiv, 0 )) >= 2 .AND.
+                        IfValidAnd( NumAssignedBRFracs >= 0 ))
+               then  (1 + ((ValidOr( NumAssignedDUFracs, 0 ) + ValidOr( NumAssignedCommonDUEquiv, 0 ) - 2) * 0.33) + (NumAssignedBRFracs * 0.0125))
                else  2  endif endif
          endif endif  }
    "Set DHWSys:StdHPWHSzRunMlts[1] (low end)"         DHWSys:StdHPWHSzRunMlts[1]  = {
@@ -2304,10 +2307,11 @@ RULELIST  "BudgetConversion_DHWSys_CentralRecircGasBoiler" 1 0 1 0
 
    "Remove DHWSys:LoopHeater assignment"  DHWSys:LoopHeater  = {  UNDEFINED  }
 
-	"Set Std Cntrl Recirc Boiler ResWtrHtr:TankVolume"    DHWSys:DHWHeater[1]:TankVolume	=     ; SAC 03/02/22 (MFam)
+	"Set Std Cntrl Recirc Boiler ResWtrHtr:TankVolume"    DHWSys:DHWHeater[1]:TankVolume	=     ; SAC 03/02/22 (MFam)  ; NumAssignedCommonDUEquiv - SAC 10/10/24 (tic #3630)
 		{  if (DHWHeater[1]:HeaterElementType == 1 .AND.
              DHWHeater[1]:TankType == 16)
-         then  (ValidOr( NumAssignedBRFracs, 1 ) * 3) + (ValidOr( NumAssignedDUFracs, 1 ) * 10)     ; "Commercial Packaged Boiler" 
+         then  (ValidOr( NumAssignedBRFracs, 1 ) * 3) +
+               ((ValidOr( NumAssignedDUFracs, 1 ) + ValidOr( NumAssignedCommonDUEquiv, 0 )) * 10)     ; "Commercial Packaged Boiler" 
 			else  UNCHANGED  endif  }
 END
 ;*************************************************************************
@@ -2362,13 +2366,13 @@ RULELIST  "BudgetConversion_DHWSys_CentralHPWH" 1 0 1 0
    "Set DHWSys:CHPWHLoopTankCompCnt"   DHWSys:CHPWHLoopTankCompCnt   = {  1    }
    "Set DHWSys:CHPWHLoopTankSetpt"     DHWSys:CHPWHLoopTankSetpt     = {  140  }
    "Set DHWSys:CHPWHLoopTankRVal"      DHWSys:CHPWHLoopTankRVal      = {  16   }
-   "Set DHWSys:CHPWHLoopTankVol"       DHWSys:CHPWHLoopTankVol       = 
-      {  if (IfValidAnd( NumAssignedDUFracs > 48 ))
+   "Set DHWSys:CHPWHLoopTankVol"       DHWSys:CHPWHLoopTankVol       =              ; NumAssignedCommonDUEquiv - SAC 10/10/24 (tic #3630)
+      {  if ((ValidOr( NumAssignedDUFracs, 0 ) + ValidOr( NumAssignedCommonDUEquiv, 0 )) > 48 )
          then  120  else  80  endif  }
    "Set DHWSys:CHPWHLoopTankTankCnt"   DHWSys:CHPWHLoopTankTankCnt   = {  1  }
-   "Set DHWSys:CHPWHLoopTankResHtPwr"  DHWSys:CHPWHLoopTankResHtPwr  =              ; SAC 07/03/21 (tic #1275)
-      {  if (IfValidAnd( NumAssignedDUFracs > 0 ))
-         then  1.75 * 100 * NumAssignedDUFracs
+   "Set DHWSys:CHPWHLoopTankResHtPwr"  DHWSys:CHPWHLoopTankResHtPwr  =              ; SAC 07/03/21 (tic #1275)  ; NumAssignedCommonDUEquiv - SAC 10/10/24 (tic #3630)
+      {  if ((ValidOr( NumAssignedDUFracs, 0 ) + ValidOr( NumAssignedCommonDUEquiv, 0 )) > 0 )
+         then  1.75 * 100 * (ValidOr( NumAssignedDUFracs, 0 ) + ValidOr( NumAssignedCommonDUEquiv, 0 ))
          else  UNDEFINED  endif  }
 
 ; retain tank and air source locations from Proposed model (but IsStdLargeCHPWH flag will impact sim settings) - SAC 07/10/21 (tic #1275)

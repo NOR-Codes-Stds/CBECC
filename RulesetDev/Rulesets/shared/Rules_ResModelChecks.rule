@@ -91,17 +91,23 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 									else	PostError( "At least one 'Existing' zone must be specified when Run Scope = 'Addition and/or Alteration'.  If this model is of an addition alone, then change Run Scope to 'New Construction' and select 'Addition Alone project'." )  endif  }
 
 	; SAC 6/6/13 - added check for conditioned/living/sleeping zones present in model
+   ; revised logic to allow run where no res zones present as long as ResOtherZn(s) are - SAC 10/08/24 (tic #3630)
 	"Check for at least one conditioned zone plus one zone of each (conditioned) type (living & sleeping) when control credits selected"
 		ResProj:Action		= {	if (IfValidAnd( IsComRuleset > 0 ) .AND. IfValidAnd( Proj:ResDwellUnits > 0 )==0) then  UNCHANGED
-                              else if ( ResProj:ZonalControl < 0.5 .AND. SumAll( ResZn:CondFloorArea ) < 0.1)
-									then  PostError( "At least one conditioned zone must be specified in the model prior to performing analysis" )
-									else if ( ResProj:ZonalControl > 0.5 .AND. SumAll( ResZn:LvgCondFloorArea ) < 0.1 .AND. SumAll( ResZn:SlpCondFloorArea ) < 0.1)
-									then	PostError( "At least one Living and one Sleeping zone must exist in the model when Zonal Control Credit is selected" )
-									else if ( ResProj:ZonalControl > 0.5 .AND. SumAll( ResZn:LvgCondFloorArea ) < 0.1)
-									then	PostError( "No zones classified as 'Living' are present in the model.  At least one Living and one Sleeping zone must exist in the model when Zonal Control Credit is selected" )
-									else if ( ResProj:ZonalControl > 0.5 .AND. SumAll( ResZn:SlpCondFloorArea ) < 0.1)
-									then	PostError( "No zones classified as 'Sleeping' are present in the model.  At least one Living and one Sleeping zone must exist in the model when Zonal Control Credit is selected" )
-									else	UNCHANGED  endif endif endif endif endif  }
+                           else if (IfValidAnd( IsComRuleset > 0 ) .AND. SumAll( ResZn:CondFloorArea ) < 0.1 .AND.
+                                    SumAll( ResOtherZn:Area ) < 0.1)
+                           then  PostError( "At least one residential or res common zone must be specified in the model prior to performing analysis" )
+                           else if (IfValidAnd( IsComRuleset > 0 )==0)
+                           then  if ( ResProj:ZonalControl < 0.5 .AND. SumAll( ResZn:CondFloorArea ) < 0.1)
+									      then  PostError( "At least one conditioned zone must be specified in the model prior to performing analysis" )
+									      else if ( ResProj:ZonalControl > 0.5 .AND. SumAll( ResZn:LvgCondFloorArea ) < 0.1 .AND. SumAll( ResZn:SlpCondFloorArea ) < 0.1)
+									      then	PostError( "At least one Living and one Sleeping zone must exist in the model when Zonal Control Credit is selected" )
+									      else if ( ResProj:ZonalControl > 0.5 .AND. SumAll( ResZn:LvgCondFloorArea ) < 0.1)
+									      then	PostError( "No zones classified as 'Living' are present in the model.  At least one Living and one Sleeping zone must exist in the model when Zonal Control Credit is selected" )
+									      else if ( ResProj:ZonalControl > 0.5 .AND. SumAll( ResZn:SlpCondFloorArea ) < 0.1)
+									      then	PostError( "No zones classified as 'Sleeping' are present in the model.  At least one Living and one Sleeping zone must exist in the model when Zonal Control Credit is selected" )
+									      else	UNCHANGED  endif endif endif endif
+                           else  UNCHANGED  endif endif endif  }
 
 	; SAC 10/26/15 - check to confirm DwellUnit:CondFlrArea is equal to DwellUnitType:CondFlrArea
    ; relaxed area check to allow for slightly smaller DwellUnits (vs. DUT) - SAC 10/10/22
@@ -1201,9 +1207,9 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 									else	UNCHANGED  endif endif endif  }
 
 	; SAC 8/17/16 - added check to ensure that all pertinent DHW assignments are present in each DwellUnitType   ; expand error checks for NumDHWSysTypes undefined or < 1 - SAC 03/01/23
-   "Check for all pertinent DHW system assignments in each (modeled) DwellUnitType"
-      DwellUnitType:Action	= {
-         if ( Proj:IsSFamResRuleset .OR. AssignedDUFlrArea < 1) then  UNCHANGED
+   "Check for all pertinent DHW system assignments in each (modeled) DwellUnitType"    ; prevent error if HtEqpUsedAsDHWHtr - SAC 10/14/24 (tic #3629)
+      DwellUnitType:Action	= 
+      {  if ( Proj:IsSFamResRuleset .OR. AssignedDUFlrArea < 1 .OR. HtEqpUsedAsDHWHtr > 0.1) then  UNCHANGED
          else if (IfValidAnd( NumDHWSysTypes >= 1 )==0)
          then  PostError( "Number of DHW system assignment in dwelling unit type '%s' must be >= 1", Name )
          else if (IfValidAnd( NumDHWSysTypes >= 1 ) .AND. LocalCompAssigned( DHWSysRef[1] )==0)
@@ -1909,9 +1915,11 @@ RULELIST "ProposedModelSimulationCheck" 1 0 0 0
 
 ; revised several rules to be ignored for Com models where ResDwellUnits toggled OFF - SAC 05/18/22
 
-	"Check for existence of at least one zone object - and prevent OtherZones in SFam models"    ; SAC 9/10/19 - added OtherZone check (MFamProto)
+   ; SAC 9/10/19 - added OtherZone check (MFamProto)
+	"Check for existence of at least one zone object - and prevent OtherZones in SFam models"       ; added count check for ResOtherZn - SAC 10/08/24 (tic #3630)
 		ResProj:Action	= {	if (IfValidAnd( IsComRuleset > 0 ) .AND. IfValidAnd( Proj:ResDwellUnits > 0 )==0) then  UNCHANGED
-                        else if (AnalysisType > 0 .AND. ComponentCount( Zone ) < 1)		; SAC 2/4/16 - disable check for 'Research' mode
+                        else if (AnalysisType > 0 .AND. ComponentCount( Zone ) < 1 .AND.
+                                 ComponentCount( ResOtherZn ) < 1)		; SAC 2/4/16 - disable check for 'Research' mode
 								then  PostError( "At least one Zone object must be present in the model prior to simulation" )
 								else if (AnalysisType > 0 .AND. IsMultiFamily == 0 .AND. SumAll( ResOtherZn:Area ) > 0.1 .AND.
                                  IfValidAnd( Proj:EnableResearchMode > 0 )==0 .AND. IfValidAnd( BypassRuleLimits > 0 )==0)
