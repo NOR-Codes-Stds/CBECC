@@ -764,19 +764,24 @@ RULE OACtrl:EconoAvailSchRef
     NotInput
 ENDRULE
 
-
-// ********** Economizer Control Type ******************************************
-// calculate receptacle power for computer room to determine baseline economizer
+// -----------------------------------------------------------------------------
+// Calculate receptacle power AirSystem serving a computer room to determine baseline economizer
 RULE NEW AirSys:CompRmPwr
   DATATYPE
     Float
   LONGFORM
     ComputerRoomPower
+  DESCRIPTION
+    "The computer room receptacle power for the zone that the AirSystem serves, not
+     including zone multiplier."
   INPUTCLASS
     NotInput
   ANNUAL : T24N
     SumRevRef( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:CompRmPwr )
 ENDRULE
+
+
+// ********** Economizer Control Type ******************************************
 RULE OACtrl:EconoCtrlMthd
   DESCRIPTION
     "The method used to control the air-side economizer."
@@ -851,34 +856,58 @@ RULE OACtrl:EconoCtrlMthd
     then
       if( AirSys:BaseSysNum = 10 )
       then // CRAH system
-        "FixedDryBulb" // No capacity threshold for CRAH units
-      else if( AirSys:BaseSysNum = 11 )
+        "FixedDryBulb" // No cooling capacity threshold for CRAH units
+      else
+      if( AirSys:BaseSysNum = 11 )
       then // CRAC system
-        if( AirSys:CompRmPwr < 18 .AND. Bldg:PropHasAirEcono = 0  )
-        then "NoEconomizer" // Exception 1 to Section 140.9(a)
-        else "FixedDryBulb"
-        endif
-      else if( AirSys:BaseSysNum = 12 )
+        if( AirSys:IsForPropHasUnknownHVAC > 0 )
+        then // Is a baseline CRAC for proposed zone with HasUnknownHVAC
+          "FixedDryBulb" // Is for HasUnknownHVAC, CRAC always has an economizer
+        else
+      	if( AirSys:CompRmPwr < 18 .AND. Bldg:PropHasAirEcono = 0 )
+        then // Exception 1 to Section 140.9(a) applies
+          "NoEconomizer" 
+        else "FixedDryBulb" // Otherwise CRAC always has has economizer
+        endif endif
+      else
+      if( AirSys:BaseSysNum = 12 )
       then // LAB system
-        if( IfValidAnd( AirSys:PropSysOARat < 0.99 ) ) 
-        then // Is a lab system and one of the proposed system serving the 
-             // baseline lab zones(s) is less than 99% OA
-          "FixedDryBulb"
-        else "NoEconomizer"
-        endif
-      else if( AirSys:ClgCap > 33000 )
-      then "FixedDryBulb"
+        "NoEconomizer" // Lab is 100% OA
+; Lab system rule below removed since labs should always be 100% OA
+;        if( IfValidAnd( AirSys:PropSysOARat < 0.99 ) ) 
+;        then // Is a lab system and one of the proposed systems serving the 
+;             // zones(s) served by the baseline system is less than 99% OA
+;             // This was added at r2422, and was prior to us assuming baseline 
+;             // was always 100% OA, so no longer needed. 
+;          "FixedDryBulb"
+;        else "NoEconomizer"
+;        endif
+      else
+      if( Proj:IsAddOrAlt > 0 .AND.
+          ( AirSys:BaseSysNum = 3 .OR. AirSys:BaseSysNum = 7 ) .AND.
+          AirSys:ClgCap >= 54000 )
+      then // For Add/Alt, single-zone baseline systems have higher threshold for needing economizer
+        "FixedDryBulb" 
+      else
+      if( AirSys:ClgCap >= 33000 )
+      then // All other baseline cases except HlthCare, defined below
+        "FixedDryBulb"
       else "NoEconomizer"
-      endif endif endif endif
-    else if( IsBaseHlthCareSys > 0 )
+      endif endif endif endif endif
+    else
+    if( IsBaseHlthCareSys > 0 )
     then
-      if( AirSys:ClgCap >= 54000 .OR.
-          ( AirSys:ClgCap > 33000 .AND. PairedWithHtRcvryDOAS = 0 ) )
+      if( AirSys:ClgCap < 54000 .AND. PairedWithHtRcvryDOAS > 0 )
+      then // Standard design has no economizer if < 54 kBtu/hr and ventilation provided by DOAS
+        "NoEconomizer"
+      else 
+      if( AirSys:IsHlthCareDOAS > 0 .AND. AirSys:HasHtRcvry > 0 )
       then "FixedDryBulb"
-      else if( AirSys:IsHlthCareDOAS > 0 .AND. AirSys:HasHtRcvry > 0 )
+      else
+      if( AirSys:ClgCap >= 33000 )
       then "FixedDryBulb"
       else "NoEconomizer"
-      endif endif
+      endif endif endif
     else z:EconoCtrlMthd
     endif endif
   ANNUAL : S901G ECBC
@@ -902,7 +931,6 @@ RULE OACtrl:EconoCtrlMthd
     else z:EconoCtrlMthd
     endif
 ENDRULE
-
 
 // ********** Economizer Control Type Report *************************************
 RULE OACtrl:EconoCtrlMthdRpt
@@ -950,7 +978,8 @@ RULE NEW AirSys:HasAirEcono
   INPUTCLASS 
     NotInput
   DEFAULT
-    if( SumChildrenIf( OACtrl:SysCnt, OACtrl:EconoCtrlMthd != "NoEconomizer" ) > 0 )
+    if( IsFuture = 0 .AND. 
+        SumChildrenIf( OACtrl:SysCnt, OACtrl:EconoCtrlMthd != "NoEconomizer" ) > 0 )
     then 1
     else 0
     endif
@@ -969,17 +998,15 @@ RULE NEW AirSys:HasAirEcono
 ENDRULE
 
 // -----------------------------------------------------------------------------
+// Set flag to indicate if any system in the proposed design has an air economizer, 
 RULE NEW Bldg:PropHasAirEcono
   DATATYPE
     Integer
   LONGFORM
     ProposedHasAirEconomizer
   DESCRIPTION
-    "Flag if proposed building has any economizers."
-  HELP
-    "Std. 62.1 sets requirements for air cleaning on outdoor air when outddor 
-     air quality is poor.  In these cases, if the proposed building has no 
-     economizers, then the baseline does not either.  "
+    "A flag that indicates whether the proposed building systems have any 
+     air economizers. Only includes proposed systems that are not 'IsFuture'."
   INPUTCLASS 
     NotInput
   DEFAULT
