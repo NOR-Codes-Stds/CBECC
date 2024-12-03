@@ -178,6 +178,8 @@ RULE AirSys:Type
       DuctIns
       HERSDuctReq
       HERSDuctTested
+      ClgCtrl
+      FanPos
   CHECKSIM
     if( BypassCheckSim > 0 )
     then UNCHANGED // Bypass QC checks for system
@@ -243,22 +245,22 @@ RULE ZnSys:Type
       DuctIns
       HERSDuctReq
       HERSDuctTested
-  CHECKCODE
+  CHECKCODE : T24N
     if( BypassCheckCode > 0 )
     then UNCHANGED // Bypass QC checks for system
     else
     if( ( Type = "SZAC" .OR. Type = "SZHP" .OR. Type = "SZDFHP" ) .AND. 
-        IfValidAnd( ClgCap >= 135000 ) )
+        IfValidAnd( ClgCap > 240000 ) )
     then
       PostError("ZoneSystem '%s' is Type = SZAC or SZHP, and has a cooling capacity
-                 >135,000 Btu/hr. This is currently not supported. Use an AirSystem
+                 >240,000 Btu/hr. This is currently not supported. Use an AirSystem
                  for large AC/HP systems.", Name)
     else
     if( ( Type = "MiniSplitAC" .OR. Type = "MiniSplitHP" ) .AND. 
-        IfValidAnd( ClgCap >= 135000 ) )
+        IfValidAnd( ClgCap > 65000 ) )
     then
        PostError("ZoneSystem '%s' is Type = MiniSplitAC or MiniSplitHP, and has a cooling capacity
-                 >135,000 Btu/hr. This is currently not supported.", Name)
+                 >65,000 Btu/hr. This is currently not supported.", Name)
     else UNCHANGED
     endif endif endif
   CHECKSIM
@@ -488,8 +490,8 @@ RULE NEW ZnSys:IsExhSys
   INPUTCLASS 
     NotInput
   DEFAULT
-    if( Type = "Exhaust" .OR. 
-        ( Type = "VentilationOnly" .AND. ExhSysType = "ExhaustOnly" ) )
+    if( ( Type = "Exhaust" .OR. 
+        ( Type = "VentilationOnly" .AND. ExhSysType = "ExhaustOnly" ) ) )
     then 1
     else 0
     endif
@@ -976,6 +978,17 @@ RULE AirSys:IsHlthCareSys
                  zones. This is not allowed for compliance.",Name)
     else UNCHANGED
     endif 
+  SIZING : T24N
+    if( ServesThrmlZn .AND.
+        SumRevRef( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:IsHlthCare ) = 
+          CountRefs( ThrmlZn:PriAirCondgSysRef[1] ) .AND.
+        SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:IsHlthCare ) = 
+          CountRefs( ThrmlZn:VentSysRef ) .AND.
+        SumRevRef( ThrmlZn:ExhSysRef[1], ThrmlZn:IsHlthCare ) = 
+          CountRefs( ThrmlZn:ExhSysRef[1] ) )
+    then 1
+    else 0
+    endif
 ENDRULE
 RULE ZnSys:IsHlthCareSys
   DESCRIPTION
@@ -988,7 +1001,9 @@ RULE ZnSys:IsHlthCareSys
   DEFAULT : T24N_2016 S901G
     0 
   DEFAULT : T24N
-    if( SumRevRef( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:IsHlthCare ) = 
+    if( CountRefs( ThrmlZn:PriAirCondgSysRef[1] ) + CountRefs( ThrmlZn:PriAirCondgSysRef[2] ) + 
+        CountRefs( ThrmlZn:VentSysRef ) + CountRefs( ThrmlZn:ExhSysRef[1] ) > 0 .AND.
+        SumRevRef( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:IsHlthCare ) = 
           CountRefs( ThrmlZn:PriAirCondgSysRef[1] ) .AND.
         SumRevRef( ThrmlZn:PriAirCondgSysRef[2], ThrmlZn:IsHlthCare ) = 
           CountRefs( ThrmlZn:PriAirCondgSysRef[2] ) .AND.
@@ -999,6 +1014,141 @@ RULE ZnSys:IsHlthCareSys
     then 1
     else 0
     endif
+  SIZING : T24N
+    if( CountRefs( ThrmlZn:PriAirCondgSysRef[1] ) + CountRefs( ThrmlZn:PriAirCondgSysRef[2] ) + 
+        CountRefs( ThrmlZn:VentSysRef ) + CountRefs( ThrmlZn:ExhSysRef[1] ) > 0 .AND.
+        SumRevRef( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:IsHlthCare ) = 
+          CountRefs( ThrmlZn:PriAirCondgSysRef[1] ) .AND.
+        SumRevRef( ThrmlZn:PriAirCondgSysRef[2], ThrmlZn:IsHlthCare ) = 
+          CountRefs( ThrmlZn:PriAirCondgSysRef[2] ) .AND.
+        SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:IsHlthCare ) = 
+          CountRefs( ThrmlZn:VentSysRef ) .AND.
+        SumRevRef( ThrmlZn:ExhSysRef[1], ThrmlZn:IsHlthCare ) = 
+          CountRefs( ThrmlZn:ExhSysRef[1] ) )
+    then 1
+    else 0
+    endif
+ENDRULE
+RULE NEW AirSys:IsBaseHlthCareSys
+  DATATYPE
+    Integer
+  LONGFORM
+    IsBaselineHealthcareSystem
+  DESCRIPTION
+    "A flag that indicates the AirSys is a baseline 'health care' system
+     which is based on the proposed design but is modified to meet the 
+     requirements described in Standard Section 140.4."
+  INPUTCLASS
+    NotInput
+  SIZING_PROPOSED : T24N
+    0
+  SIZING_BASELINE : T24N
+    if( IfValidAnd( IsExisting > 0 ) )
+    then 0
+    else IsHlthCareSys
+    endif
+ENDRULE
+RULE NEW ZnSys:IsBaseHlthCareSys
+  DATATYPE
+    Integer
+  LONGFORM
+    IsBaselineHealthcareSystem
+  DESCRIPTION
+    "A flag that indicates the AirSys is a baseline 'health care' system
+     which is based on the proposed design but is modified to meet the 
+     requirements described in Standard Section 140.4."
+  INPUTCLASS
+    NotInput
+  SIZING_PROPOSED : T24N
+    0
+  SIZING_BASELINE : T24N
+    if( IfValidAnd( IsExisting > 0 ) )
+    then 0
+    else IsHlthCareSys
+    endif
+ENDRULE
+RULE NEW AirSys:IsLrgHlthCareFanSys
+  DATATYPE
+    Integer
+  LONGFORM
+    IsLargeHealthcareFanSystem
+  DESCRIPTION
+    "A flag that indicates the AirSys is a 'health care' system with total 
+     fan power >= 1 kW that falls in the scope of fan power requirement 
+     described in Std. Section 140.4(c)1."
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N
+    if( IsHlthCareSys > 0 .AND. SumChildren( Fan:Pwr ) >= 1 .AND. Status = "New" )
+    then 1
+    else 0
+    endif
+  SIZING : T24N
+    if( LocalCompAssigned( PropVentOnlyZnSysRef ) )
+    then PropVentOnlyZnSysRef:IsLrgHlthCareFanSys
+    else ValidOR( IsLrgHlthCareFanSys, 0 )
+    endif
+ENDRULE
+RULE NEW ZnSys:IsLrgHlthCareFanSys
+  DATATYPE
+    Integer
+  LONGFORM
+    IsLargeHealthcareFanSystem
+  DESCRIPTION
+    "A flag that indicates the ZnSys is a 'health care' system with total 
+     fan power >= 1 kW that falls in the scope of fan power requirement 
+     described in Std. Section 140.4(c)1."
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N
+    if( IsHlthCareSys > 0 .AND. Type = "VentilationOnly" .AND. IfValidAnd( RtdPwr >= 1000 ) .AND. Status = "New" )
+    then 1
+    else
+    if( IsHlthCareSys > 0 .AND. SumChildren( Fan:Pwr ) >= 1 .AND. Status = "New" )
+    then 1
+    else 0
+    endif endif
+  SIZING : T24N
+    ValidOR( IsLrgHlthCareFanSys, 0 )
+ENDRULE
+RULE NEW AirSys:IsHlthCareDOAS
+  DATATYPE
+    Integer
+  LONGFORM
+    IsHealthcareDOAS
+  DESCRIPTION
+    "A flag that indicates the AirSys is a 'health care' DOAS that falls in 
+     the scope of fan power requirement described in Std. Section 140.4(p)1."
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N
+    if( IsHlthCareSys > 0 .AND. IsVentOnlySys > 0 .AND. Status = "New" )
+    then 1
+    else 0
+    endif
+  SIZING : T24N
+    if( LocalCompAssigned( PropVentOnlyZnSysRef ) )
+    then PropVentOnlyZnSysRef:IsHlthCareDOAS
+    else ValidOR( IsHlthCareDOAS, 0 )
+    endif
+ENDRULE
+RULE NEW ZnSys:IsHlthCareDOAS
+  DATATYPE
+    Integer
+  LONGFORM
+    IsHealthcareDOAS
+  DESCRIPTION
+    "A flag that indicates the AirSys is a 'health care' DOAS that falls in 
+     the scope of fan power requirement described in Std. Section 140.4(p)1."
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N
+    if( IsHlthCareSys > 0 .AND. IsVentOnlySys > 0 .AND. Status = "New" )
+    then 1
+    else 0
+    endif
+  SIZING : T24N
+    ValidOR( IsHlthCareDOAS, 0 )
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -1134,7 +1284,8 @@ RULE AirSys:Status
                TerminalUnits) have been modified or replaced such that the cooling
                capacity and/or cooling efficiency of the system, or in the case
                of chilled water coils, the cooling capacity and/or efficiency 
-               of the plant, has changed."
+               of the plant, has changed. This status option is only available for
+               multi-zone PVAV and VAV system types."
   INPUTCLASS 
     Default
 ; OPTION
@@ -1155,8 +1306,17 @@ RULE AirSys:Status
       PostWarning("AirSystem '%s' has a Status of '%s', but ComplianceType is '%s'.
                    The status of the system will be changed to 'New' for compliance
                    analysis.", Name, Status, Proj:CompType)
+    else
+    if( Proj:IsPartMech > 0 .AND. 
+        IsFuture = 0 .AND.
+        IsPartFuture > 0 )
+    then
+      PostError("Compliance includes PartialMechanical, and AirSystem '%s' serves a 
+                 combination of zones with HasUnknownHVAC = 0 and HasUnknownHVAC = 1.
+                 This combination is not allowed. All zones served by the AirSystem must 
+                 have the same HasUnknownHVAC status", Name)    
     else UNCHANGED
-    endif
+    endif endif
   SIZING
     if( IfValidAnd( BaseSysNum > 0 ) .OR. Proj:IsNewMech > 0 )
     then "New"
@@ -1169,15 +1329,36 @@ ENDRULE
 RULE NEW AirSys:IsFuture
   DATATYPE
     Integer  
+  LONGFORM
+    IsFuture 
   DESCRIPTION
     "The flag that indicates the system serves nothing but zones that are HasUnknownHVAC."
   INPUTCLASS 
     NotInput
   DEFAULT
-    if( ServesThrmlZn .AND.
+    if( ServesThrmlZn > 0 .AND.
         SumRevRef( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:HasUnknownHVAC ) = CountRefs( ThrmlZn:PriAirCondgSysRef[1] ) .AND.
         SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:HasUnknownHVAC ) = CountRefs( ThrmlZn:VentSysRef ) .AND.
         SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:HasUnknownHVAC ) = CountRefs( ThrmlZn:ExhSysRef ) )
+    then 1
+    else 0
+    endif
+ENDRULE
+
+RULE NEW AirSys:IsPartFuture
+  DATATYPE
+    Integer  
+  LONGFORM
+    IsPartialFuture
+  DESCRIPTION
+    "The flag that indicates the system serves at least one zone that is HasUnknownHVAC."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( ServesThrmlZn > 0 .AND.
+        ( SumRevRef( ThrmlZn:PriAirCondgSysRef[1], ThrmlZn:HasUnknownHVAC ) > 0 .OR.
+          SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:HasUnknownHVAC ) > 0 .OR.
+          SumRevRef( ThrmlZn:ExhSysRef, ThrmlZn:HasUnknownHVAC ) > 0 ) )
     then 1
     else 0
     endif
@@ -1291,6 +1472,7 @@ RULE NEW AirSys:IsExisting
     z:IsExisting
 ENDRULE
 
+
 // -----------------------------------------------------------------------------
 RULE NEW AirSys:IsAltered
   DATATYPE
@@ -1303,14 +1485,12 @@ RULE NEW AirSys:IsAltered
     else
     if( IsExisting > 0 )
     then 
-      if( SumChildrenIf( CoilClg:CapHydronic, CoilClg:CapHydronic > 0 ) > 0 .AND.
-          IfValidAnd( Bldg:PlantClgCapNew > 0 ) )
+      if( SumChildrenIf( CoilClg:CapHydronic, CoilClg:PlantIsNew > 0 ) > 0 )
       then // System has hydronic cooling coils that are served by a new plant
         1
       else
       if( IfValidAnd( Bldg:TotClgCap = 0 ) .AND.
-          SumChildrenIf( CoilHtg:CapHydronic, CoilHtg:CapHydronic > 0 ) > 0 .AND.
-          IfValidAnd( Bldg:PlantHtgCapNew > 0 ) )
+          SumChildrenIf( CoilHtg:CapHydronic, CoilHtg:PlantIsNew > 0 ) > 0 )
       then // Building is heating only, and this system has hydronic heating coils
            // that are served by a new plant
         1
@@ -1324,14 +1504,12 @@ RULE NEW AirSys:IsAltered
     else
     if( IsExisting > 0 )
     then 
-      if( SumChildrenIf( CoilClg:CapHydronic, CoilClg:CapHydronic > 0 ) > 0 .AND.
-          Bldg:PlantClgCapNew > 0 )
+      if( SumChildrenIf( CoilClg:CapHydronic, CoilClg:PlantIsNew > 0 ) > 0 )
       then // System has hydronic cooling coils that are served by a new plant
         1
       else
-      if( Bldg:TotClgCap = 0 .AND.
-          SumChildrenIf( CoilHtg:CapHydronic, CoilHtg:CapHydronic > 0 ) > 0 .AND.
-          Bldg:PlantHtgCapNew > 0 )
+      if( IfValidAnd( Bldg:TotClgCap = 0 ) .AND.
+          SumChildrenIf( CoilHtg:CapHydronic, CoilHtg:PlantIsNew > 0 ) > 0 )
       then // Building is heating only, and this system has hydronic heating coils
            // that are served by a new plant
         1
@@ -1658,7 +1836,11 @@ RULE AirSys:Cnt
   REPORTPRECISION
     0
   DEFAULT
-    1
+    if( IsMultiZnSys = 0 .AND. ServesResZn > 0 )
+    then SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:Mult ) * 
+         SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:AirSysCnt )
+    else 1
+    endif
   CHECKCODE
     if( BypassCheckCode > 0 )
     then UNCHANGED // Bypass QC checks for system
@@ -1718,8 +1900,17 @@ RULE AirSys:Cnt
                    This indicates either a) the single-zone system has slave zones, or
                    b) HVACZnCount may be improperly defined. Check inputs for consistency.",
                    Name)
+      else
+      if( ServesResZn > 0 .AND. 
+          Cnt != SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:Mult ) * 
+                 SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:AirSysCnt ) )
+      then // The AirSys:Cnt is not consistent with ResOtherZn:Mult
+        PostError("The AirSystem:Count for single-zone system '%s' is not
+                   consistent with the number of systems serving the zone times
+                   ResOtherZn:Mult that the system serves. Check inputs for consistency.",
+                   Name)
       else UNCHANGED
-      endif endif
+      endif endif endif
     else UNCHANGED
     endif endif endif endif
   SIZING : T24N
@@ -1734,7 +1925,7 @@ RULE AirSys:Cnt
       else
       if( BaseSysNum > 200 )
       then // SZ AirSys serving res common areas (ResOtherZn) - SAC 05/09/22
-        1
+        SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:Mult )
       else
       if( BaseSysNum > 100 )
       then // AirSys (DOAS) VentSys
@@ -1756,6 +1947,34 @@ RULE AirSys:Cnt
     endif
   ANNUAL
     z:Cnt   
+ENDRULE
+RULE NEW AirSys:CntSim
+  DESCRIPTION
+    "The number of duplicate systems represented by the current AirSystem that are
+     simulated"
+  HELP
+    "For systems simulated in EnergyPlus, the non-residential systems, all the 
+     systems, including the systems serving the ThermalZones represented by the
+     multipliers, are simulated and are simulated as one big system.
+     
+     For systems simulated in CSE, the residential systems, not all the systems are
+     simulated. Only the systems serving one ResidentialOtherZone are simulated as 
+     one big system. Then, the energy of the one big system is multiplied by the
+     zone multiplier."
+  INPUTCLASS 
+    NotInput
+  DATATYPE
+    Integer
+  DEFAULT
+    if( ServesResZn > 0 )
+    then SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:AirSysCnt )
+    else Cnt
+    endif
+  SIZING
+    if( ServesResZn > 0 )
+    then SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:AirSysCnt )
+    else Cnt
+    endif
 ENDRULE
 
 // =========================== ZoneSystem ======================================
@@ -1857,7 +2076,31 @@ RULE ZnSys:Cnt
   ANNUAL
     z:Cnt   
 ENDRULE
-
+RULE NEW ZnSys:CntSim
+  DESCRIPTION
+    "The number of duplicate systems represented by the current AirSystem that are
+     simulated"
+  HELP
+    "For systems simulated in EnergyPlus, the non-residential systems, all the 
+     systems, including the systems serving the ThermalZones represented by the
+     multipliers, are simulated and are simulated as one big system.
+     
+     For systems simulated in CSE, the residential systems, not all the systems are
+     simulated. Only the systems serving one ResidentialOtherZone are simulated as 
+     one big system. Then, the energy of the one big system is multiplied by the
+     zone multiplier.
+     
+     Currently, ZoneSystem can only be assigned as a non-residential. So, the
+     number of systems is always equal to the number of systems simulated."
+  INPUTCLASS 
+    NotInput
+  DATATYPE
+    Integer
+  DEFAULT
+    Cnt
+  SIZING
+    Cnt
+ENDRULE
 
 // ********** Air Distribution Type ********************************************
 // TO DO: Revise to Rule once added to BEMBase
@@ -1937,25 +2180,17 @@ RULE NEW AirSys:SysVentFlowUncorrected
     0
   DEFAULT
     if( ServesResZn > 0 )
-    then SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:TotalIAQCFM )
+    then SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:VentFlowWithMult ) / Cnt
     else SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:VentFlowWithMult ) / Cnt
     endif 
   SIZING
     if( ServesResZn > 0 )
-    then
-      if( BaseSysNum > 0 )
-      then SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:MinIAQCFM )
-      else SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:TotalIAQCFM )
-      endif
+    then SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:VentFlowWithMult ) / Cnt
     else SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:VentFlowWithMult ) / Cnt
     endif 
   ANNUAL
     if( ServesResZn > 0 )
-    then
-      if( BaseSysNum > 0 )
-      then SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:MinIAQCFM )
-      else SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:TotalIAQCFM )
-      endif
+    then SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:VentFlowWithMult ) / Cnt
     else SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:VentFlowWithMult ) / Cnt
     endif 
 ENDRULE
@@ -1975,17 +2210,17 @@ RULE NEW AirSys:SysMinVentFlow
     0
   DEFAULT
     if( ServesResZn > 0 )
-    then SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:StdDesignIAQCFM )
+    then SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:VentFlowWithMult ) / Cnt
     else SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:MinVentFlowWithMult ) / Cnt
     endif 
   SIZING
     if( ServesResZn > 0 )
-    then SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:StdDesignIAQCFM )
+    then SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:VentFlowWithMult ) / Cnt
     else SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:MinVentFlowWithMult ) / Cnt
     endif
   ANNUAL
     if( ServesResZn > 0 )
-    then SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:StdDesignIAQCFM )
+    then SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:VentFlowWithMult ) / Cnt
     else SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:MinVentFlowWithMult ) / Cnt
     endif 
 ENDRULE
@@ -2003,17 +2238,17 @@ RULE NEW AirSys:SysCodeVentFlow
     cfm
   DEFAULT
     if( ServesResZn > 0 )
-    then SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:MinIAQCFM )
+    then SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:MinIAQCFMWithMult ) / Cnt
     else SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:CodeVentFlowWithMult ) / Cnt
     endif 
   SIZING
     if( ServesResZn > 0 )
-    then SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:MinIAQCFM )
+    then SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:MinIAQCFMWithMult ) / Cnt
     else SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:CodeVentFlowWithMult ) / Cnt
     endif 
   ANNUAL
     if( ServesResZn > 0 )
-    then SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:MinIAQCFM )
+    then SumRevRef( ResOtherZn:ActiveHVACSystem, ResOtherZn:MinIAQCFMWithMult ) / Cnt
     else SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:CodeVentFlowWithMult ) / Cnt
     endif 
 ENDRULE
@@ -2092,25 +2327,28 @@ RULE AirSys:SysVentFlow
 ;   else UNCHANGED
 ;   endif endif
   SIZING
-    if( ServesResZn > 0 )
-    then
-      if( BaseSysNum > 0 )
-      then SysCodeVentFlow
-      else SysVentFlowUncorrected
-      endif
-    else SysVentFlowUncorrected
-    endif 
+    SysVentFlowUncorrected
   ANNUAL
-    if( ServesResZn > 0 )
-    then
-      if( BaseSysNum > 0 )
-      then SysCodeVentFlow
-      else SysVentFlowUncorrected
-      endif
-    else SysVentFlowUncorrected
-    endif 
+    SysVentFlowUncorrected
 ENDRULE
 
+
+RULE NEW AirSys:OAFlowRat
+  DATATYPE
+    Float
+  LONGFORM
+    OutsideAirFlowRatio
+  DESCRIPTION
+    "The design outside air flow ratio as a fraction of supply flow rate."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( SysVentFlow >= 0 ) .AND.
+        IfValidAnd( SupFanCap > 0 ) )
+    then Max( SysVentFlow / SupFanCap, 0 )
+    else 0
+    endif
+ENDRULE
 
 RULE AirSys:RetAirFlowRat
   DESCRIPTION
@@ -2239,6 +2477,23 @@ RULE NEW ZnSys:SysCodeVentFlow
     SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:CodeVentFlowWithMult ) / Cnt
   ANNUAL
     SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:CodeVentFlowWithMult ) / Cnt
+ENDRULE
+
+RULE NEW ZnSys:OAFlowRat
+  DATATYPE
+    Float
+  LONGFORM
+    OutsideAirFlowRatio
+  DESCRIPTION
+    "The design outside air flow ratio as a fraction of supply flow rate."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( SysVentFlow >= 0 ) .AND.
+        IfValidAnd( SupFanCap > 0 ) )
+    then Max( SysVentFlow / SupFanCap, 0 )
+    else 0
+    endif
 ENDRULE
 
 
@@ -2506,6 +2761,29 @@ RULE NEW ZnSys:VRFNetClgCap
   DEFAULT
     SumChildrenIf( CoilClg:CapTotNetRtd, CoilClg:Type = "VRF" )   
 ENDRULE
+RULE NEW ZnSys:VRFNetClgCapSim
+  DATATYPE
+    Float
+  LONGFORM
+    VariableRefrigerantFlowNetCoolingCapacitySimulated
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    SumChildrenIf( CoilClg:CapTotNetRtd, CoilClg:Type = "VRF" ) * Cnt 
+ENDRULE
+RULE NEW ZnSys:VRFHlthCareNetClgCapSim
+  DATATYPE
+    Float
+  LONGFORM
+    VariableRefrigerantFlowHealthCareNetCoolingCapacitySimulated
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( IsHlthCareSys > 0 )
+    then VRFNetClgCapSim
+    else 0
+    endif
+ENDRULE
 
 // -----------------------------------------------------------------------------
 RULE NEW ZnSys:NonElecHtgCap
@@ -2532,7 +2810,42 @@ RULE NEW ZnSys:VRFNetHtgCap
   DEFAULT
     SumChildrenIf( CoilHtg:CapTotNetRtd, CoilHtg:Type = "VRF" )   
 ENDRULE
-
+RULE NEW ZnSys:VRFNetHtgCapSim
+  DATATYPE
+    Float
+  LONGFORM
+    VariableRefrigerantFlowNetHeatingCapacitySimulated
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    SumChildrenIf( CoilHtg:CapTotNetRtd, CoilHtg:Type = "VRF" ) * Cnt
+ENDRULE
+RULE NEW ZnSys:VRFHlthCareNetHtgCapSim
+  DATATYPE
+    Float
+  LONGFORM
+    VariableRefrigerantFlowHealthCareNetHeatingCapacitySimulated
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( IsHlthCareSys > 0 )
+    then VRFNetHtgCapSim
+    else 0
+    endif
+ENDRULE
+// Set WSHP fraction of on-cycle use to 0 to avoid loop overheat at low flow, ticket 3502
+RULE ZnSys:OffCyclePwrFrac
+  DESCRIPTION
+    "This is to be translated into EnergyPlus as the Fraction of On-Cycle Use for WSHP."
+  HELP
+    "Setting this any value greater than 0 can be cause of CW overheat at low flow. EnergyPlus 
+     team is working on a fix to this issue, but before the official fix is in place we set it to 0."
+  DEFAULT
+    if( IfValidAnd( Type = "WSHP" ) )
+    then 0
+    else UNDEFINED
+    endif
+ENDRULE
 // -----------------------------------------------------------------------------
 // Identify unitary equipment category for mandatory efficiency checks
 RULE NEW AirSys:UnitaryCat
@@ -2593,6 +2906,40 @@ RULE Proj:EffMetric
   DEFAULT
     "SEER/EER/HSPF"
 ENDRULE
+// Set a flag at ThrmlZn indicating the standard design system is SEER2
+// -----------------------------------------------------------------------------
+RULE NEW ThrmlZn:StdIsSEER2
+  DATATYPE
+    Integer
+  DESCRIPTION
+    "A flag that indicates SEER2/EER2/HSPF2 efficiency ratings should be used for the standard design."
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N_2019
+    if( IfValidAnd( IsCond > 0 ) .AND. 
+        IfValidAnd( IsNewHVAC > 0 ) .AND.
+        ( IfValidAnd( IsHighRiseRes > 0 ) .OR. IfValidAnd( IsHotelMotelGuestRm > 0 ) ) ) 
+    then
+      if( IfValidAnd( PriAirCondgSysRef[1]:EffMetric = "SEER2/EER2/HSPF2" ) .AND.
+          IfValidAnd( PriAirCondgSysRef[1]:SEER2IsValid > 0 ) )
+      then 1
+      else 0
+      endif
+    else 0
+    endif
+  DEFAULT 
+    0
+ENDRULE
+RULE NEW Proj:StdIsSEER2
+  DATATYPE
+    Integer
+  DESCRIPTION
+    "The number of zones that will use SEER2/EER2/HSPF2 efficiency ratings in the standard design."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    SumChildrenIf( ThrmlZn:StdIsSEER2, ThrmlZn:FlrArea > 0 )
+ENDRULE
 
 // =========================== AirSystem ======================================
 RULE NEW AirSys:SEER2IsValid
@@ -2608,7 +2955,7 @@ RULE NEW AirSys:SEER2IsValid
         SumChildrenIf( CoilClg:CapTotNetRtd, CoilClg:Type = "DirectExpansion" ) < 65000 .AND. 
         SumChildrenIf( CoilClg:CapTotNetRtd, CoilClg:CndsrType = "Air" ) > 0 .AND. 
         Proj:StdsVersionYr >= 2019 .AND. 
-        IfValidAnd( UnitaryCat != "NA" ) .AND. 
+        IfValidAnd( UnitaryCat != "NA" ) .AND.
         ( IfValidAnd( SubType != "CRAC" ) .AND. IfValidAnd( SubType != "CRAH" ) .AND. IfValidAnd( SubType != "NA" ) ) )
     then 1
     else 0
@@ -2675,11 +3022,12 @@ RULE NEW ZnSys:SEER2IsValid
   INPUTCLASS 
     NotInput
   DEFAULT
-    if( ( Type = "SZAC" .OR. Type = "SZHP" .OR. Type = "SZDFHP" ) .AND.
+    if( ( Type = "SZAC" .OR. Type = "SZHP" .OR. Type = "SZDFHP" .OR.
+          Type = "MiniSplitAC" .OR. Type = "MiniSplitHP" ) .AND. // added MiniSplit, ticket 3537
         SumChildrenIf( CoilClg:CapTotNetRtd, CoilClg:Type = "DirectExpansion" ) < 65000 .AND. 
         SumChildrenIf( CoilClg:CapTotNetRtd, CoilClg:CndsrType = "Air" ) > 0 .AND. 
         Proj:StdsVersionYr >= 2019 .AND. 
-        IfValidAnd( UnitaryCat != "NA" ) .AND. 
+        IfValidAnd( UnitaryCat != "NA" ) .AND.
         IfValidAnd( SubType != "NA" ) )
     then 1
     else 0
@@ -3221,8 +3569,12 @@ RULE NEW AirSeg:CoilHtgCnt
       PostError("AirSegment '%s' has more than one child CoilHeating objects.
                  This is currently only supported if one coil is referenced as the
                  supplemental heating coil of a Type = 'HeatPump' coil.", Name)
+    else if( CoilHtgCnt > 2 ) ; JP 11/18/24 (Issue #46)
+    then // Three or more coil heating object 
+      PostError("AirSegment '%s' has more than two child CoilHeating objects.
+                 This is currently not supported.", Name)
     else UNCHANGED
-    endif endif endif
+    endif endif endif endif
 ENDRULE 
 
 // -----------------------------------------------------------------------------

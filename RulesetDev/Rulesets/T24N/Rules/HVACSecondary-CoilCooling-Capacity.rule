@@ -201,7 +201,54 @@ RULE NEW CoilClg:SysType
     else "NA"
     endif endif endif
 ENDRULE
-
+RULE NEW CoilClg:SysUnitaryCat
+  DATATYPE
+    String
+  LONGFORM
+    SystemUnitaryCategory
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( ParentComp = "AirSys" )
+    then AirSys:UnitaryCat
+    else if( ParentComp = "ZnSys" )
+    then ZnSys:UnitaryCat
+    else "NA"
+    endif endif
+  SIZING
+    if( ParentComp = "AirSys" )
+    then AirSys:UnitaryCat
+    else if( ParentComp = "ZnSys" )
+    then ZnSys:UnitaryCat
+    else "NA"
+    endif endif
+ENDRULE
+RULE NEW CoilClg:IsCRAC
+  DESCRIPTION
+    "A flag indicats that the cooling coil is part of a Computer Room Air Conditioner (CRAC)."
+  DATATYPE
+    Integer
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if(ParentComp = "AirSys")
+    then 
+      if(IfValidAnd(AirSys:SubType = "CRAC"))
+      then 1
+      else 0
+      endif
+    else 0
+    endif
+  SIZING
+    if(ParentComp = "AirSys")
+    then 
+      if(IfValidAnd(AirSys:SubType = "CRAC"))
+      then 1
+      else 0
+      endif
+    else 0
+    endif
+ENDRULE
 // -----------------------------------------------------------------------------
 // FluidSysRef set to property of local component, for coils connected to FluidSys
 RULE NEW CoilClg:FluidSysRef
@@ -231,7 +278,7 @@ ENDRULE
 
 // -----------------------------------------------------------------------------
 // Set IsDummy flag for all components
-RULE CoilHtg:IsDummy
+RULE CoilClg:IsDummy
   INPUTCLASS
     NotInput
   DEFAULT
@@ -311,6 +358,29 @@ RULE CoilClg:SysCnt
       TrmlUnit:Cnt
     else 0
     endif endif endif
+ENDRULE
+RULE NEW CoilClg:SysCntSim
+  DESCRIPTION
+    "Echo of Air/System:CntSim, or if the Coil parent is a TerminalUnit, the 
+     SystemCount is TerminalUnit:SystemCount * TerminalUnit:Count."
+  INPUTCLASS 
+    NotInput 
+  DATATYPE
+    Integer
+  DEFAULT
+    if( ParentComp = "AirSys" )
+    then AirSys:CntSim
+    else if( ParentComp = "TrmlUnit" )
+    then TrmlUnit:SysCntSim
+    else SysCnt
+    endif endif
+  SIZING
+    if( ParentComp = "AirSys" )
+    then AirSys:CntSim
+    else if( ParentComp = "TrmlUnit" )
+    then TrmlUnit:SysCntSim
+    else SysCnt
+    endif endif
 ENDRULE
 // Define parent system object reference at coil
 RULE NEW CoilClg:ParentAirSysRef
@@ -424,6 +494,23 @@ ENDRULE
 
 // Calculate actual fan heat at design condition
 // =========================== AirSystem ======================================
+RULE NEW AirSys:PropSupFanHtDsgn
+  DATATYPE
+    Float
+  LONGFORM
+    ProposedSupplyFanHeatDesign
+  DESCRIPTION
+    "The total proposed supply fan heat of the AirSystem at design conditions."
+  INPUTCLASS 
+    NotInput         
+  UNITS 
+    Btu/h
+  SIZING_PROPOSED
+    if( BaseSysNum > 0 .OR. LocalCompAssigned( PropVentOnlyZnSysRef ) )
+    then UNDEFINED // FanHtDsgn was not calculated
+    else SumChildrenIf( Fan:FanHtDsgn, Fan:IsSupFan )
+    endif
+ENDRULE
 RULE NEW AirSys:SupFanHtDsgn
   DATATYPE
     Float
@@ -440,8 +527,42 @@ RULE NEW AirSys:SupFanHtDsgn
   ANNUAL
     SumChildrenIf( Fan:FanHtDsgn, Fan:IsSupFan )
 ENDRULE
-
+RULE NEW AirSys:BaseSupFanHtDsgnChange
+  DATATYPE
+    Float
+  LONGFORM
+    BaselineSupplyFanHeatDesignChange
+  DESCRIPTION
+    "The change of total supply fan heat of the AirSystem at design conditions
+     from proposed to baseline."
+  INPUTCLASS 
+    NotInput         
+  UNITS 
+    Btu/h
+  ANNUAL
+    if( IsBaseHlthCareSys > 0 .AND. LocalCompAssigned( PropVentOnlyZnSysRef ) < 1 )
+    then SupFanHtDsgn - PropSupFanHtDsgn
+    else UNDEFINED
+    endif
+ENDRULE
 // =========================== ZoneSystem ======================================
+RULE NEW ZnSys:PropSupFanHtDsgn
+  DATATYPE
+    Float
+  LONGFORM
+    ProposedSupplyFanHeatDesign
+  DESCRIPTION
+    "The total proposed supply fan heat of the AirSystem at design conditions."
+  INPUTCLASS 
+    NotInput         
+  UNITS 
+    Btu/h
+  SIZING_PROPOSED
+    if( BaseSysNum > 0 .OR. Type = "VentilationOnly" )
+    then UNDEFINED // FanHtDsgn was not calculated
+    else SumChildrenIf( Fan:FanHtDsgn, Fan:IsSupFan )
+    endif
+ENDRULE
 RULE NEW ZnSys:SupFanHtDsgn
   DATATYPE
     Float
@@ -457,6 +578,24 @@ RULE NEW ZnSys:SupFanHtDsgn
     0
   ANNUAL
     SumChildrenIf( Fan:FanHtDsgn, Fan:IsSupFan )
+ENDRULE
+RULE NEW ZnSys:BaseSupFanHtDsgnChange
+  DATATYPE
+    Float
+  LONGFORM
+    BaselineSupplyFanHeatDesignChange
+  DESCRIPTION
+    "The change of total supply fan heat of the AirSystem at design conditions
+     from proposed to baseline."
+  INPUTCLASS 
+    NotInput         
+  UNITS 
+    Btu/h
+  ANNUAL
+    if( IsBaseHlthCareSys > 0 .AND. Type != "VentilationOnly" )
+    then SupFanHtDsgn - PropSupFanHtDsgn
+    else UNDEFINED
+    endif
 ENDRULE
 // Transfer to coils
 RULE NEW CoilClg:SupFanHtDsgn
@@ -487,12 +626,46 @@ RULE NEW CoilHtg:SupFanHtDsgn
     else 0
     endif endif
 ENDRULE
-
+RULE NEW CoilClg:BaseSupFanHtDsgnChange
+  DATATYPE
+    Float
+  LONGFORM
+    BaselineSupplyFanHeatDesignChange
+  ANNUAL
+    if( IsBaseHlthCare > 0 .AND. ParentComp = "ZnSys" )
+    then ZnSys:BaseSupFanHtDsgnChange
+    else
+    if( IsBaseHlthCare > 0 .AND. ParentComp = "AirSys" )
+    then AirSys:BaseSupFanHtDsgnChange
+    else UNDEFINED
+    endif endif
+ENDRULE
+RULE NEW CoilHtg:BaseSupFanHtDsgnChange
+  DATATYPE
+    Float
+  LONGFORM
+    BaselineSupplyFanHeatDesignChange
+  ANNUAL
+    if( IsBaseHlthCare > 0 .AND. ParentComp = "ZnSys" )
+    then ZnSys:BaseSupFanHtDsgnChange
+    else
+    if( IsBaseHlthCare > 0 .AND. ParentComp = "AirSys" )
+    then AirSys:BaseSupFanHtDsgnChange
+    else UNDEFINED
+    endif endif
+ENDRULE
 
 // ********** Status ***********************************************************
 RULE CoilClg:Status
   DESCRIPTION
     "The status of the system or component, used for additions/alterations."
+  HELP
+    "The status of this component is inherited from the status of its parent
+     AirSystem or ZoneSystem, and therefore cannot be changed. In the case of
+     ChilledWater coils connected to a central plant, the status of the coil 
+     reflects whether the status of the primary equipment; i.e. a ChilledWater
+     coil connected to an existing plant with new chillers is reflected as
+     having a 'New' status."
   INPUTCLASS 
     NotInput
 ; OPTION
@@ -558,7 +731,22 @@ RULE NEW CoilClg:IsHlthCare
     else 0
     endif endif
 ENDRULE
-
+RULE NEW CoilClg:IsBaseHlthCare
+  DATATYPE
+    Integer
+  LONGFORM
+    IsBaselineHealthCare
+  DESCRIPTION
+    "Whether the coil is a baseline cooling coil that is part of
+     that serves a healthcare facility."
+  INPUTCLASS
+    NotInput
+  SIZING
+    if( ParentComp = "AirSys" )
+    then AirSys:IsBaseHlthCareSys
+    else ZnSys:IsBaseHlthCareSys
+    endif
+ENDRULE 
 
 // ---------- Section 5.7.5.1 - General ----------------------------------------
 // ********** Cooling Source ***************************************************
@@ -786,12 +974,14 @@ RULE AirSys:AirSeg:CoilClg:CapTotNetRtd
     else UNCHANGED
     endif
   SIZING
-    if( BaseSysNum > 0 ) 
+    if(BaseSysNum > 0) 
     then UNDEFINED
-    else if( Type = "DirectExpansion" )
+    else if(IsCRAC > 0)
+    then CapSensNetRtd
+    else if(Type = "DirectExpansion")
     then CapTotNetRtd 
     else CapTotGrossRtd
-    endif endif
+    endif endif endif
 ENDRULE
 // For AutoHardSize passive beams
 RULE AirSys:TrmlUnit:CoilClg:CapTotNetRtd
@@ -820,12 +1010,18 @@ RULE ZnSys:CoilClg:CapTotNetRtd
       then // Net is same as gross for non-HP coils
         CapTotGrossRtd
       else 
-      if( IfValidAnd( ZnSys:SupFanCap >= 0 ) .AND. 
+      if( IfValidAnd( ZnSys:SupFanCap > 0 ) .AND. 
           IfValidAnd( ZnSys:AirFlowPerTon > 0 ) )
       then // Calculate capacity based on AutoHardSize cfm/ft2 and cfm/ton 
         ZnSys:SupFanCap / ZnSys:AirFlowPerTon * 12000
+      else
+      if( IfValidAnd( ZnSys:TotCondFlrArea >= 0 ) .AND.
+          IfValidAnd( ZnSys:AirFlowPerSqFt >= 0 ) .AND.
+          IfValidAnd( ZnSys:AirFlowPerTon > 0 ) )
+      then // Calculate capacity based on AutoHardSize cfm/ft2 and cfm/ton for systems w/o fan
+        ZnSys:TotCondFlrArea * ZnSys:AirFlowPerSqFt / SysCnt / ZnSys:AirFlowPerTon* 12000
       else UNDEFINED
-      endif endif endif
+      endif endif endif endif
     else if( Type != "DirectExpansion" .AND.
              Type != "VRF" )
     then CapTotGrossRtd // Net is same as gross for non-DX coils
@@ -882,12 +1078,43 @@ RULE NEW CoilClg:FanHtRtd
     else 0
     endif endif endif
   SIZING
-    if( BaseSysNum > 0 )
+    if(BaseSysNum > 0)
     then 0
-    else ValidOr( FanHtRtd, 0 )
-    endif
+    else if(IsCRAC > 0 .AND. IfValidAnd(FanPwrRtd > 0))
+    then FanPwrRtd * 3412
+    else ValidOr(FanHtRtd, 0)
+    endif endif
 //ANNUAL
 // See below
+ENDRULE
+
+RULE NEW CoilClg:FanPwrRtd
+  DESCRIPTION
+    "The fan power measured at AHRI 1360 rated condition which will be used to adjust NSensCOP 
+    to modeled COP"
+  INPUTCLASS 
+    CondRequired
+  UNITS 
+    kW
+  REPORTPRECISION
+    2
+  DEFAULT
+    if(IsCRAC > 0)
+    then ValidOr(ParentAirSysRef:SupFanPwr, 0)
+    else UNDEFINED
+    endif
+  CHECKCODE
+    if(IfValidAnd(CodeMinNSenCOP > 0) .AND. 
+       IfValidAnd(FanPwrRtd > 0) = 0)
+    then PostError("DX coil '%s' must be specified with fan power measured at AHRI 1360 rated 
+                   condition", Name)
+    else UNCHANGED
+    endif
+  ANNUAL  
+    if(BaseSysNum > 0 .AND. IsCRAC > 0)
+    then ParentAirSysRef:SupFanPwrRat
+    else UNCHANGED
+    endif 
 ENDRULE
 
 RULE NEW CoilClg:PumpPwrRtd
@@ -1041,38 +1268,43 @@ RULE CoilClg:CapTotGrossRtd
   REPORTPRECISION
     -3
   DEFAULT
-    if( IfValidAnd( CapTotNetRtd > 0 ) )
+    if(IfValidAnd(CapTotNetRtd > 0))
     then 
-      if( ( Type = "DirectExpansion" .OR. Type = "VRF" ) .AND. 
-            IfValidAnd( FanHtRtd >= 0 ) )
+      if(IsCRAC > 0 .AND. IfValidAnd(FanPwrRtd >= 0))
+      then CapTotNetRtd + FanPwrRtd *3412
+      else if((Type = "DirectExpansion" .OR. Type = "VRF") .AND. 
+              IfValidAnd(FanHtRtd >= 0))
       then CapTotNetRtd + FanHtRtd
-      else if( Proj:AutoHardSize = 1 )
+      else if(Proj:AutoHardSize = 1)
       then CapTotNetRtd
       else UNDEFINED
-      endif endif
+      endif endif endif
     else UNDEFINED
     endif
   CHECKSIM
-    if( Type = "ChilledWater" .AND. 
-        IfValidAnd( CapTotGrossRtd <= 0 ) )
+    if(Type = "ChilledWater" .AND. 
+        IfValidAnd(CapTotGrossRtd > 0) = 0)
     then // User is required to enter gross capacity
       PostError("Gross capacity for coil '%s' a required input for 
                  ChilledWater coils", Name)
     else UNCHANGED
     endif
   SIZING
-    if( BaseSysNum > 0)
+    if(BaseSysNum > 0)
     then UNDEFINED
-    else if( IfValidAnd( CapTotGrossRtd > 0 ) .AND. 
-             Type != "DirectExpansion" .AND. Type != "VRF" ) 
+    else if(IfValidAnd( CapTotGrossRtd > 0) .AND. 
+            Type != "DirectExpansion" .AND. Type != "VRF") 
     then // User has defined gross capacity
       CapTotGrossRtd
-    else if( IfValidAnd( CapTotNetRtd > 0 ) .AND. 
-           ( Type = "DirectExpansion" .OR. Type = "VRF" ) )
-        then // Calculate gross by adding AHRI fan heat to net capacity
+    else if(IsCRAC > 0 .AND. IfValidAnd(FanPwrRtd >= 0))
+    then // Calculate gross by adding AHRI fan heat to net capacity
+      CapTotNetRtd + FanPwrRtd *3412
+    else if(IfValidAnd(CapTotNetRtd > 0) .AND. 
+           (Type = "DirectExpansion" .OR. Type = "VRF"))
+    then // Calculate gross by adding AHRI fan heat to net capacity
       CapTotNetRtd + FanHtRtd
     else 0
-    endif endif endif
+    endif endif endif endif
   ANNUAL : T24N_2016 T24N_2019
     if( BaseSysNum > 0 )
     then
@@ -1107,11 +1339,11 @@ RULE CoilClg:CapTotGrossRtd
           if( AirSys:IsMultiZnSys .AND. AirSys:BaseHasNoClgZns = AirSys:NumThrmlZnCond )
           then 1 // Set capacity to 1 if is multi-zone AirSys all zones are HasNoClgZns
           else
-// Remove this case that primarily applies to Labs. See issue 2639
-;          if( AirSys:SysVentFlow > AirSys:SupFanCap * ( 1 - Proj:OATolLim ) )
-;          then // System is 100 % OA, do not apply coil sizing ratio
-;            z:CapTotGrossRtdSim / SysCnt + SupFanHtDsgn
-;          else           
+          // Remove this case that primarily applies to Labs. See issue 2639
+          ; if( AirSys:SysVentFlow > AirSys:SupFanCap * ( 1 - Proj:OATolLim ) )
+          ; then // System is 100 % OA, do not apply coil sizing ratio
+          ;   z:CapTotGrossRtdSim / SysCnt + SupFanHtDsgn
+          ; else           
           if( Type = "DirectExpansion" )
           then // Ensure DX coil cap results in at >280 cfm/ton & < 450 cfm/ton
             Max( Min( z:CapTotGrossRtdSim / SysCnt * SizingRat + SupFanHtDsgn,
@@ -1127,7 +1359,7 @@ RULE CoilClg:CapTotGrossRtd
     else z:CapTotGrossRtd
     endif
   ANNUAL : T24N
-// For 2022, set HP capacity to be consistent with cooling capacity
+    // For 2022, set HP capacity to be consistent with cooling capacity
     if( BaseSysNum > 0 )
     then
       if( IfValidAnd( IsDummy > 0 ) )
@@ -1189,16 +1421,32 @@ RULE CoilClg:CapTotGrossRtd
         endif endif
       else 0
       endif endif
+    else if( IsBaseHlthCare > 0 .AND. ParentComp != "TrmlUnit" )
+    then z:CapTotGrossRtd + BaseSupFanHtDsgnChange
     else z:CapTotGrossRtd
+    endif endif
+ENDRULE
+RULE NEW CoilClg:BaseCapTotGrossRtdRatio
+  DESCRIPTION
+    "The ratio of baseline gross total (both sensible and latent) cooling capacity
+     to the proposed gross cooling capacity at AHRI rating conditions."
+  DATATYPE
+    Float
+  INPUTCLASS 
+    NotInput
+  ANNUAL
+    if( IsBaseHlthCare > 0 .AND. ParentComp != "TrmlUnit" )
+    then CapTotGrossRtd / z:CapTotGrossRtd
+    else UNDEFINED
     endif
 ENDRULE
 
 // ------------ ANNUAL rule for FanHtRtd and CapTotNetRtd ----------------------
 RULE NEW CoilClg:FanHtRtd
   ANNUAL
-    if( BaseSysNum > 0 )
+    if(BaseSysNum > 0)
     then
-      if( ParentComp = "ZnSys" )
+      if(ParentComp = "ZnSys")
       then // ZnSys
         if( IfValidAnd( ParentZnSysRef:AddClgToPropSys > 0 ) .AND.
             BaseSysNum = 3 )
@@ -1209,19 +1457,22 @@ RULE NEW CoilClg:FanHtRtd
         then CapTotGrossRtd * Proj:FanHtCoeff   
         else 0
         endif endif
-      else // AirSys
-      if( Type = "DirectExpansion" .AND. IfValidAnd( CapTotGrossRtd >= 0 ) )
+      else // CRAC
+      if(IsCRAC > 0 .AND. IfValidAnd(SupFanHtDsgn >= 0))
+      then SupFanHtDsgn
+      else // AirSys 
+      if(Type = "DirectExpansion" .AND. IfValidAnd(CapTotGrossRtd >= 0))
       then CapTotGrossRtd * Proj:FanHtCoeff   
       else 0
-      endif endif
-    else z:FanHtRtd
+      endif endif endif
+    else FanHtRtd
     endif
 ENDRULE
 
 // -----------------------------------------------------------------------------
 RULE CoilClg:CapTotNetRtd
   ANNUAL 
-    if( BaseSysNum > 0 )
+    if( BaseSysNum > 0 .OR. ( IsBaseHlthCare > 0 .AND. ParentComp != "TrmlUnit" ) )
     then
       // Make adjustment for fan heat for baseline systems with DX coils
       // Q_gross = Q_net + Q_fan 
@@ -1286,6 +1537,16 @@ RULE ZnSys:ClgCap
 ;                  cooling coils, or zero cooling capacity.", Name, Type)
 ;   else UNCHANGED
 ;   endif
+  CHECKCODE
+    if( IsHlthCareSys > 0 .AND. LocalCompAssigned( CtrlZnRef ) )
+    then
+      if( ClgCap < 33000 .OR. ( ClgCap < 54000 .AND. IfValidAnd( CtrlZnRef:HasHtRcvryDOAS > 0 ) ) )
+      then UNCHANGED // Exception 6 to Section 140.4(e)1
+      else PostError("ZoneSystem '%s' required economizer in the Baseline but economizer is not
+                      supported for ZoneSystem. Use AirSystem to model this system.", Name )
+      endif
+    else UNCHANGED
+    endif
   SIZING
     if( BaseSysNum > 0 )
     then UNDEFINED
@@ -1356,40 +1617,52 @@ RULE AirSys:Type
       then // Is SZVAV
         if( IsRetailBaseSys > 0 )
         then // Is Retail building system
+          if( Proj:IsAddOrAlt > 0 )
+          then "SZAC" // Tic 3485: Addition or Alteration, SZVAVAC -> SZAC
+          else
           if( AirSys:Type = "SZVAVHP" .AND. Proj:CliZnNum >= 2 .AND. Proj:CliZnNum <= 15 ) 
           then "SZHP" // Change SZVAVHP -> SZHP for CZ 2-15
           else
           if( AirSys:Type = "SZVAVDFHP" )
           then "SZAC" // Change SZVAVDFHP -> SZAC for CZ 1 & 16
           else UNCHANGED
-          endif endif
+          endif endif endif
         else
         if( IsSchoolBaseSys > 0 )
         then // Is School building system
+          if( Proj:IsAddOrAlt > 0 )
+          then "SZAC" // Tic 3485: Addition or Alteration, SZVAVAC -> SZAC
+          else
           if( AirSys:Type = "SZVAVHP" .AND. Proj:CliZnNum >= 2 .AND. Proj:CliZnNum <= 15 ) 
           then "SZHP" // Change SZVAVHP -> SZHP for CZ 2-15
           else
           if( AirSys:Type = "SZVAVDFHP" )
           then "SZDFHP" // Change SZVAVDFHP -> SZDFHP for CZ 1 & 16
           else UNCHANGED
-          endif endif 
+          endif endif endif
         else
         if( IsOfficeBaseSys > 0 )
         then // Is Office building system
+          if( Proj:IsAddOrAlt > 0 )
+          then "SZAC" // Tic 3485: Addition or Alteration, SZVAVAC -> SZAC
+          else
           if( AirSys:Type = "SZVAVHP" .AND. Proj:CliZnNum >= 1 .AND. Proj:CliZnNum <= 15 ) 
           then "SZHP" // Change SZVAVHP -> SZHP for CZ 1-15
           else
           if( AirSys:Type = "SZVAVDFHP" )
           then "SZDFHP" // Change SZVAVDFHP -> SZHP for CZ 16
           else UNCHANGED
-          endif endif
+          endif endif endif
         else
         if( IsWarehouseOfficeBaseSys > 0 )
         then // Is Warehouse building 'Office' system
+          if( Proj:IsAddOrAlt > 0 )
+          then "SZAC" // Tic 3485: Addition or Alteration, SZVAVAC -> SZAC
+          else
           if( AirSys:Type = "SZVAVHP" )
           then "SZHP" // Change SZVAVHP -> SZHP for all CZ
           else UNCHANGED
-          endif
+          endif endif
         else // Regular NonRes system map
           "SZAC" 
         endif endif endif endif
@@ -1451,7 +1724,19 @@ RULE AirSys:AirSeg:CoilHtg:Type
     else UNCHANGED
     endif
 ENDRULE
-// Update BasSysNumOpt based on AirSys:Type change
+// Update BaseSysNum based on AirSys:Type change
+// THIS RULE NOT USED SINCE FOR T24N_2022+, BaseSysNum = 3 only used for NonRes PropNoClg system
+// Added here for clarity
+;RULE AirSys:BaseSysNum
+;  ANNUAL : T24N_2016
+;    UNCHANGED
+;  ANNUAL : T24N
+;    if( BaseSysNum = 7 .AND. ( Type = "SZAC" .OR. Type = "SZHP" ) )
+;    then 3
+;    else UNCHANGED
+;    endif
+;ENDRULE
+// Update BaseSysNumOpt based on AirSys:Type change
 RULE AirSys:BaseSysNumOpt
   ANNUAL : T24N_2016
     UNCHANGED
@@ -1463,12 +1748,22 @@ RULE AirSys:BaseSysNumOpt
     endif
 ENDRULE
 // Update UnitaryCat based on AirSys:Type change
-RULE AirSys:BaseSysNumOpt
+RULE NEW AirSys:UnitaryCat
   ANNUAL : T24N_2016
     UNCHANGED
   ANNUAL : T24N
     if( ( BaseSysNum = 7 .OR. BaseSysNum = 3 ) .AND. 
         ( Type = "SZAC" .OR. Type = "SZVAVAC" ) ) 
+    then "AC"
+    else UNCHANGED
+    endif
+ENDRULE
+RULE NEW CoilClg:SysUnitaryCat
+  ANNUAL : T24N_2016
+    UNCHANGED
+  ANNUAL : T24N
+    if( ( BaseSysNum = 7 .OR. BaseSysNum = 3 ) .AND. 
+        ( SysType = "SZAC" .OR. SysType = "SZVAVAC" ) ) 
     then "AC"
     else UNCHANGED
     endif
@@ -1811,6 +2106,25 @@ RULE CoilClg:CapTotRtdStageFrac[2]
     endif
 ENDRULE
 
+// -----------------------------------------------------------------------------
+// Convert EERAdj to EIR for simulation purposes
+RULE NEW CoilClg:HasPRE
+  DESCRIPTION
+    "A flag that indicates the system has Pumped Refrigerant Economizer (PRE)."
+  HELP
+    "This option is only available for Computer Room Air Conditioner (CRAC)."
+  DATATYPE
+    Integer
+  INPUTCLASS 
+    Optional
+  DEFAULT
+    0
+  SIZING
+    if(IsCRAC)
+    then ValidOr(HasPRE, 0)
+    else 0
+    endif
+ENDRULE
 
 // ********** Cooling Capacity Adjustment Curves *******************************
 RULE CoilClg:Cap_fTempCrvRef
@@ -1847,8 +2161,11 @@ RULE CoilClg:Cap_fTempCrvRef
                SysType = "SPVAC" .OR. SysType = "SPVHP" ) .AND.
              IfValidAnd( AirSys:HasAirEcono = 0 ) )
         then RuleLibrary(CrvDblQuad, "CoilClgPTACQRatio_fTwbToadbSI")
+        else
+        if( HasPRE )
+        then RuleLibrary( CrvDblQuad, "CoilCLgCRACwPREQRatio_fTwbToadbSI" )
         else RuleLibrary( CrvDblQuad, "CoilClgDXQRatio_fTwbToadbSI" )
-        endif endif
+        endif endif endif
       else UNDEFINED  // Should never land here
       endif endif endif
     else
@@ -2054,10 +2371,23 @@ RULE CoilClg:FluidFlowRtDsgn
       then CapTotGrossRtd /( 500.19 * FluidSegInRef:ParentFluidSysRef:DsgnSupWtrDelT)
       else UNDEFINED
       endif
+    else if( IsBaseHlthCare > 0 .AND. ParentComp != "TrmlUnit" .AND. IfValidAnd( z:FluidFlowRtDsgn > 0 ) )
+    then // Adjust flow rate based on capacity change
+         z:FluidFlowRtDsgn * BaseCapTotGrossRtdRatio
     else z:FluidFlowRtDsgn
-    endif
+    endif endif
 ENDRULE   
 
+RULE NEW CoilClg:PumpPwrRtd
+  ANNUAL
+    if( IsBaseHlthCare > 0 .AND. ParentComp != "TrmlUnit" .AND.
+        Type = "DirectExpansion" .AND. 
+        CndsrType = "WaterSource" )
+    then 
+      ( ValidOr( FluidFlowRtDsgn, 5 ) * 0.0631 ) * ( ValidOr( CoilHdDsgn, 5 ) * 2990 ) / 300
+    else 0
+    endif
+ENDRULE
 // Load on water side of coil
 ;RULE CoilClg:FluidLdDsgn
 ;  DESCRIPTION
@@ -2127,6 +2457,63 @@ RULE CoilClg:CoilHdDsgn
     endif endif
 ENDRULE
 
+// ********** Capacity Adjustment For CRAC Units *******************************
+RULE NEW CoilClg:IndoorWBTRtd
+  DESCRIPTION
+    "The rated condition indoor wet bulb temperature."
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  UNITS
+    F
+  SIZING
+    if(IsCRAC > 0)
+    then
+      switch(AirSys:Config)
+        case "Floor-Mounted (Downflow)"                                 : 64.25
+        case "Floor-Mounted (Upflow - Ducted)"                          : 64.25
+        case "Floor-Mounted (Upflow - Nonducted)"                       : 60.86
+        case "Floor-Mounted (Horizontal)"                               : 67.40
+        case "Ceiling-Mounted (Ducted Discharge and Ducted Return)"     : 60.86
+        case "Ceiling-Mounted (Ducted Discharge and Free Air Return)"   : 60.86
+        case "Ceiling-Mounted (Free Air Discharge and Ducted Return)"   : 60.86
+        case "Ceiling-Mounted (Free Air Discharge and Free Air Return)" : 60.86
+        default : 67
+      endswitch
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW CoilClg:CapAdjFactor
+  DESCRIPTION
+    "The factor represents the ratio of the capacity at the AHRI Standrad 210/240 condition to the 
+     capacity at the AHRI Standard 1360 condition based on the performance curve we use. Because the 
+     curve we use passes through 1 at the Standard 210/240 condition we need to adjust the input 
+     capacity by this factor."
+  DATATYPE
+    Float
+  INPUTCLASS 
+    NotInput
+  SIZING
+    if(IsCRAC > 0)
+    then 0.8740302 - 0.0011416 * IndoorWBTRtd + 0.0001711 * pow( IndoorWBTRtd, 2) - 0.002957 * 95 + 0.0000102 * pow(95, 2) - 0.0000592 * IndoorWBTRtd * 95
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE CoilClg:CapTotGrossRtdSim
+  SIZING
+    if(IfValidAnd(CapTotGrossRtd > 1) .AND. IfValidAnd(CapAdjFactor > 1))
+    then CapTotGrossRtd / CapAdjFactor
+    else UNCHANGED
+    endif
+  ANNUAL
+    if(IfValidAnd(CapTotGrossRtd > 1) .AND. IfValidAnd(CapAdjFactor > 1))
+    then CapTotGrossRtd / CapAdjFactor
+    else UNCHANGED
+    endif
+ENDRULE
 
 // ********** Simulated Capacities *********************************************
 RULE CoilClg:CapTotGrossRtdSim
@@ -2142,7 +2529,7 @@ RULE CoilClg:CapTotGrossRtdSim
     0
   DEFAULT
     if( IfValidAnd( CapTotGrossRtd > 1 ) )
-    then CapTotGrossRtd * SysCnt
+    then CapTotGrossRtd * SysCntSim
     else 1
     endif
   SIZING
@@ -2151,7 +2538,7 @@ RULE CoilClg:CapTotGrossRtdSim
     // This value reflects multipliers of zone loads
   ANNUAL
     if( IfValidAnd( CapTotGrossRtd > 1 ) )
-    then CapTotGrossRtd * SysCnt
+    then CapTotGrossRtd * SysCntSim
     else 1
     endif
 ENDRULE
@@ -2174,14 +2561,14 @@ RULE NEW CoilClg:CapTotNetRtdSim
     0
   DEFAULT
     if( IfValidAnd( CapTotNetRtd > 0 ) )
-    then CapTotNetRtd * SysCnt
+    then CapTotNetRtd * SysCntSim
     else 0
     endif
   SIZING
     UNDEFINED
   ANNUAL
     if( IfValidAnd( CapTotNetRtd > 0 ) )
-    then CapTotNetRtd * SysCnt
+    then CapTotNetRtd * SysCntSim
     else 0
     endif
 ENDRULE
@@ -2200,7 +2587,7 @@ RULE CoilClg:FluidFlowRtDsgnSim
     1
   DEFAULT
     if( IfValidAnd( FluidFlowRtDsgn > 0 ) )
-    then FluidFlowRtDsgn * SysCnt
+    then FluidFlowRtDsgn * SysCntSim
     else UNDEFINED
     endif
   SIZING
@@ -2209,7 +2596,7 @@ RULE CoilClg:FluidFlowRtDsgnSim
     // This value reflects multipliers of zone loads
   ANNUAL
     if( IfValidAnd( FluidFlowRtDsgn > 0 ) )
-    then FluidFlowRtDsgn * SysCnt
+    then FluidFlowRtDsgn * SysCntSim
     else UNDEFINED
     endif
 ENDRULE
@@ -2317,6 +2704,39 @@ RULE NEW CoilClg:CapHydronic
     endif
 ENDRULE
 
+RULE NEW CoilClg:PlantIsNew
+  DATATYPE
+    Integer
+  LONGFORM
+    PlantIsNew
+  DESCRIPTION
+    "A flag that indicates if the plant that is connected to is considered 'New'."
+  HELP
+    "If chilled water plant that serves the coil has any new capacity, this flag is 1"
+  INPUTCLASS
+    NotInput  
+  DEFAULT
+    if( Type = "ChilledWater" .AND. 
+        IfValidAnd( CapTotGrossRtdSim >= 0 ) )
+    then
+      if( IfValidAnd( FluidSysRef:ClgCapNew > 0 ) )
+      then 1
+      else 0
+      endif
+    else 0
+    endif
+  ANNUAL
+    if( Type = "ChilledWater" .AND. 
+        IfValidAnd( CapTotGrossRtdSim >= 0 ) )
+    then
+      if( IfValidAnd( FluidSysRef:ClgCapNew > 0 ) )
+      then 1
+      else 0
+      endif
+    else 0
+    endif
+ENDRULE
+
 RULE NEW CoilClg:CapWSHP
   DATATYPE
     Float
@@ -2335,7 +2755,11 @@ RULE NEW CoilClg:CapWSHP
     endif
   ANNUAL
     if( IfValidAnd( HtRejLdSim >= 0 ) )
-    then HtRejLdSim
+    then 
+      if( IsBaseHlthCare > 0 )
+      then CapTotGrossRtdSim * ( 1 + ( 3.412 / ValidOr( DXEERAdj, 12 ) ) )
+      else HtRejLdSim
+      endif
     else 0
     endif
 ENDRULE
@@ -2468,85 +2892,119 @@ RULE NEW ZnSys:CoilClgCapNonHydronic
     SumChildren( CoilClg:CapNonHydronic )
 ENDRULE
 
-;// -----------------------------------------------------------------------------
-;// ********** Sensible Cooling Capacity ****************************************
-;RULE CoilClg:SensHtRatRtd
-;  DESCRIPTION
-;    "The sensible capacity ratio - the gross sensible capacity of the coil
-;     divided by the total gross capacity of a cooling coil or packaged DX
-;     system at AHRI rating conditions."
-;  REFERENCE 
-;    NACM Section 5.7.5.1
-;  INPUTCLASS 
-;    NotInput     
-;  MINIMUM 
-;    0.3
-;  COMMONMINIMUM
-;    0.6
-;  MAXIMUM
-;    0.9
-;  DEFAULT
-;    0.78
-;  SIZING
-;    if( BaseSysNum > 0 )
-;    then UNDEFINED
-;    else u:SensHtRatRtd
-;    endif
-;  ANNUAL
-;    0.78
-;ENDRULE
-;// -----------------------------------------------------------------------------
-;RULE CoilClg:CapSensGrossRtd
-;  DESCRIPTION
-;    "The gross sensible cooling capacity of a cooling coil or packaged DX system 
-;     at AHRI rating conditions."
-;  HELP
-;    "The gross sensible capacity is the sensible cooling cpacity of the coil 
-;     without adjustments for fan heat."
-;  REFERENCE 
-;    NACM Section 5.7.5.1
-;  INPUTCLASS 
-;    NotInput
-;  MINIMUM 
-;    0
-;  COMMONMINIMUM
-;    300
-;  COMMONMAXIMUM
-;    2400000  
-;  UNITS 
-;    Btu/h
-;  DEFAULT
-;    if( IfValidAnd( CapTotGrossRtd > 0 ) ) then
-;      CapTotGrossRtd * SensHtRatRtd
-;    else 0
-;    endif
-;  SIZING
-;    if( IfValidAnd( CapTotGrossRtd > 0 ) ) then
-;      CapTotGrossRtd * SensHtRatRtd
-;    else 0
-;    endif
-;  ANNUAL
-;    CapTotGrossRtd * SensHtRatRtd
-;ENDRULE
-;// -----------------------------------------------------------------------------
-;RULE CoilClg:CapSensGrossRtdSim
-;  DESCRIPTION
-;    "The sensible cooling capacity at design conditions, for simulation" 
-;  INPUTCLASS 
-;    NotInput
-;  MINIMUM 
-;    0
-;  UNITS 
-;    Btu/h
-;  SIZING
-;    if( IfValidAnd( CapSensGrossRtd > 0 ) ) then
-;      CapSensGrossRtd * SysCnt
-;    else 0
-;    endif
-;  ANNUAL
-;;  ANNUAL_PROPOSED
-;    CapSensGrossRtd * SysCnt
-;ENDRULE
+// -----------------------------------------------------------------------------
+// ********** Sensible Cooling Capacity ****************************************
+RULE CoilClg:SensHtRatRtd
+  DESCRIPTION
+    "The sensible capacity ratio - the gross sensible capacity of the coil
+     divided by the total gross capacity of a cooling coil or packaged DX
+     system at AHRI rating conditions."
+  INPUTCLASS 
+    NotInput     
+  MINIMUM 
+    0.3
+  COMMONMINIMUM
+    0.6
+  MAXIMUM
+    1
+  DEFAULT
+    if(IsCRAC > 0)
+    then 1
+    else UNDEFINED ; 0.78
+    endif
+  SIZING
+    if( BaseSysNum > 0 )
+    then UNDEFINED
+    else u:SensHtRatRtd
+    endif
+  ANNUAL
+    if(IsCRAC > 0)
+    then 1
+    else UNDEFINED ; 0.78
+    endif
+ENDRULE
+// -----------------------------------------------------------------------------
+RULE CoilClg:CapSensNetRtd
+  DESCRIPTION
+    "The net sensible cooling capacity of a cooling coil at AHRI 1360 rating conditions."
+  HELP
+    "The net sensible capacity is the sensible cooling cpacity of the coil without adjustments for 
+     fan heat."
+  INPUTCLASS 
+    CondRequired     
+  MINIMUM 
+    0
+  COMMONMINIMUM
+    300
+  COMMONMAXIMUM
+    2400000
+  UNITS 
+    Btu/h
+  DEFAULT
+    if(IsCRAC > 0 .AND. u:Proj:AutoHardSize = 1)
+    then CapTotNetRtd
+    else UNDEFINED
+    endif
+  ANNUAL
+    if(BaseSysNum > 0 .AND. IsCRAC > 0)
+    then CapTotNetRtd
+    else UNCHANGED
+    endif
+ENDRULE
+RULE CoilClg:CapSensGrossRtd
+  DESCRIPTION
+    "The gross sensible cooling capacity of a cooling coil or packaged DX system 
+     at AHRI rating conditions."
+  HELP
+    "The gross sensible capacity is the sensible cooling cpacity of the coil 
+     without adjustments for fan heat."
+  INPUTCLASS 
+    NotInput
+  MINIMUM 
+    0
+  COMMONMINIMUM
+    300
+  COMMONMAXIMUM
+    2400000  
+  UNITS 
+    Btu/h
+  DEFAULT
+    if(IfValidAnd(CapTotGrossRtd > 0) .AND. IfValidAnd(SensHtRatRtd > 0))
+    then CapTotGrossRtd * SensHtRatRtd
+    else UNDEFINED
+    endif
+  SIZING
+    if(IfValidAnd(CapTotGrossRtd > 0) .AND. IfValidAnd(SensHtRatRtd > 0))
+    then CapTotGrossRtd * SensHtRatRtd
+    else UNDEFINED
+    endif
+  ANNUAL
+    if(IfValidAnd(CapTotGrossRtd > 0) .AND. IfValidAnd(SensHtRatRtd > 0))
+    then CapTotGrossRtd * SensHtRatRtd
+    else UNDEFINED
+    endif
+ENDRULE
+// -----------------------------------------------------------------------------
+RULE CoilClg:CapSensGrossRtdSim
+  DESCRIPTION
+    "The sensible cooling capacity at design conditions, for simulation" 
+  INPUTCLASS 
+    NotInput
+  MINIMUM 
+    0
+  UNITS 
+    Btu/h
+  SIZING
+    if(IfValidAnd(CapSensGrossRtd > 0))
+    then CapSensGrossRtd * SysCnt
+    else UNDEFINED
+    endif
+  ANNUAL
+    if(IfValidAnd(CapSensGrossRtd > 0))
+    then CapSensGrossRtd * SysCnt
+    else UNDEFINED
+    endif
+ENDRULE
 ;// -----------------------------------------------------------------------------
 ;// ********** Sensible Cooling Capacity by Stage *******************************
 ;RULE AirSys:AirSeg:CoilClg:CapSensRtdStageFrac[1]
@@ -2671,45 +3129,6 @@ ENDRULE
 ;    UNDEFINED // Zone systems currently cannot have multistage cooling equipment. 
 ;ENDRULE
 ;
-;;RULE CoilClg:CapSensNetRtd
-;  DESCRIPTION
-;    "The gross sensible cooling capacity of a cooling coil or packaged DX system 
-;     at AHRI rating conditions."
-;  HELP
-;    "The gross sensible capacity is the sensible cooling cpacity of the coil 
-;     without adjustments for fan heat."
-;  REFERENCE 
-;    NACM Section 5.7.5.1
-;  INPUTCLASS 
-;    Optional     
-;  MINIMUM 
-;    0
-;  COMMONMINIMUM
-;    300
-;  COMMONMAXIMUM
-;    2400000
-;  UNITS 
-;    Btu/h
-;// Removed default since sensible capacity is now auto-sized in simulation
-;;  DEFAULT
-;;    if( LocalStatus( u:CapSensNetRtd ) < 5 .AND. u:Proj:AutoHardSize = 1 )
-;;    then // For PROPOSED AutoHardSizing only
-;;      u:CapTotNetRtd*u:SensHtRatRtd
-;;    else UNDEFINED
-;;    endif
-;  PROPOSED
-;    u:CapSensNetRtd
-;ENDRULE
-;RULE CoilClg:CapSensNetRtd
-;  BASELINESIZING  
-;    UNDEFINED // Not used
-;  BASELINE  
-;    if( b:Type = "DirectExpansion" )
-;    then // Make adjustment for fan heat for baseline systems with DX coils
-;      b:CapSensGrossRtd - b:FanHtRtd
-;    else b:CapSensGrossRtd // Net = Gross for other coils
-;    endif
-;ENDRULE
 ;RULE NEW CoilClg:SensHtRatRtd
 ;  DATATYPE
 ;    Float

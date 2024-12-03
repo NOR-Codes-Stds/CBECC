@@ -33,86 +33,406 @@
 
 //Relevant ACM Section: ...
 
+;RULE Proj:Action
+;  DEFAULT
+;    PostMessageToLog( "START PV rules..." )
+;ENDRULE
+;;    StoreBEMProc( "begin PV defaulting", 0 )
 
-////////////////////////////////////////////////////////////////////////////////
-// Project-level SARA (Solar Access Roof Area) data - SAC 04/21/22
+//////////////////////////////////////////////////////////////////////////////// SAC 10/25/23
+// flags to force PV/Battery simulation on/off
 
-RULE Proj:SolAccessRfArea
+RULE Proj:AllowPropPVBatt
   DESCRIPTION
-    "SARA includes the area of the building's roof space capable of structurally 
-    supporting a PV system, and the area of all roof space on covered parking 
-    areas, carports, and all other newly constructed structures on the site that 
-    are compatible with supporting a PV system per Title 24, Part 2, Section 1511.2.
-    (program default to all roof area)
-
-    Excludes:
-
-    A) Any area that has less than 70 percent annual solar access.
-
-    B) Occupied roofs as specified by CBC Section 503.1.4.
-
-    C) Roof space that is otherwise not available due to compliance with other 
-    building code requirements if confirmed by the Executive Director."
+    "-1 to ignore flag, 0 to remove PV & Battery in Proposed model and 1 retain (even for EAA)"
   INPUTCLASS
-    Optional
+    Prescribed
   DEFAULT 
-    SumAll( Roof:Area ) + SumAll( ResCathedralCeiling:Area ) +
-    SumAll( ResAttic:DeckArea )
+    if (LocalStatus( AllowPropPVBatt ) < 1)
+    then  -1
+    else  UNCHANGED  endif
 ENDRULE
 
-RULE Proj:T24StdPVPwrDens
+RULE Proj:AllowStdPV
   DESCRIPTION
-    "min/default PV power density from Std sec 140.10"
+    "-1 to ignore flag, 0 to remove PV in Standard model(s) and 1 retain (even for EAA)"
   INPUTCLASS
-    NotInput
+    Prescribed
   DEFAULT 
-    14
+    if (LocalStatus( AllowStdPV ) < 1)
+    then  -1
+    else  UNCHANGED  endif
 ENDRULE
 
-RULE Proj:SolAccessRfAreaPVPwr
+RULE Proj:AllowStdBatt
   DESCRIPTION
-    "min PV system capacity based on SARA (Std sec 140.10)"
+    "-1 to ignore flag, 0 to remove Battery in Standard model(s) and 1 retain (even for EAA)"
   INPUTCLASS
-    NotInput
+    Prescribed
   DEFAULT 
-    SolAccessRfArea * T24StdPVPwrDens / 1000
-ENDRULE
-
-RULE Proj:SolAccessRfAreaPVMsg
-  DEFAULT 
-    if (SolAccessRfAreaPVPwr < 4) then  UNDEFINED
-    else if (SumAll( Bldg:TotCondFlrArea ) > 0)
-    then  Format( "(implies PV capacity of %.0f kW @ %.0f W/ft2 | SARA %.1f% of building cond area)",
-               SolAccessRfAreaPVPwr, T24StdPVPwrDens, (SolAccessRfArea * 100 / SumAll( Bldg:TotCondFlrArea )) )
-    else  Format( "(implies PV capacity of %.0f kW @ %.0f W/ft2)", SolAccessRfAreaPVPwr, T24StdPVPwrDens )
-    endif endif
+    if (LocalStatus( AllowStdBatt ) < 1)
+    then  -1
+    else  UNCHANGED  endif
 ENDRULE
 
 
 //////////////////////////////////////////////////////////////////////////////// SAC 04/21/22
 // 2022+ Prescribed PV Requirements (for std design) - BldgType & Area rules
-RULE NEW Spc:PVBattSizeBldgType
+   // altered logic top prevent PV/Batt for MFam Addition Alone - SAC 06/01/23   // account for Allow* flags - SAC 10/25/23
+RULE NEW Proj:DisableAllPVBattRequirements
   LONGFORM
-    PhotovoltaicBatterySizeBuildingType
+    DisableAllPVBatteryRequirements
   DATATYPE
-    String
+    Integer
+  REFERENCE
+    2022+ Standards Tables 140.10-A,B
+  DESCRIPTION
+    "index of reason for PV/Batt requirements to be relaxed (0 = normal requirements enforced, >0 ID of reason for bypass of requirements)"
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (     IfValidAnd( AllowStdPV      > 0 ) ) then  0
+    else if (IfValidAnd( AllowPropPVBatt = 0 ) .AND.
+             IfValidAnd( AllowStdPV      = 0 ) .AND.
+             IfValidAnd( AllowStdBatt    = 0 ) ) then  4
+    else if (IfValidAnd( HlthCareFacility > 0 )) then  1
+    else if (IfValidAnd( ResDwellUnits > 0 ) .AND.
+             IfValidAnd( ResCompOpt = "Newly Constructed" )==0) then  2
+    else if (IfValidAnd( ResDwellUnits > 0 )==0 .AND.
+             IfValidAnd( IsNewEnv  > 0 )==0 .AND.
+             IfValidAnd( IsNewMech > 0 )==0 .AND.
+             IfValidAnd( IsAddOrAlt > 0)==1 ) then  3
+    else  0
+    endif endif endif endif endif
+ENDRULE
+
+RULE NEW Spc:ShowPVBattSizeBldgType
+  LONGFORM
+    ShowPhotovoltaicBatterySizeArea
+  DATATYPE
+    Integer
   REFERENCE
     2022+ Standards Tables 140.10-A,B
   HELP
-    "Building type used to determine prescribed PV & battery sizes"
+    "whether or not this Spc contributes to prescribed PV & battery sizes"
   DESCRIPTION
-    "Building type used to determine prescribed PV & battery sizes"
+    "whether or not this Spc contributes to prescribed PV & battery sizes"
   INPUTCLASS
     NotInput
   DEFAULT : T24N_2019
     UNDEFINED
   DEFAULT
-    if (enumvalue(SpcFunc) < 1)
-    then "none"
-    else SpaceFunctionData:PVBatteryBldgType("FuncType", SpcFunc) 
+    if (enumvalue(SpcFunc) < 1 .OR. CondgType == "Plenum" .OR.
+        Proj:DisableAllPVBattRequirements .OR.
+        (LocalStatus( IsHlthCare ) > 5 .AND. IfValidAnd( IsHlthCare > 0 )))
+    then  0
+    else if ( SpaceFunctionData:HlthCareEligible( "FuncType", Spc:SpcFunc ) .AND.
+              LocalStatus( IsHlthCare ) < 6 .AND.
+              ( IfValidAnd( Proj:HlthCareFacility > 0 ) .OR.
+                IfValidAnd ( SpcFunc = "Healthcare Facility and Hospitals (Exam/Treatment Room)" ) .OR.
+                IfValidAnd ( SpcFunc = "Healthcare Facility and Hospitals (Imaging Room)" ) .OR.
+                IfValidAnd ( SpcFunc = "Healthcare Facility and Hospitals (Medical Supply Room)" ) .OR.
+                IfValidAnd ( SpcFunc = "Healthcare Facility and Hospitals (Nursery)" ) .OR.
+                IfValidAnd ( SpcFunc = "Healthcare Facility and Hospitals (Nurse's Station)" ) .OR.
+                IfValidAnd ( SpcFunc = "Healthcare Facility and Hospitals (Operating Room)" ) .OR.
+                IfValidAnd ( SpcFunc = "Healthcare Facility and Hospitals (Patient Room)" ) .OR.
+                IfValidAnd ( SpcFunc = "Healthcare Facility and Hospitals (Physical Therapy Room)" ) .OR.
+                IfValidAnd ( SpcFunc = "Healthcare Facility and Hospitals (Recovery Room)" ) ) )
+    then  0
+    else  1
+    endif endif
+ENDRULE
+;    else if ( IfValidAnd( Proj:PrscrpPVBattClass = "LowRiseRes" ) .OR.
+;              IfValidAnd( Proj:PrscrpPVBattClass = "HiRiseRes_NoPVBatt" ) .OR.
+;              IfValidAnd( Proj:PrscrpPVBattClass = "NonRes_NoPVBatt" ) )
+;    then  0
+;    else if (SpaceFunctionData:PVBatteryBldgType("FuncType", SpcFunc) == "none")
+;    then  0
+
+RULE Spc:PVBattSizeBldgType
+  REFERENCE
+    2022+ Standards Tables 140.10-A,B
+  DESCRIPTION
+    "Building type used to determine prescribed PV & battery sizes"
+  INPUTCLASS
+    Optional
+  RESETS
+    ResetThisWhenTheFollowingIsModified
+      Spc:SpcFunc
+  DEFAULT : T24N_2019
+    "none"
+  DEFAULT
+    if (ShowPVBattSizeBldgType > 0)
+    then  SpaceFunctionData:PVBatteryBldgType("FuncType", SpcFunc) 
+    else  "none"
     endif
 ENDRULE
+;  CHECKCODE
+;    if ( ShowPVBattSizeBldgType < 1 .OR.
+;         ( EnumValue( PVBattSizeBldgType ) > 0 .AND. EnumValue( PVBattSizeBldgType ) < 99 ) )
+;    then  UNCHANGED
+;    else  PostError( "PV/Battery requirement building type (other than 'unspecified') must be specified for Space '%s'.", Name )
+;    endif
 
+RULE NEW ResOtherZn:ShowPVBattSizeBldgType
+  LONGFORM
+    ShowPhotovoltaicBatterySizeArea
+  DATATYPE
+    Integer
+  REFERENCE
+    2022+ Standards Tables 140.10-A,B
+  HELP
+    "whether or not this ResOtherZn contributes to prescribed PV & battery sizes"
+  DESCRIPTION
+    "whether or not this ResOtherZn contributes to prescribed PV & battery sizes"
+  INPUTCLASS
+    NotInput
+  DEFAULT : T24N_2019
+    UNDEFINED
+  DEFAULT
+    if (enumvalue(SpcFunc) < 1 .OR. Proj:DisableAllPVBattRequirements)
+    then  0
+    else  1
+    endif
+ENDRULE
+;    else if ( IfValidAnd( Proj:PrscrpPVBattClass = "LowRiseRes" ) .OR.
+;              IfValidAnd( Proj:PrscrpPVBattClass = "HiRiseRes_NoPVBatt" ) .OR.
+;              IfValidAnd( Proj:PrscrpPVBattClass = "NonRes_NoPVBatt" ) )
+;    then  0
+;    else if (SpaceFunctionData:PVBatteryBldgType("FuncType", SpcFunc) == "none")
+;    then  0
+
+RULE ResOtherZn:PVBattSizeBldgType
+  REFERENCE
+    2022+ Standards Tables 140.10-A,B
+  DESCRIPTION
+    "Building type used to determine prescribed PV & battery sizes"
+  INPUTCLASS
+    Optional
+  RESETS
+    ResetThisWhenTheFollowingIsModified
+      ResOtherZn:SpcFunc
+  DEFAULT : T24N_2019
+    "none"
+  DEFAULT
+    if (ShowPVBattSizeBldgType > 0)
+    then  SpaceFunctionData:PVBatteryBldgType("FuncType", SpcFunc) 
+    else  "none"
+    endif
+ENDRULE
+;  CHECKCODE
+;    if ( ShowPVBattSizeBldgType < 1 .OR.
+;         ( EnumValue( PVBattSizeBldgType ) > 0 .AND. EnumValue( PVBattSizeBldgType ) < 99 ) )
+;    then  UNCHANGED
+;    else  PostError( "PV/Battery requirement building type (other than 'unspecified') must be specified for ResOtherZn '%s'.", Name )
+;    endif
+
+
+; can't rely on Spc:IsHlthCare since it is not yet defaulted - SAC 01/19/23
+RULE NEW Spc:HlthcarePVBattArea
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if ((LocalStatus( IsHlthCare ) > 4 .AND. IfValidAnd( IsHlthCare > 0 )) .OR.
+        (LocalStatus( IsHlthCare ) < 4 .AND. IfValidAnd( Proj:HlthCareFacility > 0 )))
+    then  CondFlrAreaWithMult
+    else  0  endif
+ENDRULE
+
+RULE NEW Story:PredomHlthcareArea
+  LONGFORM
+    PredominantHealthcareArea
+  DATATYPE
+    Float
+  REFERENCE
+    2022+ Standards Tables 140.10-A,B
+  DESCRIPTION
+    "tracking of Spc areas w/ Healthcare checkbox checked"
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    SumChildren( Spc:HlthcarePVBattArea )
+ENDRULE
+;    SumChildrenIf( Spc:CondFlrAreaWithMult, Spc:IsHlthCare > 0 )
+
+; added rules to calculate Predominant Story/ResZnGrp PVBattSizeBldgType
+RULE Story:PredomPVBattSizeBldgTypeArea[1]
+  DEFAULT
+    SumChildrenIf( Spc:CondFlrAreaWithMult, Spc:PVBattSizeBldgType = "Grocery" )
+ENDRULE
+RULE Story:PredomPVBattSizeBldgTypeArea[2]
+  DEFAULT
+    if (IfValidAnd( Bldg:AboveGrdStoryCnt > 3 ))
+    then  SumChildrenIf( Spc:CondFlrAreaWithMult, Spc:PVBattSizeBldgType = "Highrise Multifamily" ) +
+          SumChildren(   ResZn:CondFlrAreaWithMult )
+    else  SumChildrenIf( Spc:CondFlrAreaWithMult, Spc:PVBattSizeBldgType = "Highrise Multifamily" )
+    endif
+ENDRULE
+RULE Story:PredomPVBattSizeBldgTypeArea[3]
+  DEFAULT
+    SumChildrenIf( Spc:CondFlrAreaWithMult, Spc:PVBattSizeBldgType = "Office, Financial, Unleased Tenant" )
+ENDRULE
+RULE Story:PredomPVBattSizeBldgTypeArea[4]
+  DEFAULT
+    SumChildrenIf( Spc:CondFlrAreaWithMult, Spc:PVBattSizeBldgType = "Retail" )
+ENDRULE
+RULE Story:PredomPVBattSizeBldgTypeArea[5]
+  DEFAULT
+    SumChildrenIf( Spc:CondFlrAreaWithMult, Spc:PVBattSizeBldgType = "School" )
+ENDRULE
+RULE Story:PredomPVBattSizeBldgTypeArea[6]
+  DEFAULT
+    SumChildrenIf( Spc:CondFlrAreaWithMult, Spc:PVBattSizeBldgType = "Warehouse" )
+ENDRULE
+RULE Story:PredomPVBattSizeBldgTypeArea[7]
+  DEFAULT
+    SumChildrenIf( Spc:CondFlrAreaWithMult, Spc:PVBattSizeBldgType = "Other" )
+ENDRULE
+RULE Story:PredomPVBattSizeBldgType
+  DEFAULT
+    if      ( PredomHlthcareArea > 0 .AND.
+              PredomHlthcareArea > PredomPVBattSizeBldgTypeArea[7] .AND.
+              PredomHlthcareArea > PredomPVBattSizeBldgTypeArea[6] .AND.
+              PredomHlthcareArea > PredomPVBattSizeBldgTypeArea[5] .AND.
+              PredomHlthcareArea > PredomPVBattSizeBldgTypeArea[4] .AND.
+              PredomHlthcareArea > PredomPVBattSizeBldgTypeArea[3] .AND.
+              PredomHlthcareArea > PredomPVBattSizeBldgTypeArea[2] .AND.
+              PredomHlthcareArea > PredomPVBattSizeBldgTypeArea[1] )  then  100
+    else if ( PredomPVBattSizeBldgTypeArea[7] > 0 .AND.
+              PredomPVBattSizeBldgTypeArea[7] > PredomPVBattSizeBldgTypeArea[6] .AND.
+              PredomPVBattSizeBldgTypeArea[7] > PredomPVBattSizeBldgTypeArea[5] .AND.
+              PredomPVBattSizeBldgTypeArea[7] > PredomPVBattSizeBldgTypeArea[4] .AND.
+              PredomPVBattSizeBldgTypeArea[7] > PredomPVBattSizeBldgTypeArea[3] .AND.
+              PredomPVBattSizeBldgTypeArea[7] > PredomPVBattSizeBldgTypeArea[2] .AND.
+              PredomPVBattSizeBldgTypeArea[7] > PredomPVBattSizeBldgTypeArea[1] )  then  7
+    else if ( PredomPVBattSizeBldgTypeArea[6] > 0 .AND.
+              PredomPVBattSizeBldgTypeArea[6] > PredomPVBattSizeBldgTypeArea[5] .AND.
+              PredomPVBattSizeBldgTypeArea[6] > PredomPVBattSizeBldgTypeArea[4] .AND.
+              PredomPVBattSizeBldgTypeArea[6] > PredomPVBattSizeBldgTypeArea[3] .AND.
+              PredomPVBattSizeBldgTypeArea[6] > PredomPVBattSizeBldgTypeArea[2] .AND.
+              PredomPVBattSizeBldgTypeArea[6] > PredomPVBattSizeBldgTypeArea[1] )  then  6
+    else if ( PredomPVBattSizeBldgTypeArea[5] > 0 .AND.
+              PredomPVBattSizeBldgTypeArea[5] > PredomPVBattSizeBldgTypeArea[4] .AND.
+              PredomPVBattSizeBldgTypeArea[5] > PredomPVBattSizeBldgTypeArea[3] .AND.
+              PredomPVBattSizeBldgTypeArea[5] > PredomPVBattSizeBldgTypeArea[2] .AND.
+              PredomPVBattSizeBldgTypeArea[5] > PredomPVBattSizeBldgTypeArea[1] )  then  5
+    else if ( PredomPVBattSizeBldgTypeArea[2] > 0 .AND.
+              PredomPVBattSizeBldgTypeArea[2] > PredomPVBattSizeBldgTypeArea[4] .AND.
+              PredomPVBattSizeBldgTypeArea[2] > PredomPVBattSizeBldgTypeArea[3] .AND.
+              PredomPVBattSizeBldgTypeArea[2] > PredomPVBattSizeBldgTypeArea[1] )  then  2
+    else if ( PredomPVBattSizeBldgTypeArea[4] > 0 .AND.
+              PredomPVBattSizeBldgTypeArea[4] > PredomPVBattSizeBldgTypeArea[3] .AND.
+              PredomPVBattSizeBldgTypeArea[4] > PredomPVBattSizeBldgTypeArea[1] )  then  4
+    else if ( PredomPVBattSizeBldgTypeArea[1] > 0 .AND.
+              PredomPVBattSizeBldgTypeArea[1] > PredomPVBattSizeBldgTypeArea[3] )  then  1
+    else if ( PredomPVBattSizeBldgTypeArea[3] > 0  )                               then  3
+    else  7  endif endif endif endif endif endif endif endif
+ENDRULE
+
+RULE ResZnGrp:PredomPVBattSizeBldgTypeArea[1]
+  DEFAULT
+    SumChildrenIf( ResOtherZn:CondFlrAreaWithMult, ResOtherZn:PVBattSizeBldgType = "Grocery" )
+ENDRULE
+RULE ResZnGrp:PredomPVBattSizeBldgTypeArea[2]
+  DEFAULT
+    if (IfValidAnd( Bldg:AboveGrdStoryCnt > 3 ))
+    then  SumChildrenIf( ResOtherZn:CondFlrAreaWithMult, ResOtherZn:PVBattSizeBldgType = "Highrise Multifamily" ) +
+          SumChildren(   ResZn:CondFlrAreaWithMult )
+    else  SumChildrenIf( ResOtherZn:CondFlrAreaWithMult, ResOtherZn:PVBattSizeBldgType = "Highrise Multifamily" )
+    endif
+ENDRULE
+RULE ResZnGrp:PredomPVBattSizeBldgTypeArea[3]
+  DEFAULT
+    SumChildrenIf( ResOtherZn:CondFlrAreaWithMult, ResOtherZn:PVBattSizeBldgType = "Office, Financial, Unleased Tenant" )
+ENDRULE
+RULE ResZnGrp:PredomPVBattSizeBldgTypeArea[4]
+  DEFAULT
+    SumChildrenIf( ResOtherZn:CondFlrAreaWithMult, ResOtherZn:PVBattSizeBldgType = "Retail" )
+ENDRULE
+RULE ResZnGrp:PredomPVBattSizeBldgTypeArea[5]
+  DEFAULT
+    SumChildrenIf( ResOtherZn:CondFlrAreaWithMult, ResOtherZn:PVBattSizeBldgType = "School" )
+ENDRULE
+RULE ResZnGrp:PredomPVBattSizeBldgTypeArea[6]
+  DEFAULT
+    SumChildrenIf( ResOtherZn:CondFlrAreaWithMult, ResOtherZn:PVBattSizeBldgType = "Warehouse" )
+ENDRULE
+RULE ResZnGrp:PredomPVBattSizeBldgTypeArea[7]
+  DEFAULT
+    SumChildrenIf( ResOtherZn:CondFlrAreaWithMult, ResOtherZn:PVBattSizeBldgType = "Other" )
+ENDRULE
+RULE ResZnGrp:PredomPVBattSizeBldgType
+  DEFAULT
+    if      ( PredomPVBattSizeBldgTypeArea[7] > 0 .AND.
+              PredomPVBattSizeBldgTypeArea[7] > PredomPVBattSizeBldgTypeArea[6] .AND.
+              PredomPVBattSizeBldgTypeArea[7] > PredomPVBattSizeBldgTypeArea[5] .AND.
+              PredomPVBattSizeBldgTypeArea[7] > PredomPVBattSizeBldgTypeArea[4] .AND.
+              PredomPVBattSizeBldgTypeArea[7] > PredomPVBattSizeBldgTypeArea[3] .AND.
+              PredomPVBattSizeBldgTypeArea[7] > PredomPVBattSizeBldgTypeArea[2] .AND.
+              PredomPVBattSizeBldgTypeArea[7] > PredomPVBattSizeBldgTypeArea[1] )  then  7
+    else if ( PredomPVBattSizeBldgTypeArea[6] > 0 .AND.
+              PredomPVBattSizeBldgTypeArea[6] > PredomPVBattSizeBldgTypeArea[5] .AND.
+              PredomPVBattSizeBldgTypeArea[6] > PredomPVBattSizeBldgTypeArea[4] .AND.
+              PredomPVBattSizeBldgTypeArea[6] > PredomPVBattSizeBldgTypeArea[3] .AND.
+              PredomPVBattSizeBldgTypeArea[6] > PredomPVBattSizeBldgTypeArea[2] .AND.
+              PredomPVBattSizeBldgTypeArea[6] > PredomPVBattSizeBldgTypeArea[1] )  then  6
+    else if ( PredomPVBattSizeBldgTypeArea[5] > 0 .AND.
+              PredomPVBattSizeBldgTypeArea[5] > PredomPVBattSizeBldgTypeArea[4] .AND.
+              PredomPVBattSizeBldgTypeArea[5] > PredomPVBattSizeBldgTypeArea[3] .AND.
+              PredomPVBattSizeBldgTypeArea[5] > PredomPVBattSizeBldgTypeArea[2] .AND.
+              PredomPVBattSizeBldgTypeArea[5] > PredomPVBattSizeBldgTypeArea[1] )  then  5
+    else if ( PredomPVBattSizeBldgTypeArea[2] > 0 .AND.
+              PredomPVBattSizeBldgTypeArea[2] > PredomPVBattSizeBldgTypeArea[4] .AND.
+              PredomPVBattSizeBldgTypeArea[2] > PredomPVBattSizeBldgTypeArea[3] .AND.
+              PredomPVBattSizeBldgTypeArea[2] > PredomPVBattSizeBldgTypeArea[1] )  then  2
+    else if ( PredomPVBattSizeBldgTypeArea[4] > 0 .AND.
+              PredomPVBattSizeBldgTypeArea[4] > PredomPVBattSizeBldgTypeArea[3] .AND.
+              PredomPVBattSizeBldgTypeArea[4] > PredomPVBattSizeBldgTypeArea[1] )  then  4
+    else if ( PredomPVBattSizeBldgTypeArea[1] > 0 .AND.
+              PredomPVBattSizeBldgTypeArea[1] > PredomPVBattSizeBldgTypeArea[3] )  then  1
+    else if ( PredomPVBattSizeBldgTypeArea[3] > 0  )                               then  3
+    else  7  endif endif endif endif endif endif endif
+ENDRULE
+
+; round 2 PVBattSizeBldgType defaulting - SAC 01/14/23
+RULE NEW Spc:ShowPVBattSizeBldgType
+  DEFAULT : T24N_2019
+    UNCHANGED
+  DEFAULT
+    if (EnumValue( PVBattSizeBldgType ) == 99 .AND.
+        Parent( PredomPVBattSizeBldgType ) == 100)
+    then  0
+    else  UNCHANGED  endif
+ENDRULE
+; logic mods to toggle PVBattSizeBldgType for 'default ... predominance' to 'none' for Hlthcare stories - SAC 01/18/23
+RULE Spc:PVBattSizeBldgType
+  DEFAULT : T24N_2019
+    UNCHANGED
+  DEFAULT
+    if (EnumValue( PVBattSizeBldgType ) == 99)
+    then  if (Parent( PredomPVBattSizeBldgType ) == 100)
+          then  "none"
+          else  Parent( PredomPVBattSizeBldgType )
+          endif
+    else  UNCHANGED
+    endif
+ENDRULE
+;    if (Proj:DisableAllPVBattRequirements < 1 .AND. EnumValue( PVBattSizeBldgType ) == 99)
+RULE ResOtherZn:PVBattSizeBldgType
+  DEFAULT : T24N_2019
+    UNCHANGED
+  DEFAULT
+    if (EnumValue( PVBattSizeBldgType ) == 99)
+    then  Parent( PredomPVBattSizeBldgType )
+    else  UNCHANGED
+    endif
+ENDRULE
+;    if (Proj:DisableAllPVBattRequirements < 1 .AND. EnumValue( PVBattSizeBldgType ) == 99)
+
+   ; exclude Plenum spaces from PVBattSizeArea (regardless of PVBattSizeBldgType) - SAC 01/19/23
+   ; fixed error in logic reversing effect of Plenum spaces - SAC 01/20/23
 RULE NEW Spc:PVBattSizeArea
   LONGFORM
     PhotovoltaicBatterySizeArea
@@ -129,32 +449,12 @@ RULE NEW Spc:PVBattSizeArea
   DEFAULT : T24N_2019
     UNDEFINED
   DEFAULT
-    if (IfValidAnd( PVBattSizeBldgType != "none" ))
+    if (IfValidAnd( PVBattSizeBldgType != "none" ) .AND.
+        CondgType != "Plenum")
     then  ValidOr( CondFlrAreaWithMult, 0 )
     else  0  endif
 ENDRULE
-
-RULE NEW ResOtherZn:PVBattSizeBldgType
-  LONGFORM
-    PhotovoltaicBatterySizeBuildingType
-  DATATYPE
-    String
-  REFERENCE
-    2022+ Standards Tables 140.10-A,B
-  HELP
-    "Building type used to determine prescribed PV & battery sizes"
-  DESCRIPTION
-    "Building type used to determine prescribed PV & battery sizes"
-  INPUTCLASS
-    NotInput
-  DEFAULT : T24N_2019
-    UNDEFINED
-  DEFAULT
-    if (enumvalue(SpcFunc) < 1)
-    then "none"
-    else SpaceFunctionData:PVBatteryBldgType("FuncType", SpcFunc) 
-    endif
-ENDRULE
+;    if (Proj:DisableAllPVBattRequirements < 1 .AND. IfValidAnd( PVBattSizeBldgType != "none" ))
 
 RULE NEW ResOtherZn:PVBattSizeArea
   LONGFORM
@@ -176,6 +476,7 @@ RULE NEW ResOtherZn:PVBattSizeArea
     then  ValidOr( ResCondFlrAreaWithMult, 0 ) + ValidOr( NonResCondFlrAreaWithMult, 0 )
     else  0  endif
 ENDRULE
+;    if (Proj:DisableAllPVBattRequirements < 1 .AND. IfValidAnd( PVBattSizeBldgType != "none" ))
 
 RULE NEW ResZn:PVBattSizeResArea
   LONGFORM
@@ -195,6 +496,369 @@ RULE NEW ResZn:PVBattSizeResArea
   DEFAULT
     ValidOr( CondFlrAreaWithMult, 0 )
 ENDRULE
+
+
+; SAC 01/20/23
+RULE Spc:CondPVBattBldgTypeArea[1]
+  REFERENCE
+    2022+ Standards Tables 140.10-A,B
+  DESCRIPTION
+    "Cond area by PVBatt BldgType (1:Grocery, 2:HiRiseRes, 3:Office, 4:Retail, 5:School, 6:Warehouse, 7:Other / 9:Hlthcare, 10:none"
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "Grocery" ) .AND.
+         ( CondgType == "DirectlyConditioned" .OR.
+           CondgType == "IndirectlyConditioned") )
+    then  ValidOr( CondFlrAreaWithMult, 0 )
+    else  UNDEFINED  endif
+ENDRULE
+RULE Spc:CondPVBattBldgTypeArea[2]
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "Highrise Multifamily" ) .AND.
+         ( CondgType == "DirectlyConditioned" .OR.
+           CondgType == "IndirectlyConditioned") )
+    then  ValidOr( CondFlrAreaWithMult, 0 )
+    else  UNDEFINED  endif
+ENDRULE
+RULE Spc:CondPVBattBldgTypeArea[3]
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "Office, Financial, Unleased Tenant" ) .AND.
+         ( CondgType == "DirectlyConditioned" .OR.
+           CondgType == "IndirectlyConditioned") )
+    then  ValidOr( CondFlrAreaWithMult, 0 )
+    else  UNDEFINED  endif
+ENDRULE
+RULE Spc:CondPVBattBldgTypeArea[4]
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "Retail" ) .AND.
+         ( CondgType == "DirectlyConditioned" .OR.
+           CondgType == "IndirectlyConditioned") )
+    then  ValidOr( CondFlrAreaWithMult, 0 )
+    else  UNDEFINED  endif
+ENDRULE
+RULE Spc:CondPVBattBldgTypeArea[5]
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "School" ) .AND.
+         ( CondgType == "DirectlyConditioned" .OR.
+           CondgType == "IndirectlyConditioned") )
+    then  ValidOr( CondFlrAreaWithMult, 0 )
+    else  UNDEFINED  endif
+ENDRULE
+RULE Spc:CondPVBattBldgTypeArea[6]
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "Warehouse" ) .AND.
+         ( CondgType == "DirectlyConditioned" .OR.
+           CondgType == "IndirectlyConditioned") )
+    then  ValidOr( CondFlrAreaWithMult, 0 )
+    else  UNDEFINED  endif
+ENDRULE
+RULE Spc:CondPVBattBldgTypeArea[7]
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "Other" ) .AND.
+         ( CondgType == "DirectlyConditioned" .OR.
+           CondgType == "IndirectlyConditioned") )
+    then  ValidOr( CondFlrAreaWithMult, 0 )
+    else  UNDEFINED  endif
+ENDRULE
+RULE Spc:CondPVBattBldgTypeArea[9]
+  DEFAULT
+    if ( IfValidAnd( IsHlthCare > 0 ) .AND.
+         ( CondgType == "DirectlyConditioned" .OR.
+           CondgType == "IndirectlyConditioned") )
+    then  ValidOr( CondFlrAreaWithMult, 0 )
+    else  UNDEFINED  endif
+ENDRULE
+RULE Spc:CondPVBattBldgTypeArea[10]
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "none" ) .AND.
+         ( CondgType == "DirectlyConditioned" .OR.
+           CondgType == "IndirectlyConditioned") )
+    then  ValidOr( CondFlrAreaWithMult, 0 )
+    else  UNDEFINED  endif
+ENDRULE
+
+RULE Spc:UncondPVBattBldgTypeArea[1]
+  REFERENCE
+    2022+ Standards Tables 140.10-A,B
+  DESCRIPTION
+    "Cond area by PVBatt BldgType (1:Grocery, 2:HiRiseRes, 3:Office, 4:Retail, 5:School, 6:Warehouse, 7:Other / 9:Hlthcare, 10:none"
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "Grocery" ) .AND.
+         ( CondgType == "Unconditioned") )
+    then  ValidOr( FlrArea, 0 ) * ValidOr( Mult, 1 )
+    else  UNDEFINED  endif
+ENDRULE
+RULE Spc:UncondPVBattBldgTypeArea[2]
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "Highrise Multifamily" ) .AND.
+         ( CondgType == "Unconditioned") )
+    then  ValidOr( FlrArea, 0 ) * ValidOr( Mult, 1 )
+    else  UNDEFINED  endif
+ENDRULE
+RULE Spc:UncondPVBattBldgTypeArea[3]
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "Office, Financial, Unleased Tenant" ) .AND.
+         ( CondgType == "Unconditioned") )
+    then  ValidOr( FlrArea, 0 ) * ValidOr( Mult, 1 )
+    else  UNDEFINED  endif
+ENDRULE
+RULE Spc:UncondPVBattBldgTypeArea[4]
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "Retail" ) .AND.
+         ( CondgType == "Unconditioned") )
+    then  ValidOr( FlrArea, 0 ) * ValidOr( Mult, 1 )
+    else  UNDEFINED  endif
+ENDRULE
+RULE Spc:UncondPVBattBldgTypeArea[5]
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "School" ) .AND.
+         ( CondgType == "Unconditioned") )
+    then  ValidOr( FlrArea, 0 ) * ValidOr( Mult, 1 )
+    else  UNDEFINED  endif
+ENDRULE
+RULE Spc:UncondPVBattBldgTypeArea[6]
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "Warehouse" ) .AND.
+         ( CondgType == "Unconditioned") )
+    then  ValidOr( FlrArea, 0 ) * ValidOr( Mult, 1 )
+    else  UNDEFINED  endif
+ENDRULE
+RULE Spc:UncondPVBattBldgTypeArea[7]
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "Other" ) .AND.
+         ( CondgType == "Unconditioned") )
+    then  ValidOr( FlrArea, 0 ) * ValidOr( Mult, 1 )
+    else  UNDEFINED  endif
+ENDRULE
+RULE Spc:UncondPVBattBldgTypeArea[9]
+  DEFAULT
+    if ( IfValidAnd( IsHlthCare > 0 ) .AND.
+         ( CondgType == "Unconditioned") )
+    then  ValidOr( FlrArea, 0 ) * ValidOr( Mult, 1 )
+    else  UNDEFINED  endif
+ENDRULE
+RULE Spc:UncondPVBattBldgTypeArea[10]
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "none" ) .AND.
+         ( CondgType == "Unconditioned") )
+    then  ValidOr( FlrArea, 0 ) * ValidOr( Mult, 1 )
+    else  UNDEFINED  endif
+ENDRULE
+
+RULE ResOtherZn:CondPVBattBldgTypeArea[1]
+  REFERENCE
+    2022+ Standards Tables 140.10-A,B
+  DESCRIPTION
+    "Cond area by PVBatt BldgType (1:Grocery, 2:HiRiseRes, 3:Office, 4:Retail, 5:School, 6:Warehouse, 7:Other / 9:Hlthcare, 10:none"
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "Grocery" ) .AND.
+         ( Type == "Conditioned") )
+    then  ValidOr( CondFlrAreaWithMult, 0 )
+    else  UNDEFINED  endif
+ENDRULE
+RULE ResOtherZn:CondPVBattBldgTypeArea[2]
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "Highrise Multifamily" ) .AND.
+         ( Type == "Conditioned") )
+    then  ValidOr( CondFlrAreaWithMult, 0 )
+    else  UNDEFINED  endif
+ENDRULE
+RULE ResOtherZn:CondPVBattBldgTypeArea[3]
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "Office, Financial, Unleased Tenant" ) .AND.
+         ( Type == "Conditioned") )
+    then  ValidOr( CondFlrAreaWithMult, 0 )
+    else  UNDEFINED  endif
+ENDRULE
+RULE ResOtherZn:CondPVBattBldgTypeArea[4]
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "Retail" ) .AND.
+         ( Type == "Conditioned") )
+    then  ValidOr( CondFlrAreaWithMult, 0 )
+    else  UNDEFINED  endif
+ENDRULE
+RULE ResOtherZn:CondPVBattBldgTypeArea[5]
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "School" ) .AND.
+         ( Type == "Conditioned") )
+    then  ValidOr( CondFlrAreaWithMult, 0 )
+    else  UNDEFINED  endif
+ENDRULE
+RULE ResOtherZn:CondPVBattBldgTypeArea[6]
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "Warehouse" ) .AND.
+         ( Type == "Conditioned") )
+    then  ValidOr( CondFlrAreaWithMult, 0 )
+    else  UNDEFINED  endif
+ENDRULE
+RULE ResOtherZn:CondPVBattBldgTypeArea[7]
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "Other" ) .AND.
+         ( Type == "Conditioned") )
+    then  ValidOr( CondFlrAreaWithMult, 0 )
+    else  UNDEFINED  endif
+ENDRULE
+RULE ResOtherZn:CondPVBattBldgTypeArea[9]
+  DEFAULT
+    UNDEFINED
+ENDRULE
+RULE ResOtherZn:CondPVBattBldgTypeArea[10]
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "none" ) .AND.
+         ( Type == "Conditioned") )
+    then  ValidOr( CondFlrAreaWithMult, 0 )
+    else  UNDEFINED  endif
+ENDRULE
+
+RULE ResOtherZn:UncondPVBattBldgTypeArea[1]
+  REFERENCE
+    2022+ Standards Tables 140.10-A,B
+  DESCRIPTION
+    "Cond area by PVBatt BldgType (1:Grocery, 2:HiRiseRes, 3:Office, 4:Retail, 5:School, 6:Warehouse, 7:Other / 9:Hlthcare, 10:none"
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "Grocery" ) .AND.
+         ( Type == "Unconditioned") )
+    then  ValidOr( Area, 0 ) * ValidOr( Mult, 1 )
+    else  UNDEFINED  endif
+ENDRULE
+RULE ResOtherZn:UncondPVBattBldgTypeArea[2]
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "Highrise Multifamily" ) .AND.
+         ( Type == "Unconditioned") )
+    then  ValidOr( Area, 0 ) * ValidOr( Mult, 1 )
+    else  UNDEFINED  endif
+ENDRULE
+RULE ResOtherZn:UncondPVBattBldgTypeArea[3]
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "Office, Financial, Unleased Tenant" ) .AND.
+         ( Type == "Unconditioned") )
+    then  ValidOr( Area, 0 ) * ValidOr( Mult, 1 )
+    else  UNDEFINED  endif
+ENDRULE
+RULE ResOtherZn:UncondPVBattBldgTypeArea[4]
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "Retail" ) .AND.
+         ( Type == "Unconditioned") )
+    then  ValidOr( Area, 0 ) * ValidOr( Mult, 1 )
+    else  UNDEFINED  endif
+ENDRULE
+RULE ResOtherZn:UncondPVBattBldgTypeArea[5]
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "School" ) .AND.
+         ( Type == "Unconditioned") )
+    then  ValidOr( Area, 0 ) * ValidOr( Mult, 1 )
+    else  UNDEFINED  endif
+ENDRULE
+RULE ResOtherZn:UncondPVBattBldgTypeArea[6]
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "Warehouse" ) .AND.
+         ( Type == "Unconditioned") )
+    then  ValidOr( Area, 0 ) * ValidOr( Mult, 1 )
+    else  UNDEFINED  endif
+ENDRULE
+RULE ResOtherZn:UncondPVBattBldgTypeArea[7]
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "Other" ) .AND.
+         ( Type == "Unconditioned") )
+    then  ValidOr( Area, 0 ) * ValidOr( Mult, 1 )
+    else  UNDEFINED  endif
+ENDRULE
+RULE ResOtherZn:UncondPVBattBldgTypeArea[9]
+  DEFAULT
+    UNDEFINED
+ENDRULE
+RULE ResOtherZn:UncondPVBattBldgTypeArea[10]
+  DEFAULT
+    if ( IfValidAnd( PVBattSizeBldgType = "none" ) .AND.
+         ( Type == "Unconditioned") )
+    then  ValidOr( Area, 0 ) * ValidOr( Mult, 1 )
+    else  UNDEFINED  endif
+ENDRULE
+
+RULE Proj:CondPVBattBldgTypeArea[1]
+  REFERENCE
+    2022+ Standards Tables 140.10-A,B
+  DESCRIPTION
+    "Project-wide cond area by PVBatt BldgType (1:Grocery, 2:HiRiseRes, 3:Office, 4:Retail, 5:School, 6:Warehouse, 7:Other / 9:Hlthcare, 10:none"
+  DEFAULT
+    SumAll( Spc:CondPVBattBldgTypeArea[1] ) + SumAll( ResOtherZn:CondPVBattBldgTypeArea[1] )
+ENDRULE
+RULE Proj:CondPVBattBldgTypeArea[2]
+  DEFAULT
+    if (IfValidAnd( Bldg:AboveGrdStoryCnt >= 4 ))
+    then  SumAll( Spc:CondPVBattBldgTypeArea[2] ) + SumAll( ResOtherZn:CondPVBattBldgTypeArea[2] ) + SumAll( ResZn:CondFlrAreaWithMult )
+    else  SumAll( Spc:CondPVBattBldgTypeArea[2] ) + SumAll( ResOtherZn:CondPVBattBldgTypeArea[2] )
+    endif
+ENDRULE
+RULE Proj:CondPVBattBldgTypeArea[3]
+  DEFAULT
+    SumAll( Spc:CondPVBattBldgTypeArea[3] ) + SumAll( ResOtherZn:CondPVBattBldgTypeArea[3] )
+ENDRULE
+RULE Proj:CondPVBattBldgTypeArea[4]
+  DEFAULT
+    SumAll( Spc:CondPVBattBldgTypeArea[4] ) + SumAll( ResOtherZn:CondPVBattBldgTypeArea[4] )
+ENDRULE
+RULE Proj:CondPVBattBldgTypeArea[5]
+  DEFAULT
+    SumAll( Spc:CondPVBattBldgTypeArea[5] ) + SumAll( ResOtherZn:CondPVBattBldgTypeArea[5] )
+ENDRULE
+RULE Proj:CondPVBattBldgTypeArea[6]
+  DEFAULT
+    SumAll( Spc:CondPVBattBldgTypeArea[6] ) + SumAll( ResOtherZn:CondPVBattBldgTypeArea[6] )
+ENDRULE
+RULE Proj:CondPVBattBldgTypeArea[7]
+  DEFAULT
+    SumAll( Spc:CondPVBattBldgTypeArea[7] ) + SumAll( ResOtherZn:CondPVBattBldgTypeArea[7] )
+ENDRULE
+RULE Proj:CondPVBattBldgTypeArea[9]
+  DEFAULT
+    SumAll( Spc:CondPVBattBldgTypeArea[9] ) + SumAll( ResOtherZn:CondPVBattBldgTypeArea[9] )
+ENDRULE
+RULE Proj:CondPVBattBldgTypeArea[10]
+  DEFAULT
+    SumAll( Spc:CondPVBattBldgTypeArea[10] ) + SumAll( ResOtherZn:CondPVBattBldgTypeArea[10] )
+ENDRULE
+
+RULE Proj:UncondPVBattBldgTypeArea[1]
+  REFERENCE
+    2022+ Standards Tables 140.10-A,B
+  DESCRIPTION
+    "Project-wide UNcond area by PVBatt BldgType (1:Grocery, 2:HiRiseRes, 3:Office, 4:Retail, 5:School, 6:Warehouse, 7:Other / 9:Hlthcare, 10:none"
+  DEFAULT
+    SumAll( Spc:UncondPVBattBldgTypeArea[1] ) + SumAll( ResOtherZn:UncondPVBattBldgTypeArea[1] )
+ENDRULE
+RULE Proj:UncondPVBattBldgTypeArea[2]
+  DEFAULT
+    SumAll( Spc:UncondPVBattBldgTypeArea[2] ) + SumAll( ResOtherZn:UncondPVBattBldgTypeArea[2] )
+ENDRULE
+RULE Proj:UncondPVBattBldgTypeArea[3]
+  DEFAULT
+    SumAll( Spc:UncondPVBattBldgTypeArea[3] ) + SumAll( ResOtherZn:UncondPVBattBldgTypeArea[3] )
+ENDRULE
+RULE Proj:UncondPVBattBldgTypeArea[4]
+  DEFAULT
+    SumAll( Spc:UncondPVBattBldgTypeArea[4] ) + SumAll( ResOtherZn:UncondPVBattBldgTypeArea[4] )
+ENDRULE
+RULE Proj:UncondPVBattBldgTypeArea[5]
+  DEFAULT
+    SumAll( Spc:UncondPVBattBldgTypeArea[5] ) + SumAll( ResOtherZn:UncondPVBattBldgTypeArea[5] )
+ENDRULE
+RULE Proj:UncondPVBattBldgTypeArea[6]
+  DEFAULT
+    SumAll( Spc:UncondPVBattBldgTypeArea[6] ) + SumAll( ResOtherZn:UncondPVBattBldgTypeArea[6] )
+ENDRULE
+RULE Proj:UncondPVBattBldgTypeArea[7]
+  DEFAULT
+    SumAll( Spc:UncondPVBattBldgTypeArea[7] ) + SumAll( ResOtherZn:UncondPVBattBldgTypeArea[7] )
+ENDRULE
+RULE Proj:UncondPVBattBldgTypeArea[9]
+  DEFAULT
+    SumAll( Spc:UncondPVBattBldgTypeArea[9] ) + SumAll( ResOtherZn:UncondPVBattBldgTypeArea[9] )
+ENDRULE
+RULE Proj:UncondPVBattBldgTypeArea[10]
+  DEFAULT
+    SumAll( Spc:UncondPVBattBldgTypeArea[10] ) + SumAll( ResOtherZn:UncondPVBattBldgTypeArea[10] )
+ENDRULE
+
 
 RULE NEW Proj:NResPVBattAreaSum
   LONGFORM
@@ -231,7 +895,7 @@ RULE NEW Proj:HiRiseResNResPVBattAreaSum
   DEFAULT : T24N_2019
     UNDEFINED
   DEFAULT
-    if (IfValidAnd( Bldg:TotStoryCnt >= 4 ))
+    if (IfValidAnd( Bldg:AboveGrdStoryCnt >= 4 ))
     then  SumAll( ResZn:PVBattSizeResArea ) + NResPVBattAreaSum
     else  0  endif
 ENDRULE
@@ -300,7 +964,7 @@ RULE NEW Proj:PrscrpPVBattClass
   DEFAULT
     if (IfValidAnd( ResDwellUnits > 0 ) .AND.
         IfValidAnd( ResProj:NumDwellingUnits > 0 ))
-    then  if (IfValidAnd( Bldg:TotStoryCnt > 3 ))
+    then  if (IfValidAnd( Bldg:AboveGrdStoryCnt > 3 ))
           then  if (HiRiseResNResPVBattAreaPct >= 80)
                 then  "HiRiseRes/MixedUse"
                 else  "HiRiseRes_NoPVBatt"  endif
@@ -313,6 +977,8 @@ RULE NEW Proj:PrscrpPVBattClass
           else  "NonRes_NoPVBatt"  endif
     endif
 ENDRULE
+;    if (DisableAllPVBattRequirements > 0)
+;    then  "NonRes_NoPVBatt"
 ; prior version -
 ;    if (IfValidAnd( ResDwellUnits > 0 ) .AND.
 ;        IfValidAnd( ResProj:NumDwellingUnits > 0 ) .AND.
@@ -344,15 +1010,25 @@ RULE NEW Proj:NResPVBattAreaMsg
   DEFAULT : T24N_2019
     UNDEFINED
   DEFAULT
-    switch (PrscrpPVBattClass)
-       case "HiRiseRes/MixedUse"  :  Format( "Prescribed PV/Battery based on '%s' classification w/ %g stories, %.0f dwellings and %.1f% highrise res and mixed use area", PrscrpPVBattClass, Bldg:TotStoryCnt, ResProj:NumDwellingUnits, HiRiseResNResPVBattAreaPct )
-       case "LowRiseRes/MixedUse" :  Format( "Prescribed PV/Battery based on '%s' classification w/ %g stories, %.0f dwellings and %.1f% nonres and mixed use area", PrscrpPVBattClass, Bldg:TotStoryCnt, ResProj:NumDwellingUnits, NResPVBattAreaPct )
-       case "NonRes/MixedUse"     :  Format( "Prescribed PV/Battery based on '%s' classification w/ %.1f% PV/Battery requirement area", PrscrpPVBattClass, NResPVBattAreaPct )
-       case "LowRiseRes"          :  Format( "Prescribed PV/Battery based on '%s' classification w/ %g stories and %.0f dwellings", PrscrpPVBattClass, Bldg:TotStoryCnt, ResProj:NumDwellingUnits )
-       case "HiRiseRes_NoPVBatt"  :  Format( "No Prescribed PV/Battery requirement ('%s' classification) due to %.1f% highrise res and mixed use area (below 80%)", PrscrpPVBattClass, HiRiseResNResPVBattAreaPct )
-       case "NonRes_NoPVBatt"     :  Format( "No Prescribed PV/Battery requirement ('%s' classification) due to %.1f% nonres and mixed use area (below 80%)", PrscrpPVBattClass, NResPVBattAreaPct )
-       default  :  Format( "No prescriptive PV/Battery requirement w/ %.1f% PV requirement area", NResPVBattAreaPct )
-    endswitch
+    if (DisableAllPVBattRequirements > 0)
+    then
+      switch (DisableAllPVBattRequirements)
+         case  1 :  "There are no PV/Battery requirements for Hospital facilities (Proj:HlthCareFacility checked)"
+         case  2 :  "There are no PV/Battery requirements for Residential Dwelling projects that are not flagged as New"
+         case  3 :  "There are no PV/Battery requirements for Nonresidential projects that are not flagged as New Envelope or New Mechanical"
+         default :  "Error describing reason for PV/Battery requirement exemption"
+      endswitch
+    else
+      switch (PrscrpPVBattClass)
+         case "HiRiseRes/MixedUse"  :  Format( "Prescribed PV/Battery based on '%s' classification w/ %g stories, %.0f dwellings and %.1f% highrise res and mixed use area", PrscrpPVBattClass, Bldg:TotStoryCnt, ResProj:NumDwellingUnits, HiRiseResNResPVBattAreaPct )
+         case "LowRiseRes/MixedUse" :  Format( "Prescribed PV/Battery based on '%s' classification w/ %g stories, %.0f dwellings and %.1f% nonres and mixed use area", PrscrpPVBattClass, Bldg:TotStoryCnt, ResProj:NumDwellingUnits, NResPVBattAreaPct )
+         case "NonRes/MixedUse"     :  Format( "Prescribed PV/Battery based on '%s' classification w/ %.1f% PV/Battery requirement area", PrscrpPVBattClass, NResPVBattAreaPct )
+         case "LowRiseRes"          :  Format( "Prescribed PV/Battery based on '%s' classification w/ %g stories and %.0f dwellings", PrscrpPVBattClass, Bldg:TotStoryCnt, ResProj:NumDwellingUnits )
+         case "HiRiseRes_NoPVBatt"  :  Format( "No Prescribed PV/Battery requirement ('%s' classification) due to %.1f% highrise res and mixed use area (below 80%)", PrscrpPVBattClass, HiRiseResNResPVBattAreaPct )
+         case "NonRes_NoPVBatt"     :  Format( "No Prescribed PV/Battery requirement ('%s' classification) due to %.1f% nonres and mixed use area (below 80%)", PrscrpPVBattClass, NResPVBattAreaPct )
+         default  :  Format( "No prescriptive PV/Battery requirement w/ %.1f% PV requirement area", NResPVBattAreaPct )
+      endswitch
+    endif
 ENDRULE
 ;       case "HiRiseRes"  :  if (IfValidAnd( ResDwellUnits > 0 ) .AND. HiRiseResPVBattAreaPct > 20)
 ;                            then  Format( "Prescribed PV/Battery based on '%s' classification w/ %g stories, %.0f dwellings and %.1f% highrise residential area", PrscrpPVBattClass, Bldg:TotStoryCnt, ResProj:NumDwellingUnits, HiRiseResPVBattAreaPct )
@@ -364,9 +1040,184 @@ ENDRULE
 
 
 ////////////////////////////////////////////////////////////////////////////////
+// Project-level SARA (Solar Access Roof Area) data - SAC 04/21/22   ; moved down here from above to rely on PVBattClass info - SAC 05/01/24 (tic #3596)
+
+RULE Proj:SolAccessRfArea
+  DESCRIPTION
+    "SARA includes the area of the building's roof space capable of structurally 
+    supporting a PV system, and the area of all roof space on covered parking 
+    areas, carports, and all other newly constructed structures on the site that 
+    are compatible with supporting a PV system per Title 24, Part 2, Section 1511.2.
+    (program default to all roof area)
+
+    Excludes:
+
+    A) Any area that has less than 70 percent annual solar access.
+
+    B) Occupied roofs as specified by CBC Section 503.1.4.
+
+    C) Roof space that is otherwise not available due to compliance with other 
+    building code requirements if confirmed by the Executive Director."
+  INPUTCLASS
+    Optional
+  DEFAULT 
+      switch (PrscrpPVBattClass)
+         case "LowRiseRes"          :  0
+         case "LowRiseRes/MixedUse" :  ( NResPVBattAreaPct/100 ) *
+                                       ( SumAll( Roof:Area ) + SumAll( ResCathedralCeiling:Area ) +
+                                         SumAll( ResAttic:DeckArea ) )
+         default                    :    SumAll( Roof:Area ) + SumAll( ResCathedralCeiling:Area ) +
+                                         SumAll( ResAttic:DeckArea )
+      endswitch
+ENDRULE
+
+RULE Proj:T24StdPVPwrDens
+  DESCRIPTION
+    "min/default PV power density from Std sec 140.10"
+  INPUTCLASS
+    NotInput
+  DEFAULT 
+    14
+ENDRULE
+
+RULE Proj:SolAccessRfAreaPVPwr
+  DESCRIPTION
+    "min PV system capacity based on SARA (Std sec 140.10)"
+  INPUTCLASS
+    NotInput
+  DEFAULT 
+    SolAccessRfArea * T24StdPVPwrDens / 1000
+ENDRULE
+
+RULE Proj:SolAccessRfAreaPVMsg
+  DEFAULT 
+    if (SolAccessRfAreaPVPwr < 4) then  UNDEFINED
+    else  switch (PrscrpPVBattClass)
+             case "LowRiseRes"          :  UNDEFINED
+             case "LowRiseRes/MixedUse" : 
+                        if (SumAll( Bldg:NonResFlrArea ) > 0 .AND. NResPVBattAreaPct > 0)
+                        then  Format( "(implies PV capacity of %s kW @ %.0f W/ft2 | SARA %.1f% of nonres building cond area)",
+                                   FltToStr( SolAccessRfAreaPVPwr, 1 ), T24StdPVPwrDens, (SolAccessRfArea * 100 / ((NResPVBattAreaPct/100) * SumAll( Bldg:NonResFlrArea ))) )
+                        else if (SumAll( Bldg:TotCondFlrArea ) > 0 .AND. NResPVBattAreaPct > 0)
+                        then  Format( "(implies PV capacity of %s kW @ %.0f W/ft2 | SARA %.1f% of building cond area)",
+                                   FltToStr( SolAccessRfAreaPVPwr, 1 ), T24StdPVPwrDens, (SolAccessRfArea * 100 / ((NResPVBattAreaPct/100) * SumAll( Bldg:TotCondFlrArea ))) )
+                        else  Format( "(implies PV capacity of %s kW @ %.0f W/ft2)", FltToStr( SolAccessRfAreaPVPwr, 1 ), T24StdPVPwrDens )
+                        endif endif
+             default  : if (SumAll( Bldg:TotCondFlrArea ) > 0)
+                        then  Format( "(implies PV capacity of %s kW @ %.0f W/ft2 | SARA %.1f% of building cond area)",
+                                   FltToStr( SolAccessRfAreaPVPwr, 1 ), T24StdPVPwrDens, (SolAccessRfArea * 100 / SumAll( Bldg:TotCondFlrArea )) )
+                        else  Format( "(implies PV capacity of %s kW @ %.0f W/ft2)", FltToStr( SolAccessRfAreaPVPwr, 1 ), T24StdPVPwrDens )
+                        endif
+          endswitch
+    endif
+ENDRULE
+
+RULE Proj:SolAccessRfAreaPVLbl
+  DEFAULT 
+      switch (PrscrpPVBattClass)
+         case "LowRiseRes"          :  UNDEFINED
+         case "LowRiseRes/MixedUse" :  "Nonresidential Solar Access Roof Area:"
+         default                    :  "Solar Access Roof Area:"
+      endswitch
+ENDRULE
+
+RULE Proj:ShowSolAccessRfArea
+  DEFAULT 
+      switch (PrscrpPVBattClass)
+         case "LowRiseRes"          :  0
+         default                    :  1
+      endswitch
+ENDRULE
+
+
+; duplicate SARA properties (above) for lowrise MFam (below), and classify SARAPVPwr editable by user - SAC 05/01/24 (tic #3596)
+RULE Proj:LowRiseResSolAccessRfArea
+  DESCRIPTION
+    "Low-rise residential SARA includes the area of the building's 
+    residential roof space capable of structurally 
+    supporting a PV system, and the area of all roof space on covered parking 
+    areas, carports, and all other newly constructed structures on the site that 
+    are compatible with supporting a PV system per Title 24, Part 2, Section 1511.2.
+    (program defaults to all low-rise residential roof area)
+
+    Excludes:
+
+    A) Any area that has less than 70 percent annual solar access.
+
+    B) Occupied roofs as specified by CBC Section 503.1.4.
+
+    C) Roof space that is otherwise not available due to compliance with other 
+    building code requirements if confirmed by the Executive Director."
+  INPUTCLASS
+    Optional
+  DEFAULT 
+      switch (PrscrpPVBattClass)
+         case "LowRiseRes/MixedUse" :  ( 1 - (NResPVBattAreaPct/100) ) *
+                                       ( SumAll( Roof:Area ) + SumAll( ResCathedralCeiling:Area ) +
+                                         SumAll( ResAttic:DeckArea ) )
+         case "LowRiseRes"          :    SumAll( Roof:Area ) + SumAll( ResCathedralCeiling:Area ) +
+                                         SumAll( ResAttic:DeckArea )
+         default  :  0
+      endswitch
+ENDRULE
+
+RULE Proj:LowRiseResSolAccessRfAreaPVPwr
+  DESCRIPTION
+    "min PV system capacity based on low-rise residential SARA"
+  DEFAULT 
+    LowRiseResSolAccessRfArea * T24StdPVPwrDens / 1000
+ENDRULE
+
+RULE Proj:LowRiseResSolAccessRfAreaPVMsg
+  DEFAULT 
+    if (LowRiseResSolAccessRfAreaPVPwr < 4 .OR.
+        LowRiseResSolAccessRfArea < 1) then  UNDEFINED
+    else  switch (PrscrpPVBattClass)
+             case "LowRiseRes"          : 
+                        if (SumAll( Bldg:TotCondFlrArea ) > 0)
+                        then  Format( "(%.1f W/ft2 | SARA %.1f% of building cond area)",
+                                   (LowRiseResSolAccessRfAreaPVPwr * 1000 / LowRiseResSolAccessRfArea),
+                                   (LowRiseResSolAccessRfArea * 100 / SumAll( Bldg:TotCondFlrArea )) )
+                        else  Format( "(%.1f W/ft2)", (LowRiseResSolAccessRfAreaPVPwr * 1000 / LowRiseResSolAccessRfArea) )
+                        endif
+             case "LowRiseRes/MixedUse" : 
+                        if (SumAll( Bldg:TotCondFlrArea ) > 0 .AND. NResPVBattAreaPct < 100)
+                        then  Format( "(%.1f W/ft2 | SARA %.1f% of residential cond area)",
+                                   (LowRiseResSolAccessRfAreaPVPwr * 1000 / LowRiseResSolAccessRfArea),
+                                   (LowRiseResSolAccessRfArea * 100 / ((1 - (NResPVBattAreaPct/100)) * SumAll( Bldg:TotCondFlrArea ))) )
+                        else  Format( "(%.1f W/ft2)", (LowRiseResSolAccessRfAreaPVPwr * 1000 / LowRiseResSolAccessRfArea) )
+                        endif
+             default  : UNDEFINED
+          endswitch
+    endif
+ENDRULE
+
+RULE Proj:ShowLowRiseResSolAccessRfArea
+  DEFAULT 
+      switch (PrscrpPVBattClass)
+         case "LowRiseRes"          :  1
+         case "LowRiseRes/MixedUse" :  1
+         default                    :  0
+      endswitch
+ENDRULE
+
+
+RULE Proj:TotSolAccessRfArea
+  DEFAULT 
+    (SolAccessRfArea * ShowSolAccessRfArea) + (LowRiseResSolAccessRfArea * ShowLowRiseResSolAccessRfArea)
+ENDRULE
+
+RULE Proj:TotSolAccessRfAreaPVPwr
+  DEFAULT 
+    (SolAccessRfAreaPVPwr * ShowSolAccessRfArea) + (LowRiseResSolAccessRfAreaPVPwr * ShowLowRiseResSolAccessRfArea)
+ENDRULE
+
+
+////////////////////////////////////////////////////////////////////////////////
 // 2022+ Prescribed PV Requirements (for std design) - PV capacity rules
 
 // Spc Prescribed PV Requirements
+   ; add logic to prevent Uncond area from contributing to T24PVSize - SAC 01/19/23
 RULE NEW Spc:T24PVSize
   LONGFORM
     Title24PhotovoltaicSize
@@ -388,6 +1239,8 @@ RULE NEW Spc:T24PVSize
     if ( ( Proj:PrscrpPVBattClass == "HiRiseRes/MixedUse"  .OR.
            Proj:PrscrpPVBattClass == "LowRiseRes/MixedUse" .OR.
            Proj:PrscrpPVBattClass == "NonRes/MixedUse"     ) .AND.
+         ( CondgType == "DirectlyConditioned" .OR.
+           CondgType == "IndirectlyConditioned" ) .AND.
          IfValidAnd( Proj:CliZnNum > 0 ) )
     then  ( PVBattSizeArea *
             T24NR_PVCapacity:FactorA( "ClimateZone", Proj:CliZnNum,
@@ -414,9 +1267,10 @@ RULE NEW ResOtherZn:T24PVSize
   DEFAULT : T24N_2019
     UNDEFINED
   DEFAULT
-    if ( Proj:PrscrpPVBattClass == "HiRiseRes/MixedUse"  .OR.
-         Proj:PrscrpPVBattClass == "LowRiseRes/MixedUse" .OR.
-         Proj:PrscrpPVBattClass == "NonRes/MixedUse" )
+    if ( Type == "Conditioned"  .AND.
+         ( Proj:PrscrpPVBattClass == "HiRiseRes/MixedUse"  .OR.
+           Proj:PrscrpPVBattClass == "LowRiseRes/MixedUse" .OR.
+           Proj:PrscrpPVBattClass == "NonRes/MixedUse" ) )
     then  ( PVBattSizeArea *
             T24NR_PVCapacity:FactorA( "ClimateZone", ValidOr( Proj:CliZnNum, 12 ),
                                       "BldgType", PVBattSizeBldgType ) ) / 1000
@@ -478,7 +1332,13 @@ RULE NEW Proj:PrscrpPVSize
     else  0
     endif
 ENDRULE
+;    if (DisableAllPVBattRequirements)
+;    then  0
 
+;RULE Proj:PVSARATestDebugMsg
+;  DEFAULT 
+;    Format( "PVBatt Class: '%s'  /  Prescrip PV: %g kW  /  NResPVBattAreaPct: %.1f %%", ValidOr( PrscrpPVBattClass, "unknown" ), ValidOr( PrscrpPVSize, 0 ), ValidOr( NResPVBattAreaPct, 0 ) )
+;ENDRULE
 
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -492,7 +1352,7 @@ RULE Proj:ReducedPVReqExcptLowRiseRes
     NotInput
   DEFAULT 
     switch (PrscrpPVBattClass)
-       case "LowRiseRes/MixedUse" :  1
+       case "LowRiseRes/MixedUse" :  2
        case "LowRiseRes"          :  1
        default                    :  0
     endswitch
@@ -507,28 +1367,27 @@ RULE Proj:ReducedPVReqExcpt
     ResetTheFollowingWhenThisIsModified
       Proj:ReducedPVReqVal
   DEFAULT 
-    if (IfValidAnd( IsLowRiseMFam > 0 ))
+    if (DisableAllPVBattRequirements)
+    then  "- select applicable reason for PV reduction -"
+    else if (IfValidAnd( IsLowRiseMFam > 0 ))
     then if (IfValidAnd( PrscrpPVSize < 1.8 ))
-         then  "(Exc. 2) No PV required when prescribed system < 1.8 kWdc"
-         else if (IfValidAnd( PrscrpPVSize > SolAccessRfAreaPVPwr ))
+         then  "(R Exc.2) No PV required when prescribed system < 1.8 kWdc"
+         else if (IfValidAnd( PrscrpPVSize > TotSolAccessRfAreaPVPwr ))
          then  "Limited by SARA provided"
          else  "- select applicable reason for PV reduction -"
          endif endif
     else if (IfValidAnd( PrscrpPVSize < 4 ))
-         then  "(Exc. 2) No PV required when prescribed system < 4 kWdc"
-         else if (IfValidAnd( SolAccessRfArea < (SumAll( Bldg:TotCondFlrArea ) * 0.03) ))
-         then  "(Exc. 1) No PV required when SARA < 3% cond floor area"
-         else if (IfValidAnd( SolAccessRfArea < 80 ))
-         then  "(Exc. 3) No PV required when SARA < 80 contiguous SF"
-         else if (IfValidAnd( PrscrpPVSize > SolAccessRfAreaPVPwr ))
+         then  "(NR Exc.2) No PV required when prescribed system < 4 kWdc"
+         else if (IfValidAnd( TotSolAccessRfArea < (SumAll( Bldg:TotCondFlrArea ) * 0.03) ))
+         then  "(NR Exc.1) No PV required when SARA < 3% cond floor area"
+         else if (IfValidAnd( TotSolAccessRfArea < 80 ))
+         then  "(NR Exc.3) No PV required when SARA < 80 contiguous SF"
+         else if (IfValidAnd( PrscrpPVSize > TotSolAccessRfAreaPVPwr ))
          then  "Limited by SARA provided"
          else  "- select applicable reason for PV reduction -"
          endif endif endif endif
-    endif
+    endif endif
 ENDRULE
-; reset REMOVED from above - SAC 05/26/22
-;    ResetThisWhenTheFollowingIsModified
-;      Proj:SolAccessRfArea
 
 RULE Proj:ReducedPVReq
   DESCRIPTION
@@ -542,11 +1401,6 @@ RULE Proj:ReducedPVReq
     else 0
     endif
 ENDRULE
-;  RESETS   - removed - SAC 05/26/22
-;    ResetThisWhenTheFollowingIsModified
-;      Proj:SolAccessRfArea
-;    ResetTheFollowingWhenThisIsModified
-;      Proj:ReducedPVReqExcpt
 
 RULE Proj:ReducedPVReqExcptDesc
   DESCRIPTION
@@ -577,7 +1431,7 @@ RULE Proj:ReducedPVReqMinVal
   DEFAULT 
     if (IfValidAnd( ReducedPVReq > 0 )==0) then  0
     else if (FindInString( ReducedPVReqExcpt, "Limited by SARA" ) >= 0)
-    then  SolAccessRfAreaPVPwr
+    then  TotSolAccessRfAreaPVPwr
     else  0
     endif endif
 ENDRULE
@@ -610,10 +1464,11 @@ RULE Proj:ReducedPVReqVal
     ReducedPVReqMinVal
   DEFAULT 
     if (ReducedPVReq > 0 )
-    then if (FindInString( ReducedPVReqExcpt, "No PV" ) > 0)
+    then if (FindInString( ReducedPVReqExcpt, "No PV" ) > 0 .OR.
+             FindInString( ReducedPVReqExcpt, "snow load" ) > 0)
         then  0
         else if (FindInString( ReducedPVReqExcpt, "Limited by SARA" ) >= 0)
-        then  SolAccessRfAreaPVPwr
+        then  TotSolAccessRfAreaPVPwr
         else UNDEFINED
         endif endif
     else if (ReducedPVReqMinVal > 0.01)
@@ -627,6 +1482,7 @@ ENDRULE
 ;        else if (EnumValue( ReducedPVReqExcpt = 100 ) .AND. SumAll( PVArray:DCSysSize ) > SolAccessRfAreaPVPwr) ; "Limited by SARA provided"
 ;        then SolAccessRfAreaPVPwr
 
+      ; added logic to prevent setting UseReducedPVReqVal to a value above PrscrpPVSize (so that reduced req exception not reported) - SAC 02/02/23
 RULE Proj:UseReducedPVReqVal
   DESCRIPTION
     "Reduced PV requirement capacity (only if valid inputs)"
@@ -634,70 +1490,12 @@ RULE Proj:UseReducedPVReqVal
     NotInput
   DEFAULT 
     if (ReducedPVReq > 0 .AND. EnumValue( ReducedPVReqExcpt ) > 0 .AND.
-        IfValidAnd( ReducedPVReqVal >= 0 ))
+        IfValidAnd( ReducedPVReqVal >= 0 ) .AND.
+        IfValidAnd( ReducedPVReqVal < PrscrpPVSize ))
     then  ReducedPVReqVal
     else  UNDEFINED
     endif
 ENDRULE
-
-// APB 05/18/22 - New SARA limit on proposed PV kW (tic #3352)
-RULE Proj:DCSizeMultiplier
-  DESCRIPTION
-    "Multiplier on PV system size, used to adjust user-entered proposed PV kW down to required exception kW (when exception is applied)"
-  INPUTCLASS
-    NotInput
-  DEFAULT 
-    if (IfValidAnd( UseReducedPVReqVal >= 0 ) .AND. IfValidAnd( SumAll(  PVArray:DCSysSize ) > 0 ))
-    then  if (ValidOr( UseReducedPVReqVal, 999 ) == (SumAll(  PVArray:DCSysSize )))
-          then  1   ; don't re-scale already scaled value
-          else if (ValidOr( UseReducedPVReqVal, 999 ) <= (SumAll(  PVArray:DCSysSize )))
-          then ReducedPVReqVal / SumAll(  PVArray:DCSysSize )
-          else  1
-          endif endif
-    else  1  endif
-  ANNUAL_PROPOSED 
-    if (LocalStatus( DCSizeMultiplier ) > 0) then  UNCHANGED
-    else 1 endif
-  ANNUAL_BASELINE 
-    1
-ENDRULE
-
-// APB 05/18/22 - Add messages about new SARA limit on proposed PV kW
-RULE Proj:ReducedPVReqMsg1
-  DEFAULT 
-    if (IfValidAnd( SumAll(  PVArray:DCSysSize ) > SolAccessRfAreaPVPwr ))
-    then  Format( "Proposed PV capacity of %.1f kW > capacity based on SARA (%.1f kW).",
-               SumAll(  PVArray:DCSysSize ), SolAccessRfAreaPVPwr )
-    else  ""
-    endif
-ENDRULE
-
-RULE Proj:ReducedPVReqMsg2
-  DEFAULT 
-    if (IfValidAnd( SumAll(  PVArray:DCSysSize ) > SolAccessRfAreaPVPwr ))
-    then  if (ReducedPVReq = 1)
-        then if (EnumValue(ReducedPVReqExcpt) = 100)  ; "Limited by SARA provided"
-            then "Proposed kW will be adjusted to match the capacity based on SARA."
-            else ""
-            endif 
-        else ""
-        endif
-    else  ""
-    endif
-ENDRULE
-
-RULE Proj:ReducedPVReqMsg3
-  DEFAULT 
-    if (IfValidAnd( SumAll(  PVArray:DCSysSize ) > SolAccessRfAreaPVPwr ))
-    then  if (ReducedPVReq = 0)
-        then "Standard PV & Battery = Prescriptive tables w/ no reduced PV requirement."
-        else ""
-        endif
-    else  ""
-    endif
-ENDRULE
-;        then "With no reduced PV requirement, standard PV & Battery matches prescriptive tables."
-
 
 // Proj-wide PV Requirements
    ; adjust Proj:T24PVSize for lower SARA-based PV for NonRes/MixedUse & HiRiseRes prescrip PV models - SAC 04/21/22
@@ -715,7 +1513,9 @@ RULE NEW Proj:T24PVSize
   INPUTCLASS
     NotInput
   DEFAULT
-    if (ReducedPVReq > 0 .AND. IfValidAnd( UseReducedPVReqVal >= 0 ))
+    if (DisableAllPVBattRequirements)
+    then  0
+    else if (ReducedPVReq > 0 .AND. IfValidAnd( UseReducedPVReqVal >= 0 ))
     then  UseReducedPVReqVal
     else if ( PrscrpPVBattClass == "HiRiseRes/MixedUse"  .OR.
               PrscrpPVBattClass == "LowRiseRes/MixedUse" .OR.
@@ -723,7 +1523,7 @@ RULE NEW Proj:T24PVSize
               PrscrpPVBattClass == "NonRes/MixedUse" )
     then  PrscrpPVSize
     else  0
-    endif endif
+    endif endif endif
 ENDRULE
 ; logic removed since SARA limits incorporated into ReducedPVReq - SAC 05/26/22
 ;    then  if ( SolAccessRfAreaPVPwr > 0 .AND.
@@ -732,10 +1532,6 @@ ENDRULE
 ;                then  PrscrpPVSize
 ;                else  SolAccessRfAreaPVPwr
 ;                endif
-
-
-// Round 2 of T24PVSize mod adjusting for ReducedPVReq
-
 
 // keep track of FRACTION of final Std design PV size / Prescriptive table size
 RULE NEW Proj:PrscrpStdPVSizeRat
@@ -756,7 +1552,6 @@ RULE NEW Proj:PrscrpStdPVSizeRat
     then  T24PVSize / PrscrpPVSize
     else  0  endif
 ENDRULE
-
 
 RULE NEW Proj:T24PVArrayRef
   LONGFORM
@@ -1660,6 +2455,166 @@ RULE Proj:PVSizeSum
     SumAll( PVArray:DCSysSize )
 ENDRULE
 
+// APB 05/18/22 - New SARA limit on proposed PV kW (tic #3352)
+// revised per direction from CEC - SAC 01/19/23 & SAC 01/20/23
+RULE Proj:DCSizeMultiplier
+  DESCRIPTION
+    "Multiplier on PV system size, used to adjust user-entered proposed PV kW down to required exception kW (when exception is applied)"
+  INPUTCLASS
+    NotInput
+  DEFAULT 
+    if (PVSizeSum > 0)
+    then  if (DisableAllPVBattRequirements > 0)
+          then  0   ; zero out all PV for Hlthcare or EAA
+          else if (ValidOr( UseReducedPVReqVal, 9999 ) < PVSizeSum)
+          then ReducedPVReqVal / PVSizeSum    ; SCALE user PV to equal UseReducedPVReqVal
+          else  1
+          endif endif
+    else  1
+    endif
+  ANNUAL_PROPOSED 
+    if (IfValidAnd( AllowPropPVBatt = 0 )) then  0
+    else if (IfValidAnd( DCSizeMultiplier = 0 ) .AND.
+             IfValidAnd( AllowPropPVBatt > 0 ))
+    then  if (ValidOr( UseReducedPVReqVal, 9999 ) < PVSizeSum)
+          then ReducedPVReqVal / PVSizeSum    ; SCALE user PV to equal UseReducedPVReqVal
+          else  1  endif
+    else if (LocalStatus( DCSizeMultiplier ) > 0) then  UNCHANGED
+    else 1 endif endif endif
+  ANNUAL_BASELINE 
+    if (IfValidAnd( AllowStdPV = 0 )) then  0
+    else  1  endif
+ENDRULE
+;    if (IfValidAnd( UseReducedPVReqVal >= 0 ) .AND. IfValidAnd( SumAll(  PVArray:DCSysSize ) > 0 ))
+;    then  if (ValidOr( UseReducedPVReqVal, 999 ) == (SumAll(  PVArray:DCSysSize )))
+;          then  1   ; don't re-scale already scaled value
+;          else if (ValidOr( UseReducedPVReqVal, 999 ) <= (SumAll(  PVArray:DCSysSize )))
+;          then ReducedPVReqVal / SumAll(  PVArray:DCSysSize )
+;          else  1
+;          endif endif
+;    else  1  endif
+
+// APB 05/18/22 - Add messages about new SARA limit on proposed PV kW
+RULE Proj:ReducedPVReqMsg1
+  DEFAULT 
+    if (DisableAllPVBattRequirements)
+    then  ""
+    else if (IfValidAnd( SumAll(  PVArray:DCSysSize ) > TotSolAccessRfAreaPVPwr ))
+    then  Format( "Proposed PV capacity of %s kW > cap. based on SARA (%s kW).",
+               FltToStr( SumAll(  PVArray:DCSysSize ), 1 ), FltToStr( TotSolAccessRfAreaPVPwr, 1 ) )
+    else  ""
+    endif endif
+ENDRULE
+
+; merged ReducedPVReqMsg3 into ReducedPVReqMsg2 - SAC 01/10/23 
+; added logic to document scenario where SARA-based capacity exceeds prescriptive, therefore reduced requirement not applied (despite user input) - SAC 09/29/24 (user support gh #37)
+RULE Proj:ReducedPVReqMsg2
+  DEFAULT 
+    if (DisableAllPVBattRequirements)
+    then  ""
+    else if (IfValidAnd( SumAll( PVArray:DCSysSize ) > TotSolAccessRfAreaPVPwr ))
+    then  if (ReducedPVReq = 1)
+          then  if (EnumValue(ReducedPVReqExcpt) = 100)  ; "Limited by SARA provided"
+                then  if (ValidOr( UseReducedPVReqVal, 99999 ) >= SumAll( PVArray:DCSysSize ))
+                      then  "Proposed kW will NOT be adjusted (SARA-based cap. >= Prescriptive)"
+                      else  "Proposed kW will be adjusted to match the capacity based on SARA."  endif 
+                else  ""  endif 
+          else if (ReducedPVReq = 0)
+          then       "Standard PV & Battery = Prescriptive tables w/ no reduced PV reqrmt."
+          else ""  endif endif
+    else  ""  endif endif
+ENDRULE
+
+;RULE Proj:ReducedPVReqMsg3
+;  DEFAULT 
+;    if (IfValidAnd( SumAll(  PVArray:DCSysSize ) > TotSolAccessRfAreaPVPwr ))
+;    then  if (ReducedPVReq = 0)
+;        then "Standard PV & Battery = Prescriptive tables w/ no reduced PV requirement."
+;        else ""
+;        endif
+;    else  ""
+;    endif
+;ENDRULE
+;;        then "With no reduced PV requirement, standard PV & Battery matches prescriptive tables."
+
+
+//////////////////////////////////////////////////////////////////////////////// SAC 07/16/24 (tic #3624)
+
+RULE Proj:NetEnergyMeteringType
+  DESCRIPTION
+    "Net Energy Metering (NEM) type used to value onsite generation exports to grid"  
+  INPUTCLASS
+    Prescribed 
+  OPTION
+    none
+    NEM3-LSC
+    NEM3-ACC
+  DEFAULT 
+    "NEM3-LSC"
+  ANNUAL
+    "NEM3-LSC"
+ENDRULE
+
+RULE NEW Proj:HrlyNEMTableName
+  DATATYPE
+    String
+  DESCRIPTION
+    "Name of hourly NEM (NEM3+) data table used to value onsite generation exports to grid"  
+  INPUTCLASS
+    NotInput 
+  DEFAULT 
+    if (NetEnergyMeteringType == "NEM3-LSC")
+    then  "HrlyNEMLSCTable"
+    else if (NetEnergyMeteringType == "NEM3-ACC")
+    then  "HrlyNEMACCTable"
+    else  "none"
+    endif endif 
+ENDRULE
+
+RULE NEW Proj:HrlyNEMTableCol
+  DATATYPE
+    Integer
+  DESCRIPTION
+    "Column index of data to pull from hourly NEM (NEM3+) data table used to value onsite generation exports to grid"  
+  INPUTCLASS
+    NotInput 
+  DEFAULT 
+    if (NetEnergyMeteringType == "NEM3-LSC" .OR.
+        NetEnergyMeteringType == "NEM3-ACC")
+    then  ValidOr( CliZnNum, 0 )
+    else  0
+    endif 
+ENDRULE
+
+RULE Proj:NEMGrossUpPctInp
+  DESCRIPTION
+    "NEM (NEM3+) gross-up factor used to value onsite generation exports to grid"  
+  INPUTCLASS
+    Prescribed 
+  DEFAULT 
+    if (NetEnergyMeteringType == "NEM3-LSC" .OR.
+        NetEnergyMeteringType == "NEM3-ACC")
+    then  6.6
+    else  0
+    endif 
+ENDRULE
+
+RULE NEW Proj:NEMGrossUpFactor
+  DATATYPE
+    Float
+  DESCRIPTION
+    "NEM (NEM3+) gross-up factor used to value onsite generation exports to grid"  
+  INPUTCLASS
+    NotInput 
+  DEFAULT 
+    if (NetEnergyMeteringType == "NEM3-LSC" .OR.
+        NetEnergyMeteringType == "NEM3-ACC")
+    then  NEMGrossUpPctInp / 100.0
+    else  0
+    endif 
+ENDRULE
+
+
 ////////////////////////////////////////////////////////////////////////////////
 
 // ** debugging rule evaluation duration **
@@ -1677,4 +2632,11 @@ RULE NEW Proj:RuleEvalDuration
   ANNUAL_BASELINE
     LogDuration( "            time to evaluate PV ANNUAL_PROPOSED rules:  %.3f seconds" )
 ENDRULE
+
+
+;RULE Proj:Action
+;  DEFAULT
+;    StoreBEMProc( "end PV defaulting", 0 )
+;ENDRULE
+;;    PostMessageToLog( "END PV rules..." )
 

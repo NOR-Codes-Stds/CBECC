@@ -58,6 +58,11 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
          then  0
          else  UNCHANGED  endif  }
 
+   "Force reset of ResDHWSys:CentralDHW if not a central type"    ResDHWSys:Action  =     ; SAC 10/25/22
+      {  if (LocalStatus( CentralDHW ) > 4 .AND. IfValidAnd( CentralDHW > 0 ) .AND.
+             CentralRecircType < 1)
+         then  EvalRulelist( "ForceReset_DHWSys_CentralDHW", 1 )
+         else  UNCHANGED  endif  }
 	"Default ResDHWSys:CentralDHW"			ResDHWSys:CentralDHW		=     ; SAC 02/13/21 (tic #1260)
       {  if (IfValidAnd( Proj:AnalysisVersion >= 190200 ))
          then  if (CentralRecircType > 0)
@@ -134,16 +139,21 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
    ; SAC 12/6/18 - updated DHW draw profile include file to latest combined SFam/MFam (tic #?? no explicit ticket)
    ; SAC 2/28/19 - restored use of DHWDUSF & DHWDUMF for PRE-2019 analysis (to ensure equivalent results)
    ; revised to DHWDU2.txt for 2019.2.0 and later releases - SAC 03/16/21
+   ; switch ResProj:EnergyCodeYearNum to Proj:CompCodeBase for CBECC MFam compatibility - SAC 03/06/23
 	"Default Proj:CSE_DHWUseIncFile"		Proj:CSE_DHWUseIncFile		= {
       if (IfValidAnd( ResProj:CSEDHWUseMethod = 1 )) then  UNDEFINED
       else if (AnalysisVersion >= 190200) then "DHWDU2.txt"
-      else if (IfValidAnd( ResProj:EnergyCodeYearNum >= 2019 )) then  "DHWDU.txt"
+      else if (IfValidAnd( Proj:CompCodeBase >= 2019 )) then  "DHWDU.txt"
       else if (IfValidAnd( ResProj:IsMultiFamily < 0.5 )) then  "DHWDUSF.txt"  else  "DHWDUMF.txt"
       endif endif endif endif  }
 	"Default Proj:CSE_DHWUseIncFileHashID"	Proj:CSE_DHWUseIncFileHashID	= {
       if (IfValidAnd( ResProj:CSEDHWUseMethod = 1 )) then  UNDEFINED
       else  17
       endif  }
+
+   "Set flag DHWSys:DHWSolarSysRefValid"     ResDHWSys:DHWSolarSysRefValid =     ; SAC 05/30/22
+      {  if (LocalCompAssigned( DHWSolarSysRef ) > 0) then  1
+         else  0  endif  }
 
 ; SAC 12/30/19 - moved these DHWSys heater assignment rules up here BEFORE certain DHWHeater defaults that can depend on # heaters assigned by DHWSystems (tic #862)
   ; SAC 5/21/13 - added a few basic DHWSys UI & defaulting rules
@@ -156,6 +166,9 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
       else if (LocalCompAssigned( DHWHeater[1] ) .OR.
                (Proj:IsComRuleset .AND. CentralDHW > 0 .AND. CentralDHWTypeVal == 2)) then  1
       else  0  endif endif endif endif endif endif  }
+
+   "Set DHWSys:DHWHtrHVACSysRef[1-6]"  for:#Htr=(1to6)  ResDHWSys:DHWHtrHVACSysRef[#Htr]  =     ; needed to define rules that SET properties of these referenced HVACSys(es) - SAC 09/24/24 (res tic #1349, com #3629)
+      {  if (LocalCompAssigned( DHWHeater[#Htr] ) == ComponentType( "ResHVACSys" )) then  DHWHeater[#Htr]  else  UNDEFINED  endif  }
 
 	"Default ResDHWSys:HeaterMult[1]"		ResDHWSys:HeaterMult[1]		= {
       if (LocalCompAssigned( DHWHeater[1] )) then  1  else  UNDEFINED  endif  }
@@ -299,10 +312,11 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
    ; allow ResWtrHtr:HPWHBrand & ResWtrHtr:HPWHModel to default via enums
    ; SAC 5/23/17 - wrapped HPWHModel in IfValidAnd() check for 2013 models where this property has no enumeration list and is therefore undefined
    ; HPWH_ComProduct & HPWHComModel - SAC 02/01/21 (tic #1260)
-   "Default ResWtrHtr:ASHPType"  ResWtrHtr:ASHPType  =               ; added check for IsCentralHPWH > 0 - SAC 03/02/22
+   ; added check for IsCentralHPWH > 0 - SAC 03/02/22
+   "Default ResWtrHtr:ASHPType"  ResWtrHtr:ASHPType  =               ; incremented CHPWH ASHPType value by 100 to avoid conflict w/ new Rheem NEEA models - SAC 12/28/22
       {  if (HeaterElementType == 5 .AND. (HPWH_NEEARated > 0 .OR. HPWH_ComProduct > 0 .OR. IfValidAnd( IsCentralHPWH > 0 )))
          then  if (CentralHPWHCprsrType > 0)
-               then  mod( CentralHPWHCprsrType, 100 )
+               then  mod( CentralHPWHCprsrType, 100 ) + 100
                else if (HPWH_NEEARated > 0 .AND. IfValidAnd( HPWHModel > 1 ))
                then  mod( HPWHModel, 100 )
                else if (HPWH_ComProduct > 0 .AND. IfValidAnd( HPWHComModel > 1 ))
@@ -371,49 +385,50 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
       if (HeaterElementType .NE. 5) then  UNDEFINED
       else if (HPWH_NEEARated < 0.5) then  0
       else  switch( ASHPType )
-               case 16 :  1      ; "Sanden 40"
-               case 17 :  1      ; "Sanden 80"
+               case 16 :  1      ; "Sanden 40" - RJH 9/30/24 Sanden now SANCO2
+               case 17 :  1      ; "Sanden 80" - RJH 9/30/24 Sanden now SANCO2
+               case 18 :  1      ; "Sanden 120" - RJH 9/30/24 added
            ;    case 45 :  1      ; "Colmac CxA20"  - SAC 3/9/20 (Colmac)
            ;    case 46 :  1      ; "Nyle C185A external"  - SAC 4/19/20
            ;    case 47 :  1      ; "Nyle C250A external"  - SAC 4/19/20
-               case 48 :  1      ; "Colmac CxV-5"
-               case 49 :  1      ; "Colmac CxA-10"
-               case 50 :  1      ; "Colmac CxA-15"
-               case 45 :  1      ; "Colmac CxA-20"
-               case 51 :  1      ; "Colmac CxA-25"
-               case 52 :  1      ; "Colmac CxA-30"
-               case 53 :  1      ; "Nyle C25A"
-               case 54 :  1      ; "Nyle C60A"
-               case 55 :  1      ; "Nyle C90A"
-               case 56 :  1      ; "Nyle C125A"
-               case 46 :  1      ; "Nyle C185A"
-               case 47 :  1      ; "Nyle C250A"
-               case 67 :  1      ; "Nyle C60A-CWP"        ; SAC 6/23/20 - added cold wthr package presets
-               case 68 :  1      ; "Nyle C90A-CWP"
-               case 69 :  1      ; "Nyle C125A-CWP"
-               case 70 :  1      ; "Nyle C185A-CWP"
-               case 71 :  1      ; "Nyle C250A-CWP"
-               case 57 :  1      ; "Sanden GS3-45HPA-US"   ; used to map to 17 - Sanden 80
-               case 77 :  1      ; "Colmac CxV-5 (MP)"      ; multi pass additions - SAC 01/18/22
-               case 78 :  1      ; "Colmac CxA-10 (MP)"
-               case 79 :  1      ; "Colmac CxA-15 (MP)"
-               case 80 :  1      ; "Colmac CxA-20 (MP)"
-               case 81 :  1      ; "Colmac CxA-25 (MP)"
-               case 82 :  1      ; "Colmac CxA-30 (MP)"
-               case 83 :  1      ; "Rheem HPHD-60HNU (horiz MP)"
-               case 84 :  1      ; "Rheem HPHD-60VNU (vertical MP)"
-               case 85 :  1      ; "Rheem HPHD-135HNU (horiz MP)"
-               case 86 :  1      ; "Rheem HPHD-135VNU (vertical MP)"
-               case  5 :  1      ; "NyleC60A_MP"      ; more multi pass options - SAC 02/23/22
-               case  6 :  1      ; "NyleC90A_MP"
-               case  7 :  1      ; "NyleC125A_MP"
-               case  8 :  1      ; "NyleC185A_MP"
-               case  9 :  1      ; "NyleC250A_MP"
-               case 25 :  1      ; "NyleC60A_CWP_MP"
-               case 26 :  1      ; "NyleC90A_CWP_MP"
-               case 27 :  1      ; "NyleC125A_CWP_MP"
-               case 28 :  1      ; "NyleC185A_CWP_MP"
-               case 29 :  1      ; "NyleC250A_CWP_MP"
+               case 148 :  1      ; "Colmac CxV-5"
+               case 149 :  1      ; "Colmac CxA-10"
+               case 150 :  1      ; "Colmac CxA-15"
+               case 145 :  1      ; "Colmac CxA-20"
+               case 151 :  1      ; "Colmac CxA-25"
+               case 152 :  1      ; "Colmac CxA-30"
+               case 153 :  1      ; "Nyle C25A"
+               case 154 :  1      ; "Nyle C60A"
+               case 155 :  1      ; "Nyle C90A"
+               case 156 :  1      ; "Nyle C125A"
+               case 146 :  1      ; "Nyle C185A"
+               case 147 :  1      ; "Nyle C250A"
+               case 167 :  1      ; "Nyle C60A-CWP"        ; SAC 6/23/20 - added cold wthr package presets
+               case 168 :  1      ; "Nyle C90A-CWP"
+               case 169 :  1      ; "Nyle C125A-CWP"
+               case 170 :  1      ; "Nyle C185A-CWP"
+               case 171 :  1      ; "Nyle C250A-CWP"
+               case 157 :  1      ; "Sanden GS3-45HPA-US"   ; used to map to 17 - Sanden 80
+               case 177 :  1      ; "Colmac CxV-5 (MP)"      ; multi pass additions - SAC 01/18/22
+               case 178 :  1      ; "Colmac CxA-10 (MP)"
+               case 179 :  1      ; "Colmac CxA-15 (MP)"
+               case 180 :  1      ; "Colmac CxA-20 (MP)"
+               case 181 :  1      ; "Colmac CxA-25 (MP)"
+               case 182 :  1      ; "Colmac CxA-30 (MP)"
+               case 183 :  1      ; "Rheem HPHD-60HNU (horiz MP)"
+               case 184 :  1      ; "Rheem HPHD-60VNU (vertical MP)"
+               case 185 :  1      ; "Rheem HPHD-135HNU (horiz MP)"
+               case 186 :  1      ; "Rheem HPHD-135VNU (vertical MP)"
+               case 105 :  1      ; "NyleC60A_MP"      ; more multi pass options - SAC 02/23/22
+               case 106 :  1      ; "NyleC90A_MP"
+               case 107 :  1      ; "NyleC125A_MP"
+               case 108 :  1      ; "NyleC185A_MP"
+               case 109 :  1      ; "NyleC250A_MP"
+               case 125 :  1      ; "NyleC60A_CWP_MP"
+               case 126 :  1      ; "NyleC90A_CWP_MP"
+               case 127 :  1      ; "NyleC125A_CWP_MP"
+               case 128 :  1      ; "NyleC185A_CWP_MP"
+               case 129 :  1      ; "NyleC250A_CWP_MP"
                default :  0
             endswitch  endif endif  }
    ; added default (Std design) logic to locate in garage if present - SAC 03/31/22 (Res tic #1327)
@@ -505,9 +520,76 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
 		endswitch  }
 
    ; moved UP to here in evaluation order to define NumDwellingUnits before being referenced in DHWSys rules - SAC 12/30/19 (tic #862)
-	"Default DwellUnit:Count"					DwellUnit:Count				= {	1  }
-	"Set ResZn:NumDwellingUnits"		ResZn:NumDwellingUnits	= {	if (ResProj:IsMultiFamily < 0.5) then  0  else  SumChildren( DwellUnit:Count )  endif  }
-	"Set ResProj:NumDwellingUnits"		ResProj:NumDwellingUnits	= {	if (ResProj:IsMultiFamily < 0.5) then  1  else  SumAll( ResZn:NumDwellingUnits )  endif  }
+   "Set ResZn:Mult"     ResZn:Mult = {  if (IfValidAnd( ResZnGrp:Mult > 0 )) then  ResZnGrp:Mult  else  1  endif  }   ; SAC 04/21/23 (tic #3392)
+	"Default DwellUnit:Count"					DwellUnit:Count				    = {  1  }
+	"Set DwellUnit:CountWithMult"				DwellUnit:CountWithMult		    = {  Count * Parent( Mult )  }     ; SAC 04/26/23 (tic #3392)
+	"Set ResZn:NumDwellingUnits"		      ResZn:NumDwellingUnits	       = {  if (ResProj:IsMultiFamily < 0.5) then  0  else  SumChildren( DwellUnit:Count )  endif  }
+   "Set ResZn:NumDwellingUnitsWithMult"   ResZn:NumDwellingUnitsWithMult = {  if (ResProj:IsMultiFamily < 0.5) then  0  else  SumChildren( DwellUnit:CountWithMult )  endif  }   ; SAC 04/26/23 (tic #3392)
+	"Set ResProj:NumDwellingUnits"		   ResProj:NumDwellingUnits	    = {  if (ResProj:IsMultiFamily < 0.5) then  1  else  SumAll( ResZn:NumDwellingUnitsWithMult )  endif  }
+
+   "Set DwellUnit:CentralDHWDUCount"   DwellUnit:CentralDHWDUCount =       ; SAC 08/20/22 (CUAC)
+      {  if (IfValidAnd( DwellUnitTypeRef:DHWSysRef[1]:CentralDHW > 0 )) then  Count  else  UNDEFINED  endif  }
+   "Set ResZn:CentralDHWDUCount"       ResZn:CentralDHWDUCount = {  SumChildren( DwellUnit:CentralDHWDUCount )  }
+
+   "Set ResZn:NumDwellingUnitsByBedrmsWithMult[1] - Studio"    ResZn:NumDwellingUnitsByBedrmsWithMult[1] =      ; SAC 08/05/22 (CUAC)
+      {  if (  SumChildrenIf( DwellUnit:Count, DwellUnit:NumBedroomsPerUnit = 0 ))
+         then  SumChildrenIf( DwellUnit:Count, DwellUnit:NumBedroomsPerUnit = 0 ) * ValidOr( ResZnGrp:Mult, 1 )  else  UNDEFINED  endif  }
+   "Set ResZn:NumDwellingUnitsByBedrmsWithMult[2] - 1 Bdrm"    ResZn:NumDwellingUnitsByBedrmsWithMult[2] = 
+      {  if (  SumChildrenIf( DwellUnit:Count, DwellUnit:NumBedroomsPerUnit = 1 ))
+         then  SumChildrenIf( DwellUnit:Count, DwellUnit:NumBedroomsPerUnit = 1 ) * ValidOr( ResZnGrp:Mult, 1 )  else  UNDEFINED  endif  }
+   "Set ResZn:NumDwellingUnitsByBedrmsWithMult[3] - 2 Bdrm"    ResZn:NumDwellingUnitsByBedrmsWithMult[3] = 
+      {  if (  SumChildrenIf( DwellUnit:Count, DwellUnit:NumBedroomsPerUnit = 2 ))
+         then  SumChildrenIf( DwellUnit:Count, DwellUnit:NumBedroomsPerUnit = 2 ) * ValidOr( ResZnGrp:Mult, 1 )  else  UNDEFINED  endif  }
+   "Set ResZn:NumDwellingUnitsByBedrmsWithMult[4] - 3 Bdrm"    ResZn:NumDwellingUnitsByBedrmsWithMult[4] = 
+      {  if (  SumChildrenIf( DwellUnit:Count, DwellUnit:NumBedroomsPerUnit = 3 ))
+         then  SumChildrenIf( DwellUnit:Count, DwellUnit:NumBedroomsPerUnit = 3 ) * ValidOr( ResZnGrp:Mult, 1 )  else  UNDEFINED  endif  }
+   "Set ResZn:NumDwellingUnitsByBedrmsWithMult[5] - 4 Bdrm"    ResZn:NumDwellingUnitsByBedrmsWithMult[5] = 
+      {  if (  SumChildrenIf( DwellUnit:Count, DwellUnit:NumBedroomsPerUnit = 4 ))
+         then  SumChildrenIf( DwellUnit:Count, DwellUnit:NumBedroomsPerUnit = 4 ) * ValidOr( ResZnGrp:Mult, 1 )  else  UNDEFINED  endif  }
+   "Set ResZn:NumDwellingUnitsByBedrmsWithMult[6] - 5 Bdrm"    ResZn:NumDwellingUnitsByBedrmsWithMult[6] = 
+      {  if (  SumChildrenIf( DwellUnit:Count, DwellUnit:NumBedroomsPerUnit = 5 ))
+         then  SumChildrenIf( DwellUnit:Count, DwellUnit:NumBedroomsPerUnit = 5 ) * ValidOr( ResZnGrp:Mult, 1 )  else  UNDEFINED  endif  }
+   "Set ResZn:NumDwellingUnitsByBedrmsWithMult[7] - 6 Bdrm"    ResZn:NumDwellingUnitsByBedrmsWithMult[7] = 
+      {  if (  SumChildrenIf( DwellUnit:Count, DwellUnit:NumBedroomsPerUnit = 6 ))
+         then  SumChildrenIf( DwellUnit:Count, DwellUnit:NumBedroomsPerUnit = 6 ) * ValidOr( ResZnGrp:Mult, 1 )  else  UNDEFINED  endif  }
+   "Set ResZn:NumDwellingUnitsByBedrmsWithMult[8] - >6 Bdrm"   ResZn:NumDwellingUnitsByBedrmsWithMult[8] = 
+      {  if (  SumChildrenIf( DwellUnit:Count, DwellUnit:NumBedroomsPerUnit > 6 ))
+         then  SumChildrenIf( DwellUnit:Count, DwellUnit:NumBedroomsPerUnit > 6 ) * ValidOr( ResZnGrp:Mult, 1 )  else  UNDEFINED  endif  }
+
+   "Set ResProj:NumDwellingUnitsByBedrms[1] - Studio"     ResProj:NumDwellingUnitsByBedrms[1] =    ; SAC 08/10/22 (CUAC)   ; SAC 09/18/23 (OldCUAC)
+      {  if (IfValidAnd( CUACReport > 0 ) .AND. IfValidAnd( CUAC_OldAccessDB > 0 )) then  UNCHANGED
+         else  SumAll( ResZn:NumDwellingUnitsByBedrmsWithMult[1] )  endif  }
+   "Set ResProj:NumDwellingUnitsByBedrms[2] - 1 Bdrm"     ResProj:NumDwellingUnitsByBedrms[2] = 
+      {  if (IfValidAnd( CUACReport > 0 ) .AND. IfValidAnd( CUAC_OldAccessDB > 0 )) then  UNCHANGED
+         else  SumAll( ResZn:NumDwellingUnitsByBedrmsWithMult[2] )  endif  }
+   "Set ResProj:NumDwellingUnitsByBedrms[3] - 2 Bdrm"     ResProj:NumDwellingUnitsByBedrms[3] = 
+      {  if (IfValidAnd( CUACReport > 0 ) .AND. IfValidAnd( CUAC_OldAccessDB > 0 )) then  UNCHANGED
+         else  SumAll( ResZn:NumDwellingUnitsByBedrmsWithMult[3] )  endif  }
+   "Set ResProj:NumDwellingUnitsByBedrms[4] - 3 Bdrm"     ResProj:NumDwellingUnitsByBedrms[4] = 
+      {  if (IfValidAnd( CUACReport > 0 ) .AND. IfValidAnd( CUAC_OldAccessDB > 0 )) then  UNCHANGED
+         else  SumAll( ResZn:NumDwellingUnitsByBedrmsWithMult[4] )  endif  }
+   "Set ResProj:NumDwellingUnitsByBedrms[5] - 4 Bdrm"     ResProj:NumDwellingUnitsByBedrms[5] = 
+      {  if (IfValidAnd( CUACReport > 0 ) .AND. IfValidAnd( CUAC_OldAccessDB > 0 )) then  UNCHANGED
+         else  SumAll( ResZn:NumDwellingUnitsByBedrmsWithMult[5] )  endif  }
+   "Set ResProj:NumDwellingUnitsByBedrms[6] - 5 Bdrm"     ResProj:NumDwellingUnitsByBedrms[6] = 
+      {  if (IfValidAnd( CUACReport > 0 ) .AND. IfValidAnd( CUAC_OldAccessDB > 0 )) then  UNCHANGED
+         else  SumAll( ResZn:NumDwellingUnitsByBedrmsWithMult[6] )  endif  }
+   "Set ResProj:NumDwellingUnitsByBedrms[7] - 6 Bdrm"     ResProj:NumDwellingUnitsByBedrms[7] = 
+      {  if (IfValidAnd( CUACReport > 0 ) .AND. IfValidAnd( CUAC_OldAccessDB > 0 )) then  UNCHANGED
+         else  SumAll( ResZn:NumDwellingUnitsByBedrmsWithMult[7] )  endif  }
+   "Set ResProj:NumDwellingUnitsByBedrms[8] - >6 Bdrm"    ResProj:NumDwellingUnitsByBedrms[8] = 
+      {  if (IfValidAnd( CUACReport > 0 ) .AND. IfValidAnd( CUAC_OldAccessDB > 0 )) then  UNCHANGED
+         else  SumAll( ResZn:NumDwellingUnitsByBedrmsWithMult[8] )  endif  }
+
+   ; SAC 08/06/22   ; added logic to ensure CUAC_InputErrorCheck evaluated even when CUACReport !> 0 - SAC 12/29/22
+   "Call rulelist to set CUAC affordable housing unit stuff"   Proj:Action =     ; added logic to prevent evaluating 'CUAC_InputErrorCheck' for 2025 analysis - SAC 01/26/23   ; SAC 09/18/23 (OldCUAC)
+      {  if (IfValidAnd( CUACReport > 0 ))
+         then  if (IfValidAnd( CUAC_OldAccessDB > 0 ))
+               then  EvalRulelist( "CUAC_ZoneUnitCounts_OldCUAC" )
+               else  EvalRulelist( "CUAC_ZoneUnitCounts" )  endif
+         else if (IfValidAnd( EngyCodeYearNum <= 2022 ))
+         then  EvalRulelist( "CUAC_InputErrorCheck" )
+         else  UNCHANGED  endif endif  }
 
   ; SAC 10/24/19 - copy following rules out of Rules_CSE_Simulation_DHW to default PRIOR to defaulting new ResDHWSys:RecircPumpPwr
 	; SAC 10/27/15 - fix problem where ResDHWSys:NumAssignedDUFracs not taking into account number of assigned DwellUnits of each DwellUnitType
@@ -527,30 +609,44 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
 
    ; SAC 12/30/19 - number of DwellUnits served by DHW heater assignment to this system (sum of fractions) (tic #862)
    ; SAC 1/5/20 - added logic for new Central HPWH system inputs (tic #862)
-   "Set ResDHWSys:NumAssignedDUHtrFracs[1]"  ResDHWSys:NumAssignedDUHtrFracs[1]  =
-      {  if (Proj:IsComRuleset .AND. CentralDHW > 0 .AND. CentralDHWTypeVal == 2) then  NumAssignedDUFracs
+   "Set ResDHWSys:NumAssignedDUHtrFracs[1]"  ResDHWSys:NumAssignedDUHtrFracs[1]  =     ; NumResOtherZnsServed - SAC 03/24/23 (tic #3418)   ; fix undefined data error - SAC 04/10/23
+      {  if (Proj:IsComRuleset .AND. CentralDHW > 0 .AND. CentralDHWTypeVal == 2) then  (NumAssignedDUFracs + ValidOr( NumResOtherZnsServed, 0 ))
          else if (LocalCompAssigned( DHWHeater[1] ) < 1 .OR. IfValidAnd( HeaterMult[1] > 0 )==0 .OR. IfValidAnd( TotNumDHWHeaters > 0 )==0) then  0  
-         else  NumAssignedDUFracs / TotNumDHWHeaters  endif endif  }
+         else  (NumAssignedDUFracs + ValidOr( NumResOtherZnsServed, 0 )) / TotNumDHWHeaters  endif endif  }
    "Set ResDHWSys:NumAssignedDUHtrFracs[2]"  ResDHWSys:NumAssignedDUHtrFracs[2]  =
       {  if (Proj:IsComRuleset .AND. CentralDHW > 0 .AND. CentralDHWTypeVal == 2) then  0
          else if (LocalCompAssigned( DHWHeater[2] ) < 1 .OR. IfValidAnd( HeaterMult[2] > 0 )==0 .OR. IfValidAnd( TotNumDHWHeaters > 0 )==0) then  0  
-         else  NumAssignedDUFracs / TotNumDHWHeaters  endif endif  }
+         else  (NumAssignedDUFracs + ValidOr( NumResOtherZnsServed, 0 )) / TotNumDHWHeaters  endif endif  }
    "Set ResDHWSys:NumAssignedDUHtrFracs[3]"  ResDHWSys:NumAssignedDUHtrFracs[3]  =
       {  if (Proj:IsComRuleset .AND. CentralDHW > 0 .AND. CentralDHWTypeVal == 2) then  0
          else if (LocalCompAssigned( DHWHeater[3] ) < 1 .OR. IfValidAnd( HeaterMult[3] > 0 )==0 .OR. IfValidAnd( TotNumDHWHeaters > 0 )==0) then  0  
-         else  NumAssignedDUFracs / TotNumDHWHeaters  endif endif  }
+         else  (NumAssignedDUFracs + ValidOr( NumResOtherZnsServed, 0 )) / TotNumDHWHeaters  endif endif  }
    "Set ResDHWSys:NumAssignedDUHtrFracs[4]"  ResDHWSys:NumAssignedDUHtrFracs[4]  =
       {  if (Proj:IsComRuleset .AND. CentralDHW > 0 .AND. CentralDHWTypeVal == 2) then  0
          else if (LocalCompAssigned( DHWHeater[4] ) < 1 .OR. IfValidAnd( HeaterMult[4] > 0 )==0 .OR. IfValidAnd( TotNumDHWHeaters > 0 )==0) then  0  
-         else  NumAssignedDUFracs / TotNumDHWHeaters  endif endif  }
+         else  (NumAssignedDUFracs + ValidOr( NumResOtherZnsServed, 0 )) / TotNumDHWHeaters  endif endif  }
    "Set ResDHWSys:NumAssignedDUHtrFracs[5]"  ResDHWSys:NumAssignedDUHtrFracs[5]  =
       {  if (Proj:IsComRuleset .AND. CentralDHW > 0 .AND. CentralDHWTypeVal == 2) then  0
          else if (LocalCompAssigned( DHWHeater[5] ) < 1 .OR. IfValidAnd( HeaterMult[5] > 0 )==0 .OR. IfValidAnd( TotNumDHWHeaters > 0 )==0) then  0  
-         else  NumAssignedDUFracs / TotNumDHWHeaters  endif endif  }
+         else  (NumAssignedDUFracs + ValidOr( NumResOtherZnsServed, 0 )) / TotNumDHWHeaters  endif endif  }
    "Set ResDHWSys:NumAssignedDUHtrFracs[6]"  ResDHWSys:NumAssignedDUHtrFracs[6]  =
       {  if (Proj:IsComRuleset .AND. CentralDHW > 0 .AND. CentralDHWTypeVal == 2) then  0
          else if (LocalCompAssigned( DHWHeater[6] ) < 1 .OR. IfValidAnd( HeaterMult[6] > 0 )==0 .OR. IfValidAnd( TotNumDHWHeaters > 0 )==0) then  0  
-         else  NumAssignedDUFracs / TotNumDHWHeaters  endif endif  }
+         else  (NumAssignedDUFracs + ValidOr( NumResOtherZnsServed, 0 )) / TotNumDHWHeaters  endif endif  }
+
+
+; new property duplicating above except reporting '0' for central HPWH systems
+; RJH 9/4/23 this new property supports GitHub Issue #101
+   "Set ResDHWSys:NumIndivAssignedDUHtrFracs[1]"  ResDHWSys:NumIndivAssignedDUHtrFracs[1]  =  
+      {  if (Proj:IsComRuleset .AND. CentralDHW > 0 .AND. CentralDHWTypeVal == 2) then  0
+         else if (LocalCompAssigned( DHWHeater[1] ) < 1 .OR. IfValidAnd( HeaterMult[1] > 0 )==0 .OR. IfValidAnd( TotNumDHWHeaters > 0 )==0) then  0  
+         else if (CentralRecircType > 0) then 1 else (NumAssignedDUFracs + ValidOr( NumResOtherZnsServed, 0 )) / TotNumDHWHeaters  endif endif endif  }
+   "Set ResDHWSys:NumIndivAssignedDUHtrFracs[2]"  ResDHWSys:NumIndivAssignedDUHtrFracs[2]  = {  NumAssignedDUHtrFracs[2]  } 
+   "Set ResDHWSys:NumIndivAssignedDUHtrFracs[3]"  ResDHWSys:NumIndivAssignedDUHtrFracs[3]  = {  NumAssignedDUHtrFracs[3]  } 
+   "Set ResDHWSys:NumIndivAssignedDUHtrFracs[4]"  ResDHWSys:NumIndivAssignedDUHtrFracs[4]  = {  NumAssignedDUHtrFracs[4]  } 
+   "Set ResDHWSys:NumIndivAssignedDUHtrFracs[5]"  ResDHWSys:NumIndivAssignedDUHtrFracs[5]  = {  NumAssignedDUHtrFracs[5]  } 
+   "Set ResDHWSys:NumIndivAssignedDUHtrFracs[6]"  ResDHWSys:NumIndivAssignedDUHtrFracs[6]  = {  NumAssignedDUHtrFracs[6]  } 
+
 
   ; SAC 12/29/19 - copy following rules out of Rules_CSE_Simulation_DHW to default PRIOR to defaulting ResWtrHtr:TankVolume (tic #862)
    ; SAC 1/2/19 - added to facilitate standard design HPWH sizing (HPWHSIZE)
@@ -605,6 +701,39 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
       {  if (IfValidAnd( ResProj:IsMultiFamily < 0.5 )) then  ResProj:NumBedrooms
          else  SumRevRef( ResDHWSys:DHWHeater, ResDHWSys:NumAssignedBRHtrFracs )  endif  }
 
+   "Set ResWtrHtr:NumIndivAssignedDUFracs"     ResWtrHtr:NumIndivAssignedDUFracs  =     ; RJH 9/4/23 GitHub Issue #101
+      {  if (IfValidAnd( ResProj:IsMultiFamily < 0.5 )) then  ResProj:NumDwellingUnits
+         else  SumRevRef( ResDHWSys:DHWHeater, ResDHWSys:NumIndivAssignedDUHtrFracs )  endif  }
+
+
+   "Set ResDHWSys:DailyCommonHWConsHtrFracs[1]"                   ResDHWSys:DailyCommonHWConsHtrFracs[1]  =     ; SAC 10/10/24 (tic #3630)
+      {  if (Proj:IsComRuleset .AND. CentralDHW > 0 .AND. CentralDHWTypeVal == 2) then  DailyCommonHWConsumption
+         else if (LocalCompAssigned( DHWHeater[1] ) < 1 .OR. IfValidAnd( HeaterMult[1] > 0 )==0 .OR. IfValidAnd( TotNumDHWHeaters > 0 )==0) then  0  
+         else  ValidOr( DailyCommonHWConsumption, 0 ) * HeaterMult[1] / TotNumDHWHeaters  endif endif  }
+   "Set ResDHWSys:DailyCommonHWConsHtrFracs[2-6]"  for:#H=(2to6)  ResDHWSys:DailyCommonHWConsHtrFracs[#H]  =
+      {  if (Proj:IsComRuleset .AND. CentralDHW > 0 .AND. CentralDHWTypeVal == 2) then  0
+         else if (LocalCompAssigned( DHWHeater[#H] ) < 1 .OR. IfValidAnd( HeaterMult[#H] > 0 )==0 .OR. IfValidAnd( TotNumDHWHeaters > 0 )==0) then  0  
+         else  ValidOr( DailyCommonHWConsumption, 0 ) * HeaterMult[#H] / TotNumDHWHeaters  endif endif  }
+
+   "Set ResWtrHtr:DailyCommonHWConsFracs"       ResWtrHtr:DailyCommonHWConsFracs  =     ; SAC 10/10/24 (tic #3630)
+      {  if (IfValidAnd( ResProj:IsMultiFamily > 0.5 )==0) then  0
+         else  SumRevRef( ResDHWSys:DHWHeater, ResDHWSys:DailyCommonHWConsHtrFracs )  endif  }
+
+
+   "Set ResDHWSys:NumAssignedCommonDUEquivByHtr[1]"                   ResDHWSys:NumAssignedCommonDUEquivByHtr[1]  =     ; SAC 10/10/24 (tic #3630)
+      {  if (Proj:IsComRuleset .AND. CentralDHW > 0 .AND. CentralDHWTypeVal == 2) then  NumAssignedCommonDUEquiv
+         else if (LocalCompAssigned( DHWHeater[1] ) < 1 .OR. IfValidAnd( HeaterMult[1] > 0 )==0 .OR. IfValidAnd( TotNumDHWHeaters > 0 )==0) then  0  
+         else  ValidOr( NumAssignedCommonDUEquiv, 0 ) * HeaterMult[1] / TotNumDHWHeaters  endif endif  }
+   "Set ResDHWSys:NumAssignedCommonDUEquivByHtr[2-6]"  for:#H=(2to6)  ResDHWSys:NumAssignedCommonDUEquivByHtr[#H]  =
+      {  if (Proj:IsComRuleset .AND. CentralDHW > 0 .AND. CentralDHWTypeVal == 2) then  0
+         else if (LocalCompAssigned( DHWHeater[#H] ) < 1 .OR. IfValidAnd( HeaterMult[#H] > 0 )==0 .OR. IfValidAnd( TotNumDHWHeaters > 0 )==0) then  0  
+         else  ValidOr( NumAssignedCommonDUEquiv, 0 ) * HeaterMult[#H] / TotNumDHWHeaters  endif endif  }
+
+   "Set ResWtrHtr:NumAssignedCommonDUEquiv"        ResWtrHtr:NumAssignedCommonDUEquiv  =     ; SAC 10/10/24 (tic #3630)
+      {  if (IfValidAnd( ResProj:IsMultiFamily > 0.5 )==0) then  0
+         else  SumRevRef( ResDHWSys:DHWHeater, ResDHWSys:NumAssignedCommonDUEquivByHtr )  endif  }
+
+
    "Set ResWtrHtr:TankVolumeEditable"  ResWtrHtr:TankVolumeEditable  =     ; SAC 12/29/19 (tic #862)
       {  if (HeaterType == 16 .AND. IfValidAnd( Proj:EnableResearchMode > 0 )==0) then  0
          else  1  endif  }
@@ -613,9 +742,29 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
       {  if (LocalStatus( TankVolume ) < 5 .OR. HeaterType != 16 .OR. TankVolumeEditable > 0) then  UNCHANGED
          else  EvalRulelist( "ForceReset_DHWHeater_TankVolume", 1 )  endif  }
 
+   ; SAC 7/9/17 - added logic to prevent error when FloorAreaServed not yet defined (can happen first time through defaulting)
+   ; SAC 11/8/17 - added check for HPWH_NEEARated flag/checkbox to prevent reporting of non-NEEA HPWHs
+   ; moved up here from below to use in defaulting ResWtrHtr:TankVolume - SAC 03/07/24
+   "Set ResWtrHtr:IsNEEAHtPumpWtrHtr - flag triggering NEEA heat pump water heater special feature message"	; SAC 7/5/17 - tic #805
+      ResWtrHtr:IsNEEAHtPumpWtrHtr  = {
+         if ( IfValidAnd( FloorAreaServed <= 0 )==0 .AND.
+              HeaterElementType == 5 .AND. IfValidAnd( HPWH_NEEARated > 0 ) .AND. 
+              (IfValidAnd( CentralHPWHCprsrType > 0 ) .OR. (HPWHBrand > 2 .AND. HPWHModel > 1)) )
+         then  1  else  0  endif  }
+
+   "Force re-default of ResWtrHtr:TankVolume for NEEA HPWHs to ensure reporting accuracy"    ResWtrHtr:Action =      ; SAC 05/02/24
+      {  if (LocalStatus( TankVolume ) > 4 .AND. IsNEEAHtPumpWtrHtr .AND. HPWHModel > 1)
+         then  EvalRulelist( "ForceReset_DHWHeater_TankVolume", 1 )
+         else  UNCHANGED  endif  }
+
    ; SAC 8/29/16 - moved TankVolume default up here, before EnergyFactor rule that may reference TankVolume (tic #725)
+   ; added HPWHData_NEEA:TankVolume() table look-up for NEEA HPWHs - SAC 03/07/24
 	"Default ResWtrHtr:TankVolume"		ResWtrHtr:TankVolume	= {
 		if (HeaterElementType == 5 .AND. HPWH_NEEARated < 0.5) then  50		; SAC 5/17/16 - HP2016, Generic
+      else if (IsNEEAHtPumpWtrHtr .AND. HPWHModel > 1)
+      then  if (  HPWHData_NEEA:TankVolume( "ModelNum", HPWHModel ) > 0)
+            then  HPWHData_NEEA:TankVolume( "ModelNum", HPWHModel )
+            else  50  endif
 		else	switch (HeaterType)
 					case  0 :	50			; "Boiler"        
 					case  1 :	50			; "Indirect"      
@@ -632,9 +781,10 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
                case 13 :  100		; "Commercial Storage (TE & SBL)"            
                case 14 :   50		; "Residential-Duty Commercial Storage (UEF)"
                case 15 :    0    ; "Residential-Duty Commercial Instantaneous (UEF)"
-               case 16 :  (ValidOr( NumAssignedBRFracs, 1 ) * 3) + (ValidOr( NumAssignedDUFracs, 1 ) * 10)     ; "Commercial Packaged Boiler"      ; SAC 12/19/19 - to facilitate new central gas std design DHW system (tic #862)
+               case 16 :  max( 50, int( ((ValidOr( NumAssignedDUFracs, 1 ) + ValidOr( NumAssignedCommonDUEquiv, 0 )) * 10) +
+                                        ( ValidOr( NumAssignedBRFracs, 1 ) * 3) + 0.5 ) )      ; "Commercial Packaged Boiler"  ; SAC 12/19/19 - to facilitate new central gas std design DHW system (tic #862)  ; SAC 10/09/24 (tic #3630)
 					default :   50
-				endswitch  endif  }
+				endswitch  endif endif  }
    "Set ResWtrHtr:ShowTankVolume"      ResWtrHtr:ShowTankVolume  =            ; HPWH_ComProduct - SAC 02/01/21 (tic #1260)
          {   if (HeaterElementType == 1 .AND. HeaterType == 9) then  0
             else if (HeaterElementType != 5 .OR. (HPWH_NEEARated < 0.5 .AND. HPWH_ComProduct < 0.5))
@@ -976,14 +1126,15 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
                (HeaterType == 4 .OR. HeaterType == 5 .OR. HeaterType == 6 .OR. HeaterType == 9))
       then  1  else  0  endif endif endif  }
 
-   ; SAC 7/9/17 - added logic to prevent error when FloorAreaServed not yet defined (can happen first time through defaulting)
-   ; SAC 11/8/17 - added check for HPWH_NEEARated flag/checkbox to prevent reporting of non-NEEA HPWHs
-   "Set ResWtrHtr:IsNEEAHtPumpWtrHtr - flag triggering NEEA heat pump water heater special feature message"	; SAC 7/5/17 - tic #805
-      ResWtrHtr:IsNEEAHtPumpWtrHtr  = {
-         if ( IfValidAnd( FloorAreaServed <= 0 )==0 .AND.
-              HeaterElementType == 5 .AND. HPWH_NEEARated > 0 .AND. 
-              (CentralHPWHCprsrType > 0 .OR. (HPWHBrand > 2 .AND. HPWHModel > 1)) )
-         then  1  else  0  endif  }
+   ; moved UP above to use in defaulting TankVolume - SAC 03/07/24
+   ; ; SAC 7/9/17 - added logic to prevent error when FloorAreaServed not yet defined (can happen first time through defaulting)
+   ; ; SAC 11/8/17 - added check for HPWH_NEEARated flag/checkbox to prevent reporting of non-NEEA HPWHs
+   ; "Set ResWtrHtr:IsNEEAHtPumpWtrHtr - flag triggering NEEA heat pump water heater special feature message"	; SAC 7/5/17 - tic #805
+   ;    ResWtrHtr:IsNEEAHtPumpWtrHtr  = {
+   ;       if ( IfValidAnd( FloorAreaServed <= 0 )==0 .AND.
+   ;            HeaterElementType == 5 .AND. HPWH_NEEARated > 0 .AND. 
+   ;            (CentralHPWHCprsrType > 0 .OR. (HPWHBrand > 2 .AND. HPWHModel > 1)) )
+   ;       then  1  else  0  endif  }
 
    "Set ResWtrHtr:IsNewAssignedHPWH - flag: this is a New HPWH assigned to one or more DHWSystems"    ResWtrHtr:IsNewAssignedHPWH =       ; SAC 02/05/21
       {  if (HeaterElementType == 5 .AND. IfValidAnd( NewFlrAreaServed > 0 )) then  1  else  0  endif  }
@@ -1304,46 +1455,91 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
 
    ; SAC 2/16/18 - (tic #983)
    ; SAC 1/5/20 - added logic for new Central HPWH system inputs (tic #862)
+   ; revised logic to accommodate heaters defined as ResHVACSys and added for loop for htrs 2-6 - SAC 10/17/24 (tic #3629)
    "Set ResDHWSys:HeatersAllElec - whether all assigned DHW heaters are electric (1)"     ResDHWSys:HeatersAllElec = {
          if (Proj:IsComRuleset .AND. CentralDHW > 0 .AND. CentralDHWTypeVal == 2) then  1
     else if (IfValidAnd( HeaterMultFlt[1] > 0 ) .AND. LocalCompAssigned( DHWHeater[1] ) .AND.
-             IfValidAnd( DHWHeater[1]:HeaterElementType = 1 )==0) then  1  else  0  endif endif  }
-   "Set ResDHWSys:HeatersAllElec - whether all assigned DHW heaters are electric (2)"     ResDHWSys:HeatersAllElec = {
-         if (IfValidAnd( HeaterMultFlt[2] > 0 ) .AND. LocalCompAssigned( DHWHeater[2] ) .AND.
-             IfValidAnd( DHWHeater[2]:HeaterElementType = 1 ) .AND. CentralDHWTypeVal != 2) then  0  else  UNCHANGED  endif  }
-   "Set ResDHWSys:HeatersAllElec - whether all assigned DHW heaters are electric (3)"     ResDHWSys:HeatersAllElec = {
-         if (IfValidAnd( HeaterMultFlt[3] > 0 ) .AND. LocalCompAssigned( DHWHeater[3] ) .AND.
-             IfValidAnd( DHWHeater[3]:HeaterElementType = 1 ) .AND. CentralDHWTypeVal != 2) then  0  else  UNCHANGED  endif  }
-   "Set ResDHWSys:HeatersAllElec - whether all assigned DHW heaters are electric (4)"     ResDHWSys:HeatersAllElec = {
-         if (IfValidAnd( HeaterMultFlt[4] > 0 ) .AND. LocalCompAssigned( DHWHeater[4] ) .AND.
-             IfValidAnd( DHWHeater[4]:HeaterElementType = 1 ) .AND. CentralDHWTypeVal != 2) then  0  else  UNCHANGED  endif  }
-   "Set ResDHWSys:HeatersAllElec - whether all assigned DHW heaters are electric (5)"     ResDHWSys:HeatersAllElec = {
-         if (IfValidAnd( HeaterMultFlt[5] > 0 ) .AND. LocalCompAssigned( DHWHeater[5] ) .AND.
-             IfValidAnd( DHWHeater[5]:HeaterElementType = 1 ) .AND. CentralDHWTypeVal != 2) then  0  else  UNCHANGED  endif  }
-   "Set ResDHWSys:HeatersAllElec - whether all assigned DHW heaters are electric (6)"     ResDHWSys:HeatersAllElec = {
-         if (IfValidAnd( HeaterMultFlt[6] > 0 ) .AND. LocalCompAssigned( DHWHeater[6] ) .AND.
-             IfValidAnd( DHWHeater[6]:HeaterElementType = 1 ) .AND. CentralDHWTypeVal != 2) then  0  else  UNCHANGED  endif  }
+             ( (LocalCompAssigned( DHWHeater[1] ) == ComponentType( "ResWtrHtr"  ) .AND. IfValidAnd( DHWHeater[1]:HeaterElementType = 1 )==0) .OR.
+               (LocalCompAssigned( DHWHeater[1] ) == ComponentType( "ResHVACSys" ) .AND. IfValidAnd( DHWHeater[1]:Type              = 2 )   ) )) then  1  else  0  endif endif  }
+   "Set ResDHWSys:HeatersAllElec - whether all assigned DHW heaters are electric (2-6)"   for:#SYS=(2to6)   ResDHWSys:HeatersAllElec = {
+         if (IfValidAnd( HeaterMultFlt[#SYS] > 0 ) .AND. LocalCompAssigned( DHWHeater[#SYS] ) .AND. CentralDHWTypeVal != 2 .AND.
+             ( (LocalCompAssigned( DHWHeater[#SYS] ) == ComponentType( "ResWtrHtr"  ) .AND. IfValidAnd( DHWHeater[#SYS]:HeaterElementType = 1 )) .OR.
+               (LocalCompAssigned( DHWHeater[#SYS] ) == ComponentType( "ResHVACSys" ) .AND. IfValidAnd( DHWHeater[#SYS]:Type             != 2 )) )) then  0  else  UNCHANGED  endif  }
+   ;"Set ResDHWSys:HeatersAllElec - whether all assigned DHW heaters are electric (3)"     ResDHWSys:HeatersAllElec = {
+   ;      if (IfValidAnd( HeaterMultFlt[3] > 0 ) .AND. LocalCompAssigned( DHWHeater[3] ) .AND. CentralDHWTypeVal != 2 .AND.
+   ;          IfValidAnd( DHWHeater[3]:HeaterElementType = 1 )) then  0  else  UNCHANGED  endif  }
+   ;"Set ResDHWSys:HeatersAllElec - whether all assigned DHW heaters are electric (4)"     ResDHWSys:HeatersAllElec = {
+   ;      if (IfValidAnd( HeaterMultFlt[4] > 0 ) .AND. LocalCompAssigned( DHWHeater[4] ) .AND. CentralDHWTypeVal != 2 .AND.
+   ;          IfValidAnd( DHWHeater[4]:HeaterElementType = 1 )) then  0  else  UNCHANGED  endif  }
+   ;"Set ResDHWSys:HeatersAllElec - whether all assigned DHW heaters are electric (5)"     ResDHWSys:HeatersAllElec = {
+   ;      if (IfValidAnd( HeaterMultFlt[5] > 0 ) .AND. LocalCompAssigned( DHWHeater[5] ) .AND. CentralDHWTypeVal != 2 .AND.
+   ;          IfValidAnd( DHWHeater[5]:HeaterElementType = 1 )) then  0  else  UNCHANGED  endif  }
+   ;"Set ResDHWSys:HeatersAllElec - whether all assigned DHW heaters are electric (6)"     ResDHWSys:HeatersAllElec = {
+   ;      if (IfValidAnd( HeaterMultFlt[6] > 0 ) .AND. LocalCompAssigned( DHWHeater[6] ) .AND. CentralDHWTypeVal != 2 .AND.
+   ;          IfValidAnd( DHWHeater[6]:HeaterElementType = 1 )) then  0  else  UNCHANGED  endif  }
 
    ; SAC 12/11/18 - HPWHSIZE
+   ; revised logic to accommodate heaters defined as ResHVACSys and added for loop for htrs 2-6 - SAC 10/17/24 (tic #3629)
    "Set ResDHWSys:NumElecHeaters (1)"     ResDHWSys:NumElecHeaters = {
          if (Proj:IsComRuleset .AND. CentralDHW > 0 .AND. CentralDHWTypeVal == 2) then  1
     else if (IfValidAnd( HeaterMultFlt[1] > 0 ) .AND. LocalCompAssigned( DHWHeater[1] ) .AND.
-             IfValidAnd( DHWHeater[1]:HeaterElementType != 1 )) then  1  else  0  endif endif  }
-   "Set ResDHWSys:NumElecHeaters (2)"     ResDHWSys:NumElecHeaters = {
-         if (IfValidAnd( HeaterMultFlt[2] > 0 ) .AND. LocalCompAssigned( DHWHeater[2] ) .AND.
-             IfValidAnd( DHWHeater[2]:HeaterElementType != 1 )) then  NumElecHeaters + 1  else  UNCHANGED  endif  }
-   "Set ResDHWSys:NumElecHeaters (3)"     ResDHWSys:NumElecHeaters = {
-         if (IfValidAnd( HeaterMultFlt[3] > 0 ) .AND. LocalCompAssigned( DHWHeater[3] ) .AND.
-             IfValidAnd( DHWHeater[3]:HeaterElementType != 1 )) then  NumElecHeaters + 1  else  UNCHANGED  endif  }
-   "Set ResDHWSys:NumElecHeaters (4)"     ResDHWSys:NumElecHeaters = {
-         if (IfValidAnd( HeaterMultFlt[4] > 0 ) .AND. LocalCompAssigned( DHWHeater[4] ) .AND.
-             IfValidAnd( DHWHeater[4]:HeaterElementType != 1 )) then  NumElecHeaters + 1  else  UNCHANGED  endif  }
-   "Set ResDHWSys:NumElecHeaters (5)"     ResDHWSys:NumElecHeaters = {
-         if (IfValidAnd( HeaterMultFlt[5] > 0 ) .AND. LocalCompAssigned( DHWHeater[5] ) .AND.
-             IfValidAnd( DHWHeater[5]:HeaterElementType != 1 )) then  NumElecHeaters + 1  else  UNCHANGED  endif  }
-   "Set ResDHWSys:NumElecHeaters (6)"     ResDHWSys:NumElecHeaters = {
-         if (IfValidAnd( HeaterMultFlt[6] > 0 ) .AND. LocalCompAssigned( DHWHeater[6] ) .AND.
-             IfValidAnd( DHWHeater[6]:HeaterElementType != 1 )) then  NumElecHeaters + 1  else  UNCHANGED  endif  }
+             ( (LocalCompAssigned( DHWHeater[1] ) == ComponentType( "ResWtrHtr"  ) .AND. IfValidAnd( DHWHeater[1]:HeaterElementType != 1 )) .OR.
+               (LocalCompAssigned( DHWHeater[1] ) == ComponentType( "ResHVACSys" ) .AND. IfValidAnd( DHWHeater[1]:Type               = 2 )) )) then  1  else  0  endif endif  }
+   "Set ResDHWSys:NumElecHeaters (2-6)"   for:#SYS=(2to6)   ResDHWSys:NumElecHeaters = {
+         if (IfValidAnd( HeaterMultFlt[#SYS] > 0 ) .AND. LocalCompAssigned( DHWHeater[#SYS] ) .AND.
+             ( (LocalCompAssigned( DHWHeater[#SYS] ) == ComponentType( "ResWtrHtr"  ) .AND. IfValidAnd( DHWHeater[#SYS]:HeaterElementType != 1 )) .OR.
+               (LocalCompAssigned( DHWHeater[#SYS] ) == ComponentType( "ResHVACSys" ) .AND. IfValidAnd( DHWHeater[#SYS]:Type               = 2 )) )) then  NumElecHeaters + 1  else  UNCHANGED  endif  }
+   ;"Set ResDHWSys:NumElecHeaters (3)"     ResDHWSys:NumElecHeaters = {
+   ;      if (IfValidAnd( HeaterMultFlt[3] > 0 ) .AND. LocalCompAssigned( DHWHeater[3] ) .AND.
+   ;          IfValidAnd( DHWHeater[3]:HeaterElementType != 1 )) then  NumElecHeaters + 1  else  UNCHANGED  endif  }
+   ;"Set ResDHWSys:NumElecHeaters (4)"     ResDHWSys:NumElecHeaters = {
+   ;      if (IfValidAnd( HeaterMultFlt[4] > 0 ) .AND. LocalCompAssigned( DHWHeater[4] ) .AND.
+   ;          IfValidAnd( DHWHeater[4]:HeaterElementType != 1 )) then  NumElecHeaters + 1  else  UNCHANGED  endif  }
+   ;"Set ResDHWSys:NumElecHeaters (5)"     ResDHWSys:NumElecHeaters = {
+   ;      if (IfValidAnd( HeaterMultFlt[5] > 0 ) .AND. LocalCompAssigned( DHWHeater[5] ) .AND.
+   ;          IfValidAnd( DHWHeater[5]:HeaterElementType != 1 )) then  NumElecHeaters + 1  else  UNCHANGED  endif  }
+   ;"Set ResDHWSys:NumElecHeaters (6)"     ResDHWSys:NumElecHeaters = {
+   ;      if (IfValidAnd( HeaterMultFlt[6] > 0 ) .AND. LocalCompAssigned( DHWHeater[6] ) .AND.
+   ;          IfValidAnd( DHWHeater[6]:HeaterElementType != 1 )) then  NumElecHeaters + 1  else  UNCHANGED  endif  }
+
+   "Set ResDHWSys:IsNewAssignedAWHP"      ResDHWSys:IsNewAssignedAWHP =          ; SAC 12/12/22 (Res tic #1318)   ; expand to include HeatPumpDHWCombo - SAC 09/20/24 (tic #3629)
+      {  if (LocalCompAssigned( DHWHeater[1] ) == ComponentType( "ResHVACSys" ))
+         then  if (IfValidAnd( DHWHeater[1]:Type  = 2 ) .AND. IfValidAnd( DHWHeater[1]:IsNew > 0 ) .AND.
+                   ( IfValidAnd( DHWHeater[1]:HtPumpSysType = 34 ) .OR. IfValidAnd( DHWHeater[1]:HtPumpSysType = 35 ) ) .AND.
+                   IfValidAnd( DHWHeater[1]:HtPmpFlrAreaServed[1] > 0 ))
+               then  1
+               else  0  endif
+         else  0  endif  }
+
+   ; to assist in error checking - ensure Fule meter/rate assigned when fuel used in building - SAC 03/06/24
+   ; revised logic to accommodate heaters defined as ResHVACSys and added for loop for htrs 2-6 - SAC 10/17/24 (tic #3629)
+   ; revised logic to accommodate heaters defined as ResHVACSys and added for loop for htrs 2-6 - SAC 10/17/24 (tic #3629)
+   "Set ResDHWSys:NumFuelHeaters (1)"     ResDHWSys:NumFuelHeaters = {
+         if (Proj:IsComRuleset .AND. CentralDHW > 0 .AND. CentralDHWTypeVal == 2) then  0
+    else if (IfValidAnd( HeaterMultFlt[1] > 0 ) .AND. LocalCompAssigned( DHWHeater[1] ) .AND.
+             ( (LocalCompAssigned( DHWHeater[1] ) == ComponentType( "ResWtrHtr"  ) .AND. IfValidAnd( DHWHeater[1]:HeaterElementType = 1 )) .OR.
+               (LocalCompAssigned( DHWHeater[1] ) == ComponentType( "ResHVACSys" ) .AND. IfValidAnd( DHWHeater[1]:Type             != 2 )) )) then  1  else  0  endif endif  }
+   "Set ResDHWSys:NumFuelHeaters (2-6)"   for:#SYS=(2to6)   ResDHWSys:NumFuelHeaters = {
+         if (Proj:IsComRuleset .AND. CentralDHW > 0 .AND. CentralDHWTypeVal == 2) then  UNCHANGED
+    else if (IfValidAnd( HeaterMultFlt[#SYS] > 0 ) .AND. LocalCompAssigned( DHWHeater[#SYS] ) .AND.
+             ( (LocalCompAssigned( DHWHeater[#SYS] ) == ComponentType( "ResWtrHtr"  ) .AND. IfValidAnd( DHWHeater[#SYS]:HeaterElementType = 1 )) .OR.
+               (LocalCompAssigned( DHWHeater[#SYS] ) == ComponentType( "ResHVACSys" ) .AND. IfValidAnd( DHWHeater[#SYS]:Type             != 2 )) )) then  NumFuelHeaters + 1  else  UNCHANGED  endif endif  }
+   ;"Set ResDHWSys:NumFuelHeaters (3)"     ResDHWSys:NumFuelHeaters = {
+   ;      if (Proj:IsComRuleset .AND. CentralDHW > 0 .AND. CentralDHWTypeVal == 2) then  UNCHANGED
+   ; else if (IfValidAnd( HeaterMultFlt[3] > 0 ) .AND. LocalCompAssigned( DHWHeater[3] ) .AND.
+   ;          IfValidAnd( DHWHeater[3]:HeaterElementType = 1 )) then  NumFuelHeaters + 1  else  UNCHANGED  endif endif  }
+   ;"Set ResDHWSys:NumFuelHeaters (4)"     ResDHWSys:NumFuelHeaters = {
+   ;      if (Proj:IsComRuleset .AND. CentralDHW > 0 .AND. CentralDHWTypeVal == 2) then  UNCHANGED
+   ; else if (IfValidAnd( HeaterMultFlt[4] > 0 ) .AND. LocalCompAssigned( DHWHeater[4] ) .AND.
+   ;          IfValidAnd( DHWHeater[4]:HeaterElementType = 1 )) then  NumFuelHeaters + 1  else  UNCHANGED  endif endif  }
+   ;"Set ResDHWSys:NumFuelHeaters (5)"     ResDHWSys:NumFuelHeaters = {
+   ;      if (Proj:IsComRuleset .AND. CentralDHW > 0 .AND. CentralDHWTypeVal == 2) then  UNCHANGED
+   ; else if (IfValidAnd( HeaterMultFlt[5] > 0 ) .AND. LocalCompAssigned( DHWHeater[5] ) .AND.
+   ;          IfValidAnd( DHWHeater[5]:HeaterElementType = 1 )) then  NumFuelHeaters + 1  else  UNCHANGED  endif endif  }
+   ;"Set ResDHWSys:NumFuelHeaters (6)"     ResDHWSys:NumFuelHeaters = {
+   ;      if (Proj:IsComRuleset .AND. CentralDHW > 0 .AND. CentralDHWTypeVal == 2) then  UNCHANGED
+   ; else if (IfValidAnd( HeaterMultFlt[6] > 0 ) .AND. LocalCompAssigned( DHWHeater[6] ) .AND.
+   ;          IfValidAnd( DHWHeater[6]:HeaterElementType = 1 )) then  NumFuelHeaters + 1  else  UNCHANGED  endif endif  }
 
   "Look Up UEF Model Draw Variable"   ResWtrHtr:UEFModelDrawVar = {
     if( IsUEF )
@@ -1689,7 +1885,7 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
          then  if (CHPWHSysDescrip >= 2 .AND. IfValidAnd( CHPWHMinTotTankVol > 0 ))
                then  int( (CHPWHMinTotTankVol * 6.67) + 0.5 )
                else if (CHPWHSysDescrip == 1 .AND. CHPWHNEEAModel > 1)
-               then  HPWHData_NEEA:TankVolume( "Model", CHPWHNEEAModel ) *
+               then  HPWHData_NEEA:TankVolume( "ModelNum", CHPWHNEEAModel ) *
                      ValidOr( CHPWHNumCompFlt, 0 )
                else  UNDEFINED  endif endif
          else  UNDEFINED  endif  }
@@ -1700,7 +1896,7 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
          then  if (CHPWHSysDescrip >= 2 .AND. CHPWHLoopTankTypeVal >= 10 .AND. IfValidAnd( CHPWHLoopTankMinTankVol > 0 ))
                then  int( (CHPWHLoopTankMinTankVol * 6.67) + 0.5 )
                else if (CHPWHSysDescrip > 0 .AND. CHPWHLoopTankTypeVal == 2 .AND. CHPWHLoopTankNEEAModel > 1)
-               then  HPWHData_NEEA:TankVolume( "Model", CHPWHLoopTankNEEAModel ) *
+               then  HPWHData_NEEA:TankVolume( "ModelNum", CHPWHLoopTankNEEAModel ) *
                      ValidOr( CHPWHLoopTankCompCnt, 0 )
                else if (CHPWHSysDescrip > 0 .AND. CHPWHLoopTankTypeVal == 3)
                then  switch (CHPWHLoopTankComModel)
@@ -1710,10 +1906,11 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
                else  UNDEFINED  endif endif endif
          else  UNDEFINED  endif  }
 
-   "Default ResDHWSys:CHPWHASHPType"   ResDHWSys:CHPWHASHPType  =       ; SAC 5/28/20   ; SAC 6/23/20   ; SAC 02/18/21 (tic #1260)
+   ; SAC 5/28/20   ; SAC 6/23/20   ; SAC 02/18/21 (tic #1260)
+   "Default ResDHWSys:CHPWHASHPType"   ResDHWSys:CHPWHASHPType  =             ; incremented CHPWH ASHPType value by 100 to avoid conflict w/ new Rheem NEEA models - SAC 12/28/22
       {  if (CentralDHWTypeVal == 2)
          then  if (CHPWHSysDescrip >= 2 .AND. CHPWHCompType > 0)
-               then  mod( CHPWHCompType, 100 )
+               then  mod( CHPWHCompType, 100 ) + 100
                else if (CHPWHSysDescrip == 1 .AND. CHPWHIntegPkgType == 1 .AND. CHPWHNEEAModel > 0)
                then  mod( CHPWHNEEAModel, 100 )
                else if (CHPWHSysDescrip == 1 .AND. CHPWHIntegPkgType == 2 .AND. CHPWHComModel > 0)
@@ -1721,10 +1918,11 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
                else  0  endif endif endif
          else  0  endif  }
 
-   "Default ResDHWSys:CHPWHLoopTankASHPType"   ResDHWSys:CHPWHLoopTankASHPType  =         ; SAC 5/28/20   ; SAC 6/2/20   ; SAC 6/23/20   ; SAC 02/18/21 (tic #1260)
+   ; SAC 5/28/20   ; SAC 6/2/20   ; SAC 6/23/20   ; SAC 02/18/21 (tic #1260)
+   "Default ResDHWSys:CHPWHLoopTankASHPType"   ResDHWSys:CHPWHLoopTankASHPType  =         ; incremented CHPWH ASHPType value by 100 to avoid conflict w/ new Rheem NEEA models - SAC 12/28/22
       {  if (CentralDHWTypeVal == 2)
          then  if (CHPWHLoopTankTypeVal >= 10 .AND. CHPWHLoopTankCompType > 0)
-               then  mod( CHPWHLoopTankCompType, 100 )
+               then  mod( CHPWHLoopTankCompType, 100 ) + 100
                else if (CHPWHLoopTankTypeVal == 2 .AND. CHPWHLoopTankNEEAModel > 0)
                then  mod( CHPWHLoopTankNEEAModel, 100 )
                else if (CHPWHLoopTankTypeVal == 3 .AND. CHPWHLoopTankComModel > 0)
@@ -1946,7 +2144,7 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
    ; ----- DEMAND RESPONSE HPWHs -----
    "Set ResWtrHtr:DemRespCompat"    ResWtrHtr:DemRespCompat  =       ; SAC 12/04/20
       {  if (HPWH_NEEARated .AND. HPWHModel > 100000)
-         then  HPWHData_NEEA:JA13( "Model", HPWHModel )
+         then  HPWHData_NEEA:JA13( "ModelNum", HPWHModel )
          else  0  endif  }
 
    "Set ResDHWSys:DemRespCompat"       ResDHWSys:DemRespCompat  =          ; SAC 12/04/20    ; prevent Std & DRtg run use - SAC 01/11/21
@@ -1955,18 +2153,18 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
          else if (IfValidAnd( ValidAnalysisCHPWH > 0 ))
          then  if (CHPWHSysDescrip == 1)        ; Integrated, Packaged System
                then  if (CHPWHLoopTankNEEAModel > 100000)
-                     then  HPWHData_NEEA:JA13( "Model", CHPWHLoopTankNEEAModel )
+                     then  HPWHData_NEEA:JA13( "ModelNum", CHPWHLoopTankNEEAModel )
                      else  0  endif
                else if (CHPWHSysDescrip >= 2)   ; Single Pass Primary -or- Multi Pass Primary
                then  0   ; ResDHWSys:CHPWHCompType compatibility??
                else  0  endif endif
          else if (CentralDHWTypeVal == 2) then  0   ; central HPWH but not valid inputs
-         else if (NumDHWHeaters >= 1 .AND. IfValidAnd( DHWHeater[1]:DemRespCompat > 0 ) .AND. IfValidAnd( HeaterMult[1] > 0 )) then  1
-         else if (NumDHWHeaters >= 2 .AND. IfValidAnd( DHWHeater[2]:DemRespCompat > 0 ) .AND. IfValidAnd( HeaterMult[2] > 0 )) then  1
-         else if (NumDHWHeaters >= 3 .AND. IfValidAnd( DHWHeater[3]:DemRespCompat > 0 ) .AND. IfValidAnd( HeaterMult[3] > 0 )) then  1
-         else if (NumDHWHeaters >= 4 .AND. IfValidAnd( DHWHeater[4]:DemRespCompat > 0 ) .AND. IfValidAnd( HeaterMult[4] > 0 )) then  1
-         else if (NumDHWHeaters >= 5 .AND. IfValidAnd( DHWHeater[5]:DemRespCompat > 0 ) .AND. IfValidAnd( HeaterMult[5] > 0 )) then  1
-         else if (NumDHWHeaters >= 6 .AND. IfValidAnd( DHWHeater[6]:DemRespCompat > 0 ) .AND. IfValidAnd( HeaterMult[6] > 0 )) then  1
+         else if (NumDHWHeaters >= 1 .AND. (IfValidAnd( DHWHeater[1]:DemRespCompat > 0 ) .OR. IfValidAnd( DHWHeater[1]:JA13UICompliance > 0 )) .AND. IfValidAnd( HeaterMult[1] > 0 )) then  1   ; RJH 11/16/24 (tic #3640) Added JA13UICompliance in case User has checked box
+         else if (NumDHWHeaters >= 2 .AND. (IfValidAnd( DHWHeater[2]:DemRespCompat > 0 ) .OR. IfValidAnd( DHWHeater[2]:JA13UICompliance > 0 )) .AND. IfValidAnd( HeaterMult[2] > 0 )) then  1
+         else if (NumDHWHeaters >= 3 .AND. (IfValidAnd( DHWHeater[3]:DemRespCompat > 0 ) .OR. IfValidAnd( DHWHeater[3]:JA13UICompliance > 0 )) .AND. IfValidAnd( HeaterMult[3] > 0 )) then  1
+         else if (NumDHWHeaters >= 4 .AND. (IfValidAnd( DHWHeater[4]:DemRespCompat > 0 ) .OR. IfValidAnd( DHWHeater[4]:JA13UICompliance > 0 )) .AND. IfValidAnd( HeaterMult[4] > 0 )) then  1
+         else if (NumDHWHeaters >= 5 .AND. (IfValidAnd( DHWHeater[5]:DemRespCompat > 0 ) .OR. IfValidAnd( DHWHeater[5]:JA13UICompliance > 0 )) .AND. IfValidAnd( HeaterMult[5] > 0 )) then  1
+         else if (NumDHWHeaters >= 6 .AND. (IfValidAnd( DHWHeater[6]:DemRespCompat > 0 ) .OR. IfValidAnd( DHWHeater[6]:JA13UICompliance > 0 )) .AND. IfValidAnd( HeaterMult[6] > 0 )) then  1
          else  0  endif endif endif endif endif endif endif endif endif  }
    "reset ResDHWSys:DemResponsive if user-defined and not research mode"   ResDHWSys:Action =
       {  if (LocalStatus( DemResponsive ) > 5 .AND. IfValidAnd( Proj:EnableResearchMode > 0 )==0)
@@ -2001,10 +2199,10 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
       ResDHWSys:DrawMaxNumHrs     = {  4  }
 
    ; SAC 12/30/19 - removed dependence on CentralElecDHW (tic #862)
-   "Default ResDHWSys:BranchLossModel - CSE model used to simulate DHW branch losses"     ; SAC 11/06/19
+   "Default ResDHWSys:BranchLossModel - CSE model used to simulate DHW branch losses"     ; SAC 11/06/19   ; set to hot water draws only if DUs assigned - SAC 03/17/23 (tic #3418)
       ResDHWSys:BranchLossModel  = {
          if (Proj:IsComRuleset .AND. IfValidAnd( ResProj:EnergyCodeYearNum < 2019 )==0 .AND. 
-             NewCentralElecModel)
+             NewCentralElecModel .AND. IfValidAnd( NumDUsServed > 0 ))
          then  1  ; Attached to Hot Water Draws
          else  0  ; Scheduled (independent of draws)
          endif  }
@@ -2021,10 +2219,10 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
          then  "1.4 * 19.84 * exp( -0.554 * #Flrs/2)"
          else  UNDEFINED  endif  }
 
-   "Default ResDHWSys:RecircPumpPwr"      ResDHWSys:RecircPumpPwr  =
+   "Default ResDHWSys:RecircPumpPwr"      ResDHWSys:RecircPumpPwr  =    ; NumResOtherZnsServed - SAC 03/24/23 (tic #3418)
       {  if (IfValidAnd( MFamDistType > 0 ) .AND. IfValidAnd( CentralDHW > 0 ) .AND.
              IfValidAnd( NewCentralElecModel > 0 ))
-         then  4 + (ValidOr( NumAssignedDUFracs, 0 ) * 0.5)
+         then  4 + ((ValidOr( NumAssignedDUFracs, 0 ) + ValidOr( NumResOtherZnsServed, 0 )) * 0.5)
          else  UNDEFINED  endif  }
 
    "Set ResDHWSys:RecircPumpPwrUnits"     ResDHWSys:RecircPumpPwrUnits  =
@@ -2113,23 +2311,36 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
                         endif endif endif
             default :  "unrecognized type"
          endswitch  }
-   "Set ResWtrHtr:TreeDescrip"      ResWtrHtr:TreeDescrip  =            ; added 'JA13' - SAC 02/02/21
+   ; added 'JA13' - SAC 02/02/21   ; added rptg of NRes area served - SAC 02/24/23 (tic #3418)
+   "Set ResWtrHtr:TreeDescrip"      ResWtrHtr:TreeDescrip  =            ; added reporting of new AssignedCommonArea - SAC 10/09/24 (tic #3630)
       {  if (HeaterElementType == 5 .AND. HPWHCategory == 1 .AND. IfValidAnd( DemRespCompat > 0 ))
          then  if (Proj:IsComRuleset)
-               then  if (IfValidAnd( NumAssignedDUFracs > 0 ))
-                     then  Format( "%s, JA13, serving %.0f dwelling unit(s)", TypeAbbrevStr, NumAssignedDUFracs )
+               then  if (IfValidAnd( NumAssignedDUFracs > 0 ) .AND. IfValidAnd( AssignedCommonArea > 1 ))
+                     then  Format( "%s, JA13, serving %.0f dwelling unit(s), %s ft2 common area and/or other zones", TypeAbbrevStr, NumAssignedDUFracs, FltToStr( AssignedCommonArea ) )
+                     else if (IfValidAnd( NumAssignedDUFracs > 0 ))
+                     then  Format( "%s, JA13, serving %.0f dwelling unit(s) and/or other zones", TypeAbbrevStr, NumAssignedDUFracs )
+                     else if (IfValidAnd( AssignedCommonArea > 1 ))
+                     then  Format( "%s, JA13, serving %s ft2 common area and/or other zones", TypeAbbrevStr, FltToStr( AssignedCommonArea ) )
+                     else if (IfValidAnd( FloorAreaServed > 0 ))
+                     then  Format( "%s, JA13, %s SqFt assigned", TypeAbbrevStr, FltToStr( FloorAreaServed ) )
                      else  Format( "%s, JA13, not assigned", TypeAbbrevStr )
-                     endif
+                     endif endif endif endif
                else  if (IfValidAnd( FloorAreaServed > 1 ))
                      then  Format( "%s, JA13, %s SqFt assigned", TypeAbbrevStr, FltToStr( FloorAreaServed ) )
                      else  Format( "%s, JA13, not assigned", TypeAbbrevStr )
                      endif
                endif
          else  if (Proj:IsComRuleset)
-               then  if (IfValidAnd( NumAssignedDUFracs > 0 ))
-                     then  Format( "%s, serving %.0f dwelling unit(s)", TypeAbbrevStr, NumAssignedDUFracs )
+               then  if (IfValidAnd( NumAssignedDUFracs > 0 ) .AND. IfValidAnd( AssignedCommonArea > 1 ))
+                     then  Format( "%s, serving %.0f dwelling unit(s), %s ft2 common area and/or other zones", TypeAbbrevStr, NumAssignedDUFracs, FltToStr( AssignedCommonArea ) )
+                     else if (IfValidAnd( NumAssignedDUFracs > 0 ))
+                     then  Format( "%s, serving %.0f dwelling unit(s) and/or other zones", TypeAbbrevStr, NumAssignedDUFracs )
+                     else if (IfValidAnd( AssignedCommonArea > 1 ))
+                     then  Format( "%s, serving %s ft2 common area and/or other zones", TypeAbbrevStr, FltToStr( AssignedCommonArea ) )
+                     else if (IfValidAnd( FloorAreaServed > 0 ))
+                     then  Format( "%s, %s SqFt assigned", TypeAbbrevStr, FltToStr( FloorAreaServed ) )
                      else  Format( "%s, not assigned", TypeAbbrevStr )
-                     endif
+                     endif endif endif endif
                else  if (IfValidAnd( FloorAreaServed > 1 ))
                      then  Format( "%s, %s SqFt assigned", TypeAbbrevStr, FltToStr( FloorAreaServed ) )
                      else  Format( "%s, not assigned", TypeAbbrevStr )
@@ -2162,7 +2373,8 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
 		else if (ComponentCount( ResAttic ) > 0) then  MaxAllComp( ResAttic:FloorArea )
 		else  UNDEFINED  endif endif endif endif endif endif  }
 
-   "Set ResWtrHtr:UserMsg"    ResWtrHtr:UserMsg =     ; for input guidance and to document demand responsiveness - SAC 02/02/21
+   ; for input guidance and to document demand responsiveness - SAC 02/02/21
+   "Set ResWtrHtr:UserMsg"    ResWtrHtr:UserMsg =     ; expanded message to include info re: taking small elec res DHW exception - SAC 05/23/22 (tic #1332)
       {  if (HeaterElementType == 5 .AND. HPWHCategory == 1 .AND. HPWHBrand < 2)
          then  "NEEA HPWH Brand must be selected"
          else if (HeaterElementType == 5 .AND. HPWHCategory == 1 .AND. HPWHModel < 2)
@@ -2173,7 +2385,26 @@ RULELIST "ProposedInput_DHWEquipment" 0 0 0 0
          then  "JA13 Compliant (demand responsive)"
          else  UNDEFINED
          endif endif endif endif  }
+      ;   else if (HeaterElementType == 0 .AND. TankType == 12 .AND. SumRevRef( ResDHWSys:DHWHeater[1], ResDHWSys:ShowNewSmConsInstElecExcept ) .AND.
+      ;            SumRevRef( ResDHWSys:DHWHeater[1], ResDHWSys:NewSmConsInstElecExcept ) .AND. IfValidAnd( TankVolume > 20 ))
+      ;   then  ; this htr is elec res consumer Storage and part of system that is taking small home elec res DHW exception => restrict tank vol to 20 gal - SAC 05/23/22 (tic #1332)
+      ;         "Tank Volume limited to 20 gallons"
+         ;      "Tank Volume is limited to 20 gallons (small home electric resistance DHW exception)"
 
+   ; JA13 Compliance user input - RJH 11/16/24 (tic #3640)
+   "Set ResWtrHtr:JA13UICompliance"    ResWtrHtr:JA13UICompliance =     
+      {  if (HeaterElementType == 5 .AND. HPWHCategory == 1 .AND. IfValidAnd( DemRespCompat > 0 ))
+         then  1
+         else  0
+         endif }
+   "Set ResWtrHtr:JA13ChkBoxStatus"    ResWtrHtr:JA13ChkBoxStatus =     
+      {  if (HeaterElementType == 5 .AND. HPWHCategory == 1 .AND. IfValidAnd( DemRespCompat > 0 ))
+         then  1
+         else if (HeaterElementType == 5 .AND. HPWHCategory == 1 .AND. IfValidAnd( DemRespCompat == 0 ))
+              then 2
+              else 0
+              endif
+         endif }
 END
 ;*************************************************************************
 
@@ -2495,6 +2726,13 @@ RULELIST "Default_DHWSolarSys" 0 0 0 0
             default  :  UNDEFINED
          endswitch  }
    "Set DHWSolSys:CSESimValid"    DHWSolSys:CSESimValid  = {  UNDEFINED  }
+
+   ; RJH 11/18/24 - Add message to refer to latest SRCC Certification List for SRCC OG-100 (solar collectors) (tic #1373)
+   "Set DHWSolSys:SRCCMsg"    DHWSolSys:SRCCMsg  =
+      {  if (RatingProgram == 1)    ; SRCC OG-100 (solar collectors)
+         then  "Refer to latest SRCC OG-100 list to assure certification of selected collector"
+         else  UNDEFINED
+         endif  }
 END
 ;*************************************************************************
 
@@ -2514,31 +2752,39 @@ RULELIST "ProposedInput_DHWCompactDistribution" 0 0 0 0
 
    ; ResProj:NumStories & ResZn:Top should already be set in ProposedInput_HVAC rules
    ; mods to ensure non-DHW Zones & OtherZones not included in floors served calcs - SAC 08/30/20 (MFamProto)
+   ; updated logic to handle scenario where model is primarily or entirely ResOtherZn - SAC 10/11/24 (tic #3630)
    "Set ResProj:AvgFloorHeight"
       ResProj:AvgFloorHeight = {
-         if (MaxAll( ResZn:Top_HasDHW ) > 0 .AND.
-             MinAll( ResZn:Bottom_HasDHW ) > -1000 .AND.
-             IfValidAnd( NumStories_HasDHW > 0 ) )
-         then  ( MaxAll( ResZn:Top_HasDHW ) - MinAll( ResZn:Bottom_HasDHW ) ) / max( NumStories_HasDHW, 1 )
-         else   1      ; error
-         endif  }
-   "Set ResZn:BottomFlrEstimate - Z-level of the lowest floor in this zone" 
+         if (SumAll( ResDHWSys:NResFloorAreaServed ) > (SumAll( ResDHWSys:FloorAreaServed[1] ) * 0.5))
+         then  if ( max( MaxAll( ResZn:Top_HasDHW    ), MaxAcrossIf( ResOtherZn:Top,    ResOtherZn:HotWtrUseDUEquiv > 0 ) ) > 0 .AND.
+                    min( MinAll( ResZn:Bottom_HasDHW ), MinAcrossIf( ResOtherZn:Bottom, ResOtherZn:HotWtrUseDUEquiv > 0 ) ) > -1000 .AND.
+                   IfValidAnd( NumStories_HasDHW > 0 ) )
+               then  ( max( MaxAll( ResZn:Top_HasDHW    ), MaxAcrossIf( ResOtherZn:Top,    ResOtherZn:HotWtrUseDUEquiv > 0 ) ) -
+                       min( MinAll( ResZn:Bottom_HasDHW ), MinAcrossIf( ResOtherZn:Bottom, ResOtherZn:HotWtrUseDUEquiv > 0 ) ) ) / max( NumStories_HasDHW, 1 )
+               else   1  endif    ; error
+         else  if (MaxAll( ResZn:Top_HasDHW ) > 0 .AND.
+                   MinAll( ResZn:Bottom_HasDHW ) > -1000 .AND.
+                   IfValidAnd( NumStories_HasDHW > 0 ) )
+               then  ( MaxAll( ResZn:Top_HasDHW ) - MinAll( ResZn:Bottom_HasDHW ) ) / max( NumStories_HasDHW, 1 )
+               else   1      ; error
+               endif  endif  }
+   "Set ResZn:BottomFlrEstimate - Z-level of the lowest floor in this zone"            ; Mult - SAC 04-27-23 (tic #3392)
       ResZn:BottomFlrEstimate  = {
          if (IfValidAnd( Top_HasDHW > -100 ))
          then  if (IfValidAnd( FloorHeight > 6 ))
-               then  Top_HasDHW - (        FloorHeight * ValidOr( NumStories, 1 ))
-               else  Top_HasDHW - (ResProj:AvgFloorHeight * ValidOr( NumStories, 1 ))  endif
+               then  Top_HasDHW - (           FloorHeight * ValidOr( NumStories, 1 )) - ((Mult-1) *            FloorHeight)
+               else  Top_HasDHW - (ResProj:AvgFloorHeight * ValidOr( NumStories, 1 )) - ((Mult-1) * ResProj:AvgFloorHeight)  endif
          else  999  endif  }
-   "Set ResOtherZn:BottomFlrEstimate - Z-level of the lowest floor in this zone"       ; SAC 9/20/19 - OtherZone (MFamProto)
+   "Set ResOtherZn:BottomFlrEstimate - Z-level of the lowest floor in this zone"       ; SAC 9/20/19 - OtherZone (MFamProto)  ; Mult - SAC 04-27-23 (tic #3392)
       ResOtherZn:BottomFlrEstimate  = {
          if (IfValidAnd( Top_HasDHW > -100 ))
          then  if (IfValidAnd( FloorHeight > 6 ))
-               then  Top_HasDHW - (        FloorHeight * ValidOr( NumStories, 1 ))
-               else  Top_HasDHW - (ResProj:AvgFloorHeight * ValidOr( NumStories, 1 ))  endif
+               then  Top_HasDHW - (           FloorHeight * ValidOr( NumStories, 1 )) - ((Mult-1) *            FloorHeight)
+               else  Top_HasDHW - (ResProj:AvgFloorHeight * ValidOr( NumStories, 1 )) - ((Mult-1) * ResProj:AvgFloorHeight)  endif
          else  999  endif  }
 
-   "Set DwellUnit:TopZEstimate - top Z of highest floor in parent zone (for central DHWSys)"
-      DwellUnit:TopZEstimate[1]     = {   ParentRef( Top )  }
+   "Set DwellUnit:TopZEstimate - top Z of highest floor in parent zone (for central DHWSys)"    ; Mult - SAC 04-27-23 (tic #3392)
+      DwellUnit:TopZEstimate[1]     = {   ParentRef( Top ) + ((Parent( Mult )-1) * Parent( FloorHeight )/2)  }
    "Set DwellUnit:BottomZEstimate - bot Z of lowest floor in parent zone (for central DHWSys)"
       DwellUnit:BottomZEstimate[1]  = {   ResZn:BottomFlrEstimate  }
    "Set DwellUnitType:TopZEstimate - top Z of highest floor in referencing DwellUnits (ctrl DHWSys)"
@@ -2563,31 +2809,31 @@ RULELIST "ProposedInput_DHWCompactDistribution" 0 0 0 0
    "Set ResDHWSys:FloorZRange - top minus bottom Z of all floors served by this system"      ; SAC 9/20/19 - OtherZone (MFamProto)   ; SAC 10/3/19 - fix for when OtherZones present but not assigned (MFamProto)
       ResDHWSys:FloorZRange   =     ; incorporated updated logic referencing Spc (Htl/Mtl) levels - SAC 03/01/22
       {  if (Proj:IsComRuleset)
-         then  if (SumRevRef( ResOtherZn:ozDHWSys, ResOtherZn:HasDHWUse ) > 0 .AND.
+         then  if (SumRevRef( ResOtherZn:ActiveDHWSystem, ResOtherZn:HasDHWUse ) > 0 .AND.
                    SumRevRef( Spc:ResDHWSysRef,    Spc:IsHotelMotelGuestRm  ) > 0 .AND.
                    SumRevRef( DwellUnitType:DHWSysRef, DwellUnitType:TopZEstimate,
                                                        DwellUnitType:NumDHWSysTypes ) > 0)
-               then  max( MaxRevRef( ResOtherZn:ozDHWSys, ResOtherZn:Top_HasDHW ),
+               then  max( MaxRevRef( ResOtherZn:ActiveDHWSystem, ResOtherZn:Top_HasDHW ),
                      max( MaxRevRef( Spc:ResDHWSysRef,    Spc:MaxZ ),
                           MaxRevRef( DwellUnitType:DHWSysRef, DwellUnitType:TopZEstimate,
                                                               DwellUnitType:NumDHWSysTypes ) ) ) -
-                     min( MinRevRef( ResOtherZn:ozDHWSys, ResOtherZn:BottomFlrEstimate ),
+                     min( MinRevRef( ResOtherZn:ActiveDHWSystem, ResOtherZn:BottomFlrEstimate ),
                      min( MinRevRef( Spc:ResDHWSysRef,    Spc:FlrZ ),
                           MinRevRef( DwellUnitType:DHWSysRef, DwellUnitType:BottomZEstimate,
                                                               DwellUnitType:NumDHWSysTypes ) ) )
-               else if (SumRevRef( ResOtherZn:ozDHWSys, ResOtherZn:HasDHWUse ) > 0 .AND.
+               else if (SumRevRef( ResOtherZn:ActiveDHWSystem, ResOtherZn:HasDHWUse ) > 0 .AND.
                         SumRevRef( Spc:ResDHWSysRef,    Spc:IsHotelMotelGuestRm  ) > 0)
-               then  max( MaxRevRef( ResOtherZn:ozDHWSys, ResOtherZn:Top_HasDHW ),
+               then  max( MaxRevRef( ResOtherZn:ActiveDHWSystem, ResOtherZn:Top_HasDHW ),
                           MaxRevRef( Spc:ResDHWSysRef,    Spc:MaxZ ) ) -
-                     min( MinRevRef( ResOtherZn:ozDHWSys, ResOtherZn:BottomFlrEstimate ),
+                     min( MinRevRef( ResOtherZn:ActiveDHWSystem, ResOtherZn:BottomFlrEstimate ),
                           MinRevRef( Spc:ResDHWSysRef,    Spc:FlrZ ) )
-               else if (SumRevRef( ResOtherZn:ozDHWSys, ResOtherZn:HasDHWUse ) > 0 .AND.
+               else if (SumRevRef( ResOtherZn:ActiveDHWSystem, ResOtherZn:HasDHWUse ) > 0 .AND.
                         SumRevRef( DwellUnitType:DHWSysRef, DwellUnitType:TopZEstimate,
                                                             DwellUnitType:NumDHWSysTypes ) > 0)
-               then  max( MaxRevRef( ResOtherZn:ozDHWSys, ResOtherZn:Top_HasDHW ),
+               then  max( MaxRevRef( ResOtherZn:ActiveDHWSystem, ResOtherZn:Top_HasDHW ),
                           MaxRevRef( DwellUnitType:DHWSysRef, DwellUnitType:TopZEstimate,
                                                               DwellUnitType:NumDHWSysTypes ) ) -
-                     min( MinRevRef( ResOtherZn:ozDHWSys, ResOtherZn:BottomFlrEstimate ),
+                     min( MinRevRef( ResOtherZn:ActiveDHWSystem, ResOtherZn:BottomFlrEstimate ),
                           MinRevRef( DwellUnitType:DHWSysRef, DwellUnitType:BottomZEstimate,
                                                               DwellUnitType:NumDHWSysTypes ) )
                else if (SumRevRef( Spc:ResDHWSysRef,    Spc:IsHotelMotelGuestRm  ) > 0 .AND.
@@ -2599,9 +2845,9 @@ RULELIST "ProposedInput_DHWCompactDistribution" 0 0 0 0
                      min( MinRevRef( Spc:ResDHWSysRef,    Spc:FlrZ ),
                           MinRevRef( DwellUnitType:DHWSysRef, DwellUnitType:BottomZEstimate,
                                                               DwellUnitType:NumDHWSysTypes ) )
-               else if (SumRevRef( ResOtherZn:ozDHWSys, ResOtherZn:HasDHWUse ) > 0)
-               then       MaxRevRef( ResOtherZn:ozDHWSys, ResOtherZn:Top_HasDHW ) -
-                          MinRevRef( ResOtherZn:ozDHWSys, ResOtherZn:BottomFlrEstimate )
+               else if (SumRevRef( ResOtherZn:ActiveDHWSystem, ResOtherZn:HasDHWUse ) > 0)
+               then       MaxRevRef( ResOtherZn:ActiveDHWSystem, ResOtherZn:Top_HasDHW ) -
+                          MinRevRef( ResOtherZn:ActiveDHWSystem, ResOtherZn:BottomFlrEstimate )
                else if (SumRevRef( Spc:ResDHWSysRef,    Spc:IsHotelMotelGuestRm  ) > 0)
                then       MaxRevRef( Spc:ResDHWSysRef,    Spc:MaxZ ) -
                           MinRevRef( Spc:ResDHWSysRef,    Spc:FlrZ )
@@ -2643,12 +2889,13 @@ RULELIST "ProposedInput_DHWCompactDistribution" 0 0 0 0
                               else  0  endif endif endif
                endswitch
          endif  }
-   "Set ResDHWSys:NumFloorsServed - # of floors served by this DHW system"    ; include reference to new Proj:AvgFlrHgt - SAC 03/01/22
+   ; include reference to new Proj:AvgFlrHgt - SAC 03/01/22
+   "Set ResDHWSys:NumFloorsServed - # of floors served by this DHW system"       ; revise to ensure minimum return value of 1 - SAC 09/23/24
       ResDHWSys:NumFloorsServed  = { 
          if (IfValidAnd( FloorZRange > 0 ) .AND. IfValidAnd( Proj:AvgFlrHgt > 0 ))
-         then  int( (FloorZRange / Proj:AvgFlrHgt) + 0.5 )
+         then  max( 1, int( (FloorZRange / Proj:AvgFlrHgt) + 0.5 ) )
          else if (IfValidAnd( FloorZRange > 0 ) .AND. IfValidAnd( ResProj:AvgFloorHeight > 0 ))
-         then  int( (FloorZRange / ResProj:AvgFloorHeight) + 0.5 )
+         then  max( 1, int( (FloorZRange / ResProj:AvgFloorHeight) + 0.5 ) )
          else  1     ; ERROR
          endif endif  }
    ;"Set ResDHWSys:AvgFlrHtServed - Avg height of flrs served by this DHW sys"
@@ -2962,6 +3209,8 @@ END
 RULELIST  "Refresh_DHWSolarSys_ServedAreaDUsBRs" 1 0 0 0
    "Set DHWSolSys:FloorAreaServed"   DHWSolSys:FloorAreaServed  =      ; SAC 1/7/20 - DHWSolarSys (tic #1013)
       {  SumRevRef( ResDHWSys:DHWSolarSysRef, ResDHWSys:FloorAreaServed[1] )  }
+   "Set DHWSolSys:NResFloorAreaServed"  DHWSolSys:NResFloorAreaServed  =   ; SAC 11/02/23
+      {  SumRevRef( ResDHWSys:DHWSolarSysRef, ResDHWSys:NResFloorAreaServed )  }
    "Set DHWSolSys:DwellUnitsServed"  DHWSolSys:DwellUnitsServed  =     ; SAC 1/27/20 (StdSolarSys)
       {  SumRevRef( ResDHWSys:DHWSolarSysRef, ResDHWSys:NumAssignedDUFracs )  }
    "Set DHWSolSys:BedroomsServed"    DHWSolSys:BedroomsServed  =  
@@ -3012,20 +3261,20 @@ RULELIST  "BackwardCompat_ASHPType_to_HPWHModel"  1 0 1 1
       endswitch  }
    "Set ResWtrHtr:HPWHModel"     ResWtrHtr:HPWHModel  = {
       switch (ASHPType)
-         case  11 :  111311  ; "AO Smith PHPT 60" -> "PHPT 60  (60 gal)"                 
-         case  12 :  111412  ; "AO Smith PHPT 80" -> "PHPT 80  (80 gal)"                 
-         case  13 :  110713  ; "AO Smith HPTU 50" -> "HPTU 50 120  (50 gal)"             
-         case  14 :  110914  ; "AO Smith HPTU 66" -> "HPTU 66 120  (66 gal)"             
-         case  15 :  111115  ; "AO Smith HPTU 80" -> "HPTU 80 120  (80 gal)"             
-         case  32 :  261032  ; "AO Smith SHPT 50" -> "HPSE2K50HD045V 100 (WP)  (50 gal)" 
-         case  33 :  110914  ; "AO Smith SHPT 66" -> "HPTU 66 120  (66 gal)"             
-         case  34 :  261212  ; "AO Smith SHPT 80" -> "HPSE2K80HD045V  (80 gal)"          
-         case  19 :  150319  ; "GE2014 50"        -> "GEH50DEEJSC  (50 gal)"             
-         case  23 :  150723  ; "GE2014 80"        -> "GEH80DEEJSC  (80 gal)"             
-         case  21 :  190121  ; "Rheem HB 50"      -> "HB50RH  (50 gal)"                  
-         case  16 :  220116  ; "Sanden 40"        -> "GUS-A45HPA & GAUS-160QTA  (43 gal)"
-         case  17 :  220217  ; "Sanden 80"        -> "GUS-A45HPA & GAUS-315QTD  (83 gal)"
-         case  22 :  240122  ; "Stiebel 220E"     -> "Accelera 220 E  (58 gal)"          
+         case  11 :  1101311  ; "AO Smith PHPT 60" -> "PHPT 60  (60 gal)"     RJH 11/7/24 update Model ID to 7 digits  (tic #3640)                
+         case  12 :  1101412  ; "AO Smith PHPT 80" -> "PHPT 80  (80 gal)"                 
+         case  13 :  1100713  ; "AO Smith HPTU 50" -> "HPTU 50 120  (50 gal)"             
+         case  14 :  1100914  ; "AO Smith HPTU 66" -> "HPTU 66 120  (66 gal)"             
+         case  15 :  1101115  ; "AO Smith HPTU 80" -> "HPTU 80 120  (80 gal)"             
+         case  32 :  2601032  ; "AO Smith SHPT 50" -> "HPSE2K50HD045V 100 (WP)  (50 gal)" 
+         case  33 :  1100914  ; "AO Smith SHPT 66" -> "HPTU 66 120  (66 gal)"             
+         case  34 :  2601212  ; "AO Smith SHPT 80" -> "HPSE2K80HD045V  (80 gal)"          
+         case  19 :  1500319  ; "GE2014 50"        -> "GEH50DEEJSC  (50 gal)"             
+         case  23 :  1500723  ; "GE2014 80"        -> "GEH80DEEJSC  (80 gal)"             
+         case  21 :  1900121  ; "Rheem HB 50"      -> "HB50RH  (50 gal)"                  
+         case  16 :  2200116  ; "Sanden 40"        -> "GUS-A45HPA & GAUS-160QTA  (43 gal)"
+         case  17 :  2200217  ; "Sanden 80"        -> "GUS-A45HPA & GAUS-315QTD  (83 gal)"
+         case  22 :  2400122  ; "Stiebel 220E"     -> "Accelera 220 E  (58 gal)"          
          default  :     1    ; -> "- select Brand -"
       endswitch  }
    "Blast ResWtrHtr:ASHPType"    ResWtrHtr:ASHPType   = {  UNDEFINED  }
@@ -3052,20 +3301,20 @@ RULELIST  "BackwardCompat_SimTypeHPWHModel_to_BrandHPWHModel"  1 0 1 1
       endswitch  }
    "Set ResWtrHtr:HPWHModel"     ResWtrHtr:HPWHModel  = {
       switch (HPWHModel)
-         case  11 :  111311  ; "AO Smith PHPT 60" -> "PHPT 60  (60 gal)"                 
-         case  12 :  111412  ; "AO Smith PHPT 80" -> "PHPT 80  (80 gal)"                 
-         case  13 :  110713  ; "AO Smith HPTU 50" -> "HPTU 50 120  (50 gal)"             
-         case  14 :  110914  ; "AO Smith HPTU 66" -> "HPTU 66 120  (66 gal)"             
-         case  15 :  111115  ; "AO Smith HPTU 80" -> "HPTU 80 120  (80 gal)"             
-         case  32 :  261032  ; "AO Smith SHPT 50" -> "HPSE2K50HD045V 100 (WP)  (50 gal)" 
-         case  33 :  110914  ; "AO Smith SHPT 66" -> "HPTU 66 120  (66 gal)"             
-         case  34 :  261212  ; "AO Smith SHPT 80" -> "HPSE2K80HD045V  (80 gal)"          
-         case  19 :  150319  ; "GE2014 50"        -> "GEH50DEEJSC  (50 gal)"             
-         case  23 :  150723  ; "GE2014 80"        -> "GEH80DEEJSC  (80 gal)"             
-         case  21 :  190121  ; "Rheem HB 50"      -> "HB50RH  (50 gal)"                  
-         case  16 :  220116  ; "Sanden 40"        -> "GUS-A45HPA & GAUS-160QTA  (43 gal)"
-         case  17 :  220217  ; "Sanden 80"        -> "GUS-A45HPA & GAUS-315QTD  (83 gal)"
-         case  22 :  240122  ; "Stiebel 220E"     -> "Accelera 220 E  (58 gal)"          
+         case  11 :  1101311  ; "AO Smith PHPT 60" -> "PHPT 60  (60 gal)"     RJH 11/7/24 update Model ID to 7 digits  (tic #3640)                 
+         case  12 :  1101412  ; "AO Smith PHPT 80" -> "PHPT 80  (80 gal)"                 
+         case  13 :  1100713  ; "AO Smith HPTU 50" -> "HPTU 50 120  (50 gal)"             
+         case  14 :  1100914  ; "AO Smith HPTU 66" -> "HPTU 66 120  (66 gal)"             
+         case  15 :  1101115  ; "AO Smith HPTU 80" -> "HPTU 80 120  (80 gal)"             
+         case  32 :  2601032  ; "AO Smith SHPT 50" -> "HPSE2K50HD045V 100 (WP)  (50 gal)" 
+         case  33 :  1100914  ; "AO Smith SHPT 66" -> "HPTU 66 120  (66 gal)"             
+         case  34 :  2601212  ; "AO Smith SHPT 80" -> "HPSE2K80HD045V  (80 gal)"          
+         case  19 :  1500319  ; "GE2014 50"        -> "GEH50DEEJSC  (50 gal)"             
+         case  23 :  1500723  ; "GE2014 80"        -> "GEH80DEEJSC  (80 gal)"             
+         case  21 :  1900121  ; "Rheem HB 50"      -> "HB50RH  (50 gal)"                  
+         case  16 :  2200116  ; "Sanden 40"        -> "GUS-A45HPA & GAUS-160QTA  (43 gal)"
+         case  17 :  2200217  ; "Sanden 80"        -> "GUS-A45HPA & GAUS-315QTD  (83 gal)"
+         case  22 :  2400122  ; "Stiebel 220E"     -> "Accelera 220 E  (58 gal)"          
          default  :     1    ; -> "- select Brand -"
       endswitch  }
 END
@@ -3469,6 +3718,12 @@ RULELIST "ForceReset_DHWSys_UseMaxDurNumHtrs"  1 0 0 0
 END
 ;*************************************************************************
 
+;*************************************************************************   - SAC 10/25/22
+RULELIST  "ForceReset_DHWSys_CentralDHW"  1 0 0 1
+   "Blast ResDHWSys:CentralDHW"           ResDHWSys:CentralDHW  = {  UNDEFINED  }
+END
+;*************************************************************************
+
 ;*************************************************************************   - SAC 1/1/20 (tic #862)
 RULELIST  "ForceReset_DHWSys_CentralDHWType"  1 0 0 1
    "Blast ResDHWSys:CentralDHWType"       ResDHWSys:CentralDHWType  = {  UNDEFINED  }
@@ -3591,15 +3846,19 @@ RULELIST  "SetupDemRespSched_DHWSys" 1 0 1 0
 
    "Create ResDHWSys:DRTempSetptSchRef:SchWeekRef[1-12]"    for:#Mo=(1to12) ResDHWSys:DRTempSetptSchRef:SchWeekRef[#Mo]    = {  CreateComp( SchWeek, Name + "-DRTempSchWk#Mo" )  }
    "Set    ResDHWSys:DRTempSetptSchRef:SchWeekRef[1-12]:Type"           for:#Mo=(1to12) ResDHWSys:DRTempSetptSchRef:SchWeekRef[#Mo]:Type           = {  "Temperature"  }
-   "Create ResDHWSys:DRTempSetptSchRef:SchWeekRef[1-12]:SchDayWDRef"    for:#Mo=(1to12) ResDHWSys:DRTempSetptSchRef:SchWeekRef[#Mo]:SchDayWDRef    = {  CreateComp( SchDay, Name + "-DRTempSchWk#MoWD" )  }
-   "Create ResDHWSys:DRTempSetptSchRef:SchWeekRef[1-12]:SchDayWERef"    for:#Mo=(1to12) ResDHWSys:DRTempSetptSchRef:SchWeekRef[#Mo]:SchDayWERef    = {  CreateComp( SchDay, Name + "-DRTempSchWk#MoWE" )  }
-   "Set ResDHWSys:DRTempSetptSchRef:SchWeekRef[1-12]:SchDayWDRef:Type"  for:#Mo=(1to12) ResDHWSys:DRTempSetptSchRef:SchWeekRef[#Mo]:SchDayWDRef:Type  = {  "Temperature"  }
-   "Set ResDHWSys:DRTempSetptSchRef:SchWeekRef[1-12]:SchDayWERef:Type"  for:#Mo=(1to12) ResDHWSys:DRTempSetptSchRef:SchWeekRef[#Mo]:SchDayWERef:Type  = {  "Temperature"  }
+   "Create ResDHWSys:DRTempSetptSchRef:SchWeekRef[1-12]:SchDayWDRef"    for:#Mo=(1to12) ResDHWSys:DRTempSetptSchRef:SchWeekRef[#Mo]:SchDayWDRef    = {  CreateComp( SchDay, Name + "-DRTempSchWk#MoWD", "SetSchDay_Type_Temperature" )  }
+   "Create ResDHWSys:DRTempSetptSchRef:SchWeekRef[1-12]:SchDayWERef"    for:#Mo=(1to12) ResDHWSys:DRTempSetptSchRef:SchWeekRef[#Mo]:SchDayWERef    = {  CreateComp( SchDay, Name + "-DRTempSchWk#MoWE", "SetSchDay_Type_Temperature" )  }
+   ; set new SchDayNoTESWDRef/SchDayNoTESWERef properties so that subsequent defaulting rules will work - SAC 04/25/23
+   "Set ResDHWSys:DRTempSetptSchRef:SchWeekRef[1-12]:SchDayNoTESWDRef"  for:#Mo=(1to12) ResDHWSys:DRTempSetptSchRef:SchWeekRef[#Mo]:SchDayNoTESWDRef  = {  DRTempSetptSchRef:SchWeekRef[#Mo]:SchDayWDRef  }
+   "Set ResDHWSys:DRTempSetptSchRef:SchWeekRef[1-12]:SchDayNoTESWERef"  for:#Mo=(1to12) ResDHWSys:DRTempSetptSchRef:SchWeekRef[#Mo]:SchDayNoTESWERef  = {  DRTempSetptSchRef:SchWeekRef[#Mo]:SchDayWERef  }
+   "Set ResDHWSys:DRTempSetptSchRef:SchWeekRef[1-12]:SchDayNoTESWDRef:Type"  for:#Mo=(1to12) ResDHWSys:DRTempSetptSchRef:SchWeekRef[#Mo]:SchDayNoTESWDRef:Type  = {  "Temperature"  }
+   "Set ResDHWSys:DRTempSetptSchRef:SchWeekRef[1-12]:SchDayNoTESWERef:Type"  for:#Mo=(1to12) ResDHWSys:DRTempSetptSchRef:SchWeekRef[#Mo]:SchDayNoTESWERef:Type  = {  "Temperature"  }
 
-   "Set ResDHWSys:DRTempSetptSchRef:SchWeekRef[1-12]:SchDayWDRef:Hr[1-24]"  for:#Mo=(1to12) for:#Hr=(1to24) ResDHWSys:DRTempSetptSchRef:SchWeekRef[#Mo]:SchDayWDRef:Hr[#Hr]  =
-      {  T24RDemandResponseHPWH_Sched:Val( "CodeVint", ResProj:EnergyCodeYearNum, "Schedule", EnumString( DemRespControl ), "ClimateZone", Proj:CliZnNum, "Month", #Mo, "DayType", "Weekday", "Signal_Setpoint", "Setpoint", "Hour", #Hr )  }
-   "Set ResDHWSys:DRTempSetptSchRef:SchWeekRef[1-12]:SchDayWERef:Hr[1-24]"  for:#Mo=(1to12) for:#Hr=(1to24) ResDHWSys:DRTempSetptSchRef:SchWeekRef[#Mo]:SchDayWERef:Hr[#Hr]  =
-      {  T24RDemandResponseHPWH_Sched:Val( "CodeVint", ResProj:EnergyCodeYearNum, "Schedule", EnumString( DemRespControl ), "ClimateZone", Proj:CliZnNum, "Month", #Mo, "DayType", "Weekend", "Signal_Setpoint", "Setpoint", "Hour", #Hr )  }
+   ; switch ResProj:EnergyCodeYearNum to Proj:CompCodeBase for CBECC MFam compatibility - SAC 03/06/23
+   "Set ResDHWSys:DRTempSetptSchRef:SchWeekRef[1-12]:SchDayNoTESWDRef:Hr[1-24]"  for:#Mo=(1to12) for:#Hr=(1to24) ResDHWSys:DRTempSetptSchRef:SchWeekRef[#Mo]:SchDayNoTESWDRef:Hr[#Hr]  =
+      {  T24RDemandResponseHPWH_Sched:Val( "CodeVint", Proj:CompCodeBase, "Schedule", EnumString( DemRespControl ), "ClimateZone", Proj:CliZnNum, "Month", #Mo, "DayType", "Weekday", "Signal_Setpoint", "Setpoint", "Hour", #Hr )  }
+   "Set ResDHWSys:DRTempSetptSchRef:SchWeekRef[1-12]:SchDayNoTESWERef:Hr[1-24]"  for:#Mo=(1to12) for:#Hr=(1to24) ResDHWSys:DRTempSetptSchRef:SchWeekRef[#Mo]:SchDayNoTESWERef:Hr[#Hr]  =
+      {  T24RDemandResponseHPWH_Sched:Val( "CodeVint", Proj:CompCodeBase, "Schedule", EnumString( DemRespControl ), "ClimateZone", Proj:CliZnNum, "Month", #Mo, "DayType", "Weekend", "Signal_Setpoint", "Setpoint", "Hour", #Hr )  }
 
    ; DR Signal Sched
    "Create ResDHWSys:DRSignalSchRef"            ResDHWSys:DRSignalSchRef               = {  CreateComp( Sch, Name + "-DRSignalSch" )  }
@@ -3623,13 +3882,17 @@ RULELIST  "SetupDemRespSched_DHWSys" 1 0 1 0
    "Set    ResDHWSys:DRSignalSchRef:SchWeekRef[1-12]:Type"            for:#Mo=(1to12) ResDHWSys:DRSignalSchRef:SchWeekRef[#Mo]:Type           = {  "Keyword"  }
    "Create ResDHWSys:DRSignalSchRef:SchWeekRef[1-12]:SchDayWDRef"     for:#Mo=(1to12) ResDHWSys:DRSignalSchRef:SchWeekRef[#Mo]:SchDayWDRef    = {  CreateComp( SchDay, Name + "-DRSgnlSchWk#MoWD" )  }
    "Create ResDHWSys:DRSignalSchRef:SchWeekRef[1-12]:SchDayWERef"     for:#Mo=(1to12) ResDHWSys:DRSignalSchRef:SchWeekRef[#Mo]:SchDayWERef    = {  CreateComp( SchDay, Name + "-DRSgnlSchWk#MoWE" )  }
-   "Set ResDHWSys:DRSignalSchRef:SchWeekRef[1-12]:SchDayWDRef:Type"   for:#Mo=(1to12) ResDHWSys:DRSignalSchRef:SchWeekRef[#Mo]:SchDayWDRef:Type  = {  "Keyword"  }
-   "Set ResDHWSys:DRSignalSchRef:SchWeekRef[1-12]:SchDayWERef:Type"   for:#Mo=(1to12) ResDHWSys:DRSignalSchRef:SchWeekRef[#Mo]:SchDayWERef:Type  = {  "Keyword"  }
+   ; set new SchDayNoTESWDRef/SchDayNoTESWERef properties so that subsequent defaulting rules will work - SAC 04/25/23
+   "Set ResDHWSys:DRSignalSchRef:SchWeekRef[1-12]:SchDayNoTESWDRef"   for:#Mo=(1to12) ResDHWSys:DRSignalSchRef:SchWeekRef[#Mo]:SchDayNoTESWDRef  = {  DRSignalSchRef:SchWeekRef[#Mo]:SchDayWDRef  }
+   "Set ResDHWSys:DRSignalSchRef:SchWeekRef[1-12]:SchDayNoTESWERef"   for:#Mo=(1to12) ResDHWSys:DRSignalSchRef:SchWeekRef[#Mo]:SchDayNoTESWERef  = {  DRSignalSchRef:SchWeekRef[#Mo]:SchDayWERef  }
+   "Set ResDHWSys:DRSignalSchRef:SchWeekRef[1-12]:SchDayNoTESWDRef:Type"   for:#Mo=(1to12) ResDHWSys:DRSignalSchRef:SchWeekRef[#Mo]:SchDayNoTESWDRef:Type  = {  "Keyword"  }
+   "Set ResDHWSys:DRSignalSchRef:SchWeekRef[1-12]:SchDayNoTESWERef:Type"   for:#Mo=(1to12) ResDHWSys:DRSignalSchRef:SchWeekRef[#Mo]:SchDayNoTESWERef:Type  = {  "Keyword"  }
 
-   "Set ResDHWSys:DRSignalSchRef:SchWeekRef[1-12]:SchDayWDRef:Key[1-24]"  for:#Mo=(1to12) for:#Hr=(1to24) ResDHWSys:DRSignalSchRef:SchWeekRef[#Mo]:SchDayWDRef:Key[#Hr]  =
-      {  T24RDemandResponseHPWH_Sched:Val( "CodeVint", ResProj:EnergyCodeYearNum, "Schedule", EnumString( DemRespControl ), "ClimateZone", Proj:CliZnNum, "Month", #Mo, "DayType", "Weekday", "Signal_Setpoint", "Signal", "Hour", #Hr )  }
-   "Set ResDHWSys:DRSignalSchRef:SchWeekRef[1-12]:SchDayWERef:Key[1-24]"  for:#Mo=(1to12) for:#Hr=(1to24) ResDHWSys:DRSignalSchRef:SchWeekRef[#Mo]:SchDayWERef:Key[#Hr]  =
-      {  T24RDemandResponseHPWH_Sched:Val( "CodeVint", ResProj:EnergyCodeYearNum, "Schedule", EnumString( DemRespControl ), "ClimateZone", Proj:CliZnNum, "Month", #Mo, "DayType", "Weekend", "Signal_Setpoint", "Signal", "Hour", #Hr )  }
+   ; switch ResProj:EnergyCodeYearNum to Proj:CompCodeBase for CBECC MFam compatibility - SAC 03/06/23
+   "Set ResDHWSys:DRSignalSchRef:SchWeekRef[1-12]:SchDayNoTESWDRef:Key[1-24]"  for:#Mo=(1to12) for:#Hr=(1to24) ResDHWSys:DRSignalSchRef:SchWeekRef[#Mo]:SchDayNoTESWDRef:Key[#Hr]  =
+      {  T24RDemandResponseHPWH_Sched:Val( "CodeVint", Proj:CompCodeBase, "Schedule", EnumString( DemRespControl ), "ClimateZone", Proj:CliZnNum, "Month", #Mo, "DayType", "Weekday", "Signal_Setpoint", "Signal", "Hour", #Hr )  }
+   "Set ResDHWSys:DRSignalSchRef:SchWeekRef[1-12]:SchDayNoTESWERef:Key[1-24]"  for:#Mo=(1to12) for:#Hr=(1to24) ResDHWSys:DRSignalSchRef:SchWeekRef[#Mo]:SchDayNoTESWERef:Key[#Hr]  =
+      {  T24RDemandResponseHPWH_Sched:Val( "CodeVint", Proj:CompCodeBase, "Schedule", EnumString( DemRespControl ), "ClimateZone", Proj:CliZnNum, "Month", #Mo, "DayType", "Weekend", "Signal_Setpoint", "Signal", "Hour", #Hr )  }
 
 
 
@@ -3653,6 +3916,13 @@ RULELIST  "SetupDemRespSched_DHWSys" 1 0 1 0
 
 END
 ;*************************************************************************
+
+;*************************************************************************  - SAC 07/01/23
+RULELIST  "SetSchDay_Type_Temperature" 1 0 1 0
+   "Set SchDay:Type to 'Temperature'"     SchDay:Type = {  "Temperature"  }
+END
+;*************************************************************************
+
 
 ;;------------------------------------------------------------------------------------------------
 ;;                LName              Template             MD  MR  AC   Parent1  P2  P3  P4  P5  P6  P7  P8  P9  P10 P11 P12 P13 P14 P15  MC  MS  bP  CF  SR  IN     HI 

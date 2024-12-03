@@ -43,7 +43,13 @@ RULELIST "LoadModelAdjustments" 1 0 0 0
 ;         if (LocalStatus( AirSrcHtPumpType ) > 4)
 ;         then  EvalRulelist( "BackwardCompat_AirSrcHtPumpType_to_HPWHModel", 1 )
 ;         else  UNCHANGED  endif  }
-         
+
+   "Removal of errant 2022 weather files"    Proj:Action =        ; SAC 04/23/24 (tic #3588)
+      {  if (LocalStatus( WeatherStation ) < 1) then  UNCHANGED
+         else if (WeatherStationRemoval_2022:InList( "BadWthrStationName", WeatherStation ) > 0)
+         then  EvalRulelist( "BackwardCompat_WeatherStationRemoval_2022" )
+         else  UNCHANGED  endif endif  }
+
    ; DR 8/25/17 - rule to reset ThrmlZn:VentStd for the current ruleset
    "Backward compat for VentStd"   ThrmlZn:Action  = {
          if ( IfValidAnd( VentStd = "T24-2013" ) )
@@ -52,6 +58,26 @@ RULELIST "LoadModelAdjustments" 1 0 0 0
          else
            UNCHANGED
          endif  }
+
+   "Remove invalid 'High-Rise Residential Living Spaces' SpcFuncDefaults:SpcFunc"   SpcFuncDefaults:Action  =     ; SAC 04/22/24
+      {  if (IfValidAnd( SpcFunc = "High-Rise Residential Living Spaces" )==0) then  UNCHANGED
+         else  EvalRulelist( "Blast_SpcFuncDefaults_SpcFunc_HighRiseRes", 1 )     endif  }
+   "Remove invalid 'High-Rise Residential Living Spaces' Spc:SpcFunc"               Spc:Action  =                 ; SAC 04/22/24
+      {  if (IfValidAnd( SpcFunc = "High-Rise Residential Living Spaces" )==0) then  UNCHANGED
+         else  EvalRulelist( "Blast_Spc_SpcFunc_HighRiseRes", 1 )    endif  }
+   "Remove invalid 'High-Rise Residential Living Spaces' Proj:MandatoryLtgCtrlSpcFunctRpt"   for:#S=(1to10)   Proj:Action  =     ; SAC 04/22/24
+      {  if (IfValidAnd( MandatoryLtgCtrlSpcFunctRpt[#S] = "High-Rise Residential Living Spaces" )==0) then  UNCHANGED
+         else  EvalRulelist( "Blast_Proj_MandatoryLtgCtrlSpcFunctRpt_#S_HighRiseRes", 1 )    endif  }
+
+   ; JP 12/7/2022 - backward compat rules to reset Very Valuable Display Case Allowance when no available
+   "Backward compat for IntLtgSys:AllowType"  IntLtgSys:Action  = {
+        if( IfValidAnd( Parent( SpcFunc ) != "Museum Area (Exhibition/Display)" ) .AND.
+            IfValidAnd( Parent( SpcFunc ) != "Religious Worship Area" ) .AND.
+            IfValidAnd( Parent( SpcFunc ) != "Retail Sales Area (Retail Merchandise Sales)" ) .AND.
+            EnumValue( AllowType ) = 115 )
+        then EvalRulelist( "BackwardCompat_VeryValuableDisplayCaseNotAllowa", 1 )
+        else UNCHANGED
+        endif }
 
    ; LH 12/21/2017 - backward compat rules to reset Tailored Method lighting inputs when no longer allowed
    "Backward compat for IntLtgSys:AllowType"  IntLtgSys:Action  = {
@@ -166,7 +192,8 @@ RULELIST "LoadModelAdjustments" 1 0 0 0
               IfValidAnd( ClgCtrl = "Scheduled" ) .OR.
               IfValidAnd( ClgCtrl = "OutsideAirReset" ) .OR.
               IfValidAnd( ClgCtrl = "FixedDualSetpoint" ) .OR.
-              IfValidAnd( ClgCtrl = "ScheduledDualSetpoint" ) )
+              IfValidAnd( ClgCtrl = "ScheduledDualSetpoint" ) .OR.
+              IfValidAnd( ClgCtrl = "OutsideAirResetDualSetpoint" ) )
          then UNCHANGED
          else EvalRulelist( "BackwardCompat_AirSys_DOASClgCtrl", 1 )
          endif 
@@ -178,14 +205,59 @@ RULELIST "LoadModelAdjustments" 1 0 0 0
          then  EvalRulelist( "BackwardCompat_PVArray_CalFlexibleInstall", 1 )
          else  UNCHANGED  endif  }
 
+   ; revised rule logic to take into account HVACSysStatus - SAC 06/27/23 (tic #3479)
    "Backward compat for ResOtherZn if an AirSystem is assigned."  ResOtherZn:Action  =
-      { if( LocalCompAssigned( ozHVACSystem ) = ComponentType ("AirSys" ) .AND.
+      { if( ( (EnumValue( HVACSysStatus ) == 3 .AND. LocalCompAssigned(  ozHVACSystem ) = ComponentType ("AirSys" )) .OR.
+              (EnumValue( HVACSysStatus ) == 2 .AND. LocalCompAssigned( AltHVACSystem ) = ComponentType ("AirSys" )) .OR.
+              (EnumValue( HVACSysStatus ) == 1 .AND. LocalCompAssigned(  exHVACSystem ) = ComponentType ("AirSys" )) ) .AND.
             ( LocalCompAssigned( IAQFanRef[1] ) .OR. 
               LocalCompAssigned( IAQFanRef[2] ) .OR. 
               LocalCompAssigned( IAQFanRef[3] ) .OR. 
               LocalCompAssigned( IAQFanRef[4] ) .OR. 
               LocalCompAssigned( CentralVentSysRef ) ) )
         then EvalRulelist( "Blast_ResOtherZnIAQ_forAirSys", 1 )
+        else UNCHANGED
+        endif }
+
+      ; converted rules above & below to use EnumValue() since enum strings dependent on data (potentially) not yet defined - SAC 08/19/23
+      ;     HVACSysStatus:   1-"Existing" 2-"Altered" 3-"New"
+         ;"dbg" ResOtherZn:Action = { PostMessageToLog( "   ResOtherZn %24s  /  HVACStatus %7s (%g)  /  IAQOption %24s (%g)  /  CentralSupplyCFM %g  /  SpcFunc %s", Name, HVACSysStatus, EnumValue( HVACSysStatus ), 
+         ;                                    IAQOption, EnumValue( IAQOption ), ValidOr( CentralSupplyCFM, -999 ), SpcFunc ) }
+   "Remove invalid ResOtherZn:CentralSupplyCFM value if invalid"     ResOtherZn:Action  =       ; fix problem present in a EPro model from user - SAC 08/18/23
+      {  if (IfValidAnd( CentralSupplyCFM > 0 )==0) then  UNCHANGED
+         else if ( (EnumValue( HVACSysStatus ) == 3 .AND. LocalCompAssigned(  ozHVACSystem ) = ComponentType ("AirSys" )) .OR.
+                   (EnumValue( HVACSysStatus ) == 2 .AND. LocalCompAssigned( AltHVACSystem ) = ComponentType ("AirSys" )) .OR.
+                   (EnumValue( HVACSysStatus ) == 1 .AND. LocalCompAssigned(  exHVACSystem ) = ComponentType ("AirSys" )) .OR.
+                   EnumValue( SpcFunc ) == 355 .OR.   ; "Parking Garage Area (Parking Zone and Ramps)"
+                   EnumValue( SpcFunc ) == 356 .OR.   ; "Parking Garage Area (Daylight Adaptation Zones)"
+                   EnumValue( IAQOption ) ==  2 .OR.  ; "Individual IAQ Fans"
+                   EnumValue( IAQOption ) == 13 .OR.  ; "Central Exhaust / Individual Supply"
+                   EnumValue( IAQOption ) == 15 )     ; "Central Exhaust"
+         then  EvalRulelist( "Blast_ResOtherZn_CentralSupplyCFM", 1 )
+         else  UNCHANGED  endif endif  }
+   "Remove invalid ResOtherZn:CentralExhaustCFM value if invalid"    ResOtherZn:Action  =       ; SAC 08/18/23
+      {  if (IfValidAnd( CentralExhaustCFM > 0 )==0) then  UNCHANGED
+         else if ( (EnumValue( HVACSysStatus ) == 3 .AND. LocalCompAssigned(  ozHVACSystem ) = ComponentType ("AirSys" )) .OR.
+                   (EnumValue( HVACSysStatus ) == 2 .AND. LocalCompAssigned( AltHVACSystem ) = ComponentType ("AirSys" )) .OR.
+                   (EnumValue( HVACSysStatus ) == 1 .AND. LocalCompAssigned(  exHVACSystem ) = ComponentType ("AirSys" )) .OR.
+                   EnumValue( SpcFunc ) == 355 .OR.   ; "Parking Garage Area (Parking Zone and Ramps)"
+                   EnumValue( SpcFunc ) == 356 .OR.   ; "Parking Garage Area (Daylight Adaptation Zones)"
+                   EnumValue( IAQOption ) ==  2 .OR.  ; "Individual IAQ Fans"
+                   EnumValue( IAQOption ) == 12 .OR.  ; "Central Supply / Individual Exhaust"
+                   EnumValue( IAQOption ) == 14 )     ; "Central Supply"
+         then  EvalRulelist( "Blast_ResOtherZn_CentralExhaustCFM", 1 )
+         else  UNCHANGED  endif endif  }
+
+   "Backward compat for MFam IAQ FID & Accessibility input at ResProj level." DwellUnitType:Action =
+      { if( IfValidAnd( Proj:ResDwellUnits > 0 ) .AND.
+            ( GlobalStatus( ResProj:IAQSupInletsAccessible ) > 4 .OR. GlobalStatus( ResProj:IAQHasFID ) > 4 ))
+        then EvalRulelist( "Set_IAQFIDandAccessible_forDwellUnitType", 1 )
+        else UNCHANGED
+        endif }
+   "Hard coded ResProj IAQ FID & Accessibility to 1 for MFam." ResProj:Action = 
+      { if( IfValidAnd( Proj:ResDwellUnits > 0 ) .AND.
+            ( GlobalStatus( ResProj:IAQSupInletsAccessible ) > 4 .OR. GlobalStatus( ResProj:IAQHasFID ) > 4 ))
+        then EvalRulelist( "Set_MFamIAQFIDandAccessible", 1 )
         else UNCHANGED
         endif }
 
@@ -213,6 +285,55 @@ RULELIST "LoadModelAdjustments" 1 0 0 0
 ;        else UNCHANGED
 ;        endif }
 
+   "reset Attic:Status of 'Altered Roof Surface' to Altered for 2022+ analysis"     Attic:Action =    ; SAC 01/09/23 (tic #1302) - SAC 07/01/23 (tic #3479)
+      {  if (EnumValue( Status ) == 4)
+         then  EvalRulelist( "ForceUpdate_Attic_Status_AlteredRoofSurface", 1 )
+         else  UNCHANGED  endif  }
+
+   "force CommunitySolar OFF for highrise or non-res models"   Proj:Action =     ; SAC 07/17/23   ; altered logic to not rely entirely on ResDwellUnits flag - SAC 04/18/24
+      {  if ( IfValidAnd( UseCommunitySolar > 0 ) .AND. 
+              ( ( ( IfValidAnd( ResDwellUnits > 0 )==0 .AND.
+                    ( LocalStatus( ResDwellUnits ) > 2 .OR. 
+                      ( ComponentCount( ResProj   ) < 1 .OR. ComponentCount( ResZn         ) < 1 .OR.
+                        ComponentCount( DwellUnit ) < 1 .OR. ComponentCount( DwellUnitType ) < 1 ) ) ) ) .OR.
+                IfValidAnd( Bldg:AboveGrdStoryCnt >= 4 ) ) )
+         then  EvalRulelist( "ForceReset_Proj_UseCommunitySolar" )
+         else  UNCHANGED  endif  }
+
+   "backward compatibility for CUAC Gen2 electric rates (from prior to 3.0-SP2 versions)"    CUAC:Action =     ; SAC 01/08/24
+      {  if ( EnumValue( ElecUtility ) > 0 .AND.
+              ( (EnumValue( G2ElecTerritory ) > 0 .AND. EnumValue( G2ElecTerritory ) < 100 ) .OR.
+                (EnumValue( G2ElecTariff    ) > 0 .AND. EnumValue( G2ElecTariff    ) < 1000) ) )
+         then  if (CUAC_UtilityRateBackCompat_SP2:NewTariff( "Utility", ElecUtility, "OldTerritory", G2ElecTerritory, "OldTariff", G2ElecTariff ) != "ERROR")
+               then  EvalRulelist( "CUAC_PerformGen2UtilityRateBackwardCompat_SP2_Electric", 1 )
+               else  UNCHANGED  endif
+         else  UNCHANGED  endif  }
+
+   "map prior CUAC elec utility rate assignment to Gen2 rate"     CUAC:Action =     ; SAC 09/05/23
+      {  if (EnumValue( ElecUtility ) > 0 .AND. EnumValue( ElecTerritory ) > 0 .AND.
+             LocalStatus( ElecTariff ) > 5)
+         then  if (CUAC_UtilityRateGen2Mapping:HaveMapping( "Fuel", "Electric", "CUACUtility", ElecUtility, "OldTerritory", ElecTerritory, "OldRate", ElecTariff ))
+               then  EvalRulelist( "CUAC_PerformGen2UtilityRateMapping_Electric", 1 )
+               else  UNCHANGED  endif
+         else  UNCHANGED  endif  }
+   "map prior CUAC gas utility rate assignment to Gen2 rate"      CUAC:Action = 
+      {  if (EnumValue( GasUtility ) > 0 .AND. EnumValue( GasTerritory ) > 0 .AND.
+             LocalStatus( GasTariff ) > 5)
+         then  if (CUAC_UtilityRateGen2Mapping:HaveMapping( "Fuel", "Gas", "CUACUtility", GasUtility, "OldTerritory", GasTerritory, "OldRate", GasTariff ))
+               then  EvalRulelist( "CUAC_PerformGen2UtilityRateMapping_Gas", 1 )
+               else  UNCHANGED  endif
+         else  UNCHANGED  endif  }
+
+   "Backward compat for CRAC efficiency metrics"   CoilClg:Action =
+      {  if(ParentComponentType() = "AirSeg")
+         then 
+            if(AirSys:SubType = "CRAC" .AND. 
+               (LocalStatus(DXEER) = 7 .OR. LocalStatus(DXIEER) = 7))
+            then EvalRulelist( "CRAC_EfficiencyMetricBackwardCompat", 1 )
+            else UNCHANGED
+            endif
+         else UNCHANGED
+         endif  }
 
 ; ^^^^ Insert additional model adjustment rules above ^^^^
 
@@ -279,6 +400,16 @@ RULELIST "BackwardCompat_AirSrcHtPumpType_to_HPWHModel"  1 0 1 1
 END
 ;*************************************************************************
 
+;************************************************************************* SAC 04/23/24 (tic #3588)
+RULELIST "BackwardCompat_WeatherStationRemoval_2022"  1 0 1 1
+   "post warning"  Proj:Action =       ; updated w/ new message from BAW - SAC 05/01/24 (tic #3588)
+      {  PostWarning( "Weather Station '%s' has been deleted from the CBECC compliance choices due to problems with missing data. Please select a different weather station or accept the climate zone default station '%s' for this analysis.", 
+                        WeatherStation, WeatherStationRemoval_2022:FixWthrStation( "BadWthrStationName", WeatherStation ) )  }
+   "reset WeatherStation to climate zone default"  Proj:WeatherStation =
+      {  WeatherStationRemoval_2022:FixWthrStation( "BadWthrStationName", WeatherStation )  }
+END
+;*************************************************************************
+
 ;*************************************************************************
 RULELIST "BackwardCompat_VentStd"  1 0 1 1
    "Set ThrmlZn:VentStd"                 ThrmlZn:VentStd              = { "UNDEFINED" }
@@ -299,6 +430,19 @@ RULELIST "BackwardCompat_AlowType"  1 0 1 1
                      Allowance has been removed.  The Tailored Method is no 
                      longer allowed for the specified Space Function.",
                      Name ) }
+END
+;*************************************************************************
+
+RULELIST "BackwardCompat_VeryValuableDisplayCaseNotAllowa"  1 0 1 1
+   "Set IntLtgSys:AllowType"             IntLtgSys:AllowType = { UNDEFINED }
+   "Set IntLtgSys:AllowArea"             IntLtgSys:AllowArea = { UNDEFINED }
+   "Set IntLtgSys:AllowQty"              IntLtgSys:AllowQty  = { UNDEFINED }
+   "Set IntLtgSys:AllowLen"              IntLtgSys:AllowLen  = { UNDEFINED }
+   "Post a Warning to the Log"           IntLtgSys:Action    = {
+        PostWarning("In Interior Lighting System: '%s', the specified additional 
+                     allow type 'TailoredVeryValuableDisplayCaseAllowance'is not 
+                     available for the specified Space Function. The allow type 
+                     is reset to 'GeneralAllowance'", Name ) }
 END
 
 ;*************************************************************************
@@ -523,6 +667,82 @@ RULELIST "BackwardCompat_PVArray_CalFlexibleInstall"  1 0 1 1
 END
 ;*************************************************************************
 
+;************************************************************************* SAC 04/22/24
+RULELIST "Blast_SpcFuncDefaults_SpcFunc_HighRiseRes"  1 0 1 1
+   "Post message to log that 'High-Rise Residential Living Spaces' no longer a valid SpcFuncDefaults:SpcFunc"  SpcFuncDefaults:Action  = 
+      { PostWarning( "The SpcFuncDefaults '%s' space function (SpcFunc) 'High-Rise Residential Living Spaces' is no longer valid and is
+                      being removed. Use Residential Zone Groups (ResZnGrp) and Zones (ResZn) to describe residential spaces.",  Name ) }
+   "Reset SpcFuncDefaults:SpcFunc"     SpcFuncDefaults:SpcFunc = { 0 }
+END
+;*************************************************************************
+RULELIST "Blast_Spc_SpcFunc_HighRiseRes"  1 0 1 1
+   "Post message to log that 'High-Rise Residential Living Spaces' no longer a valid Spc:SpcFunc"  Spc:Action  = 
+      { PostWarning( "The Spc '%s' space function (SpcFunc) 'High-Rise Residential Living Spaces' is no longer valid and is
+                      being removed. Use Residential Zone Groups (ResZnGrp) and Zones (ResZn) to describe residential spaces.",  Name ) }
+   "Reset Spc:SpcFunc"     Spc:SpcFunc = { 0 }
+END
+;*************************************************************************
+RULELIST "Blast_Proj_MandatoryLtgCtrlSpcFunctRpt_1_HighRiseRes"  1 0 1 1
+   "Post message to log that 'High-Rise Residential Living Spaces' no longer a valid Proj:MandatoryLtgCtrlSpcFunctRpt[1]"   Proj:Action  = 
+      { PostWarning( "This project's MandatoryLtgCtrlSpcFunctRpt[1] 'High-Rise Residential Living Spaces' is no longer valid and is being removed." ) }
+   "Reset Proj:MandatoryLtgCtrlSpcFunctRpt[1]"     Proj:MandatoryLtgCtrlSpcFunctRpt[1] = { 0 }
+END
+;*************************************************************************
+RULELIST "Blast_Proj_MandatoryLtgCtrlSpcFunctRpt_2_HighRiseRes"  1 0 1 1
+   "Post message to log that 'High-Rise Residential Living Spaces' no longer a valid Proj:MandatoryLtgCtrlSpcFunctRpt[2]"   Proj:Action  = 
+      { PostWarning( "This project's MandatoryLtgCtrlSpcFunctRpt[2] 'High-Rise Residential Living Spaces' is no longer valid and is being removed." ) }
+   "Reset Proj:MandatoryLtgCtrlSpcFunctRpt[2]"     Proj:MandatoryLtgCtrlSpcFunctRpt[2] = { 0 }
+END
+;*************************************************************************
+RULELIST "Blast_Proj_MandatoryLtgCtrlSpcFunctRpt_3_HighRiseRes"  1 0 1 1
+   "Post message to log that 'High-Rise Residential Living Spaces' no longer a valid Proj:MandatoryLtgCtrlSpcFunctRpt[3]"   Proj:Action  = 
+      { PostWarning( "This project's MandatoryLtgCtrlSpcFunctRpt[3] 'High-Rise Residential Living Spaces' is no longer valid and is being removed." ) }
+   "Reset Proj:MandatoryLtgCtrlSpcFunctRpt[3]"     Proj:MandatoryLtgCtrlSpcFunctRpt[3] = { 0 }
+END
+;*************************************************************************
+RULELIST "Blast_Proj_MandatoryLtgCtrlSpcFunctRpt_4_HighRiseRes"  1 0 1 1
+   "Post message to log that 'High-Rise Residential Living Spaces' no longer a valid Proj:MandatoryLtgCtrlSpcFunctRpt[4]"   Proj:Action  = 
+      { PostWarning( "This project's MandatoryLtgCtrlSpcFunctRpt[4] 'High-Rise Residential Living Spaces' is no longer valid and is being removed." ) }
+   "Reset Proj:MandatoryLtgCtrlSpcFunctRpt[4]"     Proj:MandatoryLtgCtrlSpcFunctRpt[4] = { 0 }
+END
+;*************************************************************************
+RULELIST "Blast_Proj_MandatoryLtgCtrlSpcFunctRpt_5_HighRiseRes"  1 0 1 1
+   "Post message to log that 'High-Rise Residential Living Spaces' no longer a valid Proj:MandatoryLtgCtrlSpcFunctRpt[5]"   Proj:Action  = 
+      { PostWarning( "This project's MandatoryLtgCtrlSpcFunctRpt[5] 'High-Rise Residential Living Spaces' is no longer valid and is being removed." ) }
+   "Reset Proj:MandatoryLtgCtrlSpcFunctRpt[5]"     Proj:MandatoryLtgCtrlSpcFunctRpt[5] = { 0 }
+END
+;*************************************************************************
+RULELIST "Blast_Proj_MandatoryLtgCtrlSpcFunctRpt_6_HighRiseRes"  1 0 1 1
+   "Post message to log that 'High-Rise Residential Living Spaces' no longer a valid Proj:MandatoryLtgCtrlSpcFunctRpt[6]"   Proj:Action  = 
+      { PostWarning( "This project's MandatoryLtgCtrlSpcFunctRpt[6] 'High-Rise Residential Living Spaces' is no longer valid and is being removed." ) }
+   "Reset Proj:MandatoryLtgCtrlSpcFunctRpt[6]"     Proj:MandatoryLtgCtrlSpcFunctRpt[6] = { 0 }
+END
+;*************************************************************************
+RULELIST "Blast_Proj_MandatoryLtgCtrlSpcFunctRpt_7_HighRiseRes"  1 0 1 1
+   "Post message to log that 'High-Rise Residential Living Spaces' no longer a valid Proj:MandatoryLtgCtrlSpcFunctRpt[7]"   Proj:Action  = 
+      { PostWarning( "This project's MandatoryLtgCtrlSpcFunctRpt[7] 'High-Rise Residential Living Spaces' is no longer valid and is being removed." ) }
+   "Reset Proj:MandatoryLtgCtrlSpcFunctRpt[7]"     Proj:MandatoryLtgCtrlSpcFunctRpt[7] = { 0 }
+END
+;*************************************************************************
+RULELIST "Blast_Proj_MandatoryLtgCtrlSpcFunctRpt_8_HighRiseRes"  1 0 1 1
+   "Post message to log that 'High-Rise Residential Living Spaces' no longer a valid Proj:MandatoryLtgCtrlSpcFunctRpt[8]"   Proj:Action  = 
+      { PostWarning( "This project's MandatoryLtgCtrlSpcFunctRpt[8] 'High-Rise Residential Living Spaces' is no longer valid and is being removed." ) }
+   "Reset Proj:MandatoryLtgCtrlSpcFunctRpt[8]"     Proj:MandatoryLtgCtrlSpcFunctRpt[8] = { 0 }
+END
+;*************************************************************************
+RULELIST "Blast_Proj_MandatoryLtgCtrlSpcFunctRpt_9_HighRiseRes"  1 0 1 1
+   "Post message to log that 'High-Rise Residential Living Spaces' no longer a valid Proj:MandatoryLtgCtrlSpcFunctRpt[9]"   Proj:Action  = 
+      { PostWarning( "This project's MandatoryLtgCtrlSpcFunctRpt[9] 'High-Rise Residential Living Spaces' is no longer valid and is being removed." ) }
+   "Reset Proj:MandatoryLtgCtrlSpcFunctRpt[9]"     Proj:MandatoryLtgCtrlSpcFunctRpt[9] = { 0 }
+END
+;*************************************************************************
+RULELIST "Blast_Proj_MandatoryLtgCtrlSpcFunctRpt_10_HighRiseRes"  1 0 1 1
+   "Post message to log that 'High-Rise Residential Living Spaces' no longer a valid Proj:MandatoryLtgCtrlSpcFunctRpt[10]"   Proj:Action  = 
+      { PostWarning( "This project's MandatoryLtgCtrlSpcFunctRpt[10] 'High-Rise Residential Living Spaces' is no longer valid and is being removed." ) }
+   "Reset Proj:MandatoryLtgCtrlSpcFunctRpt[10]"     Proj:MandatoryLtgCtrlSpcFunctRpt[10] = { 0 }
+END
+;*************************************************************************
+
 ;*************************************************************************
 RULELIST "Blast_ResOtherZnIAQ_forAirSys"  1 0 1 1
 
@@ -541,6 +761,34 @@ RULELIST "Blast_ResOtherZnIAQ_forAirSys"  1 0 1 1
    "Blast ResOtherZn:IAQFanCnt"          ResOtherZn:IAQFanCnt[3] = { UNDEFINED }
    "Blast ResOtherZn:IAQFanCnt"          ResOtherZn:IAQFanCnt[4] = { UNDEFINED }
 END
+;************************************************************************* SAC 08/18/23
+RULELIST "Blast_ResOtherZn_CentralSupplyCFM"  1 0 1 1
+   "Post message to log that CentralSupplyCFM will be blasted."  ResOtherZn:Action =
+       { PostWarning("Removing CentralSupplyCFM for ResidentialOtherZone '%s' since invalid for zones served by AirSystem or include no or non-central supply ventilation.", Name) }
+   "Blast ResOtherZn:CentralSupplyCFM"    ResOtherZn:CentralSupplyCFM   = { UNDEFINED }
+END
+;************************************************************************* SAC 08/18/23
+RULELIST "Blast_ResOtherZn_CentralExhaustCFM"  1 0 1 1
+   "Post message to log that CentralExhaustCFM will be blasted."  ResOtherZn:Action =
+       { PostWarning("Removing CentralExhaustCFM for ResidentialOtherZone '%s' since invalid for zones served by AirSystem or include no or non-central exhaust ventilation.", Name) }
+   "Blast ResOtherZn:CentralExhaustCFM"   ResOtherZn:CentralExhaustCFM  = { UNDEFINED }
+END
+;************************************************************************* 
+
+;*************************************************************************
+RULELIST "Set_IAQFIDandAccessible_forDwellUnitType" 0 0 1 1
+  "Set DwellUnitType:IAQHasFID"              DwellUnitType:IAQHasFID              = { ResProj:IAQHasFID }
+  "Set DwellUnitTYpe:IAQSupInletsAccessible" DwellUnitType:IAQSupInletsAccessible = { ResProj:IAQSupInletsAccessible }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "Set_MFamIAQFIDandAccessible" 1 0 1 1
+  "Set ResProj:IAQHasFID"              ResProj:IAQHasFID              = { 1 }
+  "Set ResProj:IAQSupInletsAccessible" ResProj:IAQSupInletsAccessible = { 1 }
+END
+;*************************************************************************
+
 ;*************************************************************************
 
 ;*************************************************************************
@@ -628,6 +876,70 @@ RULELIST  "TransformOld_ResHtPumpSys_EffMetric"  1 0 1 1
    "Hardwire ResHtPumpSys:EffMetric to old metrics for old models"  ResHtPumpSys:EffMetric = {  1  }
 END
 ;*************************************************************************
+
+;************************************************************************* SAC 01/09/23 (tic #1302) - SAC 07/01/23 (tic #3479)
+RULELIST "ForceUpdate_Attic_Status_AlteredRoofSurface" 1 0 1 0
+   "post message to log if pertinent"  Attic:Action =
+      {  PostMessageToLog( "Warning:  Attic '%s' Status updated from 'Altered Roof Surface' to 'Altered' due to code changes starting in 2022.", Name )  }
+   "force Attic:Status to Altered"    Attic:Status = {  "Altered"  }
+END
+;*************************************************************************
+
+;************************************************************************* SAC 07/17/23
+RULELIST "ForceReset_Proj_UseCommunitySolar" 1 0 0 0
+   "post message to log"   Proj:Action = {  PostMessageToLog( "Warning:  UseCommunitySolar toggled OFF for non-res or highrise models." )  }
+   "force reset of Proj:UseCommunitySolar"   Proj:UseCommunitySolar = {  UNDEFINED  }
+END
+;************************************************************************* SAC 10/02/23
+RULELIST "ForceReset_CUAC_UseCommunitySolar" 1 0 0 0
+   ;"post message to log"   Proj:Action = {  PostMessageToLog( "Warning:  UseCommunitySolar toggled OFF for non-res or highrise models." )  }
+   "force reset of CUAC:UseCommunitySolar"   CUAC:UseCommunitySolar = {  UNDEFINED  }
+END
+;*************************************************************************
+
+;************************************************************************* SAC 09/05/23
+RULELIST  "CUAC_PerformGen2UtilityRateMapping_Electric"  1 0 1 1
+   "set CUAC:G2ElecTerritory based on ElecUtility & ElecTerritory"            CUAC:G2ElecTerritory =
+      {  CUAC_UtilityRateGen2Mapping:Gen2Territory( "Fuel", "Electric", "CUACUtility", ElecUtility, "OldTerritory", ElecTerritory )  }
+   "set CUAC:G2ElecTariff based on ElecUtility, ElecTerritory & ElecTariff"   CUAC:G2ElecTariff    =
+      {  CUAC_UtilityRateGen2Mapping:Gen2RateName(  "Fuel", "Electric", "CUACUtility", ElecUtility, "OldTerritory", ElecTerritory, "OldRate", ElecTariff )  }
+   "log action"  CUAC:Action = {  PostMessageToLog( "Mapping prior CUAC Electric utility '%s' territory '%s' and tariff '%s' to Gen2 selections '%s' and '%s'", ElecUtility, ElecTerritory, ElecTariff, G2ElecTerritory, G2ElecTariff )  }
+   "blast old ElecTariff to prevent subsequent mappings"    CUAC:ElecTariff = {  UNDEFINED  }
+END
+;*************************************************************************
+RULELIST  "CUAC_PerformGen2UtilityRateMapping_Gas"  1 0 1 1
+   "set CUAC:G2GasTerritory based on GasUtility & GasTerritory"            CUAC:G2GasTerritory =
+      {  CUAC_UtilityRateGen2Mapping:Gen2Territory( "Fuel", "Gas", "CUACUtility", GasUtility, "OldTerritory", GasTerritory )  }
+   "set CUAC:G2GasTariff based on GasUtility, GasTerritory & GasTariff"   CUAC:G2GasTariff    =
+      {  CUAC_UtilityRateGen2Mapping:Gen2RateName(  "Fuel", "Gas", "CUACUtility", GasUtility, "OldTerritory", GasTerritory, "OldRate", GasTariff )  }
+   "log action"  CUAC:Action = {  PostMessageToLog( "Mapping prior CUAC Gas utility '%s' territory '%s' and tariff '%s' to Gen2 selections '%s' and '%s'", GasUtility, GasTerritory, GasTariff, G2GasTerritory, G2GasTariff )  }
+   "blast old GasTariff to prevent subsequent mappings"     CUAC:GasTariff = {  UNDEFINED  }
+END
+;*************************************************************************
+
+;************************************************************************* SAC 01/08/24
+RULELIST  "CUAC_PerformGen2UtilityRateBackwardCompat_SP2_Electric"  1 0 1 1
+   "log prior elec utility territory/tariff being updated"           CUAC:Action =
+      {  PostMessageToLog( "Mapping prior CUAC electric territory/tariff from:  %s / %s", G2ElecTerritory, G2ElecTariff )  }
+   "update elec utility territory selection"       CUAC:G2ElecTerritory =
+      {  CUAC_UtilityRateBackCompat_SP2:NewTerritory( "Utility", ElecUtility, "OldTerritory", G2ElecTerritory, "OldTariff", G2ElecTariff )  }
+   "update elec utility tariff selection"          CUAC:G2ElecTariff =
+      {  CUAC_UtilityRateBackCompat_SP2:NewTariff(    "Utility", ElecUtility, "OldTariff", G2ElecTariff )  }
+   "log new/mapped elec utility territory/tariff that was updated"   CUAC:Action =
+      {  PostMessageToLog( "    to:  %s / %s", G2ElecTerritory, G2ElecTariff )  }
+END
+;*************************************************************************
+
+;************************************************************************* JP 01/11/24
+RULELIST  "CRAC_EfficiencyMetricBackwardCompat"  1 0 1 1
+   "Set CoilClg:DXEER"  CoilClg:DXEER  = { "UNDEFINED" }
+   "Set CoilClg:DXIEER" CoilClg:DXIEER = { "UNDEFINED" }
+   ""                   CoilClg:Action = {
+     PostWarning("The efficiency metrics 'EER' and 'IEER' are not compatible with the Computer Room
+                  Air Conditioner, CRAC, Cooling Coil '%s' and have been reset.", Name ) }
+END
+;*************************************************************************
+
 
 
 ; ^^^^ Insert dependent rulelists above ^^^^

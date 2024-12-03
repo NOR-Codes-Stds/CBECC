@@ -82,7 +82,7 @@ RULELIST "CSE_SimulationPrep_AirSys_AirHandler" 1 0 0 1
 
    "Set AirSys:CSE_AirHandlerRef:oaVfDsMn"      AirSys:CSE_AirHandlerRef:oaVfDsMn      =     ; AirSys:SysVentFlow ??
       {  if (IfValidAnd( SysVentFlow > 0 ))
-         then  SysVentFlow
+         then  SysVentFlow * CntSim
          else  0  endif  }
    "Set AirSys:CSE_AirHandlerRef:oaMnCtrl"      AirSys:CSE_AirHandlerRef:oaMnCtrl      = {  "VOLUME"  }
 
@@ -110,7 +110,13 @@ RULELIST "CSE_SimulationPrep_AirSys_AirHandler" 1 0 0 1
                   default  :  UNDEFINED
                endswitch
          else  UNDEFINED  endif  }
-   "Set AirSys:CSE_AirHandlerRef:sfanMtr"       AirSys:CSE_AirHandlerRef:sfanMtr       = {  Global( Proj:CSE_ElecMETER )  }
+   "Set AirSys:CSE_AirHandlerRef:sfanMtr"       AirSys:CSE_AirHandlerRef:sfanMtr       =        ; SAC 04/28/23 (tic #3392)
+      {  if (LocalCompAssigned( CtrlZnRef ) == ComponentType( "ResZn" ) .OR.
+             LocalCompAssigned( CtrlZnRef ) == ComponentType( "ResOtherZn" ))
+         then  if (LocalCompAssigned( CtrlZnRef:CSE_ElecMETER ) > 0)
+               then  CtrlZnRef:CSE_ElecMETER
+               else  Global( Proj:CSE_ElecMETER )  endif
+         else  Global( Proj:CSE_ElecMETER )  endif  }
 
    "Set AirSys:CSE_AirHandlerRef:rfanType"      AirSys:CSE_AirHandlerRef:rfanType      =
       {  if (LocalCompAssigned( RetAirSegRef:FanRef ) .OR.
@@ -139,16 +145,17 @@ RULELIST "CSE_SimulationPrep_AirSys_AirHandler" 1 0 0 1
          else  UNDEFINED  endif  }
    "Set AirSys:CSE_AirHandlerRef:rfanMtr"       AirSys:CSE_AirHandlerRef:rfanMtr       =
       {  if (LocalStatus( CSE_AirHandlerRef:rfanType ) > 0)
-         then  Global( Proj:CSE_ElecMETER )     else  UNDEFINED  endif  }
+         then  CSE_AirHandlerRef:sfanMtr  else  UNDEFINED  endif  }
 
         // rfanType=Return             // For heat recovery need fan at air handler; all return air passes through it.
         // rfanVfDs=800                // 400 CFM/ton
         // rfanVfMxF=1.00             //Max volume multiplier
         // rfanElecPwr=0.2		//W/CFM at max
 
+   ; revised rule to set ahhcType to Electric for EITHER zp or zb runs w/ ResHVACAutoSizing - SAC 06/27/23 (tic #3479)
    "Set AirSys:CSE_AirHandlerRef:ahhcType"      AirSys:CSE_AirHandlerRef:ahhcType      =
       {  if (LocalStatus( SupAirSegRef:CoilHtgRef:Type ) > 0)
-         then  if (IfValidAnd( Proj:RunAbbrev = "zp") .AND.
+         then  if ((IfValidAnd( Proj:RunAbbrev = "zp") .OR. IfValidAnd( Proj:RunAbbrev = "zb")) .AND.
                    IfValidAnd( ResHVACAutoSizing > 0 ) .AND.
                    EnumString( SupAirSegRef:CoilHtgRef:Type ) == "Resistance") then  "Electric"
                else if (IfValidAnd( SupAirSegRef:HtPumpCap > 0 )) then  "AHP"
@@ -201,12 +208,25 @@ RULELIST "CSE_SimulationPrep_AirSys_AirHandler" 1 0 0 1
                else  UNDEFINED  endif
          else  UNDEFINED  endif  }
 
-   "Set AirSys:CSE_AirHandlerRef:ahhcMtr"       AirSys:CSE_AirHandlerRef:ahhcMtr       = 
-      {  if (CSE_AirHandlerRef:ahhcType == 1 .OR. CSE_AirHandlerRef:ahhcType == 4)  ; Elec or AHP
-         then  Global( Proj:CSE_ElecMETER )
-         else       if (Global( Proj:Fuel_HaveNatGas ) > 0.5) then  Global( Proj:CSE_NatGasMETER )
-               else if (Global( Proj:Fuel_HaveOther  ) > 0.5) then  Global( Proj:CSE_OtherFuelMETER )
-               else  UNDEFINED  endif endif  endif  }
+   "Set AirSys:CSE_AirHandlerRef:ahhcMtr"       AirSys:CSE_AirHandlerRef:ahhcMtr       =     ; SAC 04/28/23 (tic #3392)  ; revised to ensure this undefined when ahhcType = None - SAC 03/27/24
+      {  if (CSE_AirHandlerRef:ahhcType == 0) then  UNDEFINED
+         else if (CSE_AirHandlerRef:ahhcType == 1 .OR. CSE_AirHandlerRef:ahhcType == 4)  ; Elec or AHP
+         then  CSE_AirHandlerRef:sfanMtr 
+         else  if (Global( Proj:Fuel_HaveNatGas ) > 0.5)
+               then  if (LocalCompAssigned( CtrlZnRef ) == ComponentType( "ResZn" ) .OR.
+                         LocalCompAssigned( CtrlZnRef ) == ComponentType( "ResOtherZn" ))
+                     then  if (LocalCompAssigned( CtrlZnRef:CSE_NatGasMETER ) > 0)
+                           then  CtrlZnRef:CSE_NatGasMETER
+                           else  Global( Proj:CSE_NatGasMETER )  endif
+                     else  Global( Proj:CSE_NatGasMETER )  endif
+               else if (Global( Proj:Fuel_HaveOther  ) > 0.5)
+               then  if (LocalCompAssigned( CtrlZnRef ) == ComponentType( "ResZn" ) .OR.
+                         LocalCompAssigned( CtrlZnRef ) == ComponentType( "ResOtherZn" ))
+                     then  if (LocalCompAssigned( CtrlZnRef:CSE_OtherFuelMETER ) > 0)
+                           then  CtrlZnRef:CSE_OtherFuelMETER
+                           else  Global( Proj:CSE_OtherFuelMETER )  endif
+                     else  Global( Proj:CSE_OtherFuelMETER )  endif
+               else  UNDEFINED  endif endif  endif endif  }
 
    "Set AirSys:CSE_AirHandlerRef:ahTsMx"        AirSys:CSE_AirHandlerRef:ahTsMx        =     ; {  150  }
       {  if (IfValidAnd( HtgDsgnSupAirTemp > 0 ))
@@ -223,7 +243,7 @@ RULELIST "CSE_SimulationPrep_AirSys_AirHandler" 1 0 0 1
                   default  :  "None"
                endswitch
          else  "None"  endif  }
-   "Set AirSys:CSE_AirHandlerRef:ahccMtr"       AirSys:CSE_AirHandlerRef:ahccMtr       = {  Global( Proj:CSE_ElecMETER )  }
+   "Set AirSys:CSE_AirHandlerRef:ahccMtr"       AirSys:CSE_AirHandlerRef:ahccMtr       = {  CSE_AirHandlerRef:sfanMtr  }
 ;   "Set AirSys:CSE_AirHandlerRef:ahccAux"       AirSys:CSE_AirHandlerRef:ahccAux       = {  ""  }
 ;   "Set AirSys:CSE_AirHandlerRef:ahccAuxMtr"    AirSys:CSE_AirHandlerRef:ahccAuxMtr    = {  ""  }
    "Set AirSys:CSE_AirHandlerRef:ahccEirR"      AirSys:CSE_AirHandlerRef:ahccEirR      =
@@ -339,17 +359,41 @@ RULELIST "CSE_SimulationPrep_AirSys_AirHandler" 1 0 0 1
    "Set AirSys:CSE_AirHandlerRef:ahpSupHMtr"    AirSys:CSE_AirHandlerRef:ahpSupHMtr    =     ; SAC 05/13/22   ; moved down BELOW size setting rules to handle case where SuppHtgCoil not specified, but capacity IS - SAC 05/23/22
       {  if (CSE_AirHandlerRef:ahhcType == 4)  ; AHP
          then  if (IfValidAnd( SupAirSegRef:CoilHtgRef:HtPumpSuppCoilHtgRef:Type == 2 ))        ; Furnace 
-               then       if (Global( Proj:Fuel_HaveNatGas ) > 0.5) then  Global( Proj:CSE_NatGasMETER )
-                     else if (Global( Proj:Fuel_HaveOther  ) > 0.5) then  Global( Proj:CSE_OtherFuelMETER )
+               then  if (Global( Proj:Fuel_HaveNatGas ) > 0.5)
+                     then  if (LocalCompAssigned( CtrlZnRef ) == ComponentType( "ResZn" ) .OR.
+                               LocalCompAssigned( CtrlZnRef ) == ComponentType( "ResOtherZn" ))
+                           then  if (LocalCompAssigned( CtrlZnRef:CSE_NatGasMETER ) > 0)
+                                 then  CtrlZnRef:CSE_NatGasMETER
+                                 else  Global( Proj:CSE_NatGasMETER )  endif
+                           else  Global( Proj:CSE_NatGasMETER )  endif
+                     else if (Global( Proj:Fuel_HaveOther  ) > 0.5)
+                     then  if (LocalCompAssigned( CtrlZnRef ) == ComponentType( "ResZn" ) .OR.
+                               LocalCompAssigned( CtrlZnRef ) == ComponentType( "ResOtherZn" ))
+                           then  if (LocalCompAssigned( CtrlZnRef:CSE_OtherFuelMETER ) > 0)
+                                 then  CtrlZnRef:CSE_OtherFuelMETER
+                                 else  Global( Proj:CSE_OtherFuelMETER )  endif
+                           else  Global( Proj:CSE_OtherFuelMETER )  endif
                      else  UNDEFINED  endif endif
                else if (IfValidAnd( SupAirSegRef:CoilHtgRef:HtPumpSuppCoilHtgRef:Type == 1 ))   ; Resistance
-               then  Global( Proj:CSE_ElecMETER )
+               then  CSE_AirHandlerRef:sfanMtr
                else if (IfValidAnd( CSE_AirHandlerRef:ahpCapSupH > 0 ))
                then  if (EnumString( Type ) == "SZDFHP")
-                     then       if (Global( Proj:Fuel_HaveNatGas ) > 0.5) then  Global( Proj:CSE_NatGasMETER )
-                           else if (Global( Proj:Fuel_HaveOther  ) > 0.5) then  Global( Proj:CSE_OtherFuelMETER )
+                     then  if (Global( Proj:Fuel_HaveNatGas ) > 0.5)
+                           then  if (LocalCompAssigned( CtrlZnRef ) == ComponentType( "ResZn" ) .OR.
+                                     LocalCompAssigned( CtrlZnRef ) == ComponentType( "ResOtherZn" ))
+                                 then  if (LocalCompAssigned( CtrlZnRef:CSE_NatGasMETER ) > 0)
+                                       then  CtrlZnRef:CSE_NatGasMETER
+                                       else  Global( Proj:CSE_NatGasMETER )  endif
+                                 else  Global( Proj:CSE_NatGasMETER )  endif
+                           else if (Global( Proj:Fuel_HaveOther  ) > 0.5)
+                           then  if (LocalCompAssigned( CtrlZnRef ) == ComponentType( "ResZn" ) .OR.
+                                     LocalCompAssigned( CtrlZnRef ) == ComponentType( "ResOtherZn" ))
+                                 then  if (LocalCompAssigned( CtrlZnRef:CSE_OtherFuelMETER ) > 0)
+                                       then  CtrlZnRef:CSE_OtherFuelMETER
+                                       else  Global( Proj:CSE_OtherFuelMETER )  endif
+                                 else  Global( Proj:CSE_OtherFuelMETER )  endif
                            else  UNDEFINED  endif endif
-                     else  Global( Proj:CSE_ElecMETER )
+                     else  CSE_AirHandlerRef:sfanMtr
                      endif
                else  UNDEFINED  endif endif endif
          else  UNDEFINED  endif  }
@@ -394,15 +438,15 @@ RULELIST "CSE_SimulationPrep_AirSys_AirHandler_FixedSizes" 1 0 0 1
    "Blast AirSys:CSE_AirHandlerRef:ahccFxCap"      AirSys:CSE_AirHandlerRef:ahccFxCap  = {  UNDEFINED  } 
 
    "Set AirSys:CSE_AirHandlerRef:sfanVfDs"      AirSys:CSE_AirHandlerRef:sfanVfDs      =     ; added logic to prevent sfanVfDs from being < oaVfDsMn - SAC 05/14/22
-      {  max( ValidOr( SupFanCap, 0 ), ValidOr( SysVentFlow, 0 ) )  }
+      {  max( ValidOr( SupFanCap, 0 ), ValidOr( SysVentFlow, 0 ) ) * CntSim  }
 
    "Set AirSys:CSE_AirHandlerRef:rfanVfDs"      AirSys:CSE_AirHandlerRef:rfanVfDs      =
       {  if (IfValidAnd( RetFanCap > 0 ))
-         then  RetFanCap  else  UNDEFINED  endif  }
+         then  RetFanCap * CntSim  else  UNDEFINED  endif  }
 
    "Set AirSys:CSE_AirHandlerRef:ahpCap17"      AirSys:CSE_AirHandlerRef:ahpCap17      =        ; SAC 05/21/22
       {  if (CSE_AirHandlerRef:ahhcType == 4 .AND.    ; AHP
-             IfValidAnd( SupAirSegRef:CoilHtgRef:CapTotGrossRtd17Sim > 0 ))
+             IfValidAnd( SupAirSegRef:CoilHtgRef:CapTotGrossRtd17Sim > 0 )) ; JP 06/01/23 CSE does not lump systems/zones(with multiplier) together, so we don't use *Sim capacities for simulation
          then  SupAirSegRef:CoilHtgRef:CapTotGrossRtd17Sim
          else  UNDEFINED  endif  }
    "Set AirSys:CSE_AirHandlerRef:ahhcCapTRat"   AirSys:CSE_AirHandlerRef:ahhcCapTRat   = 
@@ -426,8 +470,8 @@ RULELIST "CSE_SimulationPrep_AirSys_AirHandler_FixedSizes" 1 0 0 1
                then  SupAirSegRef:CoilHtgRef:HtPumpSuppCoilHtgRef:CapTotGrossRtdSim
                else if ((ValidOr( SupAirSegRef:HtgCap, 0 ) - 
                          ValidOr( SupAirSegRef:HtPumpCap, 0 )) > 0)
-               then  SupAirSegRef:HtgCap - SupAirSegRef:HtPumpCap
-               else if (IfValidAnd( SupAirSegRef:CoilHtgRef:CapTotGrossRtdSim > 0 ))
+               then  ( SupAirSegRef:HtgCap - SupAirSegRef:HtPumpCap ) * CntSim
+               else if (IfValidAnd( SupAirSegRef:CoilHtgRef:CapTotGrossRtd > 0 ))
                then  SupAirSegRef:CoilHtgRef:CapTotGrossRtdSim
                else  UNDEFINED  endif endif endif
          else  UNDEFINED  endif  }
@@ -435,7 +479,7 @@ RULELIST "CSE_SimulationPrep_AirSys_AirHandler_FixedSizes" 1 0 0 1
    ; CRANKCASE HEATER
    "Set AirSys:CSE_AirHandlerRef:cchCM_x"       AirSys:CSE_AirHandlerRef:cchCM_x   =      ; SAC 05/17/22
       {  if (CSE_AirHandlerRef:ahhcType == 4 .AND.    ; AHP
-             IfValidAnd( SupAirSegRef:CoilHtgRef:HtPumpCrankcaseHtrCapSim > 0 ))
+             IfValidAnd( SupAirSegRef:CoilHtgRef:HtPumpCrankcaseHtrCap > 0 ))
          then  "TSTAT"
          else  UNDEFINED  endif  }
    "Set AirSys:CSE_AirHandlerRef:cchPMx"        AirSys:CSE_AirHandlerRef:cchPMx    =
@@ -445,13 +489,13 @@ RULELIST "CSE_SimulationPrep_AirSys_AirHandler_FixedSizes" 1 0 0 1
          else  UNDEFINED  endif  }
    "Set AirSys:CSE_AirHandlerRef:cchTOn"        AirSys:CSE_AirHandlerRef:cchTOn    =
       {  if (CSE_AirHandlerRef:ahhcType == 4 .AND.    ; AHP
-             IfValidAnd( SupAirSegRef:CoilHtgRef:HtPumpCrankcaseHtrCapSim > 0 ) .AND.
+             IfValidAnd( SupAirSegRef:CoilHtgRef:HtPumpCrankcaseHtrCap > 0 ) .AND.
              IfValidAnd( SupAirSegRef:CoilHtgRef:HtPumpCrankcaseCtrlTemp > 0 ))
          then  SupAirSegRef:CoilHtgRef:HtPumpCrankcaseCtrlTemp
          else  UNDEFINED  endif  }
    "Set AirSys:CSE_AirHandlerRef:cchMtr"        AirSys:CSE_AirHandlerRef:cchMtr    =      ; SAC 05/23/22
       {  if (CSE_AirHandlerRef:ahhcType == 4 .AND.    ; AHP
-             IfValidAnd( SupAirSegRef:CoilHtgRef:HtPumpCrankcaseHtrCapSim > 0 ))
+             IfValidAnd( SupAirSegRef:CoilHtgRef:HtPumpCrankcaseHtrCap > 0 ))
          then  Global( Proj:CSE_ElecMETER )
          else  UNDEFINED  endif  }
 
@@ -646,18 +690,18 @@ RULELIST "CSE_SimulationPrep_ResOtherZn_Terminal_FixedSizes" 1 0 0 1
    "Blast ResOtherZn:CSE_TerminalRef:tuhcFxCap"          ResOtherZn:CSE_TerminalRef:tuhcFxCap      = {  UNDEFINED  }
 
    "Set ResOtherZn:CSE_TerminalRef:tuVfMxC"     ResOtherZn:CSE_TerminalRef:tuVfMxC     =     ; was hirdwired to:  567.5  }
-      {  if (IfValidAnd( TrmlUnitRef:PriAirFlowMax > 0 ))
-         then  TrmlUnitRef:PriAirFlowMax  else  UNDEFINED  endif  }
+      {  if (IfValidAnd( TrmlUnitRef:PriAirFlowMaxSim > 0 ))
+         then  TrmlUnitRef:PriAirFlowMaxSim  else  UNDEFINED  endif  }
    "Set ResOtherZn:CSE_TerminalRef:tuVfMxH"     ResOtherZn:CSE_TerminalRef:tuVfMxH     =     ; was hirdwired to:  567.5  }
-      {  if (IfValidAnd( TrmlUnitRef:PriAirFlowMax > 0 ))
-         then  TrmlUnitRef:PriAirFlowMax  else  UNDEFINED  endif  }
+      {  if (IfValidAnd( TrmlUnitRef:PriAirFlowMaxSim > 0 ))
+         then  TrmlUnitRef:PriAirFlowMaxSim  else  UNDEFINED  endif  }
    "Set ResOtherZn:CSE_TerminalRef:tuVfMn"      ResOtherZn:CSE_TerminalRef:tuVfMn      =     ; omitted for cycling fan
       {  if (IfValidAnd( ActiveHVACSystem:FanCtrl = 1 ) .AND.   ; continuous
-             IfValidAnd( TrmlUnitRef:PriAirFlowMax > 0 ))
-         then  TrmlUnitRef:PriAirFlowMax
+             IfValidAnd( TrmlUnitRef:PriAirFlowMaxSim > 0 ))
+         then  TrmlUnitRef:PriAirFlowMaxSim
          else if (IfValidAnd( ActiveHVACSystem:FanCtrl != 1 ) .AND.   ; not continuous (?)
-                  IfValidAnd( TrmlUnitRef:PriAirFlowMin > 0 ))
-         then  TrmlUnitRef:PriAirFlowMin
+                  IfValidAnd( TrmlUnitRef:PriAirFlowMinSim > 0 ))
+         then  TrmlUnitRef:PriAirFlowMinSim
          else  UNDEFINED  endif endif  }
 END
 ;*************************************************************************
@@ -665,6 +709,7 @@ END
 ;*************************************************************************
 RULELIST "Create_ResOtherZn_AirSys" 1 0 1 0
 ;*************************************************************************
+;"dbg" ResOtherZn:Action = { PostMessageToLog( Format( "         calling 'Create_ResOtherZn_AirSys' rulelist on ResOtherZn '%s' (defaulting rnds %g)", Name, Proj:DefaultingRounds ) ) }
    "Set ResOtherZn:AirSys_NameRoot (if not already set)"    ResOtherZn:AirSys_NameRoot  =
       {  if (LocalStatus( AirSys_NameRoot ) < 1) then  substr( Name, 0, 16 )
          else  UNCHANGED  endif  }

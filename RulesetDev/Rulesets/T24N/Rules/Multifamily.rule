@@ -39,6 +39,48 @@
 //     Proj / Project
 //
 
+// -----------------------------------------------------------------------------
+//   misc properties needed for MFam rules/checks
+
+; added for MFam model surface checks - SAC 04/19/23 (tic #3497)
+RULE NEW Ceiling:SurfaceCount
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    1
+ENDRULE
+RULE NEW IntFlr:SurfaceCount
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    1
+ENDRULE
+RULE NEW IntWall:SurfaceCount
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    1
+ENDRULE
+
+; added to support MFam floor multipliers (via ResZnGrp), for now, only if mult > 1 specified - SAC 04/19/23 (tic #3392)
+RULE NEW Proj:SubMtrResZnGrps
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (MaxAll( ResZnGrp:Mult ) > 1) then  1
+    else  0  endif
+ENDRULE
+
+
+// -----------------------------------------------------------------------------
 
 RULE Proj:Action
   DEFAULT
@@ -49,20 +91,22 @@ ENDRULE
 
 
 // -----------------------------------------------------------------------------
-
+      // added new error code (4) # message to identify "old CUAC" projects - SAC 09/26/23
 RULE NEW ResProj:ErrorCode
   DATATYPE
     Integer
   INPUTCLASS
     NotInput
   DEFAULT
-         if (IfValidAnd( Proj:ResDwellUnits > 0 )==0) then  0   ; not an MFam model
+         if (ComponentCount( OldCUAC  ) > 0)          then  4   ; not an error, just an old CUAC project
+    else if (IfValidAnd( Proj:ResDwellUnits > 0 )==0) then  0   ; not an MFam model
     else if (ComponentCount( ResZnGrp ) < 1)          then  1   ; missing ResZnGrp(s)
-    else if (ComponentCount( ResZn    ) < 1)          then  2   ; missing ResZn(s)
-    else if (IfValidAnd( UnitTotCondFlrArea > 0 )==0) then  3   ; missing conditioned ResZn:FloorArea
     else  -1
-    endif endif endif endif
+    endif endif endif
 ENDRULE
+; removed errors for ResZn or DwellingUnit counts < 1 - SAC 10/08/24 (tic #3630)
+;    else if (ComponentCount( ResZn    ) < 1)          then  2   ; missing ResZn(s)
+;    else if (IfValidAnd( UnitTotCondFlrArea > 0 )==0) then  3   ; missing conditioned ResZn:FloorArea
 
 RULE NEW ResProj:ErrorMsg
   DATATYPE
@@ -72,11 +116,12 @@ RULE NEW ResProj:ErrorMsg
   DEFAULT
     switch (ErrorCode)
       case   1 : "Error: missing residential zone group(s) (ResZnGrp)"
-      case   2 : "Error: missing residential zone (s) (ResZn)"
-      case   3 : "Error: missing residential dwelling unit(s) (DwellUnit:CondFlrArea)"
+      case   4 : "old CUAC project"
       default  : UNDEFINED
     endswitch
 ENDRULE
+;      case   2 : "Error: missing residential zone (s) (ResZn)"
+;      case   3 : "Error: missing residential dwelling unit(s) (DwellUnit:CondFlrArea)"
 
 RULE NEW ResProj:TreeDescrip
   DATATYPE
@@ -87,8 +132,8 @@ RULE NEW ResProj:TreeDescrip
     if (ErrorCode > 0)
     then  ErrorMsg
     else if (IfValidAnd( UnitTotCondFlrArea != CondFloorArea ))
-    then  Format( "res only: %s cond ft2 / %s dwelling ft2 / %s dwelling units / %s bedrooms", FltToStr( CondFloorArea ), FltToStr( UnitTotCondFlrArea ), FltToStr( NumDwellingUnits ), FltToStr( NumBedrooms ) )
-    else  Format( "res only: %s cond ft2 / %s dwelling units / %s bedrooms", FltToStr( CondFloorArea ), FltToStr( NumDwellingUnits ), FltToStr( NumBedrooms ) )
+    then  Format( "res only: %s cond ft2 / %s dwelling ft2 / %s dwelling units / %s bedrooms", FltToStr( CondFloorAreaWithMult ), FltToStr( UnitTotCondFlrArea ), FltToStr( NumDwellingUnits ), FltToStr( NumBedrooms ) )
+    else  Format( "res only: %s cond ft2 / %s dwelling units / %s bedrooms", FltToStr( CondFloorAreaWithMult ), FltToStr( NumDwellingUnits ), FltToStr( NumBedrooms ) )
     endif endif
 ENDRULE
 
@@ -123,6 +168,7 @@ ENDRULE
 ;    then  PostError( "The Analysis Type (on Project / Analysis Options dialog) option must be set to 'Title24ProposedOnly' in order to simulation models with residential dwelling units using this version of CBECC." )
 
 
+; add logic to enable CSE runs w/out dwelling units (only ResOtherZns) - SAC 10/08/24 (tic #3630)
 RULE NEW Proj:SimMFamUnits
   DESCRIPTION
     "flag indicating MFam dwelling units are present and to be simulated"
@@ -131,9 +177,10 @@ RULE NEW Proj:SimMFamUnits
   INPUTCLASS
     NotInput
   DEFAULT
-    if (IfValidAnd( Proj:ResDwellUnits > 0 ) .AND.
-        IfValidAnd( ResProj:ErrorCode = -1 ))
-    then  ResProj:NumDwellingUnits  else  0  endif
+    if (IfValidAnd( ResProj:ErrorCode = -1 ) .AND.
+        IfValidAnd( Proj:ResDwellUnits > 0 ))
+    then  ValidOr( ResProj:NumDwellingUnits, 0 ) + ComponentCount( ResOtherZn )
+    else  0  endif
 ENDRULE
 
 
@@ -150,6 +197,7 @@ ENDRULE
 
 
 // ----------------------------------------------------------------------------- SAC 02/28/22
+// updated logic to include references to ResZn & ResOtherZn Top_HasDHW & Bottom_HasDHW to properly take floor multipliers into account - SAC 09/16/24 (gh Tic #30)
 RULE NEW Proj:AvgFlrHgt
   LONGFORM
     AverageFloorHeight
@@ -162,28 +210,107 @@ RULE NEW Proj:AvgFlrHgt
   DEFAULT
     if (IfValidAnd( Bldg:TotStoryCnt > 0 )==0) then  9
     else  if (ComponentCount( Spc ) > 0 .AND. ComponentCount( ResZn ) > 0 .AND. ComponentCount( ResOtherZn ) > 0)
-          then  ( max(  max(  MaxAll( Spc:MaxZ ),  MaxAll( ResZn:Top    )  ),  MaxAll( ResOtherZn:Top    )  ) -
-                  min(  min(  MinAll( Spc:FlrZ ),  MinAll( ResZn:Bottom )  ),  MinAll( ResOtherZn:Bottom )  ) ) / Bldg:TotStoryCnt
+          then  ( max(  max(  max(  max(  MaxAll( Spc:MaxZ ),  MaxAll( ResZn:Top    )  ),  MaxAll( ResOtherZn:Top    )  ),
+                                          MaxAll( ResZn:Top_HasDHW    )  ),  MaxAll( ResOtherZn:Top_HasDHW    )  ) -
+                  min(  min(  min(  min(  MinAll( Spc:FlrZ ),  MinAll( ResZn:Bottom )  ),  MinAll( ResOtherZn:Bottom )  ),
+                                          MinAll( ResZn:Bottom_HasDHW )  ),  MinAll( ResOtherZn:Bottom_HasDHW )  ) ) / Bldg:TotStoryCnt
           else if (ComponentCount( Spc ) > 0 .AND. ComponentCount( ResZn ) > 0 )
-          then  ( max(  MaxAll( Spc:MaxZ ),  MaxAll( ResZn:Top    )  ) -
-                  min(  MinAll( Spc:FlrZ ),  MinAll( ResZn:Bottom )  ) ) / Bldg:TotStoryCnt
+          then  ( max(  max(  MaxAll( Spc:MaxZ ),  MaxAll( ResZn:Top    )  ),  MaxAll( ResZn:Top_HasDHW    )  ) -
+                  min(  min(  MinAll( Spc:FlrZ ),  MinAll( ResZn:Bottom )  ),  MinAll( ResZn:Bottom_HasDHW )  ) ) / Bldg:TotStoryCnt
           else if (ComponentCount( Spc ) > 0 .AND. ComponentCount( ResOtherZn ) > 0)
-          then  ( max(  MaxAll( Spc:MaxZ ),  MaxAll( ResOtherZn:Top    )  ) -
-                  min(  MinAll( Spc:FlrZ ),  MinAll( ResOtherZn:Bottom )  ) ) / Bldg:TotStoryCnt
+          then  ( max(  max(  MaxAll( Spc:MaxZ ),  MaxAll( ResOtherZn:Top    )  ),  MaxAll( ResOtherZn:Top_HasDHW    )  ) -
+                  min(  min(  MinAll( Spc:FlrZ ),  MinAll( ResOtherZn:Bottom )  ),  MinAll( ResOtherZn:Bottom_HasDHW )  ) ) / Bldg:TotStoryCnt
           else if (ComponentCount( ResZn ) > 0 .AND. ComponentCount( ResOtherZn ) > 0)
-          then  ( max(  MaxAll( ResZn:Top    ),  MaxAll( ResOtherZn:Top    )  ) -
-                  min(  MinAll( ResZn:Bottom ),  MinAll( ResOtherZn:Bottom )  ) ) / Bldg:TotStoryCnt
+          then  ( max(  max(  max(  MaxAll( ResZn:Top    ),  MaxAll( ResOtherZn:Top    )  ),  MaxAll( ResZn:Top_HasDHW    )  ),  MaxAll( ResOtherZn:Top_HasDHW    )  ) -
+                  min(  min(  min(  MinAll( ResZn:Bottom ),  MinAll( ResOtherZn:Bottom )  ),  MinAll( ResZn:Bottom_HasDHW )  ),  MinAll( ResOtherZn:Bottom_HasDHW )  ) ) / Bldg:TotStoryCnt
           else if (ComponentCount( Spc ) > 0)
           then        ( MaxAll( Spc:MaxZ ) - MinAll( Spc:FlrZ ) ) / Bldg:TotStoryCnt
           else if (ComponentCount( ResZn ) > 0)
-          then        ( MaxAll( ResZn:Top ) - MinAll( ResZn:Bottom ) ) / Bldg:TotStoryCnt
+          then        ( max(  MaxAll( ResZn:Top    ),  MaxAll( ResZn:Top_HasDHW    )  ) -
+                        min(  MinAll( ResZn:Bottom ),  MinAll( ResZn:Bottom_HasDHW )  ) ) / Bldg:TotStoryCnt
           else if (ComponentCount( ResOtherZn ) > 0)
-          then        ( MaxAll( ResOtherZn:Top ) - MinAll( ResOtherZn:Bottom ) ) / Bldg:TotStoryCnt
+          then        ( max(  MaxAll( ResOtherZn:Top    ),  MaxAll( ResOtherZn:Top_HasDHW    )  ) -
+                        min(  MinAll( ResOtherZn:Bottom ),  MinAll( ResOtherZn:Bottom_HasDHW )  ) ) / Bldg:TotStoryCnt
           else  9
           endif endif endif endif endif endif endif
     endif
 ENDRULE
 
+// ----------------------------------------------------------------------------- JP 3/1/23
+RULE NEW Proj:ExhVentMultLimMFCom
+  DATATYPE
+    Float
+  LONGFORM
+    ExhaustVentilationMultiplierLimitMultifamilyCommon
+  DESCRIPTION
+    "The limit on the multiplier used to increase the baseline ventilation air
+     flow rate when the proposed design includes additional ventilation air to 
+     make-up for exhaust air flow. Applies to multifamily common spaces only."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    1.2
+ENDRULE
+
+RULE NEW Proj:VentTolMaxLimMFCom
+  DATATYPE
+    Float
+  LONGFORM
+    VentilationToleranceMaximumLimitMultifamilyCommon
+  DESCRIPTION
+    "The upper tolerance limit for how close the proposed design ventilation 
+     air flow must be with respect to the code minimum. 
+     Applies to multifamily common spaces only."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    0.10    
+ENDRULE
+
+RULE NEW Proj:VentTolMinLimMFCom
+  DATATYPE
+    Float
+  LONGFORM
+    VentilationToleranceMinimumLimitMultifamilyCommon
+  DESCRIPTION
+    "The lower tolerance limit for how close the proposed design ventilation 
+     air flow must be with respect to the code minimum. 
+     Applies to multifamily common spaces only."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    0.05    
+ENDRULE
+
+RULE NEW Proj:ExhTolMaxLimMFCom
+  DATATYPE
+    Float
+  LONGFORM
+    ExhaustToleranceMaximumLimitMultifamilyCommon
+  DESCRIPTION
+    "The upper tolerance limit for how close the proposed design exhaust 
+     air flow must be with respect to the code minimum.
+     Applies to multifamily common spaces only."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    0.10 
+ENDRULE
+
+RULE NEW Proj:ExhTolMinLimMFCom
+  DATATYPE
+    Float
+  LONGFORM
+    ExhaustToleranceMinimumLimitMultifamilyCommon
+  DESCRIPTION
+    "The lower tolerance limit for how close the proposed design exhaust 
+     air flow must be with respect to the code minimum.
+     Applies to multifamily common spaces only."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    0.05
+ENDRULE
 
 // ----------------------------------------------------------------------------- SAC 03-01-22
 RULE NEW cseDHWSYS:SourceSpc
@@ -236,6 +363,55 @@ RULE NEW ResMat:MatchingMatRef
     "Mat that matches the characteristics of this ResMat"
   INPUTCLASS
     NotInput
+ENDRULE
+
+
+// ----------------------------------------------------------------------------- SAC 05/01/23 (tic #3489)
+RULE DHWSolSys:ErrID
+  CHECKCODE
+    if (IfValidAnd( DHWSysAssigned < 1 ) .OR. IfValidAnd( Proj:EnableResearchMode > 0 ) .OR.
+        IfValidAnd( ErrID > 0 )==0) then  UNCHANGED
+    else  PostError( "DHW solar system '%s' error: %s.", Name, ErrMsg )  endif
+ENDRULE
+
+
+RULE NEW Spc:NoCompDHWArea
+  LONGFORM
+    NoComplianceDHWArea
+  DATATYPE
+    Float
+  HELP
+    "Spc area served by ResDHWSys that is to be excluded from compliance analysis"
+  DEFAULT
+    if (IfValidAnd( Proj:CompOptDHW = 0 ) .AND.
+        IfValidAnd( HotelMotelGuestRmCntWithMult > 0 ) .AND.
+        LocalCompAssigned( ResDHWSysRef ) > 0)
+    then  DwellingUnitSpcTotAreaWithMult
+    else  0  endif
+ENDRULE
+
+RULE NEW ResDHWSys:NoCompDHWAreaServed
+  LONGFORM
+    NoComplianceDHWAreaServed
+  DATATYPE
+    Float
+  HELP
+    "area this system serves that is to be excluded from compliance analysis"
+  CHECKCODE
+    if (IfValidAnd( NoCompDHWAreaServed > 0 ) .AND.
+        IfValidAnd( NoCompDHWAreaServed < FloorAreaServed[1] ))
+    then  PostError( "ResDHWSys '%s' is assigned to both Hotel/Motel guestrooms (w/ DHW exlcuded from compliance analysis) and residential dwellings that do include DHW compliance, but it can serve only one of these area types.", Name )
+    else  UNCHANGED  endif
+  DEFAULT
+    SumRevRef( Spc:ResDHWSysRef, Spc:NoCompDHWArea )
+ENDRULE
+
+RULE ResDHWSys:StdEqProp[1]
+  HELP
+    "flag indicating Proposed DHW should be left in place for Standard design"
+  DEFAULT
+    if (IfValidAnd( NoCompDHWAreaServed > 0))
+    then  1  else  0  endif
 ENDRULE
 
 

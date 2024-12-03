@@ -3,7 +3,7 @@
 // -------------------------------------------------------------------------
 //  Copyright (c) 2012-2021, California Energy Commission
 //  All rights reserved.
-//  Redistribution and Water03_TankCategoryuse in source and binary forms, with or without
+//  Redistribution and use in source and binary forms, with or without
 //  modification, are permitted provided that the following conditions are
 //  met:
 // 
@@ -104,7 +104,10 @@ RULE nrcctblRowWater:Water02_WaterHeaterFuelSource
     then
         switch (noXMLoutput_ResWtrHtrRef:HeaterElementType)
             case "Electric Resistance" : "Electricity"
-            case "Gas"                 : "GasWaterHeater"
+            case "Gas"                 : if (IfValidAnd(Proj:GasType == "NaturalGas"))
+                                         then "NaturalGas"
+                                         else "PropaneGas"
+                                         endif
             case "Heat Pump"           : "WaterHeatingHP"
             default :  UNDEFINED
         endswitch
@@ -113,26 +116,40 @@ RULE nrcctblRowWater:Water02_WaterHeaterFuelSource
         switch (noXMLoutput_WtrHtrRef:FuelSrc)
             case "Electricity" : "Electricity"
             case "FuelOil#1"   : "Oil"
-            case "Gas"         : "NaturalGas"
+            case "Gas"         : if (IfValidAnd(Proj:GasType == "NaturalGas"))
+                                 then "NaturalGas"
+                                 else "PropaneGas"
+                                 endif
             case "PropaneGas"  : "PropaneGas"
             default :  UNDEFINED
         endswitch
     else UNDEFINED
     endif endif
 ENDRULE
+
+; RJH 12/19/2023 Per 2022-CBECC-Com-Schema Issue #114, update ResWtrHtr:TankType enum mappings to include (existing only) CBECC enums
 RULE nrcctblRowWater:Water03_TankCategory
   ANNUAL_PROPOSED
     if (LocalCompAssigned(noXMLoutput_ResWtrHtrRef)) 
     then
         switch (noXMLoutput_ResWtrHtrRef:TankType)
-            case "Boiler"                     : "Boiler"
-            case "Commercial Packaged Boiler" : "BoilerCommercial"
-            case "Indirect"                   : "Indirect"
-            case "Instantaneous"              : "Instantaneous"
-            case "Storage"                    : "Storage"
-            case "Commercial Instantaneous (TE)" : "InstantaneousCommercial"
-            case "Commercial Storage (TE & SBL)" : "StorageCommercial"
-            default :  UNDEFINED
+            case "Boiler"                                    :  "Boiler"
+            case "Indirect"                                  :  "Indirect"
+            case "Large Instantaneous (existing only)"       :  "Instantaneous"
+            case "Large Storage (existing only)"             :  "Storage"
+            case "Small Instantaneous (existing only)"       :  "Instantaneous"
+            case "Small Storage (existing only)"             :  "Storage"
+            case "Large Instantaneous"                       :  "Instantaneous"
+            case "Large Storage"                             :  "Storage"
+            case "Small Instantaneous"                       :  "Instantaneous"
+            case "Small Storage"                             :  "Storage"
+            case "Storage"                                   :  "Storage"
+            case "Commercial Instantaneous (TE)"             :  "InstantaneousCommercial"
+            case "Consumer Instantaneous (UEF)"              :  "Instantaneous"
+            case "Residential-Duty Commercial Storage (UEF)" :  "Storage"
+            case "Commercial Storage (TE & SBL)"             :  "StorageCommercial"
+            case "Consumer Storage (UEF)"                    :  "Storage"
+            default  :  UNDEFINED
         endswitch
     else if (LocalCompAssigned(noXMLoutput_WtrHtrRef)) 
     then noXMLoutput_WtrHtrRef:SubType
@@ -145,10 +162,11 @@ RULE nrcctblRowWater:Water03_NotApplicableMessage
     then  UNDEFINED  else  "NotApplicable"  endif
 ENDRULE
 ; NRCC Res DHW
+; RJH 8/30/2023 GitHub Issue #101 - Account for number of Dwelling Units served by individual water heater
 RULE nrcctblRowWater:Water04_WaterHeaterCount
   ANNUAL_PROPOSED
-    if (LocalCompAssigned(noXMLoutput_ResWtrHtrRef)) then 1
-    else if (LocalCompAssigned(noXMLoutput_WtrHtrRef)) then noXMLoutput_WtrHtrRef:Cnt
+    if (LocalCompAssigned(noXMLoutput_ResWtrHtrRef)) then if (IfValidAnd(noXMLoutput_ResWtrHtrRef:NumIndivAssignedDUFracs > 0 )) then noXMLoutput_ResWtrHtrRef:NumIndivAssignedDUFracs else 1 endif
+    else if (LocalCompAssigned(noXMLoutput_WtrHtrRef)) then if (IfValidAnd(noXMLoutput_WtrHtrRef:CmbdMult > 0 )) then noXMLoutput_WtrHtrRef:CmbdMult else 1 endif
     else UNDEFINED
     endif endif
 ENDRULE
@@ -165,20 +183,29 @@ RULE nrcctblRowWater:Water05_NotApplicableMessage
     then  UNDEFINED  else  "NotApplicable"  endif
 ENDRULE
 ; NRCC Res DHW
+; RJH 4/10/23 do not report ResWtrHtr "Residential (NEEA rated) Product" values
+; RJH 5/03/23 Issue #47 add HeaterElementType == "Heat Pump" condition
 RULE nrcctblRowWater:Water06_WaterHeaterElectricFiredRatedInput
   ANNUAL_PROPOSED
-    if (LocalCompAssigned(noXMLoutput_ResWtrHtrRef)) then if (noXMLoutput_ResWtrHtrRef:HeaterElementType == "Gas") then UNDEFINED else atof( Format( "%.2f", noXMLoutput_ResWtrHtrRef:InputRating / 1000 ) ) endif
+    if (LocalCompAssigned(noXMLoutput_ResWtrHtrRef)) then if (noXMLoutput_ResWtrHtrRef:HPWHCategory == "Residential (NEEA rated) Product" .AND. noXMLoutput_ResWtrHtrRef:HeaterElementType == "Heat Pump")
+                                                          then UNDEFINED
+                                                          else if (noXMLoutput_ResWtrHtrRef:HeaterElementType == "Gas") then UNDEFINED else atof( Format( "%.2f", noXMLoutput_ResWtrHtrRef:InputRating / 1000 ) ) endif
+                                                          endif
     else if (LocalCompAssigned(noXMLoutput_WtrHtrRef)) then if (noXMLoutput_WtrHtrRef:FuelSrc == "Gas") then UNDEFINED else atof( Format( "%.2f", noXMLoutput_WtrHtrRef:InputPower ) ) endif
     else UNDEFINED
     endif endif
 ENDRULE
-; fixed undefined numerator bug in following rule - SAC 10/11/22
+; fixed undefined numerator bug in following rule - SAC 10/11/22   ; revised to leave undefined if InputRating hidden in UI - SAC 03/21/23
 RULE nrcctblRowWater:Water06_WaterHeaterGasRatedInput
   ANNUAL_PROPOSED
     if (LocalCompAssigned(noXMLoutput_ResWtrHtrRef))
-    then   if (noXMLoutput_ResWtrHtrRef:HeaterElementType == "Gas" .AND. LocalStatus( noXMLoutput_ResWtrHtrRef:InputRating ) > 0)
-           then atof( Format( "%.2f", noXMLoutput_ResWtrHtrRef:InputRating / 1000 ) )
-           else UNDEFINED endif
+    then if (noXMLoutput_ResWtrHtrRef:HPWHCategory == "Residential (NEEA rated) Product" .AND. noXMLoutput_ResWtrHtrRef:HeaterElementType == "Heat Pump")
+         then UNDEFINED
+         else if (noXMLoutput_ResWtrHtrRef:HeaterElementType == "Gas" .AND. LocalStatus( noXMLoutput_ResWtrHtrRef:InputRating ) > 0 .AND.
+                  IfValidAnd( noXMLoutput_ResWtrHtrRef:ShowInputRating > 0 ))
+              then atof( Format( "%.2f", noXMLoutput_ResWtrHtrRef:InputRating / 1000 ) )
+              else UNDEFINED endif
+         endif
     else if (LocalCompAssigned(noXMLoutput_WtrHtrRef)) 
     then   if (noXMLoutput_WtrHtrRef:FuelSrc == "Gas" .AND. LocalStatus( noXMLoutput_WtrHtrRef:CapRtd ) > 0)
            then atof( Format( "%.2f", noXMLoutput_WtrHtrRef:CapRtd / 1000 ) )
@@ -191,18 +218,40 @@ RULE nrcctblRowWater:Water06_NotApplicableMessage
     if (LocalStatus( Water06_WaterHeaterElectricFiredRatedInput ) > 0 .OR. LocalStatus( Water06_WaterHeaterGasRatedInput ) > 0)
     then  UNDEFINED  else  "NotApplicable"  endif
 ENDRULE
+; RJH 4/10/23 do not report ResWtrHtr "Heat Pump" "Residential (NEEA rated) Product" values
+; RJH 5/03/23 Issue #47 add HeaterElementType == "Heat Pump" condition
 RULE nrcctblRowWater:Water07_WaterHeaterRatedInputUnits
   ANNUAL_PROPOSED
-    if (LocalStatus( Water06_WaterHeaterElectricFiredRatedInput ) > 0) then "kW"
-    else if (LocalStatus( Water06_WaterHeaterGasRatedInput ) > 0) then "kBtuHr" 
-    else UNDEFINED
-    endif endif
+    if (LocalCompAssigned(noXMLoutput_ResWtrHtrRef))
+    then if (noXMLoutput_ResWtrHtrRef:HPWHCategory == "Residential (NEEA rated) Product" .AND. noXMLoutput_ResWtrHtrRef:HeaterElementType == "Heat Pump")
+         then UNDEFINED
+         else if (LocalStatus( Water06_WaterHeaterElectricFiredRatedInput ) > 0) 
+              then "kW"
+              else if (LocalStatus( Water06_WaterHeaterGasRatedInput ) > 0) 
+                   then "kBtuHr" 
+                   else UNDEFINED
+                   endif 
+              endif
+         endif
+    else if (LocalCompAssigned(noXMLoutput_WtrHtrRef))
+         then if (LocalStatus( Water06_WaterHeaterElectricFiredRatedInput ) > 0) 
+              then "kW"
+              else if (LocalStatus( Water06_WaterHeaterGasRatedInput ) > 0) 
+                   then "kBtuHr" 
+                   else UNDEFINED
+                   endif 
+              endif
+         else UNDEFINED
+         endif
+    endif
 ENDRULE
 RULE nrcctblRowWater:Water07_NotApplicableMessage
   ANNUAL_PROPOSED
     if (LocalStatus( Water07_WaterHeaterRatedInputUnits ) > 0)
     then  UNDEFINED  else  "NotApplicable"  endif
 ENDRULE
+; RJH 4/10/23 do not report ResWtrHtr "Heat Pump" "Residential (NEEA rated) Product" values
+; RJH 5/03/23 Issue #47 add HeaterElementType == "Heat Pump" condition
 RULE nrcctblRowWater:Water08_EfficiencyCOP
   ANNUAL_PROPOSED
     if (LocalCompAssigned(noXMLoutput_ResWtrHtrRef)) then UNDEFINED
@@ -213,16 +262,36 @@ ENDRULE
 ; NRCC Res DHW
 RULE nrcctblRowWater:Water08_ThermalEfficiency
   ANNUAL_PROPOSED
-    if (LocalCompAssigned(noXMLoutput_ResWtrHtrRef) .AND. LocalStatus( noXMLoutput_ResWtrHtrRef:EfficiencyUnits ) > 0) 
-         then if (noXMLoutput_ResWtrHtrRef:EfficiencyUnits == "TE") then atof( Format( "%.2f", noXMLoutput_ResWtrHtrRef:EnergyFactor ) ) else UNDEFINED endif
+    if (LocalCompAssigned(noXMLoutput_ResWtrHtrRef)) 
+    then if (noXMLoutput_ResWtrHtrRef:HPWHCategory == "Residential (NEEA rated) Product" .AND. noXMLoutput_ResWtrHtrRef:HeaterElementType == "Heat Pump")
+         then UNDEFINED
+         else if (LocalStatus( noXMLoutput_ResWtrHtrRef:EfficiencyUnits ) > 0)
+              then if (noXMLoutput_ResWtrHtrRef:EfficiencyUnits == "TE") 
+                   then atof( Format( "%.2f", noXMLoutput_ResWtrHtrRef:EnergyFactor ) ) 
+                   else UNDEFINED 
+                   endif
+              else UNDEFINED
+              endif
+         endif
     else if (LocalCompAssigned(noXMLoutput_WtrHtrRef) .AND. LocalStatus( noXMLoutput_WtrHtrRef:EffRpt ) > 0) 
-         then if (substr( noXMLoutput_WtrHtrRef:EffRpt, 0, 5 ) == "Thrml") then atof( Format( "%.2f", noXMLoutput_WtrHtrRef:ThrmlEff ) ) else UNDEFINED endif
-    else UNDEFINED endif endif
+         then if (substr( noXMLoutput_WtrHtrRef:EffRpt, 0, 5 ) == "Thrml") 
+              then atof( Format( "%.2f", noXMLoutput_WtrHtrRef:ThrmlEff ) ) 
+              else UNDEFINED 
+              endif
+         else UNDEFINED 
+         endif 
+    endif
 ENDRULE
 RULE nrcctblRowWater:Water08_EnergyFactor
   ANNUAL_PROPOSED
-    if (LocalCompAssigned(noXMLoutput_ResWtrHtrRef) .AND. LocalStatus( noXMLoutput_ResWtrHtrRef:EfficiencyUnits ) > 0) 
-         then if (noXMLoutput_ResWtrHtrRef:EfficiencyUnits == "EF") then atof( Format( "%.2f", noXMLoutput_ResWtrHtrRef:EnergyFactor ) ) else UNDEFINED endif
+    if (LocalCompAssigned(noXMLoutput_ResWtrHtrRef) .AND. LocalStatus( noXMLoutput_ResWtrHtrRef:EfficiencyUnits ) > 0)
+    then if (noXMLoutput_ResWtrHtrRef:HPWHCategory == "Residential (NEEA rated) Product" .AND. noXMLoutput_ResWtrHtrRef:HeaterElementType == "Heat Pump") 
+         then UNDEFINED
+         else if (noXMLoutput_ResWtrHtrRef:EfficiencyUnits == "EF") 
+              then atof( Format( "%.2f", noXMLoutput_ResWtrHtrRef:EnergyFactor ) ) 
+              else UNDEFINED 
+              endif
+         endif
     else if (LocalCompAssigned(noXMLoutput_WtrHtrRef) .AND. LocalStatus( noXMLoutput_WtrHtrRef:EffRpt ) > 0) 
          then if (substr( noXMLoutput_WtrHtrRef:EffRpt, 0, 2 ) == "EF") then atof( Format( "%.2f", noXMLoutput_WtrHtrRef:EF ) ) else UNDEFINED endif
     else UNDEFINED endif endif
@@ -230,7 +299,13 @@ ENDRULE
 RULE nrcctblRowWater:Water08_UniformEnergyFactor
   ANNUAL_PROPOSED
     if (LocalCompAssigned(noXMLoutput_ResWtrHtrRef) .AND. LocalStatus( noXMLoutput_ResWtrHtrRef:EfficiencyUnits ) > 0) 
-         then if (noXMLoutput_ResWtrHtrRef:EfficiencyUnits == "UEF") then atof( Format( "%.2f", noXMLoutput_ResWtrHtrRef:EnergyFactor ) ) else UNDEFINED endif
+    then if (noXMLoutput_ResWtrHtrRef:HPWHCategory == "Residential (NEEA rated) Product" .AND. noXMLoutput_ResWtrHtrRef:HeaterElementType == "Heat Pump") 
+         then UNDEFINED
+         else if (noXMLoutput_ResWtrHtrRef:EfficiencyUnits == "UEF") 
+              then atof( Format( "%.2f", noXMLoutput_ResWtrHtrRef:EnergyFactor ) ) 
+              else UNDEFINED 
+              endif
+         endif
     else if (LocalCompAssigned(noXMLoutput_WtrHtrRef) .AND. LocalStatus( noXMLoutput_WtrHtrRef:EffRpt ) > 0) 
          then if (substr( noXMLoutput_WtrHtrRef:EffRpt, 0, 3 ) == "UEF") then atof( Format( "%.2f", noXMLoutput_WtrHtrRef:UEF ) ) else UNDEFINED endif
     else UNDEFINED endif endif
@@ -242,34 +317,72 @@ RULE nrcctblRowWater:Water08_NotApplicableMessage
     else "NotApplicable"
     endif
 ENDRULE
+; RJH 4/10/23 do not report ResWtrHtr "Residential (NEEA rated) Product" values
+; RJH 5/03/23 Issue #47 add HeaterElementType == "Heat Pump" condition
 RULE nrcctblRowWater:Water09_EfficiencyType
   ANNUAL_PROPOSED
-    if (LocalStatus( Water08_EfficiencyCOP ) > 0) then "COP"
-    else if (LocalStatus( Water08_ThermalEfficiency ) > 0) then "ThermalEfficiency"
-    else if (LocalStatus( Water08_EnergyFactor ) > 0) then "EnergyFactor"
-    else if (LocalStatus( Water08_UniformEnergyFactor ) > 0) then "UniformEnergyFactor"
-    else  UNDEFINED  
-    endif endif endif endif
+    if (LocalCompAssigned(noXMLoutput_ResWtrHtrRef))
+    then if (noXMLoutput_ResWtrHtrRef:HPWHCategory == "Residential (NEEA rated) Product" .AND. noXMLoutput_ResWtrHtrRef:HeaterElementType == "Heat Pump")
+         then UNDEFINED
+         else if (LocalStatus( Water08_EfficiencyCOP ) > 0) 
+              then "COP"
+              else if (LocalStatus( Water08_ThermalEfficiency ) > 0) 
+                   then "ThermalEfficiency"
+                   else if (LocalStatus( Water08_EnergyFactor ) > 0) 
+                        then "EnergyFactor"
+                        else if (LocalStatus( Water08_UniformEnergyFactor ) > 0) 
+                             then "UniformEnergyFactor"
+                             else  UNDEFINED  
+                             endif 
+                        endif 
+                   endif 
+              endif
+         endif
+    else if (LocalCompAssigned(noXMLoutput_WtrHtrRef))
+         then if (LocalStatus( Water08_EfficiencyCOP ) > 0) 
+              then "COP"
+              else if (LocalStatus( Water08_ThermalEfficiency ) > 0) 
+                   then "ThermalEfficiency"
+                   else if (LocalStatus( Water08_EnergyFactor ) > 0) 
+                        then "EnergyFactor"
+                        else if (LocalStatus( Water08_UniformEnergyFactor ) > 0) 
+                             then "UniformEnergyFactor"
+                             else  UNDEFINED  
+                             endif 
+                        endif 
+                   endif 
+              endif
+         else UNDEFINED
+         endif
+    endif
 ENDRULE
 RULE nrcctblRowWater:Water09_NotApplicableMessage
   ANNUAL_PROPOSED
     if (LocalStatus( Water09_EfficiencyType ) > 0)
     then  UNDEFINED  else  "NotApplicable"  endif
 ENDRULE
-; NRCC Res DHW
+; NRCC Res DHW          ; added logic to set int/ext insulation only when displayed in UI - SAC 03/21/23
 RULE nrcctblRowWater:Water10_TankInteriorInsulationRValue
   ANNUAL_PROPOSED
-    if (LocalCompAssigned(noXMLoutput_ResWtrHtrRef)) then if (LocalStatus( noXMLoutput_ResWtrHtrRef:IntInsulRVal ) > 0) then atof( Format( "%.2f", noXMLoutput_ResWtrHtrRef:IntInsulRVal ) ) else UNDEFINED endif
-    else if (LocalCompAssigned(noXMLoutput_WtrHtrRef)) then UNDEFINED
-    else UNDEFINED
-    endif endif
+    if (LocalCompAssigned(noXMLoutput_ResWtrHtrRef))
+    then  if (LocalStatus( noXMLoutput_ResWtrHtrRef:IntInsulRVal ) > 0 .AND.
+              (IfValidAnd( noXMLoutput_ResWtrHtrRef:HeaterType = 7 ) .OR. IfValidAnd( noXMLoutput_ResWtrHtrRef:HeaterType = 1  ) .OR.
+               IfValidAnd( noXMLoutput_ResWtrHtrRef:HeaterType = 0 ) .OR. IfValidAnd( noXMLoutput_ResWtrHtrRef:HeaterType = 16 )))
+          then atof( Format( "%.2f", noXMLoutput_ResWtrHtrRef:IntInsulRVal ) ) else UNDEFINED endif
+          else if (LocalCompAssigned(noXMLoutput_WtrHtrRef)) then UNDEFINED
+          else UNDEFINED
+          endif endif
 ENDRULE
 RULE nrcctblRowWater:Water10_TankExteriorInsulationRValue
   ANNUAL_PROPOSED
-    if (LocalCompAssigned(noXMLoutput_ResWtrHtrRef)) then if (LocalStatus( noXMLoutput_ResWtrHtrRef:ExtInsulRVal ) > 0) then atof( Format( "%.2f", noXMLoutput_ResWtrHtrRef:ExtInsulRVal ) ) else UNDEFINED endif
-    else if (LocalCompAssigned(noXMLoutput_WtrHtrRef)) then UNDEFINED
-    else UNDEFINED
-    endif endif
+    if (LocalCompAssigned(noXMLoutput_ResWtrHtrRef))
+    then  if (LocalStatus( noXMLoutput_ResWtrHtrRef:ExtInsulRVal ) > 0 .AND.
+              (IfValidAnd( noXMLoutput_ResWtrHtrRef:HeaterType = 7 ) .OR. IfValidAnd( noXMLoutput_ResWtrHtrRef:HeaterType = 1  ) .OR.
+               IfValidAnd( noXMLoutput_ResWtrHtrRef:HeaterType = 0 ) .OR. IfValidAnd( noXMLoutput_ResWtrHtrRef:HeaterType = 16 )))
+          then atof( Format( "%.2f", noXMLoutput_ResWtrHtrRef:ExtInsulRVal ) ) else UNDEFINED endif
+          else if (LocalCompAssigned(noXMLoutput_WtrHtrRef)) then UNDEFINED
+          else UNDEFINED
+          endif endif
 ENDRULE
 RULE nrcctblRowWater:Water10_NotApplicableMessage
   ANNUAL_PROPOSED
@@ -279,9 +392,14 @@ RULE nrcctblRowWater:Water10_NotApplicableMessage
     endif
 ENDRULE
 ; NRCC Res DHW
+   ; added logic to apply same Display logic from ResScreens determining when to provide access to StandbyLossFrac before reporting it - SAC 05/11/23 (gh LMCC issue #11)
 RULE nrcctblRowWater:Water11_WaterHeaterStandbyLossFraction
   ANNUAL_PROPOSED
-    if (LocalCompAssigned(noXMLoutput_ResWtrHtrRef)) then if (LocalStatus( noXMLoutput_ResWtrHtrRef:StandbyLossFrac ) > 0) then atof( Format( "%.2f", noXMLoutput_ResWtrHtrRef:StandbyLossFrac ) ) else UNDEFINED endif
+    if (LocalCompAssigned(noXMLoutput_ResWtrHtrRef))
+    then  if ( ( IfValidAnd( noXMLoutput_ResWtrHtrRef:HeaterType =  3 ) .OR.
+                 IfValidAnd( noXMLoutput_ResWtrHtrRef:HeaterType = 13 ) ) .AND.
+                LocalStatus( noXMLoutput_ResWtrHtrRef:StandbyLossFrac ) > 0 )
+          then atof( Format( "%.2f", noXMLoutput_ResWtrHtrRef:StandbyLossFrac ) ) else UNDEFINED endif
     else if (LocalCompAssigned(noXMLoutput_WtrHtrRef)) then if (LocalStatus( noXMLoutput_WtrHtrRef:StdbyLossFrac ) > 0) then atof( Format( "%.2f", noXMLoutput_WtrHtrRef:StdbyLossFrac ) ) else UNDEFINED endif
     else UNDEFINED
     endif endif
@@ -292,17 +410,18 @@ RULE nrcctblRowWater:Water11_NotApplicableMessage
     then  UNDEFINED  else  "NotApplicable"  endif
 ENDRULE
 ; NRCC Res DHW
+; RJH 05/11/23 (2022-CBECC-NonRes-PRF-Schema Issue #66) - Modified conditions for output of Water12_* elements for both ResWtrHtr and WtrHtr   ; added IfValidAnd() for when UEFRtdVal invalid - SAC 05/12/23
 RULE nrcctblRowWater:Water12_WaterHeaterFirstHourRating
   ANNUAL_PROPOSED
-    if (LocalCompAssigned(noXMLoutput_ResWtrHtrRef)) then if (LocalStatus( noXMLoutput_ResWtrHtrRef:FirstHourRating ) > 0 .AND. noXMLoutput_ResWtrHtrRef:IsUEF = 1 .AND. noXMLoutput_ResWtrHtrRef:TankType = "Storage") then atof( Format( "%.2f", noXMLoutput_ResWtrHtrRef:FirstHourRating ) ) else UNDEFINED endif
-    else if (LocalCompAssigned(noXMLoutput_WtrHtrRef)) then if (LocalStatus( noXMLoutput_WtrHtrRef:FirstHrRating ) > 0 .AND. noXMLoutput_WtrHtrRef:IsUEFRtd = 1 .AND. noXMLoutput_WtrHtrRef:SubType = "Storage") then atof( Format( "%.2f", noXMLoutput_WtrHtrRef:FirstHrRating ) ) else UNDEFINED endif
+    if (LocalCompAssigned(noXMLoutput_ResWtrHtrRef)) then if (LocalStatus( noXMLoutput_ResWtrHtrRef:FirstHourRating ) > 0 .AND. noXMLoutput_ResWtrHtrRef:IsUEF = 1 .AND. (noXMLoutput_ResWtrHtrRef:TankType = "Consumer Storage (UEF)" .OR. noXMLoutput_ResWtrHtrRef:TankType = "Residential-Duty Commercial Storage (UEF)")) then atof( Format( "%.2f", noXMLoutput_ResWtrHtrRef:FirstHourRating ) ) else UNDEFINED endif
+    else if (LocalCompAssigned(noXMLoutput_WtrHtrRef)) then if (LocalStatus( noXMLoutput_WtrHtrRef:FirstHrRating ) > 0 .AND. IfValidAnd( noXMLoutput_WtrHtrRef:UEFRtdVal >= 10 ) .AND. noXMLoutput_WtrHtrRef:SubType = "Storage") then atof( Format( "%.2f", noXMLoutput_WtrHtrRef:FirstHrRating ) ) else UNDEFINED endif
     else UNDEFINED
     endif endif
 ENDRULE
 RULE nrcctblRowWater:Water12_WaterHeaterFlowRate
   ANNUAL_PROPOSED
-    if (LocalCompAssigned(noXMLoutput_ResWtrHtrRef)) then if (LocalStatus( noXMLoutput_ResWtrHtrRef:RatedFlow ) > 0 .AND. noXMLoutput_ResWtrHtrRef:IsUEF = 1 .AND. noXMLoutput_ResWtrHtrRef:TankType = "Instantaneous") then atof( Format( "%.2f", noXMLoutput_ResWtrHtrRef:RatedFlow ) ) else UNDEFINED endif
-    else if (LocalCompAssigned(noXMLoutput_WtrHtrRef)) then if (LocalStatus( noXMLoutput_WtrHtrRef:FlowRate ) > 0 .AND. noXMLoutput_WtrHtrRef:IsUEFRtd = 1 .AND. noXMLoutput_WtrHtrRef:SubType = "Instantaneous") then atof( Format( "%.2f", noXMLoutput_WtrHtrRef:FlowRate ) ) else UNDEFINED endif
+    if (LocalCompAssigned(noXMLoutput_ResWtrHtrRef)) then if (LocalStatus( noXMLoutput_ResWtrHtrRef:RatedFlow ) > 0 .AND. noXMLoutput_ResWtrHtrRef:IsUEF = 1 .AND. (noXMLoutput_ResWtrHtrRef:TankType = "Consumer Instantaneous (UEF)" .OR. noXMLoutput_ResWtrHtrRef:TankType = "Residential-Duty Commercial Instantaneous (UEF)")) then atof( Format( "%.2f", noXMLoutput_ResWtrHtrRef:RatedFlow ) ) else UNDEFINED endif
+    else if (LocalCompAssigned(noXMLoutput_WtrHtrRef)) then if (LocalStatus( noXMLoutput_WtrHtrRef:FlowRate ) > 0 .AND. IfValidAnd( noXMLoutput_WtrHtrRef:UEFRtdVal >= 10 ) .AND. noXMLoutput_WtrHtrRef:SubType = "Instantaneous") then atof( Format( "%.2f", noXMLoutput_WtrHtrRef:FlowRate ) ) else UNDEFINED endif
     else UNDEFINED
     endif endif
 ENDRULE
@@ -341,42 +460,48 @@ RULE nrcctblRowWater:Water13_ResHPWHCategory
 ENDRULE
 RULE nrcctblRowWater:Water13_NotApplicableMessage
   ANNUAL_PROPOSED
-    if (LocalStatus( Water13_WaterHeaterTypeNR ) > 0) 
+    if (LocalStatus( Water13_WaterHeaterTypeNR ) > 0 .OR. LocalStatus( Water13_ResHPWHCategory ) > 0) 
     then UNDEFINED
     else "NotApplicable"
     endif
 ENDRULE
 
-; NRCC Res DHW
+; NRCC Res DHW    ; revised to leave undefined if tank location hidden in UI - SAC 03/21/23
+; RJH 7/24/2023 GitHub 2022-CBECC-Com-Schema Issue #92 remove Water14_TankLocationString choice and output Water14_TankLocation with "TankZone" when user enters a tank zone name as location
 RULE nrcctblRowWater:Water14_TankLocation
   ANNUAL_PROPOSED
     if (LocalCompAssigned(noXMLoutput_ResWtrHtrRef)) 
-    then if (noXMLoutput_ResWtrHtrRef:TankOutside)
-         then "Outside"
+    then if (IfValidAnd( noXMLoutput_ResWtrHtrRef:ShowTankLocation > 0 ))
+         then if (noXMLoutput_ResWtrHtrRef:TankOutside)
+              then "Outside"
+              else "TankZone"
+              endif
          else UNDEFINED
          endif
     else UNDEFINED
     endif
 ENDRULE
-RULE nrcctblRowWater:Water14_TankLocationString
-  ANNUAL_PROPOSED
-    if (LocalCompAssigned(noXMLoutput_ResWtrHtrRef)) 
-    then if (noXMLoutput_ResWtrHtrRef:TankOutside)
-         then UNDEFINED
-         else noXMLoutput_ResWtrHtrRef:TankZone
-         endif
-    else if (LocalCompAssigned(noXMLoutput_WtrHtrRef)) 
-         then if (LocalStatus( noXMLoutput_WtrHtrRef:TankZnRpt ) > 0) 
-              then if (noXMLoutput_WtrHtrRef:TankZnRpt != "Tank Zn: NA") then noXMLoutput_WtrHtrRef:TankZnRpt else UNDEFINED endif 
-              else UNDEFINED 
-              endif
-         else UNDEFINED 
-         endif
-    endif
-ENDRULE
+;RULE nrcctblRowWater:Water14_TankLocationString
+;  ANNUAL_PROPOSED
+;    if (LocalCompAssigned(noXMLoutput_ResWtrHtrRef)) 
+;    then if (noXMLoutput_ResWtrHtrRef:TankOutside .OR.
+;             IfValidAnd( noXMLoutput_ResWtrHtrRef:ShowTankLocation > 0 )==0)
+;         then UNDEFINED
+;         else noXMLoutput_ResWtrHtrRef:TankZone
+;         endif
+;    else if (LocalCompAssigned(noXMLoutput_WtrHtrRef)) 
+;         then if (LocalStatus( noXMLoutput_WtrHtrRef:TankZnRpt ) > 0) 
+;              then if (noXMLoutput_WtrHtrRef:TankZnRpt != "Tank Zn: NA") then noXMLoutput_WtrHtrRef:TankZnRpt else UNDEFINED endif 
+;              else UNDEFINED 
+;              endif
+;         else UNDEFINED 
+;         endif
+;    endif
+;ENDRULE
 RULE nrcctblRowWater:Water14_NotApplicableMessage
   ANNUAL_PROPOSED
-    if (LocalStatus( Water14_TankLocation ) > 0 .OR. LocalStatus( Water14_TankLocationString ) > 0) 
+;    if (LocalStatus( Water14_TankLocation ) > 0 .OR. LocalStatus( Water14_TankLocationString ) > 0) 
+    if (LocalStatus( Water14_TankLocation ) > 0) 
     then UNDEFINED
     else "NotApplicable"
     endif
@@ -392,18 +517,22 @@ RULE nrcctblRowWater:Water15_HeatPumpWaterHeaterBrandNEEA
          then  switch( noXMLoutput_ResWtrHtrRef:HPWHBrand )
                         case "A. O. Smith"     :  "AOSmith"
                         case "American"        :  "American"
+                        case "AquaThermAire"   :  "AquaThermAire"       ; RJH 02/15/24
                         case "Bradford White"  :  "BradfordWhite"
                         case "Direct Energy"   :  "DirectEnergy"
                         case "EcoSense"        :  "EcoSense"
+                        case "Friedrich"       :  "Friedrich"     ; RJH 11/8/24 add (tic #3640)
                         case "GE"              :  "GE"
                         case "Kenmore"         :  "Kenmore"
+                        case "LG"              :  "LG"            ; RJH 11/8/24 add (tic #3640)
                         case "Lochinvar"       :  "Lochinvar"
                         case "Reliance"        :  "Reliance"
                         case "Rheem"           :  "Rheem"
                         case "Rheem Canada"    :  "RheemCanada"
                         case "Richmond"        :  "Richmond"
                         case "Ruud"            :  "Ruud"
-                        case "Sanden"          :  "Sanden"
+                        case "SANCO2"          :  "SANCO2"     ; RJH 9/30/24 "Sanden" renamed "SAMCO2"
+                        case "Harvest Thermal" :  "HarvestThermal"      ; RJH 9/30/24 added
                         case "State"           :  "State"
                         case "Stiebel Eltron"  :  "Stiebel"
                         case "US Craftmaster"  :  "USCraftmaster"
@@ -420,329 +549,24 @@ RULE nrcctblRowWater:Water15_NotApplicableMessage
   ANNUAL_PROPOSED
     if (LocalStatus( Water15_HeatPumpWaterHeaterBrandNEEA ) > 0) 
     then UNDEFINED
-    else "NotApplicable"
+    else if (IfValidAnd( Proj:IsLowRiseMFam > 0)) then "NotApplicable" else UNDEFINED endif
     endif
 ENDRULE
 
+; added 40 new Rheem (and related) NEEA HPWH entries - SAC 12/29/22
+; added 18 new AOSmith (and related) NEEA HPWH entries - SAC 01/19/23
+; replced long switch w/ table look-up - SAC 01/19/23
+; added 4 new AquaThermAire NEEA HPWH entries - RJH 02/15/24
 RULE nrcctblRowWater:Water16_HeatPumpWaterHeaterModelNEEA
   ANNUAL_PROPOSED
-    if (LocalStatus( Water15_HeatPumpWaterHeaterBrandNEEA ) > 0)
+    if ( IfValidAnd( Proj:IsLowRiseMFam > 0 ) .AND.
+         LocalStatus( Water15_HeatPumpWaterHeaterBrandNEEA ) > 0 )
     then if ( EnumValue( noXMLoutput_ResWtrHtrRef:HPWHModel ) > 1)
-         then  switch( EnumValue( noXMLoutput_ResWtrHtrRef:HPWHModel ) )
-          case  110113   :   "AOSmithFPTU50"
-          case  110214   :   "AOSmithFPTU66"
-          case  110315   :   "AOSmithFPTU80"
-          case  110412   :   "AOSmithHHPT80Res"
-          case  110513   :   "AOSmithHP1050"
-          case  110615   :   "AOSmithHP1080"
-          case  111513   :   "AOSmithHP1050DR"
-          case  111615   :   "AOSmithHP1080DR"
-          case  110713   :   "AOSmithHPTU50"
-          case  110813   :   "AOSmithHPTU50N"
-          case  111713   :   "AOSmithHPTU50DR"
-          case  110914   :   "AOSmithHPTU66"
-          case  111014   :   "AOSmithHPTU66N"
-          case  111814   :   "AOSmithHPTU66DR"
-          case  111115   :   "AOSmithHPTU80"
-          case  111215   :   "AOSmithHPTU80N"
-          case  111915   :   "AOSmithHPTU80DR"
-          case  111311   :   "AOSmithPHPT60"
-          case  111412   :   "AOSmithPHPT80"
-          case  120111   :   "AmericanHPE10260"
-          case  120212   :   "AmericanHPE10280"
-          case  120312   :   "AmericanHPE6280"
-          case  120413   :   "AmericanHPHE10250"
-          case  120513   :   "AmericanHPHE10250N"
-          case  121413   :   "AmericanHPHE10250DR"
-          case  120614   :   "AmericanHPHE10266Res"
-          case  120714   :   "AmericanHPHE10266NRes"
-          case  121514   :   "AmericanHPHE10266DR"
-          case  120815   :   "AmericanHPHE10280Res"
-          case  120915   :   "AmericanHPHE10280NRes"
-          case  121615   :   "AmericanHPHE10280DR"
-          case  121013   :   "AmericanHPHE6250"
-          case  121114   :   "AmericanHPHE6266Res"
-          case  121215   :   "AmericanHPHE6280Res"
-          case  121313   :   "AmericanHPHE650Res"
-          case  130119   :   "BradfordWhiteRE2H50"
-          case  130358   :   "BradfordWhiteRE2H65T101NCWT"
-          case  130223   :   "BradfordWhiteRE2H80"
-          case  130419   :   "BradfordWhiteRE2H50S61NCWT"
-          case  130558   :   "BradfordWhiteRE2H65T61NCWT"
-          case  130623   :   "BradfordWhiteRE2H80T61NCWT"
-          case  270159   :   "DirectEnergyECEPH4015"
-          case  270260   :   "DirectEnergyECEPH5015"
-          case  270361   :   "DirectEnergyECEPH6515"
-          case  270462   :   "DirectEnergyECEPH8015"
-          case  270559   :   "DirectEnergyECEPH4030"
-          case  270660   :   "DirectEnergyECEPH5030"
-          case  270761   :   "DirectEnergyECEPH6530"
-          case  270862   :   "DirectEnergyECEPH8030"
-          case  270959   :   "DirectEnergyECEPH40SO"
-          case  271060   :   "DirectEnergyECEPH50SO"
-          case  271161   :   "DirectEnergyECEPH65SO"
-          case  271262   :   "DirectEnergyECEPH80SO"
-          case  271363   :   "DirectEnergyECEH40"
-          case  271464   :   "DirectEnergyECEH50"
-          case  271565   :   "DirectEnergyECEH65"
-          case  271666   :   "DirectEnergyECEH80"
-          case  140121   :   "EcoSenseHB50ES"
-          case  150119   :   "BEH50DCEJSB"
-          case  150223   :   "BEH80DCEJSB"
-          case  150319   :   "GEH50DEEJSC"
-          case  150419   :   "GEH50DEEJXXX"
-          case  150519   :   "GEH50DFEJSR"
-          case  150619   :   "GEH50DHEKSC"
-          case  150723   :   "GEH80DEEJSC"
-          case  150823   :   "GEH80DFEJSR"
-          case  150923   :   "GEH80DHEKSC"
-          case  160111   :   "Kenmore153_32116"
-          case  160212   :   "Kenmore153_32118"
-          case  160313   :   "Kenmore153_5925"
-          case  160414   :   "Kenmore153_5926"
-          case  160515   :   "Kenmore153_5928"
-          case  170113   :   "LochinvarHPA051"
-          case  170213   :   "LochinvarHPA052"
-          case  170314   :   "LochinvarHPA067"
-          case  170414   :   "LochinvarHPA068"
-          case  170515   :   "LochinvarHPA081"
-          case  170615   :   "LochinvarHPA082"
-          case  180113   :   "Reliance1050DHPHT"
-          case  180213   :   "Reliance1050DHPHTNE"
-          case  181313   :   "Reliance1050DHPHTDR"
-          case  180311   :   "Reliance1060DHPTRes"
-          case  180414   :   "Reliance1066DHPHT"
-          case  180514   :   "Reliance1066DHPHTN"
-          case  181414   :   "Reliance1066DHPHTDR"
-          case  180615   :   "Reliance1080DHPHT"
-          case  180715   :   "Reliance1080DHPHTNE"
-          case  181515   :   "Reliance1080DHPHTDR"
-          case  180812   :   "Reliance1080DHPTRes"
-          case  180913   :   "Reliance650DHPHT"
-          case  181014   :   "Reliance666DHPHT"
-          case  181115   :   "Reliance680DHPHT"
-          case  181215   :   "Reliance680DHPT"
-          case  196059   :   "RheemHPLD401RH"
-          case  196160   :   "RheemHPLD501RH"
-          case  196261   :   "RheemHPLD651RH"
-          case  196362   :   "RheemHPLD801RH"
-          case  193259   :   "RheemPROPH40T2RH37515"
-          case  193360   :   "RheemPROPH50T2RH37515"
-          case  193461   :   "RheemPROPH65T2RH37515"
-          case  193562   :   "RheemPROPH80T2RH37515"
-          case  193659   :   "RheemPROPH40T2RH37530"
-          case  193760   :   "RheemPROPH50T2RH37530"
-          case  193861   :   "RheemPROPH65T2RH37530"
-          case  193962   :   "RheemPROPH80T2RH37530"
-          case  194059   :   "RheemPROPH40T2RH375SO"
-          case  194160   :   "RheemPROPH50T2RH375SO"
-          case  194261   :   "RheemPROPH65T2RH375SO"
-          case  194362   :   "RheemPROPH80T2RH375SO"
-          case  194459   :   "RheemXE40T10H22U0"
-          case  194560   :   "RheemXE50T10H22U0"
-          case  194661   :   "RheemXE65T10H22U0"
-          case  194762   :   "RheemXE80T10H22U0"
-          case  194859   :   "RheemXE40T10H45U0"
-          case  194960   :   "RheemXE50T10H45U0"
-          case  195061   :   "RheemXE65T10H45U0"
-          case  195162   :   "RheemXE80T10H45U0"
-          case  195259   :   "RheemXE40T10HS45U0"
-          case  195360   :   "RheemXE50T10HS45U0"
-          case  195461   :   "RheemXE65T10HS45U0"
-          case  195562   :   "RheemXE80T10HS45U0"
-          case  195663   :   "RheemPROH40T2RH310BM"
-          case  195764   :   "RheemPROH50T2RH310BM"
-          case  195865   :   "RheemPROH65T2RH310BM"
-          case  195966   :   "RheemPROH80T2RH310BM"
-          case  196463   :   "RheemPROH40T2RH310UM"
-          case  196564   :   "RheemPROH50T2RH310UM"
-          case  196665   :   "RheemPROH65T2RH310UM"
-          case  196766   :   "RheemPROH80T2RH310UM"
-          case  190121   :   "RheemHB50RH"
-          case  190221   :   "RheemPROPH50RH245"
-          case  190339   :   "RheemPROPH50RH350"
-          case  190440   :   "RheemPROPH65RH350D"
-          case  190534   :   "RheemPROPH80RH245"
-          case  190641   :   "RheemPROPH80RH350"
-          case  190739   :   "RheemXE50T10"
-          case  190821   :   "RheemXE50T12"
-          case  190921   :   "RheemXE50T12W"
-          case  191040   :   "RheemXE65T10"
-          case  191141   :   "RheemXE80T10"
-          case  191234   :   "RheemXE80T12"
-          case  191334   :   "RheemXE80T12W"
-          case  191439   :   "RheemPROPH50RH350DC"
-          case  191540   :   "RheemPROPH65RH350DC"
-          case  191641   :   "RheemPROPH80RH350DC"
-          case  191739   :   "RheemHPLD50"
-          case  191840   :   "RheemHPLD65"
-          case  191941   :   "RheemHPLD80"
-          case  192042   :   "RheemXE50T10HD22U0"
-          case  192139   :   "RheemXE50T10U1"
-          case  192243   :   "RheemXE65T10HD22U0"
-          case  192340   :   "RheemXE65T10U1"
-          case  192444   :   "RheemXE80T10HD22U0"
-          case  192541   :   "RheemXE80T10U1"
-          case  192642   :   "RheemPROPH50T2RH350D15"
-          case  192739   :   "RheemPROPH50RH350DCB"
-          case  192843   :   "RheemPROPH65RH350D15"
-          case  192940   :   "RheemPROPH65RH350DCB"
-          case  193044   :   "RheemPROPH80RH350D15"
-          case  193141   :   "RheemPROPH80RH350DCB"
-          case  280159   :   "RheemCanCPROPH40T2RH37515"
-          case  280260   :   "RheemCanCPROPH50T2RH37515"
-          case  280361   :   "RheemCanCPROPH65T2RH37515"
-          case  280462   :   "RheemCanCPROPH80T2RH37515"
-          case  280559   :   "RheemCanCPROPH40T2RH37530"
-          case  280660   :   "RheemCanCPROPH50T2RH37530"
-          case  280761   :   "RheemCanCPROPH65T2RH37530"
-          case  280862   :   "RheemCanCPROPH80T2RH37530"
-          case  280959   :   "RheemCanCPROPH40T2RH375SO"
-          case  281060   :   "RheemCanCPROPH50T2RH375SO"
-          case  281161   :   "RheemCanCPROPH65T2RH375SO"
-          case  281262   :   "RheemCanCPROPH80T2RH375SO"
-                        default  :  UNDEFINED
-                    endswitch
+         then  HPWHData_NEEA:RptHPWHModel( "ModelNum", EnumValue( noXMLoutput_ResWtrHtrRef:HPWHModel ) ) 
          else UNDEFINED
          endif
     else  UNDEFINED 
     endif
-ENDRULE
-RULE nrcctblRowWater:Water16_HeatPumpWaterHeaterModelNEEA
-  ANNUAL_PROPOSED
-    if (LocalStatus( Water16_HeatPumpWaterHeaterModelNEEA ) > 0) then  UNCHANGED
-    else if (LocalStatus( Water15_HeatPumpWaterHeaterBrandNEEA ) > 0)
-    then if ( EnumValue( noXMLoutput_ResWtrHtrRef:HPWHModel ) > 1)
-         then  switch( EnumValue( noXMLoutput_ResWtrHtrRef:HPWHModel ) )
-          case  281359   :   "RheemCanCXE40T10H22UO"
-          case  281460   :   "RheemCanCXE50T10H22UO"
-          case  281561   :   "RheemCanCXE65T10H22UO"
-          case  281662   :   "RheemCanCXE80T10H22UO"
-          case  281759   :   "RheemCanCXE40T10H45UO"
-          case  281860   :   "RheemCanCXE50T10H45UO"
-          case  281961   :   "RheemCanCXE65T10H45UO"
-          case  282062   :   "RheemCanCXE80T10H45UO"
-          case  282159   :   "RheemCanCXE40T10HS45UO"
-          case  282260   :   "RheemCanCXE50T10HS45UO"
-          case  282361   :   "RheemCanCXE65T10HS45UO"
-          case  282462   :   "RheemCanCXE80T10HS45UO"
-          case  282563   :   "RheemCanCPROH40T2RH310BM"
-          case  282664   :   "RheemCanCPROH50T2RH310BM"
-          case  282765   :   "RheemCanCPROH65T2RH310BM"
-          case  282866   :   "RheemCanCPROH80T2RH310BM"
-          case  201059   :   "Richmond10E40HP515"
-          case  201160   :   "Richmond10E50HP515"
-          case  201261   :   "Richmond10E65HP515"
-          case  201362   :   "Richmond10E80HP515"
-          case  201459   :   "Richmond10E40HP530"
-          case  201560   :   "Richmond10E50HP530"
-          case  201661   :   "Richmond10E65HP530"
-          case  201762   :   "Richmond10E80HP530"
-          case  201859   :   "Richmond10E40HP5S30"
-          case  201960   :   "Richmond10E50HP5S30"
-          case  202061   :   "Richmond10E65HP5S30"
-          case  202162   :   "Richmond10E80HP5S30"
-          case  200139   :   "Richmond10E50HP4D"
-          case  200240   :   "Richmond10E65HP4D"
-          case  200341   :   "Richmond10E80HP4D"
-          case  200421   :   "Richmond12E50HP"
-          case  200534   :   "Richmond12E80HP"
-          case  200621   :   "RichmondHB50RM"
-          case  200742   :   "Richmond10E50HP4D15"
-          case  200843   :   "Richmond10E65HP4D15"
-          case  200944   :   "Richmond10E80HP4D15"
-          case  213359   :   "RuudHPLD401RU"
-          case  213460   :   "RuudHPLD501RU"
-          case  213561   :   "RuudHPLD651RU"
-          case  213662   :   "RuudHPLD801RU"
-          case  211359   :   "RuudPROUH40T2RU37515"
-          case  211460   :   "RuudPROUH50T2RU37515"
-          case  211561   :   "RuudPROUH65T2RU37515"
-          case  211662   :   "RuudPROUH80T2RU37515"
-          case  211759   :   "RuudPROUH40T2RU37530"
-          case  211860   :   "RuudPROUH50T2RU37530"
-          case  211961   :   "RuudPROUH65T2RU37530"
-          case  212062   :   "RuudPROUH80T2RU37530"
-          case  212159   :   "RuudPROUH40T2RU375SO"
-          case  212260   :   "RuudPROUH50T2RU375SO"
-          case  212361   :   "RuudPROUH65T2RU375SO"
-          case  212462   :   "RuudPROUH80T2RU375SO"
-          case  212563   :   "RuudPROH40T2RU310BM"
-          case  212664   :   "RuudPROH50T2RU310BM"
-          case  212765   :   "RuudPROH65T2RU310BM"
-          case  212866   :   "RuudPROH80T2RU310BM"
-          case  212963   :   "RuudPROH40T2RU310UM"
-          case  213064   :   "RuudPROH50T2RU310UM"
-          case  213165   :   "RuudPROH65T2RU310UM"
-          case  213266   :   "RuudPROH80T2RU310UM"
-          case  210121   :   "RuudHB50RU"
-          case  210221   :   "RuudPROUH50RU245"
-          case  210339   :   "RuudPROUH50RU350D"
-          case  210440   :   "RuudPROUH65RU350D"
-          case  210534   :   "RuudPROUH80RU245"
-          case  210641   :   "RuudPROUH80RU350D"
-          case  210742   :   "RuudPROUH50RU350D15"
-          case  210839   :   "RuudPROUH50RU350DCB"
-          case  210943   :   "RuudPROUH65RU350D15"
-          case  211040   :   "RuudPROUH65RU350DCB"
-          case  211144   :   "RuudPROUH80RU350D15"
-          case  211241   :   "RuudPROUH80RU350DCB"
-          case  220116   :   "SandenGS3_SAN43SSAQA"
-          case  220216   :   "SandenGS3_GAUS160QTA"
-          case  220317   :   "SandenGS3_SAN83SSAQA"
-          case  220417   :   "SandenGS3_GAUS315EQTD"
-          case  220517   :   "SandenGUS_SAN83SSAQA"
-          case  220617   :   "SandenGUS_GAUS315EQTD"
-          case  230112   :   "StateEP680DHPT"
-          case  230211   :   "StateEPX60DHPT"
-          case  230312   :   "StateEPX80DHPT"
-          case  230413   :   "StateHP650DHPT"
-          case  230514   :   "StateHP666DHPT"
-          case  230615   :   "StateHP680DHPT"
-          case  230713   :   "StateHPX50DHPT"
-          case  230813   :   "StateHPX50DHPTNE"
-          case  231313   :   "StateHPX50DHPTDR"
-          case  230914   :   "StateHPX66DHPT"
-          case  231014   :   "StateHPX66DHPTNE"
-          case  231414   :   "StateHPX66DHPTDR"
-          case  231115   :   "StateHPX80DHPT"
-          case  231215   :   "StateHPX80DHPTNE"
-          case  231515   :   "StateHPX80DHPTDR"
-          case  240122   :   "Stiebel58A220E"
-          case  240212   :   "Stiebel80A300"
-          case  250112   :   "USCraftmasterHPE2F80U"
-          case  250211   :   "USCraftmasterHPE2K60"
-          case  250312   :   "USCraftmasterHPE2K80"
-          case  250413   :   "USCraftmasterHPHE2F50U"
-          case  250514   :   "USCraftmasterHPHE2F66U"
-          case  250615   :   "USCraftmasterHPHE2F80U"
-          case  250713   :   "USCraftmasterHPHE2K50UN"
-          case  250814   :   "USCraftmasterHPHE2K66UN"
-          case  250915   :   "USCraftmasterHPHE2K80UN"
-          case  260111   :   "WhirlpoolHPE2K60"
-          case  260212   :   "WhirlpoolHPE2K80"
-          case  260313   :   "WhirlpoolHPHE2K50"
-          case  260413   :   "WhirlpoolHPHE2K50C"
-          case  260513   :   "WhirlpoolHPHE2K50N"
-          case  260614   :   "WhirlpoolHPHE2K66"
-          case  260714   :   "WhirlpoolHPHE2K66C"
-          case  260815   :   "WhirlpoolHPHE2K80"
-          case  260915   :   "WhirlpoolHPHE2K80C"
-          case  261032   :   "WhirlpoolHPSE2K50"
-          case  261132   :   "WhirlpoolHPSE2K50C"
-          case  261212   :   "WhirlpoolHPSE2K80"
-          case  261312   :   "WhirlpoolHPSE2K80C"
-          case  990138   :   "WhirlpoolHPSE2K50"
-          case  990273   :   "Tier3Generic40"     ; SAC 06/17/21    ; updated to new schema enums - SAC 10/02/21
-          case  990374   :   "Tier3Generic50"
-          case  990475   :   "Tier3Generic65"
-          case  990576   :   "Tier3Generic80"
-                        default  :  UNDEFINED
-                    endswitch
-         else UNDEFINED
-         endif
-    else  UNDEFINED 
-    endif endif
 ENDRULE
 RULE nrcctblRowWater:Water16_HeatPumpWaterHeaterModelNEEA
   ANNUAL_PROPOSED
@@ -765,7 +589,7 @@ RULE nrcctblRowWater:Water16_NotApplicableMessage
   ANNUAL_PROPOSED
     if (LocalStatus( Water16_HeatPumpWaterHeaterModelNEEA ) > 0) 
     then UNDEFINED
-    else "NotApplicable"
+    else if (IfValidAnd( Proj:IsLowRiseMFam > 0)) then "NotApplicable" else UNDEFINED endif
     endif
 ENDRULE
 
@@ -785,15 +609,16 @@ RULE nrcctblRowWater:Water17_HeatPumpWaterHeaterSimulationGroup
                                     case "GE2014 50"        :  "GE201450"
                                     case "GE2014 80"        :  "GE201480"
                                     case "GE2014 80 Eff DR" :  "GE201480EffDR"
-                                    case "Sanden 40"        :  "Sanden40"
-                                    case "Sanden 80"        :  "Sanden80"
+                                    case "SANCO2 40"        :  "SANCO240"          ; RJH 9/30/24 rename Sanden to SANCO2
+                                    case "SANCO2 80"        :  "SANCO280"          ; RJH 9/30/24 rename Sanden to SANCO2
+                                    case "SANCO2 120"       :  "SANCO2120"          ; RJH 9/30/24 added
                                     case "Stiebel 220E"     :  "Stiebel220E"
                                  ;   case "GE2012 50"        :  "GE201250"
                                     case "GE2012 50"        :  "AOSmithSHPT50"     ; SAC 5/28/19
-                                    case "AWHSTier3Generic40" :  "AWHSTier3Generic40"  ; SAC 06/17/21
-                                    case "AWHSTier3Generic50" :  "AWHSTier3Generic50"
-                                    case "AWHSTier3Generic65" :  "AWHSTier3Generic65"
-                                    case "AWHSTier3Generic80" :  "AWHSTier3Generic80"
+                                    case "AWHSTier3Generic40" :  "Tier3Generic40"  ; SAC 06/17/21  ; remove leading AWHS - SAC 04/26/24
+                                    case "AWHSTier3Generic50" :  "Tier3Generic50"
+                                    case "AWHSTier3Generic65" :  "Tier3Generic65"
+                                    case "AWHSTier3Generic80" :  "Tier3Generic80"
                                     case "Rheem HB 50"      :  "RheemHB50"          ; added missing mapping to 'RheemHB50' - SAC 06/04/21
                                     case "Rheem HBDR-45-50" :  "RheemHBDR4550"
                                     case "Rheem HBDR-45-65" :  "RheemHBDR4565"
@@ -828,7 +653,27 @@ RULE nrcctblRowWater:Water17_HeatPumpWaterHeaterSimulationGroup
                                     case "Rheem 2020 Builder 50"   :  "Rheem2020Build50"
                                     case "Rheem 2020 Builder 65"   :  "Rheem2020Build65"
                                     case "Rheem 2020 Builder 80"   :  "Rheem2020Build80"
+                                    case "AOSmithHPTS40"    :  "AOSmithHPTS40"      ; RJH 11/8/24 added (tic #3640)
+                                    case "LG_APHWC50"       :  "LG_APHWC50"         ; RJH 11/8/24 added (tic #3640)
+                                    case "LG_APHWC80"       :  "LG_APHWC80"         ; RJH 11/8/24 added (tic #3640)
+                                    case "AeroTherm2023_50" :  "AeroTherm2023_50"   ; RJH 11/8/24 added (tic #3640)
+                                    case "AeroTherm2023_65" :  "AeroTherm2023_65"   ; RJH 11/8/24 added (tic #3640)
+                                    case "AeroTherm2023_80" :  "AeroTherm2023_80"   ; RJH 11/8/24 added (tic #3640)
                                     case "AO Smith CAHP-120"       :  "AOSmithCAHP120"    ; SAC 02/20/21 (tic #1260)
+                                    case "RheemPlugInShared40"     :  "RheemPlugInShared40"        ; SAC 12/29/22
+                                    case "RheemPlugInShared50"     :  "RheemPlugInShared50"   
+                                    case "RheemPlugInShared65"     :  "RheemPlugInShared65"   
+                                    case "RheemPlugInShared80"     :  "RheemPlugInShared80"   
+                                    case "RheemPlugInDedicated40"  :  "RheemPlugInDedicated40"
+                                    case "RheemPlugInDedicated50"  :  "RheemPlugInDedicated50"
+                                    case "AOSmithHPTS50"  :  "AOSmithHPTS50"     ; SAC 01/19/23
+                                    case "AOSmithHPTS66"  :  "AOSmithHPTS66"
+                                    case "AOSmithHPTS80"  :  "AOSmithHPTS80"
+                                    case "AquaThermAire"           :  "AquaThermAire"     ; RJH 02/15/24
+                                    case "AWHSTier4Generic40" :  "Tier4Generic40"    ; NEEA generic tier 4 options - SAC 04/25/24 (tic #3595)  ; remove leading AWHS - SAC 04/26/24
+                                    case "AWHSTier4Generic50" :  "Tier4Generic50"
+                                    case "AWHSTier4Generic65" :  "Tier4Generic65"
+                                    case "AWHSTier4Generic80" :  "Tier4Generic80"
                         default  :  UNDEFINED
                     endswitch
          else UNDEFINED
@@ -840,20 +685,20 @@ RULE nrcctblRowWater:Water17_NotApplicableMessage
   ANNUAL_PROPOSED
     if (LocalStatus( Water17_HeatPumpWaterHeaterSimulationGroup ) > 0) 
     then UNDEFINED
-    else "NotApplicable"
+    else if (IfValidAnd( Proj:IsLowRiseMFam > 0)) then "NotApplicable" else UNDEFINED endif
     endif
 ENDRULE
 
 RULE nrcctblRowWater:Water18_TankLocation
   ANNUAL_PROPOSED
-    if (IfValidAnd( noXMLoutput_ResWtrHtrRef:TankOutside > 0 ))
+    if (IfValidAnd(Proj:IsLowRiseMFam > 0) .AND. IfValidAnd( noXMLoutput_ResWtrHtrRef:TankOutside > 0 ))
     then  "Outside"
     else  UNDEFINED  endif
 ENDRULE
 RULE nrcctblRowWater:Water18_TankLocationString
   ANNUAL_PROPOSED
     if (LocalStatus( Water18_TankLocation ) > 0) then  UNDEFINED
-    else if (LocalCompAssigned( noXMLoutput_ResWtrHtrRef:TankZone ) > 0)
+    else if (IfValidAnd(Proj:IsLowRiseMFam > 0) .AND. LocalCompAssigned( noXMLoutput_ResWtrHtrRef:TankZone ) > 0)
     then  noXMLoutput_ResWtrHtrRef:TankZone:Name
     else  UNDEFINED
     endif endif
@@ -863,9 +708,49 @@ RULE nrcctblRowWater:Water18_NotApplicableMessage
     if (LocalStatus( Water18_TankLocation       ) > 0 .OR.
         LocalStatus( Water18_TankLocationString ) > 0) 
     then UNDEFINED
-    else "NotApplicable"
+    else if (IfValidAnd(Proj:IsLowRiseMFam > 0)) then "NotApplicable" else UNDEFINED endif
     endif
 ENDRULE
+; RJH 12/13/2023 Per 2022-CBECC-Com-Schema Issue #114, update ResWtrHtr:TankType enum mappings to include (existing only) CBECC enums
+RULE nrcctblRowWater:Water19_ResidentialWaterHeaterType
+  ANNUAL_PROPOSED
+    if (LocalCompAssigned(noXMLoutput_ResWtrHtrRef) .AND. IfValidAnd( Proj:IsLowRiseMFam > 0 ))
+    then if (noXMLoutput_ResWtrHtrRef:HeaterElementType == "Heat Pump") 
+         then "HeatPumpWaterHeater"
+         else switch( noXMLoutput_ResWtrHtrRef:TankType )
+                    case "Boiler"                                    :  "BoilerWaterHeater"
+                    case "Indirect"                                  :  "IndirectWaterHeating"
+                    case "Large Instantaneous (existing only)"       :  "InstantaneousLarge"
+                    case "Large Storage (existing only)"             :  "StorageLarge"
+                    case "Small Instantaneous (existing only)"       :  "InstantaneousSmall"
+                    case "Small Storage (existing only)"             :  "StorageSmall"
+                    case "Large Instantaneous"                       :  "InstantaneousLarge"
+                    case "Large Storage"                             :  "StorageLarge"
+                    case "Small Instantaneous"                       :  "InstantaneousSmall"
+                    case "Small Storage"                             :  "StorageSmall"
+                    case "Commercial Instantaneous (TE)"             :  "InstantaneousCommercial"
+                    case "Consumer Instantaneous (UEF)"              :  "InstantaneousConsumer"
+                    case "Residential-Duty Commercial Storage (UEF)" :  "InstantaneousResDutyCommercial"
+                    case "Commercial Storage (TE & SBL)"             :  "StorageCommercial"
+                    case "Consumer Storage (UEF)"                    :  "StorageConsumer"
+                    case "Residential-Duty Commercial Storage (UEF)" :  "StorageResDutyCommercial"
+                    case "Commercial Packaged Boiler"                :  "CommercialPackagedBoiler"
+                    default  :  UNDEFINED
+              endswitch
+         endif
+    else UNDEFINED
+    endif
+ENDRULE
+RULE nrcctblRowWater:Water19_NotApplicableMessage
+  ANNUAL_PROPOSED
+    if (LocalStatus( Water19_ResidentialWaterHeaterType ) > 0) 
+    then UNDEFINED
+    else if (IfValidAnd(Proj:IsLowRiseMFam > 0)) then "NotApplicable" else UNDEFINED endif
+    endif
+ENDRULE
+
+
+
 
 ; nrccSection_WaterMF nrccTableWaterMF 
 RULE NEW ResDHWSys:nrcctblRowWaterMFRef
@@ -904,33 +789,34 @@ RULE nrcctblRowWaterMF:WaterMF04_WaterHeaterTotalSystemCount
     int(noXMLoutput_ResDHWSysRef:TotNumDHWHeaters)
 ENDRULE
 
-; RJH 10/12/22 I do not see a mapping between the CBECC and schema enums
-;RULE nrcctblRowWaterMF:WaterMF05_ResidentialDHWCentralDistributionType
-;  ANNUAL_PROPOSED
-;    if (noXMLoutput_ResDHWSysRef:CentralDHW) 
-;    then  
-;        switch (noXMLoutput_ResDHWSysRef:MFamDistType)
-;            case "No loops or central system pump"       : "NoLoopsNoCentralPump"
-;            case "No Control (continuous pumping)"       : "NoControlContinuousPumping"
-;            case "Demand Control"                        : "DemandControlNR"
-;            case "Temperature modulation"                : "TemperatureModulationNR"
-;            case "Temperature modulation and monitoring" : "TemperatureModulationMonitoring"
-;            default :  UNDEFINED
+; RJH 10/28/22 I am not sure about this mapping between the CBECC and schema enums
+RULE nrcctblRowWaterMF:WaterMF05_ResidentialDHWCentralDistributionType
+  ANNUAL_PROPOSED
+    if (noXMLoutput_ResDHWSysRef:CentralDHW) 
+    then  
+        switch (noXMLoutput_ResDHWSysRef:MFamDistType)
+            case "Multi-family: No loops or recirc pump"                                   : "NoRecirculationMF"
+            case "Multi-family: Recirculation demand control"                              : "RecirculatingDemandControlMF"
+            case "Multi-family: Recirculating with temperature modulation and monitoring " : "RecirculationMF"
+            case "Multi-family: Recirculating with temperature modulation"                 : "RecirculationMF"
+            case "Multi-family: Recirculating with temperature modulation and monitoring"  : "RecirculationMF"
+            case "Multi-family: Recirculating with no control (continuous pumping)"        : "RecirculationMF"
+            default :  UNDEFINED
+        endswitch
+    else UNDEFINED
+    endif
+ENDRULE
 
-;1,    Proj:Ruleset,    -999,  3840   ; Compact Distrib selections
-;2,                 0, "- specify -"
-;2,             3840, "Standard"                                                    ; %WHDIST2013_STD =           3840 * 256 =     983040  &B 00000000 0000 1111 00000000 00000000 ' Standard
-;2,             5248, "Recirculation with demand control, push button"              ; %WHDIST2013_RDMan =         5248 * 256 =    1343488  &B 00000000 0001 0100 10000000 00000000 ' recirculation with demand control, push button
-;2,             5504, "Recirculation with demand control, occupancy/motion sensor"  ; %WHDIST2013_RDAuto =        5504 * 256 =    1409024  &B 00000000 0001 0101 10000000 00000000 ' recirculation with demand control, occupancy/motion sensor
-;2,             4992, "Recirculation with non-demand control (continuous pumping)"  ; %WHDIST2013_RND =           4992 * 256 =    1277952  &B 00000000 0001 0011 10000000 00000000 ' recirculation with non-demand control (continuous pumping)
-; 2,              100, "2019 Basic Compact Distribution System"    ; new option for 2019 std design HPWH systems
-;2,          8393856, "(HERS req'd) Recirculation with demand control, push button" ; %WHDIST2013_HERSRDMan =  8393856 * 256 = 2148827136  &B 10000000 0001 0100 10000000 00000000 ' recirculation, demand control push button
-;2,          8394112, "(HERS req'd) Recirculation with demand control, occupancy/motion sensor" ; %WHDIST2013_HERSRDAuto = 8394112 * 256 = 2148892672  &B 10000000 0001 0101 10000000 00000000 ' recirculation, demand control occupancy/motion
+;0, ResDHWSys:MFamDistType,  0
+;2,	 6848,	"Multi-family: Recirculating with temperature modulation and monitoring "     ; SAC 8/28/16 - remove trailing space
+;1,    Proj:Ruleset,   -1008,  0   ; Backward compatibility - removed recirc items no longer intended to be included in analysis - SAC 02/13/21 (tic #1220)
+;2,	 6336,	"Multi-family: Recirculation demand control"
+;2,	 6592,	"Multi-family: Recirculating with temperature modulation"	
+;2,	 6848,	"Multi-family: Recirculating with temperature modulation and monitoring"
+;1,    Proj:Ruleset,    -999,  0   ; Current selections
+;2,	    0,	"Multi-family: No loops or recirc pump"							; SDS 07/26/2016: modified (tic #707)
+;2,	 5056,	"Multi-family: Recirculating with no control (continuous pumping)"
 
-;        endswitch
-;    else UNDEFINED
-;    endif
-;ENDRULE
 RULE nrcctblRowWaterMF:WaterMF05_NotApplicableMessage
   ANNUAL_PROPOSED
     if (LocalStatus( WaterMF05_ResidentialDHWCentralDistributionType ) > 0) 
@@ -954,6 +840,13 @@ RULE nrcctblRowWaterMF:WaterMF06_ResidentialDHWDwellingUnitDistributionType
             case	"(HERS req'd) Parallel Piping"		                          :	"StandardDistributionCentralParallelPipingHERS"
             case	"(HERS req'd) Recirculation, Demand Control Push Button"	  :	"DemandRecirculationManualControlHERS"
             case	"(HERS req'd) Recirculation, Demand Control Occupancy/Motion" :	"DemandRecirculationSensorControlsHERS"
+            case	"Central Parallel Piping"	                                  :	"StandardDistributionCentralParallelPiping"         ; RJH 4/24/24 2022-LRMF-Schema Issue 104
+            case	"Recirculation with non-demand control (continuous pumping)"  :	"RecirculationNonDemand"                            ; RJH 4/24/24 2022-LRMF-Schema Issue 104
+            case	"Recirculation with demand control, push button"	          :	"DemandRecirculationManualControl"                  ; RJH 4/24/24 2022-LRMF-Schema Issue 104
+            case	"Recirculation with demand control, occupancy/motion sensor"  :	"DemandRecirculationSensorControls"                 ; RJH 4/24/24 2022-LRMF-Schema Issue 104
+            case	"(HERS req'd) Central Parallel Piping"	                      :	"StandardDistributionCentralParallelPipingHERS"     ; RJH 4/24/24 2022-LRMF-Schema Issue 104
+            case	"(HERS req'd) Recirculation with demand control, push button" :	"DemandRecirculationManualControlHERS"              ; RJH 4/24/24 2022-LRMF-Schema Issue 104
+            case	"(HERS req'd) Recirculation with demand control, occupancy/motion sensor" :	"DemandRecirculationSensorControlsHERS" ; RJH 4/24/24 2022-LRMF-Schema Issue 104
             default :  UNDEFINED
          endswitch
     else UNDEFINED
@@ -966,6 +859,9 @@ RULE nrcctblRowWaterMF:WaterMF06_NotApplicableMessage
     else "NotApplicable"
     endif
 ENDRULE
+
+
+
 
 ; NRCC Res DHW
 RULE nrcctblRowWaterMF:WaterMF07_WaterHeatingSystemName
@@ -1092,26 +988,104 @@ RULE nrcctblRowWaterMF:WaterMF08_NotApplicableMessage
     else "NotApplicable"
     endif
 ENDRULE
-
-; NRCC Res DHW
-RULE nrcctblRowWaterMF:WaterMF09_CompactDistributionType
+RULE nrcctblRowWaterMF:WaterMF09_IsCompactDistribution
   ANNUAL_PROPOSED
     if (noXMLoutput_ResDHWSysRef:CentralDHW) 
     then UNDEFINED 
-    else 
-        switch (noXMLoutput_ResDHWSysRef:CompactDistrib)
-            case "not compact"                   : "NotCompact"
-            case "Basic Credit"                  : "BasicType"
-            case "Expanded Credit (HERS Req'd)"  : "Expanded"
-            default :  UNDEFINED
-        endswitch
+    else if (noXMLoutput_ResDHWSysRef:IsCompactDistrib > 0)
+         then "true"
+         else "false"
+         endif
     endif
 ENDRULE
 RULE nrcctblRowWaterMF:WaterMF09_NotApplicableMessage
   ANNUAL_PROPOSED
-    if (LocalStatus( WaterMF09_CompactDistributionType ) > 0) 
+    if (LocalStatus( WaterMF09_IsCompactDistribution ) > 0) 
     then UNDEFINED
     else "NotApplicable"
+    endif
+ENDRULE
+
+
+; RJH 11/02/22 LMCC only
+RULE nrcctblRowWaterMF:WaterMF10_PipeInsulationVerificationRequired
+  ANNUAL_PROPOSED
+    if (IfValidAnd(Proj:IsLowRiseMFam > 0 ) .AND. LocalCompAssigned( noXMLoutput_ResDHWSysRef ))
+    then if (noXMLoutput_ResDHWSysRef:PipeInsVerifReq > 0)
+         then "true"  
+         else "false"  
+         endif 
+    else  UNDEFINED  
+    endif
+ENDRULE
+RULE nrcctblRowWaterMF:WaterMF10_NotApplicableMessage
+  ANNUAL_PROPOSED
+    if (IfValidAnd(Proj:IsLowRiseMFam > 0 ))
+    then if (LocalStatus( WaterMF10_PipeInsulationVerificationRequired ) > 0) 
+         then UNDEFINED
+         else "NotApplicable"
+         endif
+    else UNDEFINED
+    endif
+ENDRULE
+RULE nrcctblRowWaterMF:WaterMF11_ParallelPipingVerificationRequired
+  ANNUAL_PROPOSED
+    if (IfValidAnd(Proj:IsLowRiseMFam > 0 ) .AND. LocalCompAssigned( noXMLoutput_ResDHWSysRef ))
+    then if (noXMLoutput_ResDHWSysRef:ParPipingVerReq > 0)
+         then "true"  
+         else "false"  
+         endif 
+    else  UNDEFINED  
+    endif
+ENDRULE
+RULE nrcctblRowWaterMF:WaterMF11_NotApplicableMessage
+  ANNUAL_PROPOSED
+    if (IfValidAnd(Proj:IsLowRiseMFam > 0 ))
+    then if (LocalStatus( WaterMF11_ParallelPipingVerificationRequired ) > 0) 
+         then UNDEFINED
+         else "NotApplicable"
+         endif
+    else UNDEFINED
+    endif
+ENDRULE
+RULE nrcctblRowWaterMF:WaterMF12_RecirculationControlVerificationRequired
+  ANNUAL_PROPOSED
+    if (IfValidAnd(Proj:IsLowRiseMFam > 0 ) .AND. LocalCompAssigned( noXMLoutput_ResDHWSysRef ))
+    then if (noXMLoutput_ResDHWSysRef:RecirCtrlVerReq > 0)
+         then "true"  
+         else "false"  
+         endif 
+    else  UNDEFINED  
+    endif
+ENDRULE
+RULE nrcctblRowWaterMF:WaterMF12_NotApplicableMessage
+  ANNUAL_PROPOSED
+    if (IfValidAnd(Proj:IsLowRiseMFam > 0 ))
+    then if (LocalStatus( WaterMF12_RecirculationControlVerificationRequired ) > 0) 
+         then UNDEFINED
+         else "NotApplicable"
+         endif
+    else UNDEFINED
+    endif
+ENDRULE
+RULE nrcctblRowWaterMF:WaterMF13_DWHR_HERS_VerificationRequired
+  ANNUAL_PROPOSED
+    if (IfValidAnd(Proj:IsLowRiseMFam > 0 ) .AND. LocalCompAssigned( noXMLoutput_ResDHWSysRef ))
+    then if (noXMLoutput_ResDHWSysRef:HERSCheck:ShwrDrnWtrHtRecov > 0)
+         then "true"  
+         else "false"  
+         endif 
+    else  UNDEFINED  
+    endif
+ENDRULE
+RULE nrcctblRowWaterMF:WaterMF13_NotApplicableMessage
+  ANNUAL_PROPOSED
+    if (IfValidAnd(Proj:IsLowRiseMFam > 0 ))
+    then if (LocalStatus( WaterMF13_DWHR_HERS_VerificationRequired ) > 0) 
+         then UNDEFINED
+         else "NotApplicable"
+         endif
+    else UNDEFINED
     endif
 ENDRULE
 
@@ -1257,12 +1231,12 @@ RULE nrccWaterCHPWH02:WaterCHPWH02_CentralHPWHCompressorType
                 case	"generic  (26kW cap @ 40F)"	:	"Generic26kW"
                 case	"generic  (40kW cap @ 40F)"	:	"Generic40kW"
                 case	"generic  (45kW cap @ 40F)"	:	"Generic45kW"
-                case	"Colmac CxV-5 (MP, 14kW cap @ 40F)"	:	"ColmacCxV5"      ; RJH 10/2/22 new multi pass options
-                case	"Colmac CxA-10 (MP, 21kW cap @ 40F)"	:	"ColmacCxA10MP"
-                case	"Colmac CxA-15 (MP, 29kW cap @ 40F)"	:	"ColmacCxA15MP"
-                case	"Colmac CxA-20 (MP, 41kW cap @ 40F)"	:	"ColmacCxA20MP"
-                case	"Colmac CxA-25 (MP, 49kW cap @ 40F)"	:	"ColmacCxA25MP"
-                case	"Colmac CxA-30 (MP, 57kW cap @ 40F)"	:	"ColmacCxA30MP"
+                case	"Colmac CxV-5  (MP, 14kW cap @ 40F)"	:	"ColmacCxV5MP"      ; RJH 10/2/22 new multi pass options
+                case	"Colmac CxA-10  (MP, 21kW cap @ 40F)"	:	"ColmacCxA10MP"
+                case	"Colmac CxA-15  (MP, 29kW cap @ 40F)"	:	"ColmacCxA15MP"
+                case	"Colmac CxA-20  (MP, 41kW cap @ 40F)"	:	"ColmacCxA20MP"
+                case	"Colmac CxA-25  (MP, 49kW cap @ 40F)"	:	"ColmacCxA25MP"
+                case	"Colmac CxA-30  (MP, 57kW cap @ 40F)"	:	"ColmacCxA30MP"
                 case	"Rheem HPHD-60HNU (horiz MP, 12kW cap @ 45F)"	  :	"RheemHPHD60HNUMP"
                 case	"Rheem HPHD-60VNU (vertical MP, 12kW cap @ 45F)"  :	"RheemHPHD60VNUMP"
                 case	"Rheem HPHD-135HNU (horiz MP, 30kW cap @ 45F)"	  :	"RheemHPHD135HNUMP"
@@ -1323,18 +1297,23 @@ RULE nrccWaterCHPWH02:WaterCHPWH02_HeatPumpWaterHeaterBrand
             then switch (noXMLoutput_ResDHWSysRef:CHPWHNEEABrand)
                     case	"A. O. Smith"	 :	"AOSmith"
                     case	"American"		 :	"American"
+                    case    "AquaThermAire"  :  "AquaThermAire"       ; RJH 02/15/24
                     case	"Bradford White" :	"BradfordWhite"
                     case	"Direct Energy"	 :	"DirectEnergy"
                     case	"EcoSense"		 :	"EcoSense"
-                    case	"GE"		     :	"GE"
-                    case	"Kenmore"		 :	"Kenmore"
+                    case    "Friedrich"      :  "Friedrich"     ; RJH 11/8/24 add (tic #3640)
+                    case    "GE"             :  "GE"
+                    case    "Kenmore"        :  "Kenmore"
+                    case    "LG"             :  "LG"            ; RJH 11/8/24 add (tic #3640)
                     case	"Lochinvar"		 :	"Lochinvar"
                     case	"Reliance"		 :	"Reliance"
                     case	"Rheem"		     :	"Rheem"
                     case	"Rheem Canada"	 :	"RheemCanada"
                     case	"Richmond"		 :	"Richmond"
                     case	"Ruud"		     :	"Ruud"
-                    case	"Sanden"		 :	"Sanden"
+                    case	"Sanden"		 :	"Sanden"     ; RJH 9/30/24 left for backward compatibility
+                    case	"SANCO2"		 :	"SANCO2"     ; RJH 9/30/24 "Sanden" renamed "SANCO2"
+                    case	"Harvest Thermal" :	"HarvestThermal"  ; RJH 9/30/24 added
                     case	"State"		     :	"State"
                     case	"Stiebel Eltron" :	"Stiebel"
                     case	"US Craftmaster" :	"USCraftmaster"
@@ -1353,7 +1332,7 @@ RULE nrccWaterCHPWH02:WaterCHPWH02_HeatPumpWaterHeaterModel
   ANNUAL_PROPOSED
     if( IfValidAnd(noXMLoutput_ResDHWSysRef:CHPWHSysDescrip == "Integrated, Packaged System") .OR. IfValidAnd(noXMLoutput_ResDHWSysRef:CHPWHSysDescrip == "Integrated/Packaged System") )
     then if( ResProj:EnergyCodeYearNum >= 2022 .AND. IfValidAnd(noXMLoutput_ResDHWSysRef:CHPWHIntegPkgType == "Residential (NEEA rated) Product") .AND. LocalStatus( noXMLoutput_ResDHWSysRef:CHPWHNEEAModel ) > 0 )
-         then HPWHData_NEEA:HeatPumpWaterHeaterModel( "Model", EnumValue( noXMLoutput_ResDHWSysRef:CHPWHNEEAModel ) )
+         then HPWHData_NEEA:RptHPWHModel( "Model", noXMLoutput_ResDHWSysRef:CHPWHNEEAModel )
          else if( IfValidAnd(noXMLoutput_ResDHWSysRef:CHPWHIntegPkgType == "Commercial Product") )
               then "AOSmithCAHP120"
               else UNDEFINED
@@ -1362,7 +1341,9 @@ RULE nrccWaterCHPWH02:WaterCHPWH02_HeatPumpWaterHeaterModel
     else UNDEFINED
     endif
 ENDRULE
+; SAC 12/26/22 - was:   then HPWHData_NEEA:HeatPumpWaterHeaterModel( "Model", EnumValue( noXMLoutput_ResDHWSysRef:CHPWHNEEAModel ) )
 
+; mods to switch values accounting for increment of 100 for CHPWH compressor types - SAC 12/28/22
 RULE nrcctblRowCHPWH:afterchildren_WaterCHPWH02a_HeatPumpWaterHeaterSimulationGroup
   ANNUAL_PROPOSED
     if (EnumValue(noXMLoutput_ResDHWSysRef:CHPWHSysDescrip) < 1 .OR. EnumValue(noXMLoutput_ResDHWSysRef:CHPWHASHPType) < 1)
@@ -1377,42 +1358,44 @@ RULE nrcctblRowCHPWH:afterchildren_WaterCHPWH02a_HeatPumpWaterHeaterSimulationGr
             case 33 :  "AOSmithSHPT66"    ; "AO Smith SHPT 66"      ; AOSmithSHPT66
             case 34 :  "AOSmithSHPT80"    ; "AO Smith SHPT 80"      ; AOSmithSHPT80
             case 72 :  "AOSmithCAHP120"   ; "AO Smith CAHP-120"     ; SAC 01/30/21 (tic #1260)
+            case 86 :  "AquaThermAire"    ; "AquaThermAire"        ; RJH 02/15/24
             case 19 :  "GE201450"         ; "GE2014 50"
             case 23 :  "GE201480"         ; "GE2014 80"
             case 36 :  "GE201480"         ; "GE2014 80 Eff DR"      ; GE2014_80DR          -- DR ???
             case 21 :  "RheemHB50"        ; "Rheem HB 50"
-            case 16 :  "Sanden40"         ; "Sanden 40"
-            case 17 :  "Sanden80"         ; "Sanden 80"
+            case 16 :  "SANCO240"         ; "SANCO2 40"        ; RJH 09/30/24 rename "Sanden" to "SANCO2"
+            case 17 :  "SANCO280"         ; "SANCO2 80"        ; RJH 09/30/24 rename "Sanden" to "SANCO2"
+            case 18 :  "SANCO2120"        ; "SANCO2 120"        ; RJH 09/30/24 added
             case 22 :  "Stiebel220E"      ; "Stiebel 220E"
             case 38 :  "GE201250"         ; "GE2012 50"
-            case 73 :  "Tier3Generic40"   ; "AWHSTier3Generic40"    ; NEEA generic tier 3 options - SAC 06/17/21
-            case 74 :  "Tier3Generic50"   ; "AWHSTier3Generic50"
-            case 75 :  "Tier3Generic65"   ; "AWHSTier3Generic65"
-            case 76 :  "Tier3Generic80"   ; "AWHSTier3Generic80"
+            case 73 :  "Tier3Generic40"   ; "Tier3Generic40"    ; NEEA generic tier 3 options - SAC 06/17/21  ; remove leading AWHS - SAC 04/26/24
+            case 74 :  "Tier3Generic50"   ; "Tier3Generic50"
+            case 75 :  "Tier3Generic65"   ; "Tier3Generic65"
+            case 76 :  "Tier3Generic80"   ; "Tier3Generic80"
             case 39 :  "RheemHBDR4550"    ; "Rheem HBDR-45-50"
             case 40 :  "RheemHBDR4565"    ; "Rheem HBDR-45-65"
             case 41 :  "RheemHBDR4580"    ; "Rheem HBDR-45-80"
             case 42 :  "RheemHBDR2250"    ; "Rheem HBDR-22-50"
             case 43 :  "RheemHBDR2265"    ; "Rheem HBDR-22-65"
             case 44 :  "RheemHBDR2280"    ; "Rheem HBDR-22-80"
-            case 48 :  "ColmacCxV5_SP"    ; "Colmac CxV-5"
-            case 49 :  "ColmacCxA10_SP"   ; "Colmac CxA-10"
-            case 50 :  "ColmacCxA15_SP"   ; "Colmac CxA-15"
-            case 45 :  "ColmacCxA20_SP"   ; "Colmac CxA-20"
-            case 51 :  "ColmacCxA25_SP"   ; "Colmac CxA-25"
-            case 52 :  "ColmacCxA30_SP"   ; "Colmac CxA-30"
-            case 53 :  "NyleC25A_SP"      ; "Nyle C25A"
-            case 54 :  "NyleC60A_SP"      ; "Nyle C60A"
-            case 55 :  "NyleC90A_SP"      ; "Nyle C90A"
-            case 56 :  "NyleC125A_SP"     ; "Nyle C125A"
-            case 46 :  "NyleC185A_SP"     ; "Nyle C185A"
-            case 47 :  "NyleC250A_SP"     ; "Nyle C250A"
-            case 67 :  "NyleC60A_CWP_SP"  ; "Nyle C60A-CWP"        ; SAC 6/23/20 - added cold wthr package presets
-            case 68 :  "NyleC90A_CWP_SP"  ; "Nyle C90A-CWP"
-            case 69 :  "NyleC125A_CWP_SP" ; "Nyle C125A-CWP"
-            case 70 :  "NyleC185A_CWP_SP" ; "Nyle C185A-CWP"
-            case 71 :  "NyleC250A_CWP_SP" ; "Nyle C250A-CWP"
-            case 57 :  "SandenGS3"        ; "Sanden GS3-45HPA-US"   ; used to map to 17 - Sanden 80
+            case 148 :  "ColmacCxV5_SP"    ; "Colmac CxV-5"
+            case 149 :  "ColmacCxA10_SP"   ; "Colmac CxA-10"
+            case 150 :  "ColmacCxA15_SP"   ; "Colmac CxA-15"
+            case 145 :  "ColmacCxA20_SP"   ; "Colmac CxA-20"
+            case 151 :  "ColmacCxA25_SP"   ; "Colmac CxA-25"
+            case 152 :  "ColmacCxA30_SP"   ; "Colmac CxA-30"
+            case 153 :  "NyleC25A_SP"      ; "Nyle C25A"
+            case 154 :  "NyleC60A_SP"      ; "Nyle C60A"
+            case 155 :  "NyleC90A_SP"      ; "Nyle C90A"
+            case 156 :  "NyleC125A_SP"     ; "Nyle C125A"
+            case 146 :  "NyleC185A_SP"     ; "Nyle C185A"
+            case 147 :  "NyleC250A_SP"     ; "Nyle C250A"
+            case 167 :  "NyleC60A_CWP_SP"  ; "Nyle C60A-CWP"        ; SAC 6/23/20 - added cold wthr package presets
+            case 168 :  "NyleC90A_CWP_SP"  ; "Nyle C90A-CWP"
+            case 169 :  "NyleC125A_CWP_SP" ; "Nyle C125A-CWP"
+            case 170 :  "NyleC185A_CWP_SP" ; "Nyle C185A-CWP"
+            case 171 :  "NyleC250A_CWP_SP" ; "Nyle C250A-CWP"
+            case 157 :  "SandenGS3"        ; "Sanden GS3-45HPA-US"   ; used to map to 17 - Sanden 80
             case 58 :  "BWC202065"        ; "Bradford White 2020 65"     ; SAC 6/16/20 - NEEA additions
             case 59 :  "Rheem2020Prem40"  ; "Rheem 2020 Premium 40"
             case 60 :  "Rheem2020Prem50"  ; "Rheem 2020 Premium 50"
@@ -1422,35 +1405,51 @@ RULE nrcctblRowCHPWH:afterchildren_WaterCHPWH02a_HeatPumpWaterHeaterSimulationGr
             case 64 :  "Rheem2020Build50" ; "Rheem 2020 Builder 50"
             case 65 :  "Rheem2020Build65" ; "Rheem 2020 Builder 65"
             case 66 :  "Rheem2020Build80" ; "Rheem 2020 Builder 80"
-            case 91 :  "Generic5kW"       ; "generic 5kW"                ; SAC 06/22/21
-            case 92 :  "Generic11kW"      ; "generic 11kW"
-            case 93 :  "Generic20kW"      ; "generic 20kW"
-            case 94 :  "Generic26kW"      ; "generic 26kW"
-            case 95 :  "Generic40kW"      ; "generic 40kW"
-            case 96 :  "Generic45kW"      ; "generic 45kW"
-            case 77 :  "ColmacCxV5MP"    ; "Colmac CxV-5 (MP)"      ; multi pass additions - SAC 01/17/22
-            case 78 :  "ColmacCxA10MP"   ; "Colmac CxA-10 (MP)"
-            case 79 :  "ColmacCxA15MP"   ; "Colmac CxA-15 (MP)"
-            case 80 :  "ColmacCxA20MP"   ; "Colmac CxA-20 (MP)"
-            case 81 :  "ColmacCxA25MP"   ; "Colmac CxA-25 (MP)"
-            case 82 :  "ColmacCxA30MP"   ; "Colmac CxA-30 (MP)"
-            case 83 :  "RheemHPHD60HNUMP"      ; "Rheem HPHD-60HNU (horiz MP)"
-            case 84 :  "RheemHPHD60HNUMP"      ; "Rheem HPHD-60HNU (horiz MP)"
-            case 85 :  "RheemHPHD135HNUMP"      ; "Rheem HPHD-135HNU (horiz MP)"
-            case 86 :  "RheemHPHD135VNUMP"      ; "Rheem HPHD-135VNU (vertical MP)"
-            case  5 :  "NyleC60AMP"      ; "Nyle C60A (MP)"
-            case  6 :  "NyleC90AMP"      ; "Nyle C90A (MP)"
-            case  7 :  "NyleC125AMP"     ; "Nyle C125A (MP)"
-            case  8 :  "NyleC185AMP"     ; "Nyle C185A (MP)"
-            case  9 :  "NyleC250AM"      ; "Nyle C250A (MP)"
-            case 25 :  "NyleC60A_CWPMP"  ; "Nyle C60A-CWP (MP)"  
-            case 26 :  "NyleC90A_CWPMP"  ; "Nyle C90A-CWP (MP)"
-            case 27 :  "NyleC125A_CWPMP" ; "Nyle C125A-CWP (MP)"
-            case 28 :  "NyleC185A_CWPMP" ; "Nyle C185A-CWP (MP)"
-            case 29 :  "NyleC250A_CWPMP" ; "Nyle C250A-CWP (MP)"
+            case 20 :  "AOSmithHPTS40"      ; RJH 11/8/24 added (tic #3640)
+            case 24 :  "LG_APHWC50"         ; RJH 11/8/24 added
+            case 30 :  "LG_APHWC80"         ; RJH 11/8/24 added
+            case 35 :  "AeroTherm2023_50"   ; RJH 11/8/24 added
+            case 98 :  "AeroTherm2023_65"   ; RJH 11/8/24 added
+            case 99 :  "AeroTherm2023_80"   ; RJH 11/8/24 added
+            case 191 :  "Generic5kW"       ; "generic 5kW"                ; SAC 06/22/21
+            case 192 :  "Generic11kW"      ; "generic 11kW"
+            case 193 :  "Generic20kW"      ; "generic 20kW"
+            case 194 :  "Generic26kW"      ; "generic 26kW"
+            case 195 :  "Generic40kW"      ; "generic 40kW"
+            case 196 :  "Generic45kW"      ; "generic 45kW"
+            case 177 :  "ColmacCxV5MP"    ; "Colmac CxV-5 (MP)"      ; multi pass additions - SAC 01/17/22
+            case 178 :  "ColmacCxA10MP"   ; "Colmac CxA-10 (MP)"
+            case 179 :  "ColmacCxA15MP"   ; "Colmac CxA-15 (MP)"
+            case 180 :  "ColmacCxA20MP"   ; "Colmac CxA-20 (MP)"
+            case 181 :  "ColmacCxA25MP"   ; "Colmac CxA-25 (MP)"
+            case 182 :  "ColmacCxA30MP"   ; "Colmac CxA-30 (MP)"
+            case 183 :  "RheemHPHD60HNUMP"      ; "Rheem HPHD-60HNU (horiz MP)"
+            case 184 :  "RheemHPHD60HNUMP"      ; "Rheem HPHD-60HNU (horiz MP)"
+            case 185 :  "RheemHPHD135HNUMP"      ; "Rheem HPHD-135HNU (horiz MP)"
+            case 186 :  "RheemHPHD135VNUMP"      ; "Rheem HPHD-135VNU (vertical MP)"
+            case 105 :  "NyleC60AMP"      ; "Nyle C60A (MP)"
+            case 106 :  "NyleC90AMP"      ; "Nyle C90A (MP)"
+            case 107 :  "NyleC125AMP"     ; "Nyle C125A (MP)"
+            case 108 :  "NyleC185AMP"     ; "Nyle C185A (MP)"
+            case 109 :  "NyleC250AM"      ; "Nyle C250A (MP)"
+            case 125 :  "NyleC60A_CWPMP"  ; "Nyle C60A-CWP (MP)"  
+            case 126 :  "NyleC90A_CWPMP"  ; "Nyle C90A-CWP (MP)"
+            case 127 :  "NyleC125A_CWPMP" ; "Nyle C125A-CWP (MP)"
+            case 128 :  "NyleC185A_CWPMP" ; "Nyle C185A-CWP (MP)"
+            case 129 :  "NyleC250A_CWPMP" ; "Nyle C250A-CWP (MP)"
+            case 87 :  "Tier4Generic40"   ; "Tier4Generic40"    ; NEEA generic tier 4 options - SAC 04/25/24 (tic #3595)  ; remove leading AWHS - SAC 04/26/24
+            case 88 :  "Tier4Generic50"   ; "Tier4Generic50"
+            case 89 :  "Tier4Generic65"   ; "Tier4Generic65"
+            case 90 :  "Tier4Generic80"   ; "Tier4Generic80"
             default :  UNDEFINED
           endswitch
     endif
+ENDRULE
+
+; RJH 3/24/23 Added as NOT REPORTED IN PDF
+RULE nrcctblRowCHPWH:afterchildren_WaterCHPWH02b_WaterHeaterFuelSource
+  ANNUAL_PROPOSED
+    "WaterHeatingHP"
 ENDRULE
 
 ; NRCC Res DHW
@@ -1497,21 +1496,27 @@ RULE nrcctblRowCHPWH:afterchildren_WaterCHPWH06_NotApplicableMessage
     else "NotApplicable"
     endif
 ENDRULE
+
 ; NRCC Res DHW
+
+; RJH 11/20/2023 GitHub 2022-LRMF-Schema Issue #79 remove WaterCHPWH07_ZoneSystemName choice and output WaterCHPWH07_TankLocation with "Outside" or "TankZone" depending on ResDHWSys:CHPWHTankLoc
 RULE nrcctblRowCHPWH:afterchildren_WaterCHPWH07_TankLocation
   ANNUAL_PROPOSED
     if (noXMLoutput_ResDHWSysRef:CHPWHTankLoc == "Outside")
     then "Outside"
-    else UNDEFINED
+    else if (noXMLoutput_ResDHWSysRef:CHPWHTankLoc == "Zone")
+         then "TankZone"
+         else UNDEFINED
+         endif
     endif
 ENDRULE
-RULE nrcctblRowCHPWH:afterchildren_WaterCHPWH07_ZoneSystemName
-  ANNUAL_PROPOSED
-    if (noXMLoutput_ResDHWSysRef:CHPWHTankLoc == "Zone")
-    then noXMLoutput_ResDHWSysRef:CHPWHTankZone:Name
-    else UNDEFINED
-    endif
-ENDRULE
+;RULE nrcctblRowCHPWH:afterchildren_WaterCHPWH07_ZoneSystemName
+;  ANNUAL_PROPOSED
+;    if (noXMLoutput_ResDHWSysRef:CHPWHTankLoc == "Zone")
+;    then noXMLoutput_ResDHWSysRef:CHPWHTankZone:Name
+;    else UNDEFINED
+;    endif
+;ENDRULE
 
 
 RULE nrcctblRowCHPWH:afterchildren_WaterCHPWH08_AirSource
@@ -1602,6 +1607,12 @@ RULE nrcctblRowLpTank:LpTank01a_LoopTankConfig
     endswitch
 ENDRULE
 
+; RJH 2/3/23 Add CHPWH Name reference for HERS providers
+RULE nrcctblRowLpTank:LpTank01b_WaterHeatingSystemName
+  ANNUAL_PROPOSED
+    noXMLoutput_ResDHWSysRef:Name
+ENDRULE
+
 ;; RJH - 10/4/22 If Single Pass Primary OR Multi Pass Primary then ONLY populate LpTank02_CentralHPWHCompressorType (See SVN Documentation/T24/T24R_CentralHPWHCompressors.xlsx)
 RULE nrccLpTank02:LpTank02_CentralHPWHCompressorType
   ANNUAL_PROPOSED
@@ -1665,12 +1676,12 @@ RULE nrccLpTank02:LpTank02_CentralHPWHCompressorType
                 case	"generic  (26kW cap @ 40F)"	:	"Generic26kW"
                 case	"generic  (40kW cap @ 40F)"	:	"Generic40kW"
                 case	"generic  (45kW cap @ 40F)"	:	"Generic45kW"
-                case	"Colmac CxV-5 (MP, 14kW cap @ 40F)"	:	"ColmacCxV5"      ; RJH 10/2/22 new multi pass options
-                case	"Colmac CxA-10 (MP, 21kW cap @ 40F)"	:	"ColmacCxA10MP"
-                case	"Colmac CxA-15 (MP, 29kW cap @ 40F)"	:	"ColmacCxA15MP"
-                case	"Colmac CxA-20 (MP, 41kW cap @ 40F)"	:	"ColmacCxA20MP"
-                case	"Colmac CxA-25 (MP, 49kW cap @ 40F)"	:	"ColmacCxA25MP"
-                case	"Colmac CxA-30 (MP, 57kW cap @ 40F)"	:	"ColmacCxA30MP"
+                case	"Colmac CxV-5  (MP, 14kW cap @ 40F)"	:	"ColmacCxV5MP"      ; RJH 10/2/22 new multi pass options
+                case	"Colmac CxA-10  (MP, 21kW cap @ 40F)"	:	"ColmacCxA10MP"
+                case	"Colmac CxA-15  (MP, 29kW cap @ 40F)"	:	"ColmacCxA15MP"
+                case	"Colmac CxA-20  (MP, 41kW cap @ 40F)"	:	"ColmacCxA20MP"
+                case	"Colmac CxA-25  (MP, 49kW cap @ 40F)"	:	"ColmacCxA25MP"
+                case	"Colmac CxA-30  (MP, 57kW cap @ 40F)"	:	"ColmacCxA30MP"
                 case	"Rheem HPHD-60HNU (horiz MP, 12kW cap @ 45F)"	  :	"RheemHPHD60HNUMP"
                 case	"Rheem HPHD-60VNU (vertical MP, 12kW cap @ 45F)"  :	"RheemHPHD60VNUMP"
                 case	"Rheem HPHD-135HNU (horiz MP, 30kW cap @ 45F)"	  :	"RheemHPHD135HNUMP"
@@ -1732,18 +1743,23 @@ RULE nrccLpTank02:LpTank02_HeatPumpWaterHeaterBrand
             then switch (noXMLoutput_ResDHWSysRef:CHPWHLoopTankNEEABrand)
                     case	"A. O. Smith"	 :	"AOSmith"
                     case	"American"		 :	"American"
+                    case    "AquaThermAire"  :  "AquaThermAire"       ; RJH 02/15/24
                     case	"Bradford White" :	"BradfordWhite"
                     case	"Direct Energy"	 :	"DirectEnergy"
                     case	"EcoSense"		 :	"EcoSense"
-                    case	"GE"		     :	"GE"
-                    case	"Kenmore"		 :	"Kenmore"
+                    case    "Friedrich"      :  "Friedrich"     ; RJH 11/8/24 add (tic #3640)
+                    case    "GE"             :  "GE"
+                    case    "Kenmore"        :  "Kenmore"
+                    case    "LG"             :  "LG"            ; RJH 11/8/24 add (tic #3640)
                     case	"Lochinvar"		 :	"Lochinvar"
                     case	"Reliance"		 :	"Reliance"
                     case	"Rheem"		     :	"Rheem"
                     case	"Rheem Canada"	 :	"RheemCanada"
                     case	"Richmond"		 :	"Richmond"
                     case	"Ruud"		     :	"Ruud"
-                    case	"Sanden"		 :	"Sanden"
+                    case	"Sanden"		 :	"Sanden"     ; RJH 9/30/24 left for backward compatibility
+                    case	"SANCO2"		 :	"SANCO2"     ; RJH 9/30/24 "Sanden" renamed "SANCO2"
+                    case	"Harvest Thermal" :	"HarvestThermal"  ; RJH 9/30/24 added
                     case	"State"		     :	"State"
                     case	"Stiebel Eltron" :	"Stiebel"
                     case	"US Craftmaster" :	"USCraftmaster"
@@ -1762,7 +1778,7 @@ RULE nrccLpTank02:LpTank02_HeatPumpWaterHeaterModel
   ANNUAL_PROPOSED
     if( IfValidAnd(noXMLoutput_ResDHWSysRef:CHPWHLoopTankType == "Integrated, Packaged System") .OR. IfValidAnd(noXMLoutput_ResDHWSysRef:CHPWHLoopTankType == "Integrated/Packaged System") )
     then if( ResProj:EnergyCodeYearNum >= 2022 .AND. IfValidAnd(noXMLoutput_ResDHWSysRef:CHPWHLoopTankIntegPkgType == "Residential (NEEA rated) Product") .AND. LocalStatus( noXMLoutput_ResDHWSysRef:CHPWHLoopTankNEEAModel ) > 0 )
-         then HPWHData_NEEA:HeatPumpWaterHeaterModel( "Model", EnumValue( noXMLoutput_ResDHWSysRef:CHPWHLoopTankNEEAModel ) )
+         then HPWHData_NEEA:RptHPWHModel( "Model", noXMLoutput_ResDHWSysRef:CHPWHLoopTankNEEAModel )
          else if( IfValidAnd(noXMLoutput_ResDHWSysRef:CHPWHLoopTankIntegPkgType == "Commercial Product") )
               then "AOSmithCAHP120"
               else UNDEFINED
@@ -1771,6 +1787,7 @@ RULE nrccLpTank02:LpTank02_HeatPumpWaterHeaterModel
     else UNDEFINED
     endif
 ENDRULE
+; SAC 12/26/22 - was:   then HPWHData_NEEA:HeatPumpWaterHeaterModel( "Model", EnumValue( noXMLoutput_ResDHWSysRef:CHPWHLoopTankNEEAModel ) )
 
 RULE nrccLpTank02:LpTank02_NotApplicableMessage
   ANNUAL_PROPOSED
@@ -1933,6 +1950,13 @@ ENDRULE
 RULE nrcctblRowWaterSolar:WaterSolar02_Manufacturer
   ANNUAL_PROPOSED
     switch (noXMLoutput_DHWSolSysRef:Manufacturer)
+        case	"CALPAK S.A."                               :	"CALPAK_SA"                        ; added - RJH 11/18/24
+        case	"Chromagen Israel Ltd"                      :	"ChromagenIsraelLtd"               ; added - RJH 11/18/24
+        case	"MC Green Solutions, LLC"                   :	"MCGreenSolutionsLLC"              ; added - RJH 11/18/24
+        case	"Pleion SpA"                                :	"PleionSpA"                        ; added - RJH 11/18/24
+        case	"SP Treatment Systems Inc."                 :	"SPTreatmentSystemsInc"            ; added - RJH 11/18/24
+        case	"Tychon LLC"                                :	"TychonLLC"                        ; added - RJH 11/18/24
+        case	"ZHEJIANG JURE SOLAR TECHNOLOGY CO., LTD."	:	"ZhejiangJureSolarTechnologyCoLTD" ; added - RJH 11/18/24
         case	"1st Sunflower Renewable Energy Co., Ltd"	:	"SunflowerRenewable" ; renamed - SAC 05/11/21		
         case	"Baymak Group"	:	"BaymakGroup"                                                  ; renamed - SAC 05/11/21		
         case	"Chromagen"	:	"Chromagen"                                                        ; renamed - SAC 05/11/21		
@@ -2083,6 +2107,21 @@ ENDRULE
 RULE nrcctblRowWaterSolar:WaterSolar03_Brand
   ANNUAL_PROPOSED
     switch (noXMLoutput_DHWSolSysRef:Brand)
+        case	"Energy+"                   :	"EnergyPlus"               ; RJH added 11/18/24
+        case	"Supreme Energy"            :	"SupremeEnergy"            ; RJH added 11/18/24
+        case	"TERRA+"                    :	"TERRAPlus"                ; RJH added 11/18/24
+        case	"HICS"                      :	"HICS"                     ; RJH added 11/18/24
+        case	"FMAX"                      :	"FMAX"                     ; RJH added 11/18/24
+        case	"FMAX TOP"                  :	"FMAX_TOP"                 ; RJH added 11/18/24
+        case	"MTEC"                      :	"MTEC"                     ; RJH added 11/18/24
+        case	"OLC"                       :	"OLC"                      ; RJH added 11/18/24
+        case	"Sol 29"                    :	"Sol29"                    ; RJH added 11/18/24
+        case	"CopperHeart"               :	"CopperHeart"              ; RJH added 11/18/24
+        case	"Prisma"                    :	"Prisma"                   ; RJH added 11/18/24
+        case	"MC Green"                  :	"MCGreen"                  ; RJH added 11/18/24
+        case	"EGO"                       :	"EGO"                      ; RJH added 11/18/24
+        case	"Sustainable Products SWH"  :	"SustainableProductsSWH"   ; RJH added 11/18/24
+        case	"ER3"                       :	"ER3"                      ; RJH added 11/18/24
         case	"International Solar System" :	"InternationalSolarSystem" ; RJH added 9/25/22
         case	"Hydro Solar"		         :	"HydroSolar"               ; RJH added 9/25/22
         case	"ensol"		                 :	"Ensol"                    ; RJH added 9/25/22
@@ -2304,7 +2343,7 @@ RULE nrcctblRowWaterSolar:WaterSolar04_Model
         case	"ThermoPower VDF20"	:	"ThermoPowerVDF20" ; RJH added 9/25/22
         case	"ThermoPower VDF30"	:	"ThermoPowerVDF30" ; RJH added 9/25/22
         case	"STS-TC32R, STS-TC24R"	:	"STSTC32RSTSTC24R" ; RJH added 9/25/22
-        case	"1"	:	"1_0"
+        case	"1.0"	:	"1_0" ; RJH changed from "1" to "1.0" 11/18/24
         case	"44470"	:	"10_01"
         case	"1000 DF"	:	"1000DF"
         case	"1000G"	:	"1000G"
@@ -3009,6 +3048,47 @@ RULE nrcctblRowWaterSolar:WaterSolar04_Model
         case	"YN58-20"	:	"YN58_20"
         case	"YN58-25"	:	"YN58_25"
         case	"YN58-30"	:	"YN58_30"
+        case	"2"                :  "2"                ; RJH added 11/18/24
+        case	"2.5"              :  "2_5"              ; RJH added 11/18/24
+        case	"GEO 15"           :  "GEO15"            ; RJH added 11/18/24
+        case	"GEO 17"           :  "GEO17"            ; RJH added 11/18/24
+        case	"GEO 19"           :  "GEO19"            ; RJH added 11/18/24
+        case	"GEO 20"           :  "GEO20"            ; RJH added 11/18/24
+        case	"GEO 23"           :  "GEO23"            ; RJH added 11/18/24
+        case	"GEO 25"           :  "GEO25"            ; RJH added 11/18/24
+        case	"GEO 27"           :  "GEO27"            ; RJH added 11/18/24
+        case	"GEO 29"           :  "GEO29"            ; RJH added 11/18/24
+        case	"25"               :  "25"               ; RJH added 11/18/24
+        case	"29"               :  "29"               ; RJH added 11/18/24
+        case	"EVO 29"           :  "EVO29"            ; RJH added 11/18/24
+        case	"MCG-18"           :  "MCG_18"           ; RJH added 11/18/24
+        case	"220"              :  "220"              ; RJH added 11/18/24
+        case	"260"              :  "260"              ; RJH added 11/18/24
+        case	"SP BlueWave 29"   :  "SPBlueWave29"     ; RJH added 11/18/24
+        case	"JDL-PG2.0-80"     :  "JDL_PG2_0_80"     ; RJH added 11/18/24
+        case	"SLR-BX-02C15.75"  :  "SLR_BX_02C15_75"  ; RJH added 11/18/24
+        case	"SLR-BX-02C31.50"  :  "SLR_BX_02C31_50"  ; RJH added 11/18/24
+        case	"SLR-BX-03C31.50"  :  "SLR_BX_03C31_50"  ; RJH added 11/18/24
+        case	"SLR-BX-04C31.50"  :  "SLR_BX_04C31_50"  ; RJH added 11/18/24
+        case	"SLR-BX-05C37.50"  :  "SLR_BX_05C37_50"  ; RJH added 11/18/24
+        case	"SLR-BX-05C50.00"  :  "SLR_BX_05C50_00"  ; RJH added 11/18/24
+        case	"SLR-BX-05C75.00"  :  "SLR_BX_05C75_00"  ; RJH added 11/18/24
+        case	"FK 9251N"         :  "FK_9251N"         ; RJH added 11/18/24
+        case	"SUNPAD"           :  "SUNPAD"           ; RJH added 11/18/24
+        case	"Solpal Plus L"    :  "SolpalPlusL"      ; RJH added 11/18/24
+        case	"FPC1500C"         :  "FPC1500C"         ; RJH added 11/18/24
+        case	"1.50, 1.50H"      :  "1_50_1_50H"       ; RJH added 11/18/24
+        case	"1.82, 1.82H"      :  "1_82_1_82H"       ; RJH added 11/18/24
+        case	"2.0, 2.00H"       :  "2_0_2_00H"        ; RJH added 11/18/24
+        case	"2.37, 2.37H"      :  "2_37_2_37H"       ; RJH added 11/18/24
+        case	"2.72, 2.72H"      :  "2_72_2_72H"       ; RJH added 11/18/24
+        case	"2.72"             :  "2_72"             ; RJH added 11/18/24
+        case	"200"              :  "200"              ; RJH added 11/18/24
+        case	"Premium S"        :  "PremiumS"         ; RJH added 11/18/24
+        case	"Premium W"        :  "PremiumW"         ; RJH added 11/18/24
+        case	"CP-20"            :  "CP_20"            ; RJH added 11/18/24
+        case	"CP-40"            :  "CP_40"            ; RJH added 11/18/24
+        case	"USP-619"          :  "USP_619"          ; RJH added 11/18/24
         default :  UNDEFINED
     endswitch
     endif

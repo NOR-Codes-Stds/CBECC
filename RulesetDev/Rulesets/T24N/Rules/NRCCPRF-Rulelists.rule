@@ -74,14 +74,15 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
 
 
   ; Section_DwellInfo table only for NRCC-MF & LMCC projects (RJH 10/1/22 Created from CF1RPRF Section_H)
+  ; added logic to prevent DwellInfo & DwellType table creation when no dwelling units present - SAC 10/09/24 (tic #3630)
    "Call subordinate rulelist to handle Section_DwellInfo"
-      nrccNRCCPRF:Action = {  if (IfValidAnd( Proj:ResDwellUnits > 0 )) 
+      nrccNRCCPRF:Action = {  if (IfValidAnd( Proj:ResDwellUnits > 0 ) .AND. IfValidAnd( Proj:ResLivingUnitCnt > 0 )) 
                               then  EvalRulelist( "CF1RPRF01E_cf1rSection_DwellInfo_Proposed_MultiFamily" )
                               else  UNCHANGED  endif }
 
   ; Section_DwellType table only for NRCC-MF & LMCC projects (RJH 10/1/22 Created from CF1RPRF Section_I)
    "Call subordinate rulelist to handle Section_DwellType"
-      nrccNRCCPRF:Action = {  if (IfValidAnd( Proj:ResDwellUnits > 0 )) 
+      nrccNRCCPRF:Action = {  if (IfValidAnd( Proj:ResDwellUnits > 0 ) .AND. IfValidAnd( Proj:ResLivingUnitCnt > 0 )) 
                               then  EvalRulelist( "CF1RPRF01E_cf1rSection_DwellType_Proposed_MultiFamily" )
                               else  UNCHANGED  endif }
 
@@ -99,10 +100,22 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
       nrccNRCCPRF:Action    = {  if (Proj:AnalysisVersion >= 220000) then CreateChildren( nrccSection_C22Result3,    1, "NRCC C22Result3" ) else UNDEFINED endif  }
 
    "Create nrccSection_C22Result4 object"
-      nrccNRCCPRF:Action    = {  if (Proj:AnalysisVersion >= 220000) then CreateChildren( nrccSection_C22Result4,    1, "NRCC C22Result4" ) else UNDEFINED endif  }
+      nrccNRCCPRF:Action    = {  if (Proj:AnalysisVersion >= 220000) 
+                                 then if ( (enumvalue(Proj:CompType) >= 12 .AND. enumvalue(Proj:CompType) <= 22)  ; RJH 20230702 Nonresidential Project: Other EAA compliance scopes (CompType 12-22)
+                                            .OR. enumvalue(Proj:ResCompType) = 22 )                               ; Multifamily/mixed-use Project: ExistingAdditionAndAlteration (ResCompType 22)
+                                      then UNDEFINED
+                                      else CreateChildren( nrccSection_C22Result4,    1, "NRCC C22Result4" ) 
+                                      endif
+                                 else UNDEFINED endif  }
 
    "Create nrccSection_C22Result5 object"
-      nrccNRCCPRF:Action    = {  if (Proj:AnalysisVersion >= 220000) then CreateChildren( nrccSection_C22Result5,    1, "NRCC C22Result5" ) else UNDEFINED endif  }
+      nrccNRCCPRF:Action    = {  if (Proj:AnalysisVersion >= 220000) 
+                                 then if ( (enumvalue(Proj:CompType) >= 12 .AND. enumvalue(Proj:CompType) <= 22)  ; RJH 20230702 Nonresidential Project: Other EAA compliance scopes (CompType 12-22)
+                                            .OR. enumvalue(Proj:ResCompType) = 22 )                               ; Multifamily/mixed-use Project: ExistingAdditionAndAlteration (ResCompType 22)
+                                      then UNDEFINED
+                                      else CreateChildren( nrccSection_C22Result5,    1, "NRCC C22Result5" ) 
+                                      endif
+                                 else UNDEFINED endif  }
 
    "Create nrccSection_C22Result6Tier object"
       nrccNRCCPRF:Action    = {  if (Proj:AnalysisVersion >= 220000) then CreateChildren( nrccSection_C22Result6Tier,    1, "NRCC C22Result6Tier" ) else UNDEFINED endif  }
@@ -161,15 +174,21 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
 
    "Create nrccSection_Remarks object"
       nrccNRCCPRF:Action    = {  CreateChildren( nrccSection_Remarks,    1, "NRCC Remarks" )  }
-  ; Rule to Delete empty nrccSection_Remarks
+  ; Rule to Delete empty nrccSection_Remarks RJH 03/01/24 corrected improper deletion
    "DELETE empty nrccSection_Remarks object"
-      nrccSection_Remarks:Action   = {  if (LocalStatus(Remarks01_CommentsToPermitAuthority) > 0) then  UNCHANGED  else  DeleteComp()  endif }
+      nrccSection_Remarks:Action   = {  if (GlobalStatus( Proj:NarrativeDetails ) > 0) 
+                                        then if (Proj:NarrativeDetails != " - specify - ") 
+                                             then UNCHANGED  
+                                             else  DeleteComp()  
+                                             endif
+                                        else DeleteComp()
+                                        endif }
 
 
    "Create cf1rSection_PV (PV) object (NRCC & LMCC)"           ; SAC 08/23/22
       nrccNRCCPRF:Action    = {  if ( IfValidAnd( Proj:AnalysisVersion > 220000 ) .AND.
                                       ( IfValidAnd( Proj:CommunitySolarProjID > 0 ) .OR.
-                                        IfValidAnd( Proj:PVSizeSum > 0 ) ) ) 
+                                        IfValidAnd( Proj:DCSizeMultiplier > 0 ) ) ) 
                                  then   if (Proj:PVComp = "Performance") then CreateChildren( cf1rSection_PV, 1, "CF1R SecDa" ) else UNCHANGED endif
                                  else  UNCHANGED  endif  }
    "Create cf1rTablePV object"
@@ -185,8 +204,126 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
              IfValidAnd( TiltAngle >= 0 )==0 .OR. IfValidAnd( TiltAngle <= 90 )==0) then  UNDEFINED
          else  EvalRulelist( "CF1RPRF01E_Section_Da_PVArray", 1 )  endif  }
 
+
+
+  ; Section_PVBatBldgTypes
+   "Create nrccSection_PVBatBldgTypes object" 
+      nrccNRCCPRF:Action    = {  if ( IfValidAnd( Proj:AnalysisVersion > 220000 ) .AND.
+                                      ( IfValidAnd( Proj:CommunitySolarProjID > 0 ) .OR.
+                                        IfValidAnd( Proj:DCSizeMultiplier > 0 ) ) ) 
+                                 then   if (Proj:PVComp = "Performance") then CreateChildren( nrccSection_PVBatBldgTypes, 1, "NRCC PVBatBldgTypes" ) else UNCHANGED endif
+                                 else  UNCHANGED  endif  }
+   "Create nrccSection_PVBatBldgTypes nrccTablePVBatBldgTypes object"                 nrccSection_PVBatBldgTypes:Action  =
+      {  CreateChildren( nrccTablePVBatBldgTypes, 1, "NRCC PVBatBldgTypes table" )  }
+  ; ----------------------------------------------------------------------
+
+  ; Rules to create individual PVBatBldgTypes table rows for Proj:CondPVBattBldgTypeArea[*] >= 0
+   "Create nrcctblRowPVBatBldgTypes table row for Proj:CondPVBattBldgTypeArea[1] >= 0"
+      Proj:NRCC_PVBatBldgTypesRow[1]   = { if (ComponentCount( nrccTablePVBatBldgTypes ) < 1) 
+                                           then  UNDEFINED
+                                           else if (IfValidAnd( CondPVBattBldgTypeArea[1] >= 0 ))
+                                                then  CreateComp( nrcctblRowPVBatBldgTypes, Format( "%s PVBatBldgTypes tblRow", Name ) )  
+                                                else  UNDEFINED  
+                                                endif 
+                                           endif }
+   "Create nrcctblRowPVBatBldgTypes table row for Proj:CondPVBattBldgTypeArea[2] >= 0"
+      Proj:NRCC_PVBatBldgTypesRow[2]   = { if (ComponentCount( nrccTablePVBatBldgTypes ) < 1) 
+                                           then  UNDEFINED
+                                           else if (IfValidAnd( CondPVBattBldgTypeArea[2] >= 0 ))
+                                                then  CreateComp( nrcctblRowPVBatBldgTypes, Format( "%s PVBatBldgTypes tblRow", Name ) )  
+                                                else  UNDEFINED  
+                                                endif 
+                                           endif }
+   "Create nrcctblRowPVBatBldgTypes table row for Proj:CondPVBattBldgTypeArea[3] >= 0"
+      Proj:NRCC_PVBatBldgTypesRow[3]   = { if (ComponentCount( nrccTablePVBatBldgTypes ) < 1) 
+                                           then  UNDEFINED
+                                           else if (IfValidAnd( CondPVBattBldgTypeArea[3] >= 0 ))
+                                                then  CreateComp( nrcctblRowPVBatBldgTypes, Format( "%s PVBatBldgTypes tblRow", Name ) )  
+                                                else  UNDEFINED  
+                                                endif 
+                                           endif }
+   "Create nrcctblRowPVBatBldgTypes table row for Proj:CondPVBattBldgTypeArea[4] >= 0"
+      Proj:NRCC_PVBatBldgTypesRow[4]   = { if (ComponentCount( nrccTablePVBatBldgTypes ) < 1) 
+                                           then  UNDEFINED
+                                           else if (IfValidAnd( CondPVBattBldgTypeArea[4] >= 0 ))
+                                                then  CreateComp( nrcctblRowPVBatBldgTypes, Format( "%s PVBatBldgTypes tblRow", Name ) )  
+                                                else  UNDEFINED  
+                                                endif 
+                                           endif }
+   "Create nrcctblRowPVBatBldgTypes table row for Proj:CondPVBattBldgTypeArea[5] >= 0"
+      Proj:NRCC_PVBatBldgTypesRow[5]   = { if (ComponentCount( nrccTablePVBatBldgTypes ) < 1) 
+                                           then  UNDEFINED
+                                           else if (IfValidAnd( CondPVBattBldgTypeArea[5] >= 0 ))
+                                                then  CreateComp( nrcctblRowPVBatBldgTypes, Format( "%s PVBatBldgTypes tblRow", Name ) )  
+                                                else  UNDEFINED  
+                                                endif 
+                                           endif }
+   "Create nrcctblRowPVBatBldgTypes table row for Proj:CondPVBattBldgTypeArea[6] >= 0"
+      Proj:NRCC_PVBatBldgTypesRow[6]   = { if (ComponentCount( nrccTablePVBatBldgTypes ) < 1) 
+                                           then  UNDEFINED
+                                           else if (IfValidAnd( CondPVBattBldgTypeArea[6] >= 0 ))
+                                                then  CreateComp( nrcctblRowPVBatBldgTypes, Format( "%s PVBatBldgTypes tblRow", Name ) )  
+                                                else  UNDEFINED  
+                                                endif 
+                                           endif }
+   "Create nrcctblRowPVBatBldgTypes table row for Proj:CondPVBattBldgTypeArea[7] >= 0"
+      Proj:NRCC_PVBatBldgTypesRow[7]   = { if (ComponentCount( nrccTablePVBatBldgTypes ) < 1) 
+                                           then  UNDEFINED
+                                           else if (IfValidAnd( CondPVBattBldgTypeArea[7] >= 0 ))
+                                                then  CreateComp( nrcctblRowPVBatBldgTypes, Format( "%s PVBatBldgTypes tblRow", Name ) )  
+                                                else  UNDEFINED  
+                                                endif 
+                                           endif }
+   "Create nrcctblRowPVBatBldgTypes table row for Proj:CondPVBattBldgTypeArea[10] >= 0"
+      Proj:NRCC_PVBatBldgTypesRow[8]   = { if (ComponentCount( nrccTablePVBatBldgTypes ) < 1) 
+                                           then  UNDEFINED
+                                           else if (IfValidAnd( CondPVBattBldgTypeArea[10] >= 0 ))
+                                                then  CreateComp( nrcctblRowPVBatBldgTypes, Format( "%s PVBatBldgTypes tblRow", Name ) )  
+                                                else  UNDEFINED  
+                                                endif 
+                                           endif }
+ ; ----------------------------------------------------------------------
+   ; Rules to populate individual PVBatBldgTypes table rows for Proj:CondPVBattBldgTypeArea[*] >= 0
+   "Set Proj:NRCC_PVBatBldgTypesRow[1]:PVBatBldgTypes01_BldgOccType"   Proj:NRCC_PVBatBldgTypesRow[1]:PVBatBldgTypes01_BldgOccType = {  "Grocery"  }
+   "Set Proj:NRCC_PVBatBldgTypesRow[1]:PVBatBldgTypes02_CondFloorArea"   Proj:NRCC_PVBatBldgTypesRow[1]:PVBatBldgTypes02_CondFloorArea = { if (IfValidAnd(CondPVBattBldgTypeArea[1] >= 0)) then CondPVBattBldgTypeArea[1] else UNCHANGED endif }
+   "Set Proj:NRCC_PVBatBldgTypesRow[1]:PVBatBldgTypes03_UnCondFloorArea"   Proj:NRCC_PVBatBldgTypesRow[1]:PVBatBldgTypes03_UnCondFloorArea = { if (IfValidAnd(UncondPVBattBldgTypeArea[1] >= 0)) then UncondPVBattBldgTypeArea[1] else UNCHANGED endif }
+
+   "Set Proj:NRCC_PVBatBldgTypesRow[2]:PVBatBldgTypes01_BldgOccType"   Proj:NRCC_PVBatBldgTypesRow[2]:PVBatBldgTypes01_BldgOccType = {  "HighRiseMultifamily"  }
+   "Set Proj:NRCC_PVBatBldgTypesRow[2]:PVBatBldgTypes02_CondFloorArea"   Proj:NRCC_PVBatBldgTypesRow[2]:PVBatBldgTypes02_CondFloorArea = { if (IfValidAnd(CondPVBattBldgTypeArea[2] >= 0)) then CondPVBattBldgTypeArea[2] else UNCHANGED endif }
+   "Set Proj:NRCC_PVBatBldgTypesRow[2]:PVBatBldgTypes03_UnCondFloorArea"   Proj:NRCC_PVBatBldgTypesRow[2]:PVBatBldgTypes03_UnCondFloorArea = { if (IfValidAnd(UncondPVBattBldgTypeArea[2] >= 0)) then UncondPVBattBldgTypeArea[2] else UNCHANGED endif }
+
+   "Set Proj:NRCC_PVBatBldgTypesRow[3]:PVBatBldgTypes01_BldgOccType"   Proj:NRCC_PVBatBldgTypesRow[3]:PVBatBldgTypes01_BldgOccType = {  "OfficeFinancialUnleased"  }
+   "Set Proj:NRCC_PVBatBldgTypesRow[3]:PVBatBldgTypes02_CondFloorArea"   Proj:NRCC_PVBatBldgTypesRow[3]:PVBatBldgTypes02_CondFloorArea = { if (IfValidAnd(CondPVBattBldgTypeArea[3] >= 0)) then CondPVBattBldgTypeArea[3] else UNCHANGED endif }
+   "Set Proj:NRCC_PVBatBldgTypesRow[3]:PVBatBldgTypes03_UnCondFloorArea"   Proj:NRCC_PVBatBldgTypesRow[3]:PVBatBldgTypes03_UnCondFloorArea = { if (IfValidAnd(UncondPVBattBldgTypeArea[3] >= 0)) then UncondPVBattBldgTypeArea[3] else UNCHANGED endif }
+
+   "Set Proj:NRCC_PVBatBldgTypesRow[4]:PVBatBldgTypes01_BldgOccType"   Proj:NRCC_PVBatBldgTypesRow[4]:PVBatBldgTypes01_BldgOccType = {  "Retail"  }
+   "Set Proj:NRCC_PVBatBldgTypesRow[4]:PVBatBldgTypes02_CondFloorArea"   Proj:NRCC_PVBatBldgTypesRow[4]:PVBatBldgTypes02_CondFloorArea = { if (IfValidAnd(CondPVBattBldgTypeArea[4] >= 0)) then CondPVBattBldgTypeArea[4] else UNCHANGED endif }
+   "Set Proj:NRCC_PVBatBldgTypesRow[4]:PVBatBldgTypes03_UnCondFloorArea"   Proj:NRCC_PVBatBldgTypesRow[4]:PVBatBldgTypes03_UnCondFloorArea = { if (IfValidAnd(UncondPVBattBldgTypeArea[4] >= 0)) then UncondPVBattBldgTypeArea[4] else UNCHANGED endif }
+
+   "Set Proj:NRCC_PVBatBldgTypesRow[5]:PVBatBldgTypes01_BldgOccType"   Proj:NRCC_PVBatBldgTypesRow[5]:PVBatBldgTypes01_BldgOccType = {  "School"  }
+   "Set Proj:NRCC_PVBatBldgTypesRow[5]:PVBatBldgTypes02_CondFloorArea"   Proj:NRCC_PVBatBldgTypesRow[5]:PVBatBldgTypes02_CondFloorArea = { if (IfValidAnd(CondPVBattBldgTypeArea[5] >= 0)) then CondPVBattBldgTypeArea[5] else UNCHANGED endif }
+   "Set Proj:NRCC_PVBatBldgTypesRow[5]:PVBatBldgTypes03_UnCondFloorArea"   Proj:NRCC_PVBatBldgTypesRow[5]:PVBatBldgTypes03_UnCondFloorArea = { if (IfValidAnd(UncondPVBattBldgTypeArea[5] >= 0)) then UncondPVBattBldgTypeArea[5] else UNCHANGED endif }
+
+   "Set Proj:NRCC_PVBatBldgTypesRow[6]:PVBatBldgTypes01_BldgOccType"   Proj:NRCC_PVBatBldgTypesRow[6]:PVBatBldgTypes01_BldgOccType = {  "Warehouse"  }
+   "Set Proj:NRCC_PVBatBldgTypesRow[6]:PVBatBldgTypes02_CondFloorArea"   Proj:NRCC_PVBatBldgTypesRow[6]:PVBatBldgTypes02_CondFloorArea = { if (IfValidAnd(CondPVBattBldgTypeArea[6] >= 0)) then CondPVBattBldgTypeArea[6] else UNCHANGED endif }
+   "Set Proj:NRCC_PVBatBldgTypesRow[6]:PVBatBldgTypes03_UnCondFloorArea"   Proj:NRCC_PVBatBldgTypesRow[6]:PVBatBldgTypes03_UnCondFloorArea = { if (IfValidAnd(UncondPVBattBldgTypeArea[6] >= 0)) then UncondPVBattBldgTypeArea[6] else UNCHANGED endif }
+
+   "Set Proj:NRCC_PVBatBldgTypesRow[7]:PVBatBldgTypes01_BldgOccType"   Proj:NRCC_PVBatBldgTypesRow[7]:PVBatBldgTypes01_BldgOccType = {  "Other"  }
+   "Set Proj:NRCC_PVBatBldgTypesRow[7]:PVBatBldgTypes02_CondFloorArea"   Proj:NRCC_PVBatBldgTypesRow[7]:PVBatBldgTypes02_CondFloorArea = { if (IfValidAnd(CondPVBattBldgTypeArea[7] >= 0)) then CondPVBattBldgTypeArea[7] else UNCHANGED endif }
+   "Set Proj:NRCC_PVBatBldgTypesRow[7]:PVBatBldgTypes03_UnCondFloorArea"   Proj:NRCC_PVBatBldgTypesRow[7]:PVBatBldgTypes03_UnCondFloorArea = { if (IfValidAnd(UncondPVBattBldgTypeArea[7] >= 0)) then UncondPVBattBldgTypeArea[7] else UNCHANGED endif }
+
+   "Set Proj:NRCC_PVBatBldgTypesRow[8]:PVBatBldgTypes01_BldgOccType"   Proj:NRCC_PVBatBldgTypesRow[8]:PVBatBldgTypes01_BldgOccType = {  "None"  }
+   "Set Proj:NRCC_PVBatBldgTypesRow[8]:PVBatBldgTypes02_CondFloorArea"   Proj:NRCC_PVBatBldgTypesRow[8]:PVBatBldgTypes02_CondFloorArea = { if (IfValidAnd(CondPVBattBldgTypeArea[10] >= 0)) then CondPVBattBldgTypeArea[10] else UNCHANGED endif }
+   "Set Proj:NRCC_PVBatBldgTypesRow[8]:PVBatBldgTypes03_UnCondFloorArea"   Proj:NRCC_PVBatBldgTypesRow[8]:PVBatBldgTypes03_UnCondFloorArea = { if (IfValidAnd(UncondPVBattBldgTypeArea[10] >= 0)) then UncondPVBattBldgTypeArea[10] else UNCHANGED endif }
+
+
+   "Set nrcctblRowPVBatBldgTypes parent"   nrcctblRowPVBatBldgTypes:Parent  = { if (ComponentCount( nrccTablePVBatBldgTypes ) < 1) then UNCHANGED else nrccTablePVBatBldgTypes:Name endif }
+  ; END of Section_PVBatBldgTypes rules
+  ; ----------------------------------------------------------------------
+
+
    "Create cf1rSection_Bat (Batt) object (NRCC & LMCC)"         ; SAC 08/23/22
-      nrccNRCCPRF:Action    = {  if (IfValidAnd( Proj:AnalysisVersion > 220000 ) .AND. IfValidAnd( Proj:SimBatt > 0 )) 
+      nrccNRCCPRF:Action    = {  if (IfValidAnd( Proj:AnalysisVersion > 220000 ) .AND. IfValidAnd( Proj:BattCapMult > 0 )) 
                                  then  if (Proj:BattComp = "Performance") then CreateChildren( cf1rSection_Bat, 1, "CF1R SecDb" ) else UNCHANGED endif
                                  else  UNCHANGED  endif  }
    "Create cf1rTableBat object"
@@ -195,6 +332,42 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
       {  if (ComponentCount( cf1rSection_Bat ) < 1) then  UNDEFINED
          else  EvalRulelist( "CF1RPRF01E_Section_Db_Batt", 1 )  endif  }
 
+
+   "Create nrccSection_BatExcept object"                               nrccNRCCPRF:Action       =
+      {  if (Proj:BattComp != "Performance") 
+         then  UNCHANGED
+         else if (SumAll( Spc:BattReq_PartOfLargeTenantArea ) > 0 .OR. SumAll( ResOtherZn:BattReq_PartOfLargeTenantArea ) > 0) 
+              then CreateChildren( nrccSection_BatExcept, 1, "NRCC BatExcept" ) 
+              else UNCHANGED
+              endif
+         endif  }
+   "Create nrccSection_BatExcept nrccTableCRRC object"                 nrccSection_BatExcept:Action  =
+      {  CreateChildren( nrccTableBatExcept, 1, "NRCC BatExcept table" )  }
+
+   ; reversed logic on setting PartOfLargeTenantArea exception - flag only if TotBldgArea <= 5k or (ShowBattReq_PartOfLargeTenantArea true and BattReq_PartOfLargeTenantArea UNchecked) - SAC 01/22/23
+   "Create nrcctblRowBatExcept object for each pertinent Spc"     Spc:nrcctblRowBatExceptRef =
+      {  if (LocalCompAssigned( nrcctblRowBatExceptRef ) > 0 .OR.
+             ComponentCount( nrccTableBatExcept ) < 1 .OR.
+             ( IfValidAnd( Bldg:TotCondFlrArea > 5000 ) .AND.
+               ( ShowBattReq_PartOfLargeTenantArea < 1 .OR. BattReq_PartOfLargeTenantArea > 0 ) ))
+         then  UNDEFINED
+         else CreateComp( nrcctblRowBatExcept, Format( "%s BatExcept tblRow", Name ) )
+         endif  }
+   "Set Spc:nrcctblRowBatExceptRef:noXMLoutput_SpcRef"    Spc:nrcctblRowBatExceptRef:noXMLoutput_SpcRef = {  Name  }
+
+   "Create nrcctblRowBatExcept object for each pertinent ResOtherZn"     ResOtherZn:nrcctblRowBatExceptRef =
+      {  if (LocalCompAssigned( nrcctblRowBatExceptRef ) > 0 .OR.
+             ComponentCount( nrccTableBatExcept ) < 1 .OR.
+             ( IfValidAnd( Bldg:TotCondFlrArea > 5000 ) .AND.
+               ( ShowBattReq_PartOfLargeTenantArea < 1 .OR. BattReq_PartOfLargeTenantArea > 0 ) ))
+         then  UNDEFINED
+         else CreateComp( nrcctblRowBatExcept, Format( "%s BatExcept tblRow", Name ) )
+         endif  }
+   "Set ResOtherZn:nrcctblRowBatExceptRef:noXMLoutput_ResOtherZnRef"    ResOtherZn:nrcctblRowBatExceptRef:noXMLoutput_ResOtherZnRef = {  Name  }
+
+  ; Rule to Delete empty nrccSection_BatExcept
+   "DELETE empty nrccSection_BatExcept object"
+      nrccSection_BatExcept:Action   = {  if (ComponentCount( nrcctblRowBatExcept ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
 
 ;  ...
 ;  ...
@@ -475,6 +648,28 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
       nrccSection_Fins:Action   = {  if (ComponentCount( nrcctblRowFins ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
 
 
+
+   ; setup HSPF/HSPF2 and COP report values to be used in populating Section_HvacDry data - RJH 7/01/23 GH Issue #83
+   "Set AirSys:HtgEffHSPFRpt"  AirSys:HtgEffHSPFRpt = 
+      { if( IfValidAnd( HtgEffUnitRpt != "NA" ) )
+        then if( IfValidAnd( HtgEffUnitRpt = "HSPF2/COP" ) )
+             then Format( FltToStr( MaxChild( CoilHtg:HtPumpHSPF2 ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) )
+             else if( IfValidAnd( HtgEffUnitRpt = "HSPF/COP" ) )
+                  then Format( FltToStr( MaxChild( CoilHtg:HtPumpHSPF ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) )        
+                  else UNDEFINED
+                  endif
+             endif
+        else UNDEFINED
+        endif }
+   "Set AirSys:HtgEffCOPRpt"  AirSys:HtgEffCOPRpt = 
+      { if( IfValidAnd( HtgEffUnitRpt != "NA" ) )
+        then if( IfValidAnd( HtgEffUnitRpt = "HSPF2/COP" ) .OR. IfValidAnd( HtgEffUnitRpt = "HSPF/COP" ) )
+             then Format( FltToStr( MaxChild( CoilHtg:HtPumpCOPRnd ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) ) 
+             else UNDEFINED
+             endif
+        else UNDEFINED
+        endif }
+
    ; setup SEER and EER report values to be used in populating Section_HvacDry data - RJH 11/04/21 Updated for SEER2/EER2 10/20/22
    "Set AirSys:ClgEffEERRpt"  AirSys:ClgEffEERRpt = 
       { if( IfValidAnd( ClgEffUnitRpt != "NA" ) )
@@ -493,7 +688,7 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
    "Set AirSys:ClgEffSEERRpt"  AirSys:ClgEffSEERRpt = 
       { if( IfValidAnd( ClgEffUnitRpt != "NA" ) )
         then if( IfValidAnd( ClgEffUnitRpt = "SEER2/EER2" ) )
-             then if( MaxChild( CoilClg:DXEER2 ) > 0 )
+             then if( MaxChild( CoilClg:DXSEER2 ) > 0 )
                   then Format( FltToStr( MaxChild( CoilClg:DXSEER2 ), MaxChild( CoilClg:EERSEERRndScl ) ) ) 
                   else UNDEFINED
                   endif
@@ -501,6 +696,28 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
                   then Format( FltToStr( MaxChild( CoilClg:DXSEERRnd ), MaxChild( CoilClg:EERSEERRndScl ) ) )        
                   else UNDEFINED
                   endif
+             endif
+        else UNDEFINED
+        endif }
+
+
+   ; setup HSPF/HSPF2 and COP report values to be used in populating Section_HvacDry data - RJH 7/01/23 GH Issue #83
+   "Set ZnSys:HtgEffHSPFRpt"  ZnSys:HtgEffHSPFRpt = 
+      { if( IfValidAnd( HtgEffUnitRpt != "NA" ) )
+        then if( IfValidAnd( HtgEffUnitRpt = "HSPF2/COP" ) )
+             then Format( FltToStr( MaxChild( CoilHtg:HtPumpHSPF2 ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) )
+             else if( IfValidAnd( HtgEffUnitRpt = "HSPF/COP" ) )
+                  then Format( FltToStr( MaxChild( CoilHtg:HtPumpHSPF ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) )        
+                  else UNDEFINED
+                  endif
+             endif
+        else UNDEFINED
+        endif }
+   "Set ZnSys:HtgEffCOPRpt"  ZnSys:HtgEffCOPRpt = 
+      { if( IfValidAnd( HtgEffUnitRpt != "NA" ) )
+        then if( IfValidAnd( HtgEffUnitRpt = "HSPF2/COP" ) .OR. IfValidAnd( HtgEffUnitRpt = "HSPF/COP" ) )
+             then Format( FltToStr( MaxChild( CoilHtg:HtPumpCOPRnd ), MaxChild( CoilHtg:HSPFCOPRndScl ) ) ) 
+             else UNDEFINED
              endif
         else UNDEFINED
         endif }
@@ -535,8 +752,55 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
         endif }
 
 
+
+   ; setup HSPF/HSPF2 and COP report values to be used in populating Section_HvacDry data - RJH 7/01/23 GH Issue #83
+   "Set VRFSys:HtgEffHSPFRpt"  VRFSys:HtgEffHSPFRpt = 
+      { if( IfValidAnd( HtgEffUnitRpt != "NA" ) )
+        then if( IfValidAnd( HtgEffUnitRpt = "HSPF" ) )
+             then Format( FltToStr( HSPFRnd, 2 ) )
+             else if( IfValidAnd( HtgEffUnitRpt = "HSPF/COP" ) )
+                  then Format( FltToStr( HSPFRnd, 2 ) )        
+                  else UNDEFINED
+                  endif
+             endif
+        else UNDEFINED
+        endif }
+   "Set VRFSys:HtgEffCOPRpt"  VRFSys:HtgEffCOPRpt = 
+      { if( IfValidAnd( HtgEffUnitRpt != "NA" ) )
+        then if( IfValidAnd( HtgEffUnitRpt = "COP" ) .OR. IfValidAnd( HtgEffUnitRpt = "HSPF/COP" ) )
+             then Format( FltToStr( COPRnd, 2 ) ) 
+             else UNDEFINED
+             endif
+        else UNDEFINED
+        endif }
+
+   "Set VRFSys:ClgEffEERRpt"  VRFSys:ClgEffEERRpt = 
+      { if( IfValidAnd( ClgEffUnitRpt != "NA" ) )
+        then if( IfValidAnd( ClgEffUnitRpt = "SEER2/EER2" ) )
+             then Format( FltToStr( EERRnd, 2 ) )
+             else if( IfValidAnd( ClgEffUnitRpt = "SEER/EER" ) )
+                  then Format( FltToStr( EERRnd, 2 ) )        
+                  else UNDEFINED
+                  endif
+             endif
+        else UNDEFINED
+        endif }
+   "Set VRFSys:ClgEffSEERRpt"  VRFSys:ClgEffSEERRpt = 
+      { if( IfValidAnd( ClgEffUnitRpt != "NA" ) )
+        then if( IfValidAnd( ClgEffUnitRpt = "SEER2/EER2" ) )
+             then Format( FltToStr( SEERRnd, 2 ) )
+             else if( IfValidAnd( ClgEffUnitRpt = "SEER/EER" ) )
+                  then Format( FltToStr( SEERRnd, 2 ) )        
+                  else UNDEFINED
+                  endif
+             endif
+        else UNDEFINED
+        endif }
+
+
+
    "Create nrccSection_HvacDry object"   nrccNRCCPRF:Action =
-      {  if (Proj:CompPathMech == "Performance") 
+      {  if (Proj:CompPathMech == "Performance" .OR. Proj:ResCompPathMech == "Performance") 
          then  CreateChildren( nrccSection_HvacDry, 1, "HVAC Dry" )
          else UNCHANGED 
          endif }
@@ -548,7 +812,7 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
              ComponentCount( nrccTableHvacDry ) < 1 .OR.
              ComponentCount( AirSys ) < 1 .OR.
              IfValidAnd( Type == "Exhaust" ) .OR.
-             IfValidAnd( BaseSysNum > 0 ) .OR.
+             ( IfValidAnd( BaseSysNum > 0 ) .AND. IfValidAnd ( ServesResZn = 0) ) .OR.
              IfValidAnd( ExcludeFromRpt > 0 ) .OR.
              IfValidAnd( IsHlthCareSys > 0 ) ) then  UNDEFINED
          else  CreateComp( nrcctblRowHvacDry, Format( "%s HvacDry tblRow", Name ) )
@@ -558,6 +822,19 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
       {  if (ComponentCount( AirSys ) < 1) then  UNDEFINED
          else Name
          endif  }
+
+   ; setup HSPF/HSPF2 and COP reporting in Section_HvacDry data - RJH 7/01/23 GH Issue #83
+   "Create nrccHvacDry06b child object for each AirSys nrcctblRowHvacDry"     AirSys:nrccHvacDry06bRef =
+      {  if (ComponentCount( AirSys ) < 1) then  UNDEFINED
+         else  CreateComp( nrccHvacDry06b, Format( "%s HvacDry06b", Name ) )
+         endif  }
+   "Set AirSys:nrccHvacDry06bRef:noXMLoutput_AirSysRef"    AirSys:nrccHvacDry06bRef:noXMLoutput_AirSysRef = {  Name  }
+
+   "Create nrccHvacDry06c child object for each AirSys HSPF/COP nrcctblRowHvacDry"     AirSys:nrccHvacDry06cRef =
+      {  if ( IfValidAnd( HtgEffUnitRpt == "HSPF/COP" ) .OR. IfValidAnd( HtgEffUnitRpt == "HSPF2/COP" ) ) then  CreateComp( nrccHvacDry06c, Format( "%s HvacDry06c", Name ) )
+         else  UNDEFINED
+         endif  }
+   "Set AirSys:nrccHvacDry06cRef:noXMLoutput_AirSysRef"    AirSys:nrccHvacDry06cRef:noXMLoutput_AirSysRef = {  Name  }
 
    "Create nrccHvacDry08b child object for each AirSys nrcctblRowHvacDry"     AirSys:nrccHvacDry08bRef =
       {  if (ComponentCount( AirSys ) < 1) then  UNDEFINED
@@ -588,6 +865,19 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
          else Name
          endif  }
 
+   ; setup HSPF/HSPF2 and COP reporting in Section_HvacDry data - RJH 7/01/23 GH Issue #83
+   "Create nrccHvacDry06b child object for each ZnSys nrcctblRowHvacDry"     ZnSys:nrccHvacDry06bRef =
+      {  if (ComponentCount( ZnSys ) < 1) then  UNDEFINED
+         else  CreateComp( nrccHvacDry06b, Format( "%s HvacDry06b", Name ) )
+         endif  }
+   "Set ZnSys:nrccHvacDry06bRef:noXMLoutput_ZnSysRef"    ZnSys:nrccHvacDry06bRef:noXMLoutput_ZnSysRef = {  Name  }
+
+   "Create nrccHvacDry06c child object for each ZnSys HSPF/COP nrcctblRowHvacDry"     ZnSys:nrccHvacDry06cRef =
+      {  if ( IfValidAnd( HtgEffUnitRpt == "HSPF/COP" ) .OR. IfValidAnd( HtgEffUnitRpt == "HSPF2/COP" ) ) then  CreateComp( nrccHvacDry06c, Format( "%s HvacDry06c", Name ) )
+         else  UNDEFINED
+         endif  }
+   "Set ZnSys:nrccHvacDry06cRef:noXMLoutput_ZnSysRef"    ZnSys:nrccHvacDry06cRef:noXMLoutput_ZnSysRef = {  Name  }
+
    "Create nrccHvacDry08b child object for each ZnSys nrcctblRowHvacDry"     ZnSys:nrccHvacDry08bRef =
       {  if (ComponentCount( ZnSys ) < 1) then  UNDEFINED
          else  CreateComp( nrccHvacDry08b, Format( "%s HvacDry08b", Name ) )
@@ -612,11 +902,30 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
          else Name
          endif  }
 
+   ; setup HSPF/HSPF2 and COP reporting in Section_HvacDry data - RJH 7/01/23 GH Issue #83
+   "Create nrccHvacDry06b child object for each VRFSys nrcctblRowHvacDry"     VRFSys:nrccHvacDry06bRef =
+      {  if (ComponentCount( VRFSys ) < 1) then  UNDEFINED
+         else  CreateComp( nrccHvacDry06b, Format( "%s HvacDry06b", Name ) )
+         endif  }
+   "Set VRFSys:nrccHvacDry06bRef:noXMLoutput_VRFSysRef"    VRFSys:nrccHvacDry06bRef:noXMLoutput_VRFSysRef = {  Name  }
+
+   "Create nrccHvacDry06c child object for each VRFSys HSPF/COP nrcctblRowHvacDry"     VRFSys:nrccHvacDry06cRef =
+      {  if ( IfValidAnd( HtgEffUnitRpt == "HSPF/COP" ) .OR. IfValidAnd( HtgEffUnitRpt == "HSPF2/COP" ) ) then  CreateComp( nrccHvacDry06c, Format( "%s HvacDry06c", Name ) )
+         else  UNDEFINED
+         endif  }
+   "Set VRFSys:nrccHvacDry06cRef:noXMLoutput_VRFSysRef"    VRFSys:nrccHvacDry06cRef:noXMLoutput_VRFSysRef = {  Name  }
+
    "Create nrccHvacDry08b child object for each VRFSys nrcctblRowHvacDry"     VRFSys:nrccHvacDry08bRef =
       {  if (ComponentCount( VRFSys ) < 1) then  UNDEFINED
          else  CreateComp( nrccHvacDry08b, Format( "%s HvacDry08b", Name ) )
          endif  }
    "Set VRFSys:nrccHvacDry08bRef:noXMLoutput_VRFSysRef"    VRFSys:nrccHvacDry08bRef:noXMLoutput_VRFSysRef = {  Name  }
+
+   "Create nrccHvacDry08c child object for each VRFSys SEER/EER nrcctblRowHvacDry"     VRFSys:nrccHvacDry08cRef =
+      {  if ( IfValidAnd( ClgEffUnitRpt == "SEER/EER" ) .OR. IfValidAnd( ClgEffUnitRpt == "SEER2/EER2" ) ) then  CreateComp( nrccHvacDry08c, Format( "%s HvacDry08c", Name ) )
+         else  UNDEFINED
+         endif  }
+   "Set VRFSys:nrccHvacDry08cRef:noXMLoutput_VRFSysRef"    VRFSys:nrccHvacDry08cRef:noXMLoutput_VRFSysRef = {  Name  }
 
 
   ; Rule to Delete empty nrccSection_HvacDry
@@ -643,8 +952,10 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
          then CreateChildren( nrccSection_Hvacdwell, 1, "Hvacdwell" )
          else UNCHANGED 
          endif }
+   ; add logic to prevent nrccTableHvacdwell creation when no dwelling units are present - SAC 10/09/24 (tic #3630)
    "Create nrccSection_Hvacdwell nrccTableHvacdwell object"              nrccSection_Hvacdwell:Action  =
-      {  CreateChildren( nrccTableHvacdwell, 1, "Hvacdwell table" )  }
+      {  if (IfValidAnd( Proj:ResLivingUnitCnt > 0 )==0) then  UNCHANGED
+         else  CreateChildren( nrccTableHvacdwell, 1, "Hvacdwell table" )  endif  }
    "Create nrcctblRowHvacdwell object for each pertinent ResSCSysRpt"     ResSCSysRpt:nrcctblRowHvacdwellRef =
       {  if (LocalCompAssigned( nrcctblRowHvacdwellRef ) > 0 .OR.
              ComponentCount( nrccTableHvacdwell ) < 1 .OR.
@@ -729,36 +1040,36 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
          endif  }
    "Set ResSCSysRpt:nrccHvacdwellSingleEfficRef:noXMLoutput_ResSCSysRptRef"    ResSCSysRpt:nrccHvacdwellSingleEfficRef:noXMLoutput_ResSCSysRptRef = {  Name  }
 
-; nrccHvacdwellSEER_EER - TWO efficiency values reported
-   "Create nrccHvacdwellSEER_EER child object for each applicable nrcctblRowHvacdwell"     ResSCSysRpt:nrccHvacdwellSEER_EERRef =
+; nrccHvacdwellEER_SEER - TWO efficiency values reported
+   "Create nrccHvacdwellEER_SEER child object for each applicable nrcctblRowHvacdwell"     ResSCSysRpt:nrccHvacdwellEER_SEERRef =
       {  if (IfValidAnd(ParentNumAssigningDUsRpt > 0)) 
          then if (ParentHVACSysTypeRpt == "Heat Pump Heating and Cooling System")
               then switch (HeatingType)
-                     case "SplitHeatPump"              : CreateComp( nrccHvacdwellSEER_EER, Format( "%s HvacdwellSEER_EER", Name ) )
-                     case "SDHVSplitHeatPump"          : CreateComp( nrccHvacdwellSEER_EER, Format( "%s HvacdwellSEER_EER", Name ) )
-                     case "DuctlessMiniSplitHeatPump"  : CreateComp( nrccHvacdwellSEER_EER, Format( "%s HvacdwellSEER_EER", Name ) )
-                     case "DuctlessMultiSplitHeatPump" : CreateComp( nrccHvacdwellSEER_EER, Format( "%s HvacdwellSEER_EER", Name ) )
-                     case "DuctlessVRFHeatPump"        : CreateComp( nrccHvacdwellSEER_EER, Format( "%s HvacdwellSEER_EER", Name ) )
-                     case "DuctedMiniSplitHeatPump"    : CreateComp( nrccHvacdwellSEER_EER, Format( "%s HvacdwellSEER_EER", Name ) )
-                     case "DuctedMultiSplitHeatPump"   : CreateComp( nrccHvacdwellSEER_EER, Format( "%s HvacdwellSEER_EER", Name ) )
-                     case "Ducted+DuctlessMultiSplitHeatPump" : CreateComp( nrccHvacdwellSEER_EER, Format( "%s HvacdwellSEER_EER", Name ) )
-                     case "PkgHeatPump"                : CreateComp( nrccHvacdwellSEER_EER, Format( "%s HvacdwellSEER_EER", Name ) )
-                     case "VCHP"                       : CreateComp( nrccHvacdwellSEER_EER, Format( "%s HvacdwellSEER_EER", Name ) )
-                     case "VCHP2"                      : CreateComp( nrccHvacdwellSEER_EER, Format( "%s HvacdwellSEER_EER", Name ) )
+                     case "SplitHeatPump"              : CreateComp( nrccHvacdwellEER_SEER, Format( "%s HvacdwellEER_SEER", Name ) )
+                     case "SDHVSplitHeatPump"          : CreateComp( nrccHvacdwellEER_SEER, Format( "%s HvacdwellEER_SEER", Name ) )
+                     case "DuctlessMiniSplitHeatPump"  : CreateComp( nrccHvacdwellEER_SEER, Format( "%s HvacdwellEER_SEER", Name ) )
+                     case "DuctlessMultiSplitHeatPump" : CreateComp( nrccHvacdwellEER_SEER, Format( "%s HvacdwellEER_SEER", Name ) )
+                     case "DuctlessVRFHeatPump"        : CreateComp( nrccHvacdwellEER_SEER, Format( "%s HvacdwellEER_SEER", Name ) )
+                     case "DuctedMiniSplitHeatPump"    : CreateComp( nrccHvacdwellEER_SEER, Format( "%s HvacdwellEER_SEER", Name ) )
+                     case "DuctedMultiSplitHeatPump"   : CreateComp( nrccHvacdwellEER_SEER, Format( "%s HvacdwellEER_SEER", Name ) )
+                     case "Ducted+DuctlessMultiSplitHeatPump" : CreateComp( nrccHvacdwellEER_SEER, Format( "%s HvacdwellEER_SEER", Name ) )
+                     case "PkgHeatPump"                : CreateComp( nrccHvacdwellEER_SEER, Format( "%s HvacdwellEER_SEER", Name ) )
+                     case "VCHP"                       : CreateComp( nrccHvacdwellEER_SEER, Format( "%s HvacdwellEER_SEER", Name ) )
+                     case "VCHP2"                      : CreateComp( nrccHvacdwellEER_SEER, Format( "%s HvacdwellEER_SEER", Name ) )
                      default :  UNDEFINED
                    endswitch
               else  if (ParentHVACSysTypeRpt == "Other Heating and Cooling System")
                     then switch (CoolingType)
-                           case "SplitAirCond"                     : CreateComp( nrccHvacdwellSEER_EER, Format( "%s HvacdwellSEER_EER", Name ) )
-                           case "PkgAirCond"                       : CreateComp( nrccHvacdwellSEER_EER, Format( "%s HvacdwellSEER_EER", Name ) )
-                           case "SDHVSplitAirCond"                 : CreateComp( nrccHvacdwellSEER_EER, Format( "%s HvacdwellSEER_EER", Name ) )
-                           case "DuctlessMiniSplitAirCond"         : CreateComp( nrccHvacdwellSEER_EER, Format( "%s HvacdwellSEER_EER", Name ) )
-                           case "DuctlessMultiSplitAirCond"        : CreateComp( nrccHvacdwellSEER_EER, Format( "%s HvacdwellSEER_EER", Name ) )
-                           case "DuctlessVRFAirCond"               : CreateComp( nrccHvacdwellSEER_EER, Format( "%s HvacdwellSEER_EER", Name ) )
-                           case "DuctedMiniSplitAirCond"           : CreateComp( nrccHvacdwellSEER_EER, Format( "%s HvacdwellSEER_EER", Name ) )
-                           case "DuctedMultiSplitAirCond"          : CreateComp( nrccHvacdwellSEER_EER, Format( "%s HvacdwellSEER_EER", Name ) )
-                           case "Ducted+DuctlessMultiSplitAirCond" : CreateComp( nrccHvacdwellSEER_EER, Format( "%s HvacdwellSEER_EER", Name ) )
-                           case "EvapCondenser"                    : CreateComp( nrccHvacdwellSEER_EER, Format( "%s HvacdwellSEER_EER", Name ) )
+                           case "SplitAirCond"                     : CreateComp( nrccHvacdwellEER_SEER, Format( "%s HvacdwellEER_SEER", Name ) )
+                           case "PkgAirCond"                       : CreateComp( nrccHvacdwellEER_SEER, Format( "%s HvacdwellEER_SEER", Name ) )
+                           case "SDHVSplitAirCond"                 : CreateComp( nrccHvacdwellEER_SEER, Format( "%s HvacdwellEER_SEER", Name ) )
+                           case "DuctlessMiniSplitAirCond"         : CreateComp( nrccHvacdwellEER_SEER, Format( "%s HvacdwellEER_SEER", Name ) )
+                           case "DuctlessMultiSplitAirCond"        : CreateComp( nrccHvacdwellEER_SEER, Format( "%s HvacdwellEER_SEER", Name ) )
+                           case "DuctlessVRFAirCond"               : CreateComp( nrccHvacdwellEER_SEER, Format( "%s HvacdwellEER_SEER", Name ) )
+                           case "DuctedMiniSplitAirCond"           : CreateComp( nrccHvacdwellEER_SEER, Format( "%s HvacdwellEER_SEER", Name ) )
+                           case "DuctedMultiSplitAirCond"          : CreateComp( nrccHvacdwellEER_SEER, Format( "%s HvacdwellEER_SEER", Name ) )
+                           case "Ducted+DuctlessMultiSplitAirCond" : CreateComp( nrccHvacdwellEER_SEER, Format( "%s HvacdwellEER_SEER", Name ) )
+                           case "EvapCondenser"                    : CreateComp( nrccHvacdwellEER_SEER, Format( "%s HvacdwellEER_SEER", Name ) )
                            default :  UNDEFINED
                          endswitch
                     else UNDEFINED
@@ -766,7 +1077,23 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
               endif
          else UNDEFINED 
          endif  }
-   "Set ResSCSysRpt:nrccHvacdwellSEER_EERRef:noXMLoutput_ResSCSysRptRef"    ResSCSysRpt:nrccHvacdwellSEER_EERRef:noXMLoutput_ResSCSysRptRef = {  Name  }
+   "Set ResSCSysRpt:nrccHvacdwellEER_SEERRef:noXMLoutput_ResSCSysRptRef"    ResSCSysRpt:nrccHvacdwellEER_SEERRef:noXMLoutput_ResSCSysRptRef = {  Name  }
+
+
+
+
+; nrccHvacdwellCoolEffic_NotApplicable - NO efficiency values reported
+   "Create nrccHvacdwellCoolEffic_NotApplicable child object for each applicable nrcctblRowHvacdwell"     ResSCSysRpt:nrccHvacdwellCoolEffic_NotApplicableRef =
+      {  if (LocalCompAssigned(nrccHvacdwellSingleEfficRef) .OR. LocalCompAssigned(nrccHvacdwellEER_SEERRef)) 
+         then UNDEFINED
+         else CreateComp( nrccHvacdwellCoolEffic_NotApplicable, Format( "%s nrccHvacdwellCoolEffic_NotApplicable", Name ) )
+         endif  }
+   "Set ResSCSysRpt:nrccHvacdwellCoolEffic_NotApplicableRef:noXMLoutput_ResSCSysRptRef"    ResSCSysRpt:nrccHvacdwellCoolEffic_NotApplicableRef:noXMLoutput_ResSCSysRptRef = {  Name  }
+
+
+
+
+
 
 
    "Create nrccSection_Hvacdwell nrccTableDFHP object"              nrccSection_Hvacdwell:Action  =
@@ -829,15 +1156,104 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
    "Set ResSCSysRpt:nrccCoolingEER_IEER_DfhpRef:noXMLoutput_ResSCSysRptRef"    ResSCSysRpt:nrccCoolingEER_IEER_DfhpRef:noXMLoutput_ResSCSysRptRef = {  Name  }
 
 
+
+
+   "Create nrccSection_Hvacdwell nrccTableHvacCommonMF object"              nrccSection_Hvacdwell:Action  =
+      {  CreateChildren( nrccTableHvacCommonMF, 1, "HvacCommonMF table" )  }
+   ; revised to create nrcctblRowHvacCommonMF only for ResHVACSys present in user inputs - SAC 04/29/24
+   "Create nrcctblRowHvacCommonMF object for each pertinent ResHVACSys"     ResHVACSys:nrcctblRowHvacCommonMFRef =
+      {  if (LocalCompAssigned( nrcctblRowHvacCommonMFRef ) > 0 .OR.
+             ComponentCount( nrccTableHvacCommonMF ) < 1 ) 
+         then  UNDEFINED
+         else  if (SumRevRef( ResOtherZn:StoreUserResHVACSysRef, ResOtherZn:Area ) > 1)
+               then CreateComp( nrcctblRowHvacCommonMF, Format( "%s HvacCommonMF tblRow", Name ) )
+               else UNDEFINED 
+               endif
+         endif  }
+         ; removed:  else  if (IfValidAnd(MinResOtherZnCompIdx > 0)) 
+   "Set ResHVACSys:nrcctblRowHvacCommonMFRef:noXMLoutput_ResHVACSysRef"    ResHVACSys:nrcctblRowHvacCommonMFRef:noXMLoutput_ResHVACSysRef = 
+      {  Name  }
+
+   ; revised to create nrcctblRowHvacCommonMF only for ResHVACSys present in user inputs - RJH 04/29/24
+   "Create nrccHvacCommonMFCoolEffic child object for each nrcctblRowHvacCommonMF"     ResHVACSys:nrccHvacCommonMFCoolEfficRef =
+      {  if (SumRevRef( ResOtherZn:StoreUserResHVACSysRef, ResOtherZn:Area ) > 1) 
+         then CreateComp( nrccHvacCommonMFCoolEffic, Format( "%s nrccHvacCommonMFCoolEffic", Name ) ) 
+         else UNDEFINED 
+         endif  }
+   "Set ResHVACSys:nrccHvacCommonMFCoolEfficRef:noXMLoutput_ResHVACSysRef"    ResHVACSys:nrccHvacCommonMFCoolEfficRef:noXMLoutput_ResHVACSysRef = {  Name  }
+
+; nrccHvacCommonMFSingleEffic - ONLY ONE efficiency value reported
+   "Create nrccHvacCommonMFSingleEffic child object for each applicable nrcctblRowHvacCommonMF"     ResHVACSys:nrccHvacCommonMFSingleEfficRef =
+      {  if (SumRevRef( ResOtherZn:StoreUserResHVACSysRef, ResOtherZn:Area ) > 1)
+         then if (Type == "Heat Pump Heating and Cooling System")
+              then switch (HtPumpSystem[1]:EffMetric)
+                     case "EER"  : CreateComp( nrccHvacCommonMFSingleEffic, Format( "%s HvacCommonMFSingleEffic", Name ) )
+                     case "EER2" : CreateComp( nrccHvacCommonMFSingleEffic, Format( "%s HvacCommonMFSingleEffic", Name ) )
+                     default :  UNDEFINED
+                   endswitch
+              else  if (Type == "Other Heating and Cooling System")
+                    then switch (CoolSystem[1]:EffMetric)
+                           case "EER"   : CreateComp( nrccHvacCommonMFSingleEffic, Format( "%s HvacCommonMFSingleEffic", Name ) )
+                           case "EER2"  : CreateComp( nrccHvacCommonMFSingleEffic, Format( "%s HvacCommonMFSingleEffic", Name ) )
+                           case "SEER"  : CreateComp( nrccHvacCommonMFSingleEffic, Format( "%s HvacCommonMFSingleEffic", Name ) )
+                           case "SEER2" : CreateComp( nrccHvacCommonMFSingleEffic, Format( "%s HvacCommonMFSingleEffic", Name ) )
+                           default :  UNDEFINED
+                         endswitch
+                    else if (Type == "Central Heating and Cooling System")
+                         then if (HVACCentralRef[1]:Type == "Water source heat pump") 
+                              then CreateComp( nrccHvacCommonMFSingleEffic, Format( "%s HvacCommonMFSingleEffic", Name ) )
+                              else UNDEFINED
+                              endif
+                         else UNDEFINED
+                         endif
+                    endif
+              endif
+         else UNDEFINED 
+         endif  }
+   "Set ResHVACSys:nrccHvacCommonMFSingleEfficRef:noXMLoutput_ResHVACSysRef"    ResHVACSys:nrccHvacCommonMFSingleEfficRef:noXMLoutput_ResHVACSysRef = {  Name  }
+
+; nrccHvacCommonMFEER_SEER - TWO efficiency values reported
+   "Create nrccHvacCommonMFEER_SEER child object for each applicable nrcctblRowHvacCommonMF"     ResHVACSys:nrccHvacCommonMFEER_SEERRef =
+      {  if (SumRevRef( ResOtherZn:StoreUserResHVACSysRef, ResOtherZn:Area ) > 1) 
+         then if (Type == "Heat Pump Heating and Cooling System")
+              then switch (HtPumpSystem[1]:EffMetric)
+                     case "HSPF/SEER/EER"    : CreateComp( nrccHvacCommonMFEER_SEER, Format( "%s HvacCommonMFEER_SEER", Name ) )
+                     case "HSPF2/SEER2/EER2" : CreateComp( nrccHvacCommonMFEER_SEER, Format( "%s HvacCommonMFEER_SEER", Name ) )
+                     default :  UNDEFINED
+                   endswitch
+              else  if (Type == "Other Heating and Cooling System")
+                    then switch (CoolSystem[1]:EffMetric)
+                           case "EERa/EERb"    : CreateComp( nrccHvacCommonMFEER_SEER, Format( "%s HvacCommonMFEER_SEER", Name ) )
+                           case "EER2a/EER2b"  : CreateComp( nrccHvacCommonMFEER_SEER, Format( "%s HvacCommonMFEER_SEER", Name ) )
+                           case "SEER/EER"     : CreateComp( nrccHvacCommonMFEER_SEER, Format( "%s HvacCommonMFEER_SEER", Name ) )
+                           case "SEER2/EER2"   : CreateComp( nrccHvacCommonMFEER_SEER, Format( "%s HvacCommonMFEER_SEER", Name ) )
+                           default :  UNDEFINED
+                         endswitch
+                    else UNDEFINED
+                    endif
+              endif
+         else UNDEFINED 
+         endif  }
+   "Set ResHVACSys:nrccHvacCommonMFEER_SEERRef:noXMLoutput_ResHVACSysRef"    ResHVACSys:nrccHvacCommonMFEER_SEERRef:noXMLoutput_ResHVACSysRef = {  Name  }
+
+; nrccHvacCommonMFCoolEffic_NotApplicable - NO efficiency values reported
+   "Create nrccHvacCommonMFCoolEffic_NotApplicable child object for each applicable nrcctblRowHvacCommonMF"     ResHVACSys:nrccHvacCommonMFCoolEffic_NotApplicableRef =
+      {  if (LocalCompAssigned(nrccHvacCommonMFSingleEfficRef) .OR. LocalCompAssigned(nrccHvacCommonMFEER_SEERRef)) 
+         then UNDEFINED
+         else CreateComp( nrccHvacCommonMFCoolEffic_NotApplicable, Format( "%s nrccHvacCommonMFCoolEffic_NotApplicable", Name ) )
+         endif  }
+   "Set ResHVACSys:nrccHvacCommonMFCoolEffic_NotApplicableRef:noXMLoutput_ResHVACSysRef"    ResHVACSys:nrccHvacCommonMFCoolEffic_NotApplicableRef:noXMLoutput_ResHVACSysRef = {  Name  }
+
   ; Rules to Delete empty nrccSection_Hvacdwell tables and overall section
    "DELETE empty nrccTableHvacdwell object"
       nrccTableHvacdwell:Action   = {  if (ComponentCount( nrcctblRowHvacdwell ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
    "DELETE empty nrccTableDFHP object"
       nrccTableDFHP:Action   = {  if (ComponentCount( nrcctblRowDFHP ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
-   "DELETE empty nrccSection_Hvacdwell object"
-      nrccSection_Hvacdwell:Action   = {  if (ComponentCount( nrcctblRowHvacdwell ) < 1 .AND. ComponentCount( nrcctblRowDFHP ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
-
-
+   "DELETE empty nrccTableHvacCommonMF object"
+      nrccTableHvacCommonMF:Action   = {  if (ComponentCount( nrcctblRowHvacCommonMF ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
+   "DELETE empty nrccSection_Hvacdwell object"     ; added nrcctblRowHvacCommonMF condition - SAC 10/09/24 (tic #3630)
+      nrccSection_Hvacdwell:Action   = {  if (ComponentCount( nrcctblRowHvacdwell ) < 1 .AND. ComponentCount( nrcctblRowDFHP ) < 1 .AND.
+                                              ComponentCount( nrcctblRowHvacCommonMF ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
 
    ; setup Fan references to be used in populating Fan data in table - SAC 06/28/21
    ; Also used in populating Section_Zone - RJH 09/30/21
@@ -870,16 +1286,16 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
       {  if (LocalCompAssigned( nrcctblRowFanRef ) > 0 .OR.
              ComponentCount( nrccTableFan ) < 1 .OR.
              ComponentCount( ZnSys ) < 1 .OR.
-             IfValidAnd( Type == "Exhaust" ) .OR.
-             IfValidAnd( Type == "VentilationOnly" ) .OR.
-             IfValidAnd( Type == "Baseboard" ) .OR.
-             IfValidAnd( Type == "PassiveBeam" ) .OR.
-             IfValidAnd( Type == "Radiant" ) .OR.
-             (IfValidAnd( Type != "Furnace" ) .AND. IfValidAnd( RptFanRef:IsDummy == 0 )) .OR.
-             IfValidAnd( BaseSysNum > 0 ) .OR.
-             IfValidAnd( IsActiveBeam > 0 ) .OR.
-             IfValidAnd( ExcludeFromRpt > 0 ) ) then  UNDEFINED
-         else  CreateComp( nrcctblRowFan, Format( "%s Fan tblRow", Name ) )
+             IfValidAnd( ExcludeFromRpt > 0 ) .OR.
+             (IfValidAnd(Type == "Furnace") .AND. IfValidAnd(FurnaceType == "Gravity")) ) then  UNDEFINED
+         else if ( IfValidAnd(BaseSysNum == 0) .AND.
+                   IfValidAnd(IsActiveBeam == 0) .AND.
+                   IfValidAnd(Type != "VentilationOnly") .AND.
+                   ( IfValidAnd(Type != "Exhaust") .OR. IfValidAnd(Type != "Baseboard") .OR. IfValidAnd(Type != "PassiveBeam") .OR. IfValidAnd(Type != "Radiant") ) .OR.
+                   ( IfValidAnd( Type != "Furnace" ) .AND. IfValidAnd( RptFanRef:IsDummy != 1 ) ) )
+              then CreateComp( nrcctblRowFan, Format( "%s Fan tblRow", Name ) )
+              else UNDEFINED
+              endif
          endif  }
    "Set ZnSys:nrcctblRowFanRef:noXMLoutput_ZnSysRef"    ZnSys:nrcctblRowFanRef:noXMLoutput_ZnSysRef = 
       {  if (ComponentCount( ZnSys ) < 1) then  UNDEFINED
@@ -899,8 +1315,18 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
       {  if (ComponentCount( ResFanSys ) < 1) then  UNDEFINED
          else if (FloorAreaServed > 0) then Name else UNDEFINED endif
          endif  }
-  
-  
+
+   ; create nrcctblRowMFFan objects for each VCHP system referenced in analysis - SAC 07/02/23 (gh issue #49)
+   "Create nrcctblRowMFFan object for each pertinent ResHtPumpSys"     ResHtPumpSys:nrcctblRowMFFanRef =
+      {  if (LocalCompAssigned( nrcctblRowMFFanRef ) > 0 .OR.
+             ComponentCount( nrccTableMFFan ) < 1 .OR.
+             IfValidAnd( Type = "VCHP - Meets requirements of the VCHP compliance option" )==0) then  UNDEFINED
+         else  if (FloorAreaServed > 0) then CreateComp( nrcctblRowMFFan, Format( "%s MFFan tblRow", Name ) ) else UNDEFINED endif
+         endif  }
+   "Set ResHtPumpSys:nrcctblRowMFFanRef:noXMLoutput_ResHtPumpSysRef"    ResHtPumpSys:nrcctblRowMFFanRef:noXMLoutput_ResHtPumpSysRef = 
+      {  Name  }
+
+
    "Create nrccSection_Fan nrccTableFanIAQ object"              nrccSection_Fan:Action  =
       {  CreateChildren( nrccTableFanIAQ, 1, "FanIAQ table" )  }
    "Create nrcctblRowFanIAQ object for each pertinent ResIAQFan"     ResIAQFan:nrcctblRowFanIAQRef =
@@ -942,8 +1368,12 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
 ; RJH 10/1/22 Moved creation of Section_Aa from CF1RPRF01E_Master.rule to NRCCPRF-Rulelists.rule to handle NRCC/LMCC Section_Distmf
   ; ----------------------------------------------------------------------
   ; Section_Distmf H4. MULTIFAMILY HVAC DISTRIBUTION
-   "Create & initialize new cf1rSection_Distmf object"    ; SAC 5/25/19 - added logic to prevent cf1rSection_Aa creation when no HVACDist objects serve Zones
-      nrccNRCCPRF:Action  = {  if (SumAll( HVACDist:FloorAreaServed ) < 1) 
+   ; SAC 5/25/19 - added logic to prevent cf1rSection_Aa creation when no HVACDist objects serve Zones
+   "Create & initialize new cf1rSection_Distmf object"      ; revised logic to ensure output of DistMF* for VCHP systems w/ certified fans - SAC 05/02/24 (gh tic#144)
+      nrccNRCCPRF:Action  = {  if ( SumAll( HVACDist:FloorAreaServed ) < 1 .AND.
+                                    SumAcrossIf( ResHVACSys:HPSysVCHPFanPwr, ResHVACSys:FloorAreaServed[1] > 1 ) < 1 .AND.
+                                    SumAcrossIf( ResHtPumpSys:FloorAreaServed, ResHtPumpSys:Type = 22 ) < 1 .AND.
+                                    SumAcrossIf( AirSys:IsResSys, AirSys:ServesResZn = 1 ) < 1 ) 
                                then  UNCHANGED
                                else if (Proj:ResCompPathMech == "Performance") then CreateChildren( cf1rSection_Distmf, 1, "Section_Distmf" ) else UNDEFINED endif
                                endif  }     ; no init needed
@@ -952,6 +1382,45 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
                                then  UNCHANGED
                                else  EvalRulelist( "CF1RPRF01E_cf1rSection_Distmf_Proposed" )  
                                endif  }
+
+   ; setup ResDuctSeg Parent reference to be used in populating nrccTableDuctMF - RJH 10/31/22
+   "Set ResDuctSeg:ParentSysNameRpt"   ResDuctSeg:ParentSysNameRpt = 
+      { Parent( Name ) }
+  
+   "Create cf1rSection_Distmf nrccTableDuctMF object"              cf1rSection_Distmf:Action  =
+      {  if (IfValidAnd(Proj:IsLowRiseMFam > 0 ) .AND. SumAll( HVACDist:ReportDuctDesign ) > 0)
+         then  CreateChildren( nrccTableDuctMF, 1, "MFDuct table" )
+         else  UNCHANGED  endif  }
+
+   "Create nrcctblRowDuctMF object for each pertinent ResDuctSeg"     ResDuctSeg:nrcctblRowDuctMFRef =
+      {  if (LocalCompAssigned( nrcctblRowDuctMFRef ) > 0 .OR.
+             ComponentCount( nrccTableDuctMF ) < 1 .OR.
+             ComponentCount( ResDuctSeg ) < 1) 
+         then  UNDEFINED
+         else if (IfValidAnd(Proj:IsLowRiseMFam > 0 ) .AND. IfValidAnd( Parent(ReportDuctDesign) > 0 ) .AND. IfValidAnd( ErrorID = 0 ))
+              then CreateComp( nrcctblRowDuctMF, Format( "%s MFDuct tblRow", Name ) )
+              else  UNDEFINED
+              endif
+         endif  }  
+
+   "Set ResDuctSeg:nrcctblRowDuctMFRef:noXMLoutput_ResDuctSegRef"    ResDuctSeg:nrcctblRowDuctMFRef:noXMLoutput_ResDuctSegRef = 
+      {  if (ComponentCount( ResDuctSeg ) < 1) then  UNDEFINED
+         else if (IfValidAnd(Proj:IsLowRiseMFam > 0 ) .AND. IfValidAnd( Parent(ReportDuctDesign) > 0 ) .AND. IfValidAnd( ErrorID = 0 )) then Name else UNDEFINED endif
+         endif  }
+  
+  ; Rule to Delete empty Section_Distmf tables and overall section
+   "DELETE empty cf1rTableDistributionMF object"
+      cf1rTableDistributionMF:Action   = {  if (ComponentCount( cf1rtblRowDistMF ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
+   "DELETE empty nrccTableDuctMF object"
+      nrccTableDuctMF:Action   = {  if (ComponentCount( nrcctblRowDuctMF ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
+   "DELETE empty cf1rTableDistributionMFHERS object"
+      cf1rTableDistributionMFHERS:Action   = {  if (ComponentCount( cf1rtblRowDistMFHERS ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
+   "DELETE empty cf1rSection_Distmf object"
+      cf1rSection_Distmf:Action   = {  if (ComponentCount( cf1rtblRowDistMF ) < 1 .AND. ComponentCount( nrcctblRowDuctMF ) < 1 .AND. ComponentCount( cf1rtblRowDistMFHERS ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
+  
+
+
+
    ; setup Fan Parent Report properties to be used in populating FanExh data in table - RJH 06/30/21
    "Set Fan:ParentSysNameRpt"   Fan:ParentSysNameRpt = 
       {  if (Parent( Type ) == "Exhaust" .AND. IfValidAnd( ParentComp == "AirSys" ))
@@ -967,6 +1436,20 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
             then Parent( ZnServedAsExhSys )
          else UNDEFINED
          endif endif }
+   "Set Fan:ParentSysFanCtrlRpt"   Fan:ParentSysFanCtrlRpt = 
+      {  if (Parent( Type ) == "Exhaust" .AND. IfValidAnd( ParentComp == "AirSys" ))
+         then if (IfValidAnd(Parent2(FanCtrl) == "Continuous"))
+              then "Continuous"
+              else "NotContinuous"
+              endif
+         else if (Parent( Type ) == "Exhaust" .AND. IfValidAnd( ParentComp == "ZnSys" ))
+              then if (IfValidAnd(Parent(FanCtrl) == "Continuous"))
+                   then "Continuous"
+                   else "NotContinuous"
+                   endif
+              else UNDEFINED
+              endif
+         endif  }
 
    "Create nrccSection_FanExh object"   nrccNRCCPRF:Action =
       {  if (Proj:CompPathMech == "Performance") 
@@ -1265,10 +1748,12 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
          endif }
    "Create nrccSection_VentRes nrccTableVentRes object"              nrccSection_VentRes:Action  =
       {  CreateChildren( nrccTableVentRes, 1, "VentRes table" )  }
+   ; add logic to prevent nrcctblRowVentRes creation for un-assigned DwellUnitTypes - SAC 10/09/24 (tic #3630)
    "Create nrcctblRowVentRes object for each pertinent DwellUnitType"     DwellUnitType:nrcctblRowVentResRef =
       {  if (LocalCompAssigned( nrcctblRowVentResRef ) > 0 .OR.
              ComponentCount( nrccTableVentRes ) < 1 .OR.
-             ComponentCount( DwellUnitType ) < 1) then  UNDEFINED
+             ComponentCount( DwellUnitType ) < 1 .OR.
+             IfValidAnd( NumAssigningDUs > 0 )==0) then  UNDEFINED
          else  CreateComp( nrcctblRowVentRes, Format( "%s VentRes tblRow", Name ) )
          endif  }
    "Set DwellUnitType:nrcctblRowVentResRef:noXMLoutput_DwellUnitTypeRef"    DwellUnitType:nrcctblRowVentResRef:noXMLoutput_DwellUnitTypeRef = 
@@ -1279,6 +1764,29 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
    "DELETE empty nrccSection_VentRes object"
       nrccSection_VentRes:Action   = {  if (ComponentCount( nrcctblRowVentRes ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
 
+
+
+   ; setup TrmlUnit Fan Power report values to be used in populating Section_Zone data - RJH 11/18/22
+   "Set TrmlUnit:FanPwrRpt_bhp"  TrmlUnit:FanPwrRpt_bhp = 
+      { if (SumChildrenIf(Fan:PwrRpt, Fan:PwrUnitRpt = "bhp") > 0)
+        then SumChildrenIf(Fan:PwrRpt, Fan:PwrUnitRpt = "bhp")
+        else UNDEFINED
+        endif  }
+   "Set TrmlUnit:FanPwrRpt_wcfm"  TrmlUnit:FanPwrRpt_wcfm = 
+      { if (SumChildrenIf(Fan:PwrRpt, Fan:PwrUnitRpt = "W/cfm") > 0)
+        then SumChildrenIf(Fan:PwrRpt, Fan:PwrUnitRpt = "W/cfm")
+        else UNDEFINED
+        endif  }
+   "Set TrmlUnit:FanPwrRpt_inH2O"  TrmlUnit:FanPwrRpt_inH2O = 
+      { if (SumChildrenIf(Fan:PwrRpt, Fan:PwrUnitRpt = "inH2O") > 0)
+        then SumChildrenIf(Fan:PwrRpt, Fan:PwrUnitRpt = "inH2O")
+        else UNDEFINED
+        endif  }
+   "Set TrmlUnit:FanRpt_IsVSD"  TrmlUnit:FanRpt_IsVSD = 
+      { if (SumChildrenIf(Fan:SysCnt, Fan:CtrlMthd = "VariableSpeedDrive") > 0)
+        then SumChildrenIf(Fan:SysCnt, Fan:CtrlMthd = "VariableSpeedDrive")
+        else UNDEFINED
+        endif  }
 
    "Create nrccSection_Zone object"   nrccNRCCPRF:Action =
       {  if (Proj:CompPathMech == "Performance") 
@@ -1307,7 +1815,9 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
              ComponentCount( nrccTableZone ) < 1 .OR.
              ComponentCount( ZnSys ) < 1 .OR.
              IFValidAnd( Type = "Baseboard" ) .OR.
-             IFValidAnd( Type = "Exhaust" ) ) then  UNDEFINED
+             IFValidAnd( Type = "Exhaust" ) .OR.
+             (IfValidAnd(Type == "Furnace") .AND. IfValidAnd(FurnaceType == "Gravity")) .OR.
+             IFValidAnd( ExcludeFromRpt = 1 ) ) then  UNDEFINED
          else  if (IfValidAnd(BaseSysNum = 0) .OR. IfValidAnd(IsHlthCareSys = 0))
                then CreateComp( nrcctblRowZone, Format( "%s Zone tblRow", Name ) )
                else UNDEFINED
@@ -1397,12 +1907,7 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
       nrccSection_HtRecovery:Action   = {  if (ComponentCount( nrcctblRowHtRecovery ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
 
 
-   ; setup ResWtrHtr Parent CentralRecircType and CentralSysType to be used in triggering Section_Water table rows
-   "Set ResWtrHtr:ParentCentralRecircTypeStr"   ResWtrHtr:ParentCentralRecircTypeStr = 
-      {  EnumString( CentralRecircType )  }
-   "Set ResWtrHtr:ParentCentralSysTypeStr"   ResWtrHtr:ParentCentralSysTypeStr = 
-      {  EnumString( CentralSysType )  }
-
+   ; Section_Water
    "Create nrccSection_Water object"   nrccNRCCPRF:Action =
       {  if (Proj:CompPathDHW == "Performance" .OR. Proj:ResCompPathDHW == "Performance") 
          then CreateChildren( nrccSection_Water, 1, "NRCC Water" )
@@ -1414,7 +1919,7 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
       {  if (LocalCompAssigned( nrcctblRowWaterRef ) > 0 .OR.
              ComponentCount( nrccTableWater ) < 1 .OR.
              ComponentCount( ResWtrHtr ) < 1) then  UNDEFINED
-         else if (ParentCentralRecircTypeStr == "Non-Central" .OR. ParentCentralSysTypeStr != "HPWH") 
+         else if (NumIndivAssignedDUFracs > 0) ; RJH 9/4/23 GitHub Issue #101 modification instead of testing ResDHWSys:CentralRecircType = 'Non-Central' or ResDHWSys:CentralSysType != 'HPWH'
               then if (FloorAreaServed > 0) then CreateComp( nrcctblRowWater, Format( "%s Water tblRow", Name ) ) else UNDEFINED endif
               else UNDEFINED
               endif
@@ -1491,6 +1996,18 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
          then  ChildRef  ( ResWtrHtr:Name, 10 )
          else UNDEFINED
          endif  }
+
+   ; setup DwellUnitType:CompactDistribEnumVal and ResDHWSys flags to be used in populating Section_WaterMF
+   "Set DwellUnitType:CompactDistribEnumVal"   DwellUnitType:CompactDistribEnumVal = 
+      {  EnumValue( CompactDistrib )  }
+   "Set ResDHWSys:IsCompactDistrib"   ResDHWSys:IsCompactDistrib = 
+      {  SumRevRef( DwellUnitType:DHWSysRef, DwellUnitType:CompactDistribEnumVal )  }
+   "Set ResDHWSys:PipeInsVerifReq"   ResDHWSys:PipeInsVerifReq = 
+      {  SumRevRef( ResDHWSysRpt:DHWSysRef, ResDHWSysRpt:HERSAllPipesIns )  }
+   "Set ResDHWSys:ParPipingVerReq"   ResDHWSys:ParPipingVerReq = 
+      {  SumRevRef( ResDHWSysRpt:DHWSysRef, ResDHWSysRpt:HERSParallelPipe )  }
+   "Set ResDHWSys:RecirCtrlVerReq"   ResDHWSys:RecirCtrlVerReq = 
+      {  SumRevRef( ResDHWSysRpt:DHWSysRef, ResDHWSysRpt:HERSPointOfUse )  }
 
 
    "Create nrccSection_WaterMF object"   nrccNRCCPRF:Action =
@@ -1682,8 +2199,8 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
                                   then  CreateChildren( cf1rSection_WaterCompact, 1, "Section_WaterCompact" )
                                   else  UNCHANGED
                                   endif  }
-   "Create & initialize new cf1rTableCompact object"
-      cf1rSection_WaterCompact:Action   = {  CreateChildren( cf1rTableCompact, 1, "TableCompact" )  }     ; no init needed
+   "Create & initialize new cf1rTableWaterCompact object"
+      cf1rSection_WaterCompact:Action   = {  CreateChildren( cf1rTableWaterCompact, 1, "TableWaterCompact" )  }     ; no init needed
   ; ----------------------------------------------------------------------
   ; Rules to create individual Water Heating - Compact Distribution table rows
 
@@ -1691,19 +2208,19 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
 
    "Create cf1rtblRowCompact for all MFam DwellUnitType instances w/ Compact Distrib-1"
       DwellUnitType:CF1R_CompactMFRow[1]   = {  if (ResProj:IsMultiFamily > 0.5 .AND. IfValidAnd( ReportCompactDist > 0 ) .AND. IfValidAnd( CDCompatible[1] > 0 ) .AND. IfValidAnd( DUFloorAreaServed > 0 ) .AND. CompactDistrib != "not compact")
-                                                then  CreateComp( cf1rtblRowCompact, Name + "-1-TableCompactRow" )  else  UNDEFINED  endif  }
+                                                then  CreateComp( cf1rtblRowCompact, Name + "-1-TableWaterCompactRow" )  else  UNDEFINED  endif  }
    "Create cf1rtblRowCompact for all MFam DwellUnitType instances w/ Compact Distrib-2"
       DwellUnitType:CF1R_CompactMFRow[2]   = {  if (ResProj:IsMultiFamily > 0.5 .AND. IfValidAnd( ReportCompactDist > 0 ) .AND. IfValidAnd( CDCompatible[2] > 0 ) .AND. IfValidAnd( DUFloorAreaServed > 0 ) .AND. CompactDistrib != "not compact")
-                                                then  CreateComp( cf1rtblRowCompact, Name + "-2-TableCompactRow" )  else  UNDEFINED  endif  }
+                                                then  CreateComp( cf1rtblRowCompact, Name + "-2-TableWaterCompactRow" )  else  UNDEFINED  endif  }
    "Create cf1rtblRowCompact for all MFam DwellUnitType instances w/ Compact Distrib-3"
       DwellUnitType:CF1R_CompactMFRow[3]   = {  if (ResProj:IsMultiFamily > 0.5 .AND. IfValidAnd( ReportCompactDist > 0 ) .AND. IfValidAnd( CDCompatible[3] > 0 ) .AND. IfValidAnd( DUFloorAreaServed > 0 ) .AND. CompactDistrib != "not compact")
-                                                then  CreateComp( cf1rtblRowCompact, Name + "-3-TableCompactRow" )  else  UNDEFINED  endif  }
+                                                then  CreateComp( cf1rtblRowCompact, Name + "-3-TableWaterCompactRow" )  else  UNDEFINED  endif  }
    "Create cf1rtblRowCompact for all MFam DwellUnitType instances w/ Compact Distrib-4"
       DwellUnitType:CF1R_CompactMFRow[4]   = {  if (ResProj:IsMultiFamily > 0.5 .AND. IfValidAnd( ReportCompactDist > 0 ) .AND. IfValidAnd( CDCompatible[4] > 0 ) .AND. IfValidAnd( DUFloorAreaServed > 0 ) .AND. CompactDistrib != "not compact")
-                                                then  CreateComp( cf1rtblRowCompact, Name + "-4-TableCompactRow" )  else  UNDEFINED  endif  }
+                                                then  CreateComp( cf1rtblRowCompact, Name + "-4-TableWaterCompactRow" )  else  UNDEFINED  endif  }
    "Create cf1rtblRowCompact for all MFam DwellUnitType instances w/ Compact Distrib-5"
       DwellUnitType:CF1R_CompactMFRow[5]   = {  if (ResProj:IsMultiFamily > 0.5 .AND. IfValidAnd( ReportCompactDist > 0 ) .AND. IfValidAnd( CDCompatible[5] > 0 ) .AND. IfValidAnd( DUFloorAreaServed > 0 ) .AND. CompactDistrib != "not compact")
-                                                then  CreateComp( cf1rtblRowCompact, Name + "-5-TableCompactRow" )  else  UNDEFINED  endif  }
+                                                then  CreateComp( cf1rtblRowCompact, Name + "-5-TableWaterCompactRow" )  else  UNDEFINED  endif  }
    ; ----------------------------------------------------------------------
    ; Rules to populate Water Heating - Compact Distribution table rows for all MFam DwellUnitType instances w/ Compact Distrib
    "Setup DwellUnitType:CF1R_CompactMFRow[1] via subordinate rulelist"     DwellUnitType:Action  = {
@@ -1717,7 +2234,12 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
    "Setup DwellUnitType:CF1R_CompactMFRow[5] via subordinate rulelist"     DwellUnitType:Action  = {
          if (LocalCompAssigned( CF1R_CompactMFRow[5] ) > 0) then  EvalRulelist( "Setup_DwellUnitType_CF1R_CompactMFRow_5", 1 )  else  UNCHANGED  endif  }
 
-   "Set cf1rtblRowCompact parent"   cf1rtblRowCompact:Parent  = { cf1rTableCompact:Name  }
+   "Set cf1rtblRowCompact parent"   cf1rtblRowCompact:Parent  = { cf1rTableWaterCompact:Name  }
+
+  ; Rule to Delete empty cf1rSection_WaterCompact
+   "DELETE empty cf1rSection_WaterCompact object"
+      cf1rSection_WaterCompact:Action   = {  if (ComponentCount( cf1rtblRowCompact ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
+
   ; END of Water Heating - Compact Distribution table rules
   ; ----------------------------------------------------------------------
 
@@ -2245,9 +2767,11 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
          endif }
    "Create nrccSection_LtgCredits nrccTableLtgCredits object"              nrccSection_LtgCredits:Action  =
       {  CreateChildren( nrccTableLtgCredits, 1, "NRCC LtgCredits table" )  }
+; RJH 8/30/2023 GitHub Issue #102 - Do not report if IntLtgSys has no controls
    "Create nrcctblRowLtgCredits object for each pertinent IntLtgSys"     IntLtgSys:nrcctblRowLtgCreditsRef =
       {  if (LocalCompAssigned( nrcctblRowLtgCreditsRef ) > 0 .OR.
-             ComponentCount( nrccTableLtgCredits ) < 1) then  UNDEFINED
+             ComponentCount( nrccTableLtgCredits ) < 1 .OR.
+             PAFCredType[1] == "- none specified -") then  UNDEFINED
          else if (ParentSpcIsCond == 1 .AND. IfValidAnd(Parent(OccClass) != "Residential")) 
               then CreateComp( nrcctblRowLtgCredits, Format( "%s LtgCredits tblRow", Name ) )
               else UNDEFINED
@@ -2331,9 +2855,7 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
          then CreateChildren( nrccSection_LtgControls, 1, "NRCC LtgControls" )
          else UNCHANGED 
          endif }
-   "Create nrccSection_LtgControls nrccLtgControlsReq object"              nrccSection_LtgControls:Action  =
-      {  CreateChildren( nrccLtgControlsReq, 1, "NRCC LtgControlsReq" )  }
-   "Create nrccLtgControlsReq nrccTableLtgControls object"              nrccLtgControlsReq:Action  =
+   "Create nrccSection_LtgControls nrccTableLtgControls object"              nrccSection_LtgControls:Action  =
       {  CreateChildren( nrccTableLtgControls, 1, "NRCC LtgControls table" )  }
 
    "Create nrccSection_LtgControls nrcctblRowLtgControls #1 object"     nrccTableLtgControls:Action  =      ; SAC 05/17/21
@@ -2407,18 +2929,29 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
          then  CreateChildren( nrcctblRowLtgControls, 1, "NRCC LtgControls row10", "NRCCPRF_RowLtgControls_row10" )
          else  UNCHANGED  endif endif  }
 
-  ; Rule to Set LtgControlsNA for empty nrccSection_LtgControls
+; Scenarios for this section:
+;1. If elements LtgControls01 through LtgControls10 are present, then populate them.
+;2. If elements LtgControls01 and LtgControls02 are present, but LtgControls03 through LtgControls10 are missing, then also populate LtgControlsNA
+;3. If elements LtgControls01 through LtgControls10 are all missing, then only populate LtgControlsNA
+
+  ; Scenario 1 is automatic
+
+  ; Scenario 2
+  ; Rule to Delete empty nrccTableLtgControls table
+   "DELETE empty nrccTableLtgControls object"
+      nrccTableLtgControls:Action   = {  if (ComponentCount( nrcctblRowLtgControls ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
+  ; Rule to set LtgControlsNA is below
+
+  ; Scenario 3
+  ; Rule to set LtgControlsNA for deleted nrccTableLtgControls
    "Set nrccSection_LtgControls:LtgControlsNA"  nrccSection_LtgControls:LtgControlsNA  = {
-         if (ComponentCount( nrcctblRowLtgControls ) < 1)
+         if (ComponentCount( nrccTableLtgControls ) < 1)
          then  if ( IfValidAnd( Proj:IsLowRiseMFam > 0 ) )
                then  "See LMCC-LTI01-E for mandatory controls"     
                else  "See NRCC-LTI-E for mandatory controls"
                endif
          else  UNDEFINED
          endif  }
-  ; Rule to Delete empty nrccLtgControlsReq subsection
-   "DELETE empty nrccLtgControlsReq object"
-      nrccLtgControlsReq:Action   = {  if (ComponentCount( nrcctblRowLtgControls ) < 1) then  DeleteComp()  else  UNCHANGED  endif }
 
 
    "Create nrccSection_TailoredSum object"   nrccNRCCPRF:Action =
@@ -2869,43 +3402,50 @@ RULELIST "NRCCPRF_Proposed"  1 0 0 1
       nrccDeclarationsBlock:Action  = {  CreateChildren( nrcccomp_ResponsiblePersonNRCCPRF,       1, "NRCC ResponsiblePersonNRCCPRF" ) } ; no init needed
 
    "Create & initialize new nrcccomp_ResponsiblePersonDesigner object"
-      nrcccomp_ResponsiblePersonNRCCPRF:Action  = {  if (GlobalStatus(Proj:RespDsgnrName01) > 0) 
+      nrcccomp_ResponsiblePersonNRCCPRF:Action  = {  if ((GlobalStatus(Proj:RespDsgnrName01) > 0 .AND. Proj:RespDsgnrName01 != " - specify - " .AND. Proj:RespDsgnrName01 != "- specify -") 
+                                                         .OR. (GlobalStatus(Proj:RespDsgnrCompany01) > 0 .AND. Proj:RespDsgnrCompany01 != " - specify - " .AND. Proj:RespDsgnrCompany01 != "- specify -")) 
                                                      then CreateChildren( nrcccomp_ResponsiblePersonDesigner,       1, "NRCC ResponsiblePersonDesigner",     "NRCCPRF_Init_nrccResponsiblePersonDesigner01" )
                                                      else UNCHANGED
                                                      endif  }
 
    "Create & initialize new nrcccomp_ResponsiblePersonDesigner object"
-      nrcccomp_ResponsiblePersonNRCCPRF:Action  = {  if (GlobalStatus(Proj:RespDsgnrName02) > 0) 
+      nrcccomp_ResponsiblePersonNRCCPRF:Action  = {  if ((GlobalStatus(Proj:RespDsgnrName02) > 0 .AND. Proj:RespDsgnrName02 != " - specify - " .AND. Proj:RespDsgnrName02 != "- specify -") 
+                                                         .OR. (GlobalStatus(Proj:RespDsgnrCompany02) > 0 .AND. Proj:RespDsgnrCompany02 != " - specify - " .AND. Proj:RespDsgnrCompany02 != "- specify -")) 
                                                      then CreateChildren( nrcccomp_ResponsiblePersonDesigner,       1, "NRCC ResponsiblePersonDesigner",     "NRCCPRF_Init_nrccResponsiblePersonDesigner02" )
                                                      else UNCHANGED
                                                      endif  }
 
    "Create & initialize new nrcccomp_ResponsiblePersonDesigner object"
-      nrcccomp_ResponsiblePersonNRCCPRF:Action  = {  if (GlobalStatus(Proj:RespDsgnrName03) > 0) 
+      nrcccomp_ResponsiblePersonNRCCPRF:Action  = {  if ((GlobalStatus(Proj:RespDsgnrName03) > 0 .AND. Proj:RespDsgnrName03 != " - specify - " .AND. Proj:RespDsgnrName03 != "- specify -") 
+                                                         .OR. (GlobalStatus(Proj:RespDsgnrCompany03) > 0 .AND. Proj:RespDsgnrCompany03 != " - specify - " .AND. Proj:RespDsgnrCompany03 != "- specify -")) 
                                                      then CreateChildren( nrcccomp_ResponsiblePersonDesigner,       1, "NRCC ResponsiblePersonDesigner",     "NRCCPRF_Init_nrccResponsiblePersonDesigner03" )
                                                      else UNCHANGED
                                                      endif  }
 
    "Create & initialize new nrcccomp_ResponsiblePersonDesigner object"
-      nrcccomp_ResponsiblePersonNRCCPRF:Action  = {  if (GlobalStatus(Proj:RespDsgnrName04) > 0) 
+      nrcccomp_ResponsiblePersonNRCCPRF:Action  = {  if ((GlobalStatus(Proj:RespDsgnrName04) > 0 .AND. Proj:RespDsgnrName04 != " - specify - " .AND. Proj:RespDsgnrName04 != "- specify -") 
+                                                         .OR. (GlobalStatus(Proj:RespDsgnrCompany04) > 0 .AND. Proj:RespDsgnrCompany04 != " - specify - " .AND. Proj:RespDsgnrCompany04 != "- specify -")) 
                                                      then CreateChildren( nrcccomp_ResponsiblePersonDesigner,       1, "NRCC ResponsiblePersonDesigner",     "NRCCPRF_Init_nrccResponsiblePersonDesigner04" )
                                                      else UNCHANGED
                                                      endif  }
 
    "Create & initialize new nrcccomp_ResponsiblePersonDesigner object"
-      nrcccomp_ResponsiblePersonNRCCPRF:Action  = {  if (GlobalStatus(Proj:RespDsgnrName05) > 0) 
+      nrcccomp_ResponsiblePersonNRCCPRF:Action  = {  if ((GlobalStatus(Proj:RespDsgnrName05) > 0 .AND. Proj:RespDsgnrName05 != " - specify - " .AND. Proj:RespDsgnrName05 != "- specify -") 
+                                                         .OR. (GlobalStatus(Proj:RespDsgnrCompany05) > 0 .AND. Proj:RespDsgnrCompany05 != " - specify - " .AND. Proj:RespDsgnrCompany05 != "- specify -")) 
                                                      then CreateChildren( nrcccomp_ResponsiblePersonDesigner,       1, "NRCC ResponsiblePersonDesigner",     "NRCCPRF_Init_nrccResponsiblePersonDesigner05" )
                                                      else UNCHANGED
                                                      endif  }
 
    "Create & initialize new nrcccomp_ResponsiblePersonDesigner object"
-      nrcccomp_ResponsiblePersonNRCCPRF:Action  = {  if (GlobalStatus(Proj:RespDsgnrName06) > 0) 
+      nrcccomp_ResponsiblePersonNRCCPRF:Action  = {  if ((GlobalStatus(Proj:RespDsgnrName06) > 0 .AND. Proj:RespDsgnrName06 != " - specify - " .AND. Proj:RespDsgnrName06 != "- specify -") 
+                                                         .OR. (GlobalStatus(Proj:RespDsgnrCompany06) > 0 .AND. Proj:RespDsgnrCompany06 != " - specify - " .AND. Proj:RespDsgnrCompany06 != "- specify -")) 
                                                      then CreateChildren( nrcccomp_ResponsiblePersonDesigner,       1, "NRCC ResponsiblePersonDesigner",     "NRCCPRF_Init_nrccResponsiblePersonDesigner06" )
                                                      else UNCHANGED
                                                      endif  }
 
    "Create & initialize new nrcccomp_ResponsiblePersonDesigner object"
-      nrcccomp_ResponsiblePersonNRCCPRF:Action  = {  if (GlobalStatus(Proj:RespDsgnrName07) > 0) 
+      nrcccomp_ResponsiblePersonNRCCPRF:Action  = {  if ((GlobalStatus(Proj:RespDsgnrName07) > 0 .AND. Proj:RespDsgnrName07 != " - specify - " .AND. Proj:RespDsgnrName07 != "- specify -") 
+                                                         .OR. (GlobalStatus(Proj:RespDsgnrCompany07) > 0 .AND. Proj:RespDsgnrCompany07 != " - specify - " .AND. Proj:RespDsgnrCompany07 != "- specify -")) 
                                                      then CreateChildren( nrcccomp_ResponsiblePersonDesigner,       1, "NRCC ResponsiblePersonDesigner",     "NRCCPRF_Init_nrccResponsiblePersonDesigner07" )
                                                      else UNCHANGED
                                                      endif  }
@@ -2983,7 +3523,7 @@ RULELIST "NRCCPRF_ap_PostSim"  1 0 0 1
    "Set nrccSection_Except:noXMLoutput_DeleteFlag"      nrccSection_Except:noXMLoutput_DeleteFlag   =
       {  if (Proj:AnalysisVersion >= 220100 .AND. Proj:AnalysisVersion <= 220101)   ; always include exception section for 2022.1.0
          then  0  else  1  endif }
-   "Set nrccSection_Except:noXMLoutput_DeleteFlag"      for:#S=(1to23)   nrccSection_Except:noXMLoutput_DeleteFlag   = {  if (LocalStatus(Except01_ExceptionalConditionMessageNRCCPRFE[#S]) > 0) then 0 else UNCHANGED endif }
+   "Set nrccSection_Except:noXMLoutput_DeleteFlag"      for:#S=(1to40)   nrccSection_Except:noXMLoutput_DeleteFlag   = {  if (LocalStatus(Except01_ExceptionalConditionMessageCCPRFE[#S]) > 0) then 0 else UNCHANGED endif }
    "DELETE empty nrccSection_Except object"
       nrccSection_Except:Action   = {  if (noXMLoutput_DeleteFlag > 0) then  DeleteComp()  else  UNCHANGED  endif }
 
@@ -3064,7 +3604,7 @@ RULELIST "NRCCPRF_Init_nrccPayload"  1 0 0 1
                                                                                                                         else "NRCCPRFE"
                                                                                                                         endif }
    "Set nrccPayload:attrib_processedDate"                      nrccPayload:attrib_processedDate                    = {  ValidOr( Proj:RunDateISO, "2006-05-04T18:13:51.0" )  }
-   "Set nrccPayload:attrib_projectID"                          nrccPayload:attrib_projectID                        = {  " "  }
+   "Set nrccPayload:attrib_projectID"                          nrccPayload:attrib_projectID                        = {  ValidOr( Proj:RptComplianceID, " " )  }    ; SAC 12/13/22
    "Set nrccPayload:attrib_reportRequestor"                    nrccPayload:attrib_reportRequestor                  = {  "reportRequestor1"  }
    "Set nrccPayload:attrib_reportRequestorIP_Address"          nrccPayload:attrib_reportRequestorIP_Address        = {  "reportRequestorIP_Address1"  }
    "Set nrccPayload:attrib_revision"                           nrccPayload:attrib_revision                         = {  "revision3"  }
@@ -3900,7 +4440,7 @@ RULELIST "CF1RPRF01E_Section_Da_PVArray"  1 0 0 1
    "Create PVArray:CF1R_PVRow"     PVArray:CF1R_PVRow = {  CreateComp( cf1rtblRowPV, Name + "NRCC PVRow" )  }
   ; Rules to populate EDR_PV table row from PVArray
      "Set PVArray:CF1R_PVRow:Pv01_PV_SystemTotalRatedPowerDC"    PVArray:CF1R_PVRow:Pv01_PV_SystemTotalRatedPowerDC  = {
-            int((DCSysSize * 100) + 0.5) / 100  }
+             int((ValidOr( Proj:DCSizeMultiplier, 1 ) * DCSysSize * 100) + 0.5) / 100  }
 ; TO DO - CBECC-22 PV exceptions
 ;     "Set PVArray:CF1R_PVRow:Pv02_PhotoVoltaicExceptionRes"      PVArray:CF1R_PVRow:Action = {  EvalRulelist( "CF1RPRF01E_Set_Pv02_PhotoVoltaicExceptionRes", 1 )  }     ; SAC 03/01/21
      "Set PVArray:CF1R_PVRow:Pv03_ArrayModuleType"    PVArray:CF1R_PVRow:Pv03_ArrayModuleType  = { 
@@ -4076,5 +4616,552 @@ END
 
 ;*************************************************************************
 ;*************************************************************************
+
+;*************************************************************************
+RULELIST "NRCAMch02ASystemsToFieldVerify"  1 0 0 1
+   "Set nrccSection_Nrca:Nrca13_SystemsToFieldVerify"   for:#S=(1to3)   nrccSection_Nrca:Nrca13_SystemsToFieldVerify =
+      {  if (GlobalStatus( Proj:NRCAMchSysList[#S] ) < 1) 
+         then  UNCHANGED
+         else if (LocalStatus( Nrca13_SystemsToFieldVerify ) > 0)
+              then  
+                if ( Nrca13_SystemsToFieldVerify = "NRCAMch02ASystemsToFieldVerify" )
+                then Proj:NRCAMchSysList[#S]
+                else Nrca13_SystemsToFieldVerify + ", " + Proj:NRCAMchSysList[#S]
+                endif
+              else  Proj:NRCAMchSysList[#S]
+              endif 
+         endif  }
+   "Set nrccSection_Nrca:Nrca13_SystemsToFieldVerify"   for:#S=(1to3)   nrccSection_Nrca:Nrca13_SystemsToFieldVerify =
+      {  if (GlobalStatus( ResProj:NRCAMchResSysList[#S] ) < 1) then  UNCHANGED
+         else if (LocalStatus( Nrca13_SystemsToFieldVerify ) > 0)
+         then  
+	          if ( Nrca13_SystemsToFieldVerify = "NRCAMch02ASystemsToFieldVerify" )
+	          then ResProj:NRCAMchResSysList[#S]
+	          else Nrca13_SystemsToFieldVerify + ", " + ResProj:NRCAMchResSysList[#S]
+	          endif
+         else  ResProj:NRCAMchResSysList[#S]
+         endif endif  }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "NRCAMch03ASystemsToFieldVerify"  1 0 0 1
+   "Set nrccSection_Nrca:Nrca14_SystemsToFieldVerify"   for:#S=(4to6)   nrccSection_Nrca:Nrca14_SystemsToFieldVerify =
+      {  if (GlobalStatus( Proj:NRCAMchSysList[#S] ) < 1) 
+         then  UNCHANGED
+         else if (LocalStatus( Nrca14_SystemsToFieldVerify ) > 0)
+              then  
+                if ( Nrca14_SystemsToFieldVerify = "NRCAMch03ASystemsToFieldVerify" )
+                then Proj:NRCAMchSysList[#S]
+                else Nrca14_SystemsToFieldVerify + ", " + Proj:NRCAMchSysList[#S]
+                endif
+              else  Proj:NRCAMchSysList[#S]
+              endif 
+         endif  }
+   "Set nrccSection_Nrca:Nrca14_SystemsToFieldVerify"   for:#S=(4to6)   nrccSection_Nrca:Nrca14_SystemsToFieldVerify =
+      {  if (GlobalStatus( ResProj:NRCAMchResSysList[#S] ) < 1) then  UNCHANGED
+         else if (LocalStatus( Nrca14_SystemsToFieldVerify ) > 0)
+         then  
+	          if ( Nrca14_SystemsToFieldVerify = "NRCAMch03ASystemsToFieldVerify" )
+	          then ResProj:NRCAMchResSysList[#S]
+	          else Nrca14_SystemsToFieldVerify + ", " + ResProj:NRCAMchResSysList[#S]
+	          endif
+         else  ResProj:NRCAMchResSysList[#S]
+         endif endif  }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "NRCAMch04HSystemsToFieldVerify"  1 0 0 1
+   "Set nrccSection_Nrca:Nrca15_SystemsToFieldVerify"   for:#S=(7to9)   nrccSection_Nrca:Nrca15_SystemsToFieldVerify =
+      {  if (GlobalStatus( Proj:NRCAMchSysList[#S] ) < 1) 
+         then  UNCHANGED
+         else if (LocalStatus( Nrca15_SystemsToFieldVerify ) > 0)
+              then  
+                if ( Nrca15_SystemsToFieldVerify = "NRCAMch04HSystemsToFieldVerify" )
+                then Proj:NRCAMchSysList[#S]
+                else Nrca15_SystemsToFieldVerify + ", " + Proj:NRCAMchSysList[#S]
+                endif
+              else  Proj:NRCAMchSysList[#S]
+              endif 
+         endif  }
+   "Set nrccSection_Nrca:Nrca15_SystemsToFieldVerify"   for:#S=(7to9)   nrccSection_Nrca:Nrca15_SystemsToFieldVerify =
+      {  if (GlobalStatus( ResProj:NRCAMchResSysList[#S] ) < 1) then  UNCHANGED
+         else if (LocalStatus( Nrca15_SystemsToFieldVerify ) > 0)
+         then  
+	          if ( Nrca15_SystemsToFieldVerify = "NRCAMch04HSystemsToFieldVerify" )
+	          then ResProj:NRCAMchResSysList[#S]
+	          else Nrca15_SystemsToFieldVerify + ", " + ResProj:NRCAMchResSysList[#S]
+	          endif
+         else  ResProj:NRCAMchResSysList[#S]
+         endif endif  }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "NRCAMch05ASystemsToFieldVerify"  1 0 0 1
+   "Set nrccSection_Nrca:Nrca17_SystemsToFieldVerify"   for:#S=(10to12)   nrccSection_Nrca:Nrca17_SystemsToFieldVerify =
+      {  if (GlobalStatus( Proj:NRCAMchSysList[#S] ) < 1) 
+         then  UNCHANGED
+         else if (LocalStatus( Nrca17_SystemsToFieldVerify ) > 0)
+              then  
+                if ( Nrca17_SystemsToFieldVerify = "NRCAMch05ASystemsToFieldVerify" )
+                then Proj:NRCAMchSysList[#S]
+                else Nrca17_SystemsToFieldVerify + ", " + Proj:NRCAMchSysList[#S]
+                endif
+              else  Proj:NRCAMchSysList[#S]
+              endif 
+         endif  }
+   "Set nrccSection_Nrca:Nrca17_SystemsToFieldVerify"   for:#S=(10to12)   nrccSection_Nrca:Nrca17_SystemsToFieldVerify =
+      {  if (GlobalStatus( ResProj:NRCAMchResSysList[#S] ) < 1) then  UNCHANGED
+         else if (LocalStatus( Nrca17_SystemsToFieldVerify ) > 0)
+         then  
+	          if ( Nrca17_SystemsToFieldVerify = "NRCAMch05ASystemsToFieldVerify" )
+	          then ResProj:NRCAMchResSysList[#S]
+	          else Nrca17_SystemsToFieldVerify + ", " + ResProj:NRCAMchResSysList[#S]
+	          endif
+         else  ResProj:NRCAMchResSysList[#S]
+         endif endif  }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "NRCAMch06ASystemsToFieldVerify"  1 0 0 1
+   "Set nrccSection_Nrca:Nrca18_SystemsToFieldVerify"   for:#S=(13to15)   nrccSection_Nrca:Nrca18_SystemsToFieldVerify =
+      {  if (GlobalStatus( Proj:NRCAMchSysList[#S] ) < 1) 
+         then  UNCHANGED
+         else if (LocalStatus( Nrca18_SystemsToFieldVerify ) > 0)
+              then  
+                if ( Nrca18_SystemsToFieldVerify = "NRCAMch06ASystemsToFieldVerify" )
+                then Proj:NRCAMchSysList[#S]
+                else Nrca18_SystemsToFieldVerify + ", " + Proj:NRCAMchSysList[#S]
+                endif
+              else  Proj:NRCAMchSysList[#S]
+              endif 
+         endif  }
+   "Set nrccSection_Nrca:Nrca18_SystemsToFieldVerify"   for:#S=(13to15)   nrccSection_Nrca:Nrca18_SystemsToFieldVerify =
+      {  if (GlobalStatus( ResProj:NRCAMchResSysList[#S] ) < 1) then  UNCHANGED
+         else if (LocalStatus( Nrca18_SystemsToFieldVerify ) > 0)
+         then  
+	          if ( Nrca18_SystemsToFieldVerify = "NRCAMch06ASystemsToFieldVerify" )
+	          then ResProj:NRCAMchResSysList[#S]
+	          else Nrca18_SystemsToFieldVerify + ", " + ResProj:NRCAMchResSysList[#S]
+	          endif
+         else  ResProj:NRCAMchResSysList[#S]
+         endif endif  }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "NRCAMch07ASystemsToFieldVerify"  1 0 0 1
+   "Set nrccSection_Nrca:Nrca19_SystemsToFieldVerify"   for:#S=(16to18)   nrccSection_Nrca:Nrca19_SystemsToFieldVerify =
+      {  if (GlobalStatus( Proj:NRCAMchSysList[#S] ) < 1) 
+         then  UNCHANGED
+         else if (LocalStatus( Nrca19_SystemsToFieldVerify ) > 0)
+              then  
+                if ( Nrca19_SystemsToFieldVerify = "NRCAMch07ASystemsToFieldVerify" )
+                then Proj:NRCAMchSysList[#S]
+                else Nrca19_SystemsToFieldVerify + ", " + Proj:NRCAMchSysList[#S]
+                endif
+              else  Proj:NRCAMchSysList[#S]
+              endif 
+         endif  }
+   "Set nrccSection_Nrca:Nrca19_SystemsToFieldVerify"   for:#S=(16to18)   nrccSection_Nrca:Nrca19_SystemsToFieldVerify =
+      {  if (GlobalStatus( ResProj:NRCAMchResSysList[#S] ) < 1) then  UNCHANGED
+         else if (LocalStatus( Nrca19_SystemsToFieldVerify ) > 0)
+         then  
+	          if ( Nrca19_SystemsToFieldVerify = "NRCAMch07ASystemsToFieldVerify" )
+	          then ResProj:NRCAMchResSysList[#S]
+	          else Nrca19_SystemsToFieldVerify + ", " + ResProj:NRCAMchResSysList[#S]
+	          endif
+         else  ResProj:NRCAMchResSysList[#S]
+         endif endif  }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "NRCAMch08ASystemsToFieldVerify"  1 0 0 1
+   "Set nrccSection_Nrca:Nrca20_SystemsToFieldVerify"   for:#S=(19to19)   nrccSection_Nrca:Nrca20_SystemsToFieldVerify =
+      {  if (GlobalStatus( Proj:NRCAMchSysList[#S] ) < 1) 
+         then  UNCHANGED
+         else if (LocalStatus( Nrca20_SystemsToFieldVerify ) > 0)
+              then  
+                if ( Nrca20_SystemsToFieldVerify = "NRCAMch08ASystemsToFieldVerify" )
+                then Proj:NRCAMchSysList[#S]
+                else Nrca20_SystemsToFieldVerify + ", " + Proj:NRCAMchSysList[#S]
+                endif
+              else  Proj:NRCAMchSysList[#S]
+              endif 
+         endif  }
+   "Set nrccSection_Nrca:Nrca20_SystemsToFieldVerify"   for:#S=(19to21)   nrccSection_Nrca:Nrca20_SystemsToFieldVerify =
+      {  if (GlobalStatus( ResProj:NRCAMchResSysList[#S] ) < 1) then  UNCHANGED
+         else if (LocalStatus( Nrca20_SystemsToFieldVerify ) > 0)
+         then  
+	          if ( Nrca20_SystemsToFieldVerify = "NRCAMch08ASystemsToFieldVerify" )
+	          then ResProj:NRCAMchResSysList[#S]
+	          else Nrca20_SystemsToFieldVerify + ", " + ResProj:NRCAMchResSysList[#S]
+	          endif
+         else  ResProj:NRCAMchResSysList[#S]
+         endif endif  }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "NRCAMch09ASystemsToFieldVerify"  1 0 0 1
+   "Set nrccSection_Nrca:Nrca21_SystemsToFieldVerify"   for:#S=(20to20)   nrccSection_Nrca:Nrca21_SystemsToFieldVerify =
+      {  if (GlobalStatus( Proj:NRCAMchSysList[#S] ) < 1) 
+         then  UNCHANGED
+         else if (LocalStatus( Nrca21_SystemsToFieldVerify ) > 0)
+              then  
+                if ( Nrca21_SystemsToFieldVerify = "NRCAMch09ASystemsToFieldVerify" )
+                then Proj:NRCAMchSysList[#S]
+                else Nrca21_SystemsToFieldVerify + ", " + Proj:NRCAMchSysList[#S]
+                endif
+              else  Proj:NRCAMchSysList[#S]
+              endif 
+         endif  }
+   "Set nrccSection_Nrca:Nrca21_SystemsToFieldVerify"   for:#S=(22to24)   nrccSection_Nrca:Nrca21_SystemsToFieldVerify =
+      {  if (GlobalStatus( ResProj:NRCAMchResSysList[#S] ) < 1) then  UNCHANGED
+         else if (LocalStatus( Nrca21_SystemsToFieldVerify ) > 0)
+         then  
+	          if ( Nrca21_SystemsToFieldVerify = "NRCAMch09ASystemsToFieldVerify" )
+	          then ResProj:NRCAMchResSysList[#S]
+	          else Nrca21_SystemsToFieldVerify + ", " + ResProj:NRCAMchResSysList[#S]
+	          endif
+         else  ResProj:NRCAMchResSysList[#S]
+         endif endif  }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "NRCAMch10ASystemsToFieldVerify"  1 0 0 1
+   "Set nrccSection_Nrca:Nrca22_SystemsToFieldVerify"   for:#S=(21to21)   nrccSection_Nrca:Nrca22_SystemsToFieldVerify =
+      {  if (GlobalStatus( Proj:NRCAMchSysList[#S] ) < 1) 
+         then  UNCHANGED
+         else if (LocalStatus( Nrca22_SystemsToFieldVerify ) > 0)
+              then  
+                if ( Nrca22_SystemsToFieldVerify = "NRCAMch10ASystemsToFieldVerify" )
+                then Proj:NRCAMchSysList[#S]
+                else Nrca22_SystemsToFieldVerify + ", " + Proj:NRCAMchSysList[#S]
+                endif
+              else  Proj:NRCAMchSysList[#S]
+              endif 
+         endif  }
+   "Set nrccSection_Nrca:Nrca22_SystemsToFieldVerify"   for:#S=(25to27)   nrccSection_Nrca:Nrca22_SystemsToFieldVerify =
+      {  if (GlobalStatus( ResProj:NRCAMchResSysList[#S] ) < 1) then  UNCHANGED
+         else if (LocalStatus( Nrca22_SystemsToFieldVerify ) > 0)
+         then  
+	          if ( Nrca22_SystemsToFieldVerify = "NRCAMch10ASystemsToFieldVerify" )
+	          then ResProj:NRCAMchResSysList[#S]
+	          else Nrca22_SystemsToFieldVerify + ", " + ResProj:NRCAMchResSysList[#S]
+	          endif
+         else  ResProj:NRCAMchResSysList[#S]
+         endif endif  }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "NRCAMch11ASystemsToFieldVerify"  1 0 0 1
+   "Set nrccSection_Nrca:Nrca23_SystemsToFieldVerify"   for:#S=(22to25)   nrccSection_Nrca:Nrca23_SystemsToFieldVerify =
+      {  if (GlobalStatus( Proj:NRCAMchSysList[#S] ) < 1) 
+         then  UNCHANGED
+         else if (LocalStatus( Nrca23_SystemsToFieldVerify ) > 0)
+              then  
+                if ( Nrca23_SystemsToFieldVerify = "NRCAMch11ASystemsToFieldVerify" )
+                then Proj:NRCAMchSysList[#S]
+                else Nrca23_SystemsToFieldVerify + ", " + Proj:NRCAMchSysList[#S]
+                endif
+              else  Proj:NRCAMchSysList[#S]
+              endif 
+         endif  }
+   "Set nrccSection_Nrca:Nrca23_SystemsToFieldVerify"   for:#S=(28to30)   nrccSection_Nrca:Nrca23_SystemsToFieldVerify =
+      {  if (GlobalStatus( ResProj:NRCAMchResSysList[#S] ) < 1) then  UNCHANGED
+         else if (LocalStatus( Nrca23_SystemsToFieldVerify ) > 0)
+         then  
+	          if ( Nrca23_SystemsToFieldVerify = "NRCAMch11ASystemsToFieldVerify" )
+	          then ResProj:NRCAMchResSysList[#S]
+	          else Nrca23_SystemsToFieldVerify + ", " + ResProj:NRCAMchResSysList[#S]
+	          endif
+         else  ResProj:NRCAMchResSysList[#S]
+         endif endif  }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "NRCAMch12ASystemsToFieldVerify"  1 0 0 1
+   "Set nrccSection_Nrca:Nrca24_SystemsToFieldVerify"   for:#S=(26to28)   nrccSection_Nrca:Nrca24_SystemsToFieldVerify =
+      {  if (GlobalStatus( Proj:NRCAMchSysList[#S] ) < 1) 
+         then  UNCHANGED
+         else if (LocalStatus( Nrca24_SystemsToFieldVerify ) > 0)
+              then  
+                if ( Nrca24_SystemsToFieldVerify = "NRCAMch12ASystemsToFieldVerify" )
+                then Proj:NRCAMchSysList[#S]
+                else Nrca24_SystemsToFieldVerify + ", " + Proj:NRCAMchSysList[#S]
+                endif
+              else  Proj:NRCAMchSysList[#S]
+              endif 
+         endif  }
+   "Set nrccSection_Nrca:Nrca24_SystemsToFieldVerify"   for:#S=(31to33)   nrccSection_Nrca:Nrca24_SystemsToFieldVerify =
+      {  if (GlobalStatus( ResProj:NRCAMchResSysList[#S] ) < 1) then  UNCHANGED
+         else if (LocalStatus( Nrca24_SystemsToFieldVerify ) > 0)
+         then  
+	          if ( Nrca24_SystemsToFieldVerify = "NRCAMch12ASystemsToFieldVerify" )
+	          then ResProj:NRCAMchResSysList[#S]
+	          else Nrca24_SystemsToFieldVerify + ", " + ResProj:NRCAMchResSysList[#S]
+	          endif
+         else  ResProj:NRCAMchResSysList[#S]
+         endif endif  }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "NRCAMch13ASystemsToFieldVerify"  1 0 0 1
+   "Set nrccSection_Nrca:Nrca25_SystemsToFieldVerify"   for:#S=(29to31)   nrccSection_Nrca:Nrca25_SystemsToFieldVerify =
+      {  if (GlobalStatus( Proj:NRCAMchSysList[#S] ) < 1) 
+         then  UNCHANGED
+         else if (LocalStatus( Nrca25_SystemsToFieldVerify ) > 0)
+              then  
+                if ( Nrca25_SystemsToFieldVerify = "NRCAMch13ASystemsToFieldVerify" )
+                then Proj:NRCAMchSysList[#S]
+                else Nrca25_SystemsToFieldVerify + ", " + Proj:NRCAMchSysList[#S]
+                endif
+              else  Proj:NRCAMchSysList[#S]
+              endif 
+         endif  }
+   "Set nrccSection_Nrca:Nrca25_SystemsToFieldVerify"   for:#S=(34to36)   nrccSection_Nrca:Nrca25_SystemsToFieldVerify =
+      {  if (GlobalStatus( ResProj:NRCAMchResSysList[#S] ) < 1) then  UNCHANGED
+         else if (LocalStatus( Nrca25_SystemsToFieldVerify ) > 0)
+         then  
+	          if ( Nrca25_SystemsToFieldVerify = "NRCAMch13ASystemsToFieldVerify" )
+	          then ResProj:NRCAMchResSysList[#S]
+	          else Nrca25_SystemsToFieldVerify + ", " + ResProj:NRCAMchResSysList[#S]
+	          endif
+         else  ResProj:NRCAMchResSysList[#S]
+         endif endif  }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "NRCAMch14ASystemsToFieldVerify"  1 0 0 1
+   "Set nrccSection_Nrca:Nrca26_SystemsToFieldVerify"   for:#S=(32to34)   nrccSection_Nrca:Nrca26_SystemsToFieldVerify =
+      {  if (GlobalStatus( Proj:NRCAMchSysList[#S] ) < 1) 
+         then  UNCHANGED
+         else if (LocalStatus( Nrca26_SystemsToFieldVerify ) > 0)
+              then  
+                if ( Nrca26_SystemsToFieldVerify = "NRCAMch14ASystemsToFieldVerify" )
+                then Proj:NRCAMchSysList[#S]
+                else Nrca26_SystemsToFieldVerify + ", " + Proj:NRCAMchSysList[#S]
+                endif
+              else  Proj:NRCAMchSysList[#S]
+              endif 
+         endif  }
+   "Set nrccSection_Nrca:Nrca26_SystemsToFieldVerify"   for:#S=(37to39)   nrccSection_Nrca:Nrca26_SystemsToFieldVerify =
+      {  if (GlobalStatus( ResProj:NRCAMchResSysList[#S] ) < 1) then  UNCHANGED
+         else if (LocalStatus( Nrca26_SystemsToFieldVerify ) > 0)
+         then  
+	          if ( Nrca26_SystemsToFieldVerify = "NRCAMch14ASystemsToFieldVerify" )
+	          then ResProj:NRCAMchResSysList[#S]
+	          else Nrca26_SystemsToFieldVerify + ", " + ResProj:NRCAMchResSysList[#S]
+	          endif
+         else  ResProj:NRCAMchResSysList[#S]
+         endif endif  }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "NRCAMch15ASystemsToFieldVerify"  1 0 0 1
+   "Set nrccSection_Nrca:Nrca27_SystemsToFieldVerify"   for:#S=(35to35)   nrccSection_Nrca:Nrca27_SystemsToFieldVerify =
+      {  if (GlobalStatus( Proj:NRCAMchSysList[#S] ) < 1) 
+         then  UNCHANGED
+         else if (LocalStatus( Nrca27_SystemsToFieldVerify ) > 0)
+              then  
+                if ( Nrca27_SystemsToFieldVerify = "NRCAMch15ASystemsToFieldVerify" )
+                then Proj:NRCAMchSysList[#S]
+                else Nrca27_SystemsToFieldVerify + ", " + Proj:NRCAMchSysList[#S]
+                endif
+              else  Proj:NRCAMchSysList[#S]
+              endif 
+         endif  }
+   "Set nrccSection_Nrca:Nrca27_SystemsToFieldVerify"   for:#S=(40to42)   nrccSection_Nrca:Nrca27_SystemsToFieldVerify =
+      {  if (GlobalStatus( ResProj:NRCAMchResSysList[#S] ) < 1) then  UNCHANGED
+         else if (LocalStatus( Nrca27_SystemsToFieldVerify ) > 0)
+         then  
+	          if ( Nrca27_SystemsToFieldVerify = "NRCAMch15ASystemsToFieldVerify" )
+	          then ResProj:NRCAMchResSysList[#S]
+	          else Nrca27_SystemsToFieldVerify + ", " + ResProj:NRCAMchResSysList[#S]
+	          endif
+         else  ResProj:NRCAMchResSysList[#S]
+         endif endif  }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "NRCAMch16ASystemsToFieldVerify"  1 0 0 1
+   "Set nrccSection_Nrca:Nrca28_SystemsToFieldVerify"   for:#S=(36to38)   nrccSection_Nrca:Nrca28_SystemsToFieldVerify =
+      {  if (GlobalStatus( Proj:NRCAMchSysList[#S] ) < 1) 
+         then  UNCHANGED
+         else if (LocalStatus( Nrca28_SystemsToFieldVerify ) > 0)
+              then  
+                if ( Nrca28_SystemsToFieldVerify = "NRCAMch16ASystemsToFieldVerify" )
+                then Proj:NRCAMchSysList[#S]
+                else Nrca28_SystemsToFieldVerify + ", " + Proj:NRCAMchSysList[#S]
+                endif
+              else  Proj:NRCAMchSysList[#S]
+              endif 
+         endif  }
+   "Set nrccSection_Nrca:Nrca28_SystemsToFieldVerify"   for:#S=(43to45)   nrccSection_Nrca:Nrca28_SystemsToFieldVerify =
+      {  if (GlobalStatus( ResProj:NRCAMchResSysList[#S] ) < 1) then  UNCHANGED
+         else if (LocalStatus( Nrca28_SystemsToFieldVerify ) > 0)
+         then  
+	          if ( Nrca28_SystemsToFieldVerify = "NRCAMch16ASystemsToFieldVerify" )
+	          then ResProj:NRCAMchResSysList[#S]
+	          else Nrca28_SystemsToFieldVerify + ", " + ResProj:NRCAMchResSysList[#S]
+	          endif
+         else  ResProj:NRCAMchResSysList[#S]
+         endif endif  }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "NRCAMch17ASystemsToFieldVerify"  1 0 0 1
+   "Set nrccSection_Nrca:Nrca29_SystemsToFieldVerify"   for:#S=(39to39)   nrccSection_Nrca:Nrca29_SystemsToFieldVerify =
+      {  if (GlobalStatus( Proj:NRCAMchSysList[#S] ) < 1) 
+         then  UNCHANGED
+         else if (LocalStatus( Nrca29_SystemsToFieldVerify ) > 0)
+              then  
+                if ( Nrca29_SystemsToFieldVerify = "NRCAMch17ASystemsToFieldVerify" )
+                then Proj:NRCAMchSysList[#S]
+                else Nrca29_SystemsToFieldVerify + ", " + Proj:NRCAMchSysList[#S]
+                endif
+              else  Proj:NRCAMchSysList[#S]
+              endif 
+         endif  }
+   "Set nrccSection_Nrca:Nrca29_SystemsToFieldVerify"   for:#S=(46to48)   nrccSection_Nrca:Nrca29_SystemsToFieldVerify =
+      {  if (GlobalStatus( ResProj:NRCAMchResSysList[#S] ) < 1) then  UNCHANGED
+         else if (LocalStatus( Nrca29_SystemsToFieldVerify ) > 0)
+         then  
+	          if ( Nrca29_SystemsToFieldVerify = "NRCAMch17ASystemsToFieldVerify" )
+	          then ResProj:NRCAMchResSysList[#S]
+	          else Nrca29_SystemsToFieldVerify + ", " + ResProj:NRCAMchResSysList[#S]
+	          endif
+         else  ResProj:NRCAMchResSysList[#S]
+         endif endif  }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "NRCAMch18ASystemsToFieldVerify"  1 0 0 1
+   "Set nrccSection_Nrca:Nrca30_SystemsToFieldVerify"   for:#S=(40to43)   nrccSection_Nrca:Nrca30_SystemsToFieldVerify =
+      {  if (GlobalStatus( Proj:NRCAMchSysList[#S] ) < 1) 
+         then  UNCHANGED
+         else if (LocalStatus( Nrca30_SystemsToFieldVerify ) > 0)
+              then  
+                if ( Nrca30_SystemsToFieldVerify = "NRCAMch18ASystemsToFieldVerify" )
+                then Proj:NRCAMchSysList[#S]
+                else Nrca30_SystemsToFieldVerify + ", " + Proj:NRCAMchSysList[#S]
+                endif
+              else  Proj:NRCAMchSysList[#S]
+              endif 
+         endif  }
+   "Set nrccSection_Nrca:Nrca30_SystemsToFieldVerify"   for:#S=(49to51)   nrccSection_Nrca:Nrca30_SystemsToFieldVerify =
+      {  if (GlobalStatus( ResProj:NRCAMchResSysList[#S] ) < 1) then  UNCHANGED
+         else if (LocalStatus( Nrca30_SystemsToFieldVerify ) > 0)
+         then  
+	          if ( Nrca30_SystemsToFieldVerify = "NRCAMch18ASystemsToFieldVerify" )
+	          then ResProj:NRCAMchResSysList[#S]
+	          else Nrca30_SystemsToFieldVerify + ", " + ResProj:NRCAMchResSysList[#S]
+	          endif
+         else  ResProj:NRCAMchResSysList[#S]
+         endif endif  }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "NRCAMch19ASystemsToFieldVerify"  1 0 0 1
+   "Set nrccSection_Nrca:Nrca31_SystemsToFieldVerify"   for:#S=(44to46)   nrccSection_Nrca:Nrca31_SystemsToFieldVerify =
+      {  if (GlobalStatus( Proj:NRCAMchSysList[#S] ) < 1) 
+         then  UNCHANGED
+         else if (LocalStatus( Nrca31_SystemsToFieldVerify ) > 0)
+              then  
+                if ( Nrca31_SystemsToFieldVerify = "NRCAMch19ASystemsToFieldVerify" )
+                then Proj:NRCAMchSysList[#S]
+                else Nrca31_SystemsToFieldVerify + ", " + Proj:NRCAMchSysList[#S]
+                endif
+              else  Proj:NRCAMchSysList[#S]
+              endif 
+         endif  }
+   "Set nrccSection_Nrca:Nrca31_SystemsToFieldVerify"   for:#S=(52to54)   nrccSection_Nrca:Nrca31_SystemsToFieldVerify =
+      {  if (GlobalStatus( ResProj:NRCAMchResSysList[#S] ) < 1) then  UNCHANGED
+         else if (LocalStatus( Nrca31_SystemsToFieldVerify ) > 0)
+         then  
+	          if ( Nrca31_SystemsToFieldVerify = "NRCAMch19ASystemsToFieldVerify" )
+	          then ResProj:NRCAMchResSysList[#S]
+	          else Nrca31_SystemsToFieldVerify + ", " + ResProj:NRCAMchResSysList[#S]
+	          endif
+         else  ResProj:NRCAMchResSysList[#S]
+         endif endif  }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "NRCAMch20HSystemsToFieldVerify"  1 0 0 1
+   "Set nrccSection_Nrca:Nrca32_SystemsToFieldVerify"   for:#S=(55to57)   nrccSection_Nrca:Nrca32_SystemsToFieldVerify =
+      {  if (GlobalStatus( ResProj:NRCAMchResSysList[#S] ) < 1) then  UNCHANGED
+         else if (LocalStatus( Nrca32_SystemsToFieldVerify ) > 0)
+         then  
+	          if ( Nrca32_SystemsToFieldVerify = "NRCAMch20HSystemsToFieldVerify" )
+	          then ResProj:NRCAMchResSysList[#S]
+	          else Nrca32_SystemsToFieldVerify + ", " + ResProj:NRCAMchResSysList[#S]
+	          endif
+         else  ResProj:NRCAMchResSysList[#S]
+         endif endif  }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "NRCAMch21HSystemsToFieldVerify"  1 0 0 1
+   "Set nrccSection_Nrca:Nrca33_SystemsToFieldVerify"   for:#S=(58to60)   nrccSection_Nrca:Nrca33_SystemsToFieldVerify =
+      {  if (GlobalStatus( ResProj:NRCAMchResSysList[#S] ) < 1) then  UNCHANGED
+         else if (LocalStatus( Nrca33_SystemsToFieldVerify ) > 0)
+         then  
+	          if ( Nrca33_SystemsToFieldVerify = "NRCAMch21HSystemsToFieldVerify" )
+	          then ResProj:NRCAMchResSysList[#S]
+	          else Nrca33_SystemsToFieldVerify + ", " + ResProj:NRCAMchResSysList[#S]
+	          endif
+         else  ResProj:NRCAMchResSysList[#S]
+         endif endif  }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "NRCAMch22ASystemsToFieldVerify"  1 0 0 1
+   "Set nrccSection_Nrca:Nrca34_SystemsToFieldVerify"   for:#S=(61to63)   nrccSection_Nrca:Nrca34_SystemsToFieldVerify =
+      {  if (GlobalStatus( ResProj:NRCAMchResSysList[#S] ) < 1) then  UNCHANGED
+         else if (LocalStatus( Nrca34_SystemsToFieldVerify ) > 0)
+         then  
+	          if ( Nrca34_SystemsToFieldVerify = "NRCAMch22ASystemsToFieldVerify" )
+	          then ResProj:NRCAMchResSysList[#S]
+	          else Nrca34_SystemsToFieldVerify + ", " + ResProj:NRCAMchResSysList[#S]
+	          endif
+         else  ResProj:NRCAMchResSysList[#S]
+         endif endif  }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "No-NRCAMch23ASystemsToFieldVerify"  1 0 0 1
+   "Set nrccSection_Nrca:Nrca35_SystemsToFieldVerify"   for:#S=(64to66)   nrccSection_Nrca:Nrca35_SystemsToFieldVerify =
+      {  if (GlobalStatus( ResProj:NRCAMchResSysList[#S] ) < 1) then  UNCHANGED
+         else if (LocalStatus( Nrca35_SystemsToFieldVerify ) > 0)
+         then  
+	          if ( Nrca35_SystemsToFieldVerify = "No-NRCAMch23ASystemsToFieldVerify" )
+	          then ResProj:NRCAMchResSysList[#S]
+	          else Nrca35_SystemsToFieldVerify + ", " + ResProj:NRCAMchResSysList[#S]
+	          endif
+         else  ResProj:NRCAMchResSysList[#S]
+         endif endif  }
+END
+;*************************************************************************
+
 
 ENDFILE

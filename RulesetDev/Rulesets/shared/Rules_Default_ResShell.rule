@@ -382,9 +382,11 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
 	                                                                      endif endif }
 
    ; SAC 12/16/19 - IAQOption revisions to labels, CFMs & Powers updated to reflect new settings (default balanced, min exhaust)
+   ; prevent -NOT MET- message for DUTs serving only Existing HVAC zones - SAC 06/29/23 (tic #3479)
    "Set DwellUnitType:MinIAQCFMLbl"				DwellUnitType:MinIAQCFMLbl		= {	if (IAQDisabled > 0) then  Format( "IAQ Ventilation disabled (%s required but not met)", FltToStr( MinIAQCFM, 1 ) )
 																											else if (MinIAQCFM < 0.05) then  " " 
-																											else if (TotalIAQCFM < (MinIAQCFM - 0.05)) then	Format( "Min IAQ Vent -NOT MET-:  %s CFM required, %s entered", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
+																											else if (TotalIAQCFM < (MinIAQCFM - 0.05) .AND. IfValidAnd( DUNewOrAltHVACFlrAreaServed > 0.5 ))
+                                                                                 then	Format( "Min IAQ Vent -NOT MET-:  %s CFM required, %s entered", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
 																											else  switch (IAQOption)
 																											         case  2:  Format( "Minimum IAQ Ventilation:  %s CFM  (%s entered)", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
 																											         case  3:  Format( "Minimum IAQ Ventilation:  %s CFM", FltToStr( MinIAQCFM, 1 ) )
@@ -459,13 +461,27 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
                then  0.4
                else  0.7
                endif endif endif
-         else if (IfValidAnd( ApplyStdDesignIAQFromTable > 0 ) .AND. IfValidAnd( StdDesignIAQType[1] > 0 ) .AND.
+         else if (IfValidAnd( StdDesignIAQType[1] > 0 ) .AND.
                   IfValidAnd( StdDesignIAQFanPwr[1] > 0 ))
          then  StdDesignIAQFanPwr[1]
          else if (IsMultiFamily)
          then  if (SumAll( DwellUnitType:IAQCFMIsBalanced ) < (ComponentCount( DwellUnitType )/2))
                then  0.35  else  0.7  endif
          else  0.35  endif endif endif endif  }
+
+; Moving IAQ System FID & Accessiblity adjustments from ResProj to DwellUnitType JP 11/23/22 (tic #3425)
+  "Set DwellUnitType:HasIndvIAQSup" DwellUnitType:HasIndvIAQSup = { if( IAQCFM_Supply + IAQHRVCFM + IAQBalCFM > 0 .OR. IAQOption = 13 ) then 1 else 0 endif }
+  "Default DwellUnitType:IAQSupInletsAccessible" DwellUnitType:IAQSupInletsAccessible = {  0  }
+  "Set DwellUnitType:IAQSupInletsAccessMsg" DwellUnitType:IAQSupInletsAccessMsg = {
+      if( HasIndvIAQSup > 0 .AND. IAQSupInletsAccessible < 0 )
+      then  "Supply air filters, inlets and H/ERV cores must be accessible to receive IAQ compliance credit"
+      else  UNDEFINED  endif  }
+  "Default DwellUnitType:IAQHasFID" DwellUnitType:IAQHasFID = {  0  }
+  "Set DwellUnitType:FanPowerAdjFactor" DwellUnitType:FanPowerAdjFactor = {
+      if( HasIndvIAQSup > 0 .AND. IAQHasFID = 0 ) then 0.1 else 0 endif }
+  "Set DwellUnitType:FanHeatRecovMultFactor" DwellUnitType:FanHeatRecovMultFactor = {
+      if( HasIndvIAQSup > 0 .AND. IAQHasFID = 0 ) then -0.1 else 0 endif }
+
 
 ; then proceed w/ IAQ power defaulting - SAC 08/27/20
    ; SAC 11/18/16 - modified rules to set IAQPwr_Exhaust for Balanced fans (as well as Exhaust) (tic #765)
@@ -492,35 +508,35 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
       ; SAC 4/17/20 - fixed bug where Fans 2-4 were summing that fan's CFM*Pwr to the current IAQCFM_Supply (CFM) instead of IAQPwr_Supply (Pwr)
 	"Set DwellUnitType:IAQPwr_Supply - 1"		DwellUnitType:IAQPwr_Supply	= {	if (IAQDisabled > 0) then  0
 																											else if (IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[1] ) > 0.5)
-																											then	if (IAQFanRef[1]:IAQFanType == 2) then                   IAQCFM[1] * ValidOr( IAQFanRef[1]:WperCFMIAQ, 0 ) * IAQFanRef[1]:FanPowerMult   else      0      endif    else      0      endif endif  }
+																											then	if (IAQFanRef[1]:IAQFanType == 2) then                   IAQCFM[1] * ValidOr( IAQFanRef[1]:WperCFMIAQ, 0 ) * ( IAQFanRef[1]:FanPowerMult + FanPowerAdjFactor )   else      0      endif    else      0      endif endif  }
 	"Set DwellUnitType:IAQPwr_Supply - 2"		DwellUnitType:IAQPwr_Supply	= {	if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[2] ) > 0.5)
-																											then	if (IAQFanRef[2]:IAQFanType == 2) then  IAQPwr_Supply + (IAQCFM[2] * ValidOr( IAQFanRef[2]:WperCFMIAQ, 0 ) * IAQFanRef[2]:FanPowerMult)  else  UNCHANGED  endif    else  UNCHANGED  endif  }
+																											then	if (IAQFanRef[2]:IAQFanType == 2) then  IAQPwr_Supply + (IAQCFM[2] * ValidOr( IAQFanRef[2]:WperCFMIAQ, 0 ) * ( IAQFanRef[2]:FanPowerMult + FanPowerAdjFactor ))  else  UNCHANGED  endif    else  UNCHANGED  endif  }
 	"Set DwellUnitType:IAQPwr_Supply - 3"		DwellUnitType:IAQPwr_Supply	= {	if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[3] ) > 0.5)
-																											then	if (IAQFanRef[3]:IAQFanType == 2) then  IAQPwr_Supply + (IAQCFM[3] * ValidOr( IAQFanRef[3]:WperCFMIAQ, 0 ) * IAQFanRef[3]:FanPowerMult)  else  UNCHANGED  endif    else  UNCHANGED  endif  }
+																											then	if (IAQFanRef[3]:IAQFanType == 2) then  IAQPwr_Supply + (IAQCFM[3] * ValidOr( IAQFanRef[3]:WperCFMIAQ, 0 ) * ( IAQFanRef[3]:FanPowerMult + FanPowerAdjFactor ))  else  UNCHANGED  endif    else  UNCHANGED  endif  }
 	"Set DwellUnitType:IAQPwr_Supply - 4"		DwellUnitType:IAQPwr_Supply	= {	if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[4] ) > 0.5)
-																											then	if (IAQFanRef[4]:IAQFanType == 2) then  IAQPwr_Supply + (IAQCFM[4] * ValidOr( IAQFanRef[4]:WperCFMIAQ, 0 ) * IAQFanRef[4]:FanPowerMult)  else  UNCHANGED  endif    else  UNCHANGED  endif  }
+																											then	if (IAQFanRef[4]:IAQFanType == 2) then  IAQPwr_Supply + (IAQCFM[4] * ValidOr( IAQFanRef[4]:WperCFMIAQ, 0 ) * ( IAQFanRef[4]:FanPowerMult + FanPowerAdjFactor ))  else  UNCHANGED  endif    else  UNCHANGED  endif  }
 
    "Set DwellUnitType:IAQHRVPwr - 1"      DwellUnitType:IAQHRVPwr	= {
          if (IAQDisabled > 0) then  0
          else if (IAQOption == 4) then  MinIAQCFM * ResProj:DefaultIAQFanPwr
          else if (IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[1] ) > 0.5)
          then	if (IAQFanRef[1]:IAQFanType == 3)
-               then  IAQCFM[1] * ValidOr( IAQFanRef[1]:WperCFMIAQ, 0 ) * IAQFanRef[1]:FanPowerMult  else  0  endif
+               then  IAQCFM[1] * ValidOr( IAQFanRef[1]:WperCFMIAQ, 0 ) * ( IAQFanRef[1]:FanPowerMult + FanPowerAdjFactor )  else  0  endif
          else	0  endif endif endif  }
    "Set DwellUnitType:IAQHRVPwr - 2"      DwellUnitType:IAQHRVPwr	= {
          if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[2] ) > 0.5)
          then	if (IAQFanRef[2]:IAQFanType == 3) 
-               then  IAQHRVPwr + (IAQCFM[2] * ValidOr( IAQFanRef[2]:WperCFMIAQ, 0 ) * IAQFanRef[2]:FanPowerMult)  else  UNCHANGED  endif
+               then  IAQHRVPwr + (IAQCFM[2] * ValidOr( IAQFanRef[2]:WperCFMIAQ, 0 ) * ( IAQFanRef[2]:FanPowerMult + FanPowerAdjFactor ))  else  UNCHANGED  endif
          else	UNCHANGED  endif  }
    "Set DwellUnitType:IAQHRVPwr - 3"      DwellUnitType:IAQHRVPwr	= {
          if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[3] ) > 0.5)
          then	if (IAQFanRef[3]:IAQFanType == 3) 
-               then  IAQHRVPwr + (IAQCFM[3] * ValidOr( IAQFanRef[3]:WperCFMIAQ, 0 ) * IAQFanRef[3]:FanPowerMult)  else  UNCHANGED  endif
+               then  IAQHRVPwr + (IAQCFM[3] * ValidOr( IAQFanRef[3]:WperCFMIAQ, 0 ) * ( IAQFanRef[3]:FanPowerMult + FanPowerAdjFactor ))  else  UNCHANGED  endif
          else	UNCHANGED  endif  }
    "Set DwellUnitType:IAQHRVPwr - 4"      DwellUnitType:IAQHRVPwr	= {
          if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[4] ) > 0.5)
          then	if (IAQFanRef[4]:IAQFanType == 3) 
-               then  IAQHRVPwr + (IAQCFM[4] * ValidOr( IAQFanRef[4]:WperCFMIAQ, 0 ) * IAQFanRef[4]:FanPowerMult)  else  UNCHANGED  endif
+               then  IAQHRVPwr + (IAQCFM[4] * ValidOr( IAQFanRef[4]:WperCFMIAQ, 0 ) * ( IAQFanRef[4]:FanPowerMult + FanPowerAdjFactor ))  else  UNCHANGED  endif
          else	UNCHANGED  endif  }
 
    "Set DwellUnitType:IAQBalPwr - 1"      DwellUnitType:IAQBalPwr	= {
@@ -530,28 +546,28 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
          then	if (IAQFanRef[1]:IAQFanType == 3 .AND.
                      ( (IfValidAnd( Proj:AnalysisVersion >= 190200 )==0 .AND. IfValidAnd( IAQFanRef[1]:IAQRecovEffect = 0 )) .OR.
                        (IfValidAnd( Proj:AnalysisVersion >= 190200 )    .AND. IfValidAnd( IAQFanRef[1]:IncludesRecov  = 0 )) ))
-               then  IAQCFM[1] * ValidOr( IAQFanRef[1]:WperCFMIAQ, 0 ) * IAQFanRef[1]:FanPowerMult  else  0  endif
+               then  IAQCFM[1] * ValidOr( IAQFanRef[1]:WperCFMIAQ, 0 ) * ( IAQFanRef[1]:FanPowerMult + FanPowerAdjFactor )  else  0  endif
          else	0  endif endif endif  }
    "Set DwellUnitType:IAQBalPwr - 2"      DwellUnitType:IAQBalPwr	= {
          if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[2] ) > 0.5)
          then	if (IAQFanRef[2]:IAQFanType == 3 .AND.
                      ( (IfValidAnd( Proj:AnalysisVersion >= 190200 )==0 .AND. IfValidAnd( IAQFanRef[2]:IAQRecovEffect = 0 )) .OR.
                        (IfValidAnd( Proj:AnalysisVersion >= 190200 )    .AND. IfValidAnd( IAQFanRef[2]:IncludesRecov  = 0 )) )) 
-               then  IAQBalPwr + (IAQCFM[2] * ValidOr( IAQFanRef[2]:WperCFMIAQ, 0 ) * IAQFanRef[2]:FanPowerMult)  else  UNCHANGED  endif
+               then  IAQBalPwr + (IAQCFM[2] * ValidOr( IAQFanRef[2]:WperCFMIAQ, 0 ) * ( IAQFanRef[2]:FanPowerMult + FanPowerAdjFactor ))  else  UNCHANGED  endif
          else	UNCHANGED  endif  }
    "Set DwellUnitType:IAQBalPwr - 3"      DwellUnitType:IAQBalPwr	= {
          if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[3] ) > 0.5)
          then	if (IAQFanRef[3]:IAQFanType == 3 .AND.
                      ( (IfValidAnd( Proj:AnalysisVersion >= 190200 )==0 .AND. IfValidAnd( IAQFanRef[3]:IAQRecovEffect = 0 )) .OR.
                        (IfValidAnd( Proj:AnalysisVersion >= 190200 )    .AND. IfValidAnd( IAQFanRef[3]:IncludesRecov  = 0 )) )) 
-               then  IAQBalPwr + (IAQCFM[3] * ValidOr( IAQFanRef[3]:WperCFMIAQ, 0 ) * IAQFanRef[3]:FanPowerMult)  else  UNCHANGED  endif
+               then  IAQBalPwr + (IAQCFM[3] * ValidOr( IAQFanRef[3]:WperCFMIAQ, 0 ) * ( IAQFanRef[3]:FanPowerMult + FanPowerAdjFactor ))  else  UNCHANGED  endif
          else	UNCHANGED  endif  }
    "Set DwellUnitType:IAQBalPwr - 4"      DwellUnitType:IAQBalPwr	= {
          if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[4] ) > 0.5)
          then	if (IAQFanRef[4]:IAQFanType == 3 .AND.
                      ( (IfValidAnd( Proj:AnalysisVersion >= 190200 )==0 .AND. IfValidAnd( IAQFanRef[4]:IAQRecovEffect = 0 )) .OR.
                        (IfValidAnd( Proj:AnalysisVersion >= 190200 )    .AND. IfValidAnd( IAQFanRef[4]:IncludesRecov  = 0 )) )) 
-               then  IAQBalPwr + (IAQCFM[4] * ValidOr( IAQFanRef[4]:WperCFMIAQ, 0 ) * IAQFanRef[4]:FanPowerMult)  else  UNCHANGED  endif
+               then  IAQBalPwr + (IAQCFM[4] * ValidOr( IAQFanRef[4]:WperCFMIAQ, 0 ) * ( IAQFanRef[4]:FanPowerMult + FanPowerAdjFactor ))  else  UNCHANGED  endif
          else	UNCHANGED  endif  }
 
    ; SAC 12/16/19 - note: default balanced effectiveness = 0
@@ -582,43 +598,43 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
    "Set DwellUnitType:IAQHRVCFMxSRE - 1"      DwellUnitType:IAQHRVCFMxSRE	= {
          if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[1] ) > 0.5)
          then	if (IAQFanRef[1]:IAQFanType == 3 .AND. IfValidAnd( IAQFanRef[1]:IncludesRecov > 0 ) .AND. IfValidAnd( IAQFanRef[1]:SensRecovEff > 0 ))
-               then  IAQCFM[1] * ValidOr( IAQFanRef[1]:SensRecovEff, 0 ) * ValidOr( IAQFanRef[1]:FanHeatRecovMult, 0 )  else  0  endif
+               then  IAQCFM[1] * ValidOr( IAQFanRef[1]:SensRecovEff, 0 ) * ( IAQFanRef[1]:FanHeatRecovMult + FanHeatRecovMultFactor )  else  0  endif
          else	0  endif  }
    "Set DwellUnitType:IAQHRVCFMxSRE - 2"      DwellUnitType:IAQHRVCFMxSRE	= {
          if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[2] ) > 0.5)
          then	if (IAQFanRef[2]:IAQFanType == 3 .AND. IfValidAnd( IAQFanRef[2]:IncludesRecov > 0 ) .AND. IfValidAnd( IAQFanRef[2]:SensRecovEff > 0 )) 
-               then  IAQHRVCFMxSRE + (IAQCFM[2] * ValidOr( IAQFanRef[2]:SensRecovEff, 0 ) * ValidOr( IAQFanRef[2]:FanHeatRecovMult, 0 ))  else  UNCHANGED  endif
+               then  IAQHRVCFMxSRE + (IAQCFM[2] * ValidOr( IAQFanRef[2]:SensRecovEff, 0 ) * ( IAQFanRef[2]:FanHeatRecovMult + FanHeatRecovMultFactor ))  else  UNCHANGED  endif
          else	UNCHANGED  endif  }
    "Set DwellUnitType:IAQHRVCFMxSRE - 3"      DwellUnitType:IAQHRVCFMxSRE	= {
          if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[3] ) > 0.5)
          then	if (IAQFanRef[3]:IAQFanType == 3 .AND. IfValidAnd( IAQFanRef[3]:IncludesRecov > 0 ) .AND. IfValidAnd( IAQFanRef[3]:SensRecovEff > 0 )) 
-               then  IAQHRVCFMxSRE + (IAQCFM[3] * ValidOr( IAQFanRef[3]:SensRecovEff, 0 ) * ValidOr( IAQFanRef[3]:FanHeatRecovMult, 0 ))  else  UNCHANGED  endif
+               then  IAQHRVCFMxSRE + (IAQCFM[3] * ValidOr( IAQFanRef[3]:SensRecovEff, 0 ) * ( IAQFanRef[3]:FanHeatRecovMult + FanHeatRecovMultFactor ))  else  UNCHANGED  endif
          else	UNCHANGED  endif  }
    "Set DwellUnitType:IAQHRVCFMxSRE - 4"      DwellUnitType:IAQHRVCFMxSRE	= {
          if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[4] ) > 0.5)
          then	if (IAQFanRef[4]:IAQFanType == 3 .AND. IfValidAnd( IAQFanRef[4]:IncludesRecov > 0 ) .AND. IfValidAnd( IAQFanRef[4]:SensRecovEff > 0 )) 
-               then  IAQHRVCFMxSRE + (IAQCFM[4] * ValidOr( IAQFanRef[4]:SensRecovEff, 0 ) * ValidOr( IAQFanRef[4]:FanHeatRecovMult, 0 ))  else  UNCHANGED  endif
+               then  IAQHRVCFMxSRE + (IAQCFM[4] * ValidOr( IAQFanRef[4]:SensRecovEff, 0 ) * ( IAQFanRef[4]:FanHeatRecovMult + FanHeatRecovMultFactor ))  else  UNCHANGED  endif
          else	UNCHANGED  endif  }
 
    "Set DwellUnitType:IAQHRVCFMxASRE - 1"      DwellUnitType:IAQHRVCFMxASRE	= {
          if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[1] ) > 0.5)
          then	if (IAQFanRef[1]:IAQFanType == 3 .AND. IfValidAnd( IAQFanRef[1]:IncludesRecov > 0 ) .AND. IfValidAnd( IAQFanRef[1]:AdjSensRecovEff > 0 ))
-               then  IAQCFM[1] * ValidOr( IAQFanRef[1]:AdjSensRecovEff, 0 ) * ValidOr( IAQFanRef[1]:FanHeatRecovMult, 0 )  else  0  endif
+               then  IAQCFM[1] * ValidOr( IAQFanRef[1]:AdjSensRecovEff, 0 ) * ( IAQFanRef[1]:FanHeatRecovMult + FanHeatRecovMultFactor )  else  0  endif
          else	0  endif  }
    "Set DwellUnitType:IAQHRVCFMxASRE - 2"      DwellUnitType:IAQHRVCFMxASRE	= {
          if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[2] ) > 0.5)
          then	if (IAQFanRef[2]:IAQFanType == 3 .AND. IfValidAnd( IAQFanRef[2]:IncludesRecov > 0 ) .AND. IfValidAnd( IAQFanRef[2]:AdjSensRecovEff > 0 )) 
-               then  IAQHRVCFMxASRE + (IAQCFM[2] * ValidOr( IAQFanRef[2]:AdjSensRecovEff, 0 ) * ValidOr( IAQFanRef[2]:FanHeatRecovMult, 0 ))  else  UNCHANGED  endif
+               then  IAQHRVCFMxASRE + (IAQCFM[2] * ValidOr( IAQFanRef[2]:AdjSensRecovEff, 0 ) * ( IAQFanRef[2]:FanHeatRecovMult + FanHeatRecovMultFactor ))  else  UNCHANGED  endif
          else	UNCHANGED  endif  }
    "Set DwellUnitType:IAQHRVCFMxASRE - 3"      DwellUnitType:IAQHRVCFMxASRE	= {
          if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[3] ) > 0.5)
          then	if (IAQFanRef[3]:IAQFanType == 3 .AND. IfValidAnd( IAQFanRef[3]:IncludesRecov > 0 ) .AND. IfValidAnd( IAQFanRef[3]:AdjSensRecovEff > 0 )) 
-               then  IAQHRVCFMxASRE + (IAQCFM[3] * ValidOr( IAQFanRef[3]:AdjSensRecovEff, 0 ) * ValidOr( IAQFanRef[3]:FanHeatRecovMult, 0 ))  else  UNCHANGED  endif
+               then  IAQHRVCFMxASRE + (IAQCFM[3] * ValidOr( IAQFanRef[3]:AdjSensRecovEff, 0 ) * ( IAQFanRef[3]:FanHeatRecovMult + FanHeatRecovMultFactor ))  else  UNCHANGED  endif
          else	UNCHANGED  endif  }
    "Set DwellUnitType:IAQHRVCFMxASRE - 4"      DwellUnitType:IAQHRVCFMxASRE	= {
          if (IAQDisabled < 1 .AND. IAQOption == 2 .AND. LocalCompAssigned( IAQFanRef[4] ) > 0.5)
          then	if (IAQFanRef[4]:IAQFanType == 3 .AND. IfValidAnd( IAQFanRef[4]:IncludesRecov > 0 ) .AND. IfValidAnd( IAQFanRef[4]:AdjSensRecovEff > 0 )) 
-               then  IAQHRVCFMxASRE + (IAQCFM[4] * ValidOr( IAQFanRef[4]:AdjSensRecovEff, 0 ) * ValidOr( IAQFanRef[4]:FanHeatRecovMult, 0 ))  else  UNCHANGED  endif
+               then  IAQHRVCFMxASRE + (IAQCFM[4] * ValidOr( IAQFanRef[4]:AdjSensRecovEff, 0 ) * ( IAQFanRef[4]:FanHeatRecovMult + FanHeatRecovMultFactor ))  else  UNCHANGED  endif
          else	UNCHANGED  endif  }
 
    "Set DwellUnitType:IAQSysType" DwellUnitType:IAQSysType = ; JP 2/4/22
@@ -691,6 +707,11 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
 ;   "Set DwellUnitType:ApplyStdIAQMaxPwrToDRtg - flag indicating whether or not to apply the std design IAQ maximum power EDR reference run" 
 ;      DwellUnitType:ApplyStdIAQMaxPwrToDRtg     = {  1  }
 
+   ; added logic to prevent std design setup of IAQ for DwellUnitTypes serving only Existing zones - SAC 06/29/23 (tic #3479)
+   "Set baseline IAQ properties" DwellUnitType:Action = { 
+      if( ResProj:IsMultiFamily > 0.5 .AND. ( ResProj:RunAbbrev = "s" .OR. ResProj:RunAbbrev = "zb" .OR. ResProj:RunAbbrev = "smf" ) .AND.
+          (Proj:ResCompOpt < 2 .OR. IfValidAnd( DUNewOrAltHVACFlrAreaServed > 0.5 )) ) 
+      then EvalRulelist( "BudgetConversion_IAQ_DwellUnitType", 1 ) else UNCHANGED endif }
 
 	"Default DwellUnitType:NumDHWSysTypes"		DwellUnitType:NumDHWSysTypes	= {	1  }
 	; SAC 10/6/15 - separate out rules to force reset of DHWSys assignments and set NumDHWSysAssigns, DHWSysAssignFrac & DHWSysFlrArea (to facilitate DHW BudgetConversion)
@@ -698,7 +719,10 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
 
 	; HW consumption based on Res ACM, App E, Sec E3.1
 	; SAC 10/26/15 - added '* DHWSysAssignFrac'
-	"Set DwellUnitType:DHWDailyConsPerSys"			DwellUnitType:DHWDailyConsPerSys	= {	(21.4 + (0.00679 * min( CondFlrArea, 2500 ))) * ValidOr( DHWSysAssignFrac, 1 )  }
+	"Set DwellUnitType:DHWDailyConsPerSys"			DwellUnitType:DHWDailyConsPerSys	=     ; revised for DHWCombo (where DHWSysAssignFrac can = 0) - SAC 10/15/24 (tic #3629)
+      {	if (IfValidAnd( HtEqpUsedAsDHWHtr > 0 ))
+         then   21.4 + (0.00679 * min( CondFlrArea, 2500 ))
+         else  (21.4 + (0.00679 * min( CondFlrArea, 2500 ))) * ValidOr( DHWSysAssignFrac, 1 )  endif  }
 
 	"Set DwellUnitType:ServedByDHWSys"		; boolean (0/1) whether or not this DUT is served by one or more valid DHWSys objects"    
 			DwellUnitType:ServedByDHWSys	= {	if (IfValidAnd( NumDHWSysAssigns > 0 )) then  1  else  0  endif  }
@@ -721,8 +745,15 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
 	"Default DwellUnit:Count"					DwellUnit:Count				= {	1  }
 	"Default DwellUnit:CondFlrArea"			DwellUnit:CondFlrArea		= {	ValidOr( DwellUnitTypeRef:CondFlrArea, 0 )  }
 	"Set DwellUnit:TotalCondFlrArea"			DwellUnit:TotalCondFlrArea	= {	if (ParentComponentType() == "ResZn") then  CondFlrArea * Count  else  0  endif  }
-	"Set DwellUnit:TotalNumBedrooms"			DwellUnit:TotalNumBedrooms	= {	if (ParentComponentType() == "ResZn") then  ValidOr( DwellUnitTypeRef:NumBedrooms, 0 ) * Count  else  0  endif  }
+   "Set DwellUnit:TotalCondFlrAreaWithMult" DwellUnit:TotalCondFlrAreaWithMult = {  TotalCondFlrArea * Parent( Mult )  }      ; SAC 04/27/23 (tic #3392)
+   "Set DwellUnit:NewOrAltHVACFlrAreaWithMult"  DwellUnit:NewOrAltHVACFlrAreaWithMult =      ; SAC 06/29/23 (tic #3479)
+      {  if (Proj:ResCompOpt < 2 .OR. TotalCondFlrAreaWithMult < 0.5) then  TotalCondFlrAreaWithMult
+         else if (ResZn:HVACSysStatus < 2) then  0
+         else  TotalCondFlrAreaWithMult  endif endif  }
 
+	"Set DwellUnit:NumBedroomsPerUnit"		DwellUnit:NumBedroomsPerUnit = {	if (ParentComponentType() == "ResZn") then  ValidOr( DwellUnitTypeRef:NumBedrooms, 0 )  else  0  endif  }      ; SAC 08/05/22 (CUAC)
+	"Set DwellUnit:TotalNumBedrooms"			DwellUnit:TotalNumBedrooms	= {	NumBedroomsPerUnit * Count  }
+	"Set DwellUnit:TotalNumBedroomsWithMult" DwellUnit:TotalNumBedroomsWithMult = {  TotalNumBedrooms * Parent( Mult )  }   ; SAC 04/27/23 (tic #3392)
 	"Set DwellUnit:TotalLtgFlrArea"			DwellUnit:TotalLtgFlrArea	= {	if (ParentComponentType() == "ResZn") then  min( CondFlrArea, 4150 ) * Count  else  0  endif  }		; SAC 4/13/16
 
 	"Set DwellUnit:HaveWasher"					DwellUnit:HaveWasher			= {	ValidOr( DwellUnitTypeRef:HaveWasher, 0 )  }
@@ -736,17 +767,19 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
 																									else if (DwellUnitTypeRef:IAQOption == 4 .OR. DwellUnitTypeRef:IAQOption == 5) then  MinIAQCFM
 																									else  ValidOr( DwellUnitTypeRef:TotalIAQCFM, 0 ) * Count  endif endif  }
 
+   ; prevent -NOT MET- message for DUs of Existing HVAC zones - SAC 06/29/23 (tic #3479)
 	"Set DwellUnit:MinIAQCFMLbl"				DwellUnit:MinIAQCFMLbl		= {	if (LocalCompAssigned( DwellUnitTypeRef ) == 0) then  " "
 																									else if (IfValidAnd( DwellUnitTypeRef:IAQDisabled > 0.5 )) then  Format( "IAQ Ventilation disabled (%s required but not met)", FltToStr( MinIAQCFM, 1 ) )
 																									else if (MinIAQCFM < 0.05) then  " "  else if (DwellUnitTypeRef:IAQOption == 3) then  "CFI (Central Fan Integrated) IAQ  - NOT YET IMPLEMENTED -"
-																									else if (TotalIAQCFM < (MinIAQCFM - 0.05)) then	Format( "Min IAQ Vent -NOT MET-:  %s CFM required, %s entered", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
+																									else if (TotalIAQCFM < (MinIAQCFM - 0.05) .AND. IfValidAnd( NewOrAltHVACFlrAreaWithMult > 0.5 ))
+                                                                           then	Format( "Min IAQ Vent -NOT MET-:  %s CFM required, %s entered", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
 																									else if (DwellUnitTypeRef:IAQOption == 2) then  Format( "Minimum IAQ Ventilation:  %s CFM (%s entered)", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ) )
 																									else  Format( "Minimum IAQ Ventilation:  %s CFM", FltToStr( MinIAQCFM, 1 ) )  endif endif endif endif endif endif  }
 
    ; added logic to set DwellUnit Std design IAQ CFM, Power & HRV properties based on Proj level inputs when BypassRuleLimits activated - SAC 08/27/20 
-   "Set DwellUnit:IAQCFM_Exhaust - 1"      DwellUnit:IAQCFM_Exhaust   =       ; ApplyStdDesignIAQFromTable - SAC 04/03/21
+   "Set DwellUnit:IAQCFM_Exhaust - 1"      DwellUnit:IAQCFM_Exhaust   =
       {  if (LocalCompAssigned( DwellUnitTypeRef ) == 0 .OR. IfValidAnd( TotalCondFlrArea > 0.1 )==0 .OR. IfValidAnd( DwellUnitTypeRef:IAQDisabled > 0.5 )) then  0
-         else if (DwellUnitTypeRef:IAQOption >= 3 .AND. ((IfValidAnd( ResProj:BypassRuleLimits > 0 ) .AND. IfValidAnd( Proj:AnalysisVersion >= 190200 )) .OR. ResProj:ApplyStdDesignIAQFromTable) .AND.
+         else if (DwellUnitTypeRef:IAQOption >= 3 .AND. (IfValidAnd( ResProj:BypassRuleLimits > 0 ) .AND. IfValidAnd( Proj:AnalysisVersion >= 190200 )) .AND.
                   IfValidAnd( ResProj:StdDesignIAQType[1] > 0 ) .AND. (ResProj:RunAbbrev == "s" .OR. ResProj:RunAbbrev == "zb" .OR. ResProj:RunAbbrev == "smf"))
          then  if (IfValidAnd( ResProj:StdDesignIAQType[1] = 1 ))
                then  ValidOr( ResProj:StdIAQCFMScaleFactor[1], 1 ) * TotalIAQCFM
@@ -756,7 +789,7 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
          else   0  endif endif endif endif  }
    "Set DwellUnit:IAQCFM_Supply - 1"      DwellUnit:IAQCFM_Supply      =
       {  if (LocalCompAssigned( DwellUnitTypeRef ) == 0 .OR. IfValidAnd( TotalCondFlrArea > 0.1 )==0 .OR. IfValidAnd( DwellUnitTypeRef:IAQDisabled > 0.5 )) then  0
-         else if (DwellUnitTypeRef:IAQOption >= 3 .AND. ((IfValidAnd( ResProj:BypassRuleLimits > 0 ) .AND. IfValidAnd( Proj:AnalysisVersion >= 190200 )) .OR. ResProj:ApplyStdDesignIAQFromTable) .AND.
+         else if (DwellUnitTypeRef:IAQOption >= 3 .AND. (IfValidAnd( ResProj:BypassRuleLimits > 0 ) .AND. IfValidAnd( Proj:AnalysisVersion >= 190200 )) .AND.
                   IfValidAnd( ResProj:StdDesignIAQType[1] > 0 ) .AND. (ResProj:RunAbbrev == "s" .OR. ResProj:RunAbbrev == "zb" .OR. ResProj:RunAbbrev == "smf"))
          then  if (IfValidAnd( ResProj:StdDesignIAQType[1] = 2 ))
                then  ValidOr( ResProj:StdIAQCFMScaleFactor[1], 1 ) * TotalIAQCFM
@@ -766,7 +799,7 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
    "Set DwellUnit:IAQHRVCFM"           DwellUnit:IAQHRVCFM    = {
          if (LocalCompAssigned( DwellUnitTypeRef ) > 0 .AND. IfValidAnd( TotalCondFlrArea > 0.1 ) .AND.
              IfValidAnd( DwellUnitTypeRef:IAQDisabled > 0.5 )==0)
-         then  if (DwellUnitTypeRef:IAQOption >= 3 .AND. ((IfValidAnd( ResProj:BypassRuleLimits > 0 ) .AND. IfValidAnd( Proj:AnalysisVersion >= 190200 )) .OR. ResProj:ApplyStdDesignIAQFromTable) .AND.
+         then  if (DwellUnitTypeRef:IAQOption >= 3 .AND. (IfValidAnd( ResProj:BypassRuleLimits > 0 ) .AND. IfValidAnd( Proj:AnalysisVersion >= 190200 )) .AND.
                    IfValidAnd( ResProj:StdDesignIAQType[1] > 0 ) .AND. (ResProj:RunAbbrev == "s" .OR. ResProj:RunAbbrev == "zb" .OR. ResProj:RunAbbrev == "smf"))
                then  if (IfValidAnd( ResProj:StdDesignIAQType[1] >= 3 ))
                      then  ValidOr( ResProj:StdIAQCFMScaleFactor[1], 1 ) * TotalIAQCFM
@@ -777,7 +810,7 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
    "Set DwellUnit:IAQBalCFM"           DwellUnit:IAQBalCFM    = {
          if (LocalCompAssigned( DwellUnitTypeRef ) > 0 .AND. IfValidAnd( TotalCondFlrArea > 0.1 ) .AND.
              IfValidAnd( DwellUnitTypeRef:IAQDisabled > 0.5 )==0)
-         then  if (DwellUnitTypeRef:IAQOption >= 3 .AND. ((IfValidAnd( ResProj:BypassRuleLimits > 0 ) .AND. IfValidAnd( Proj:AnalysisVersion >= 190200 )) .OR. ResProj:ApplyStdDesignIAQFromTable) .AND.
+         then  if (DwellUnitTypeRef:IAQOption >= 3 .AND. (IfValidAnd( ResProj:BypassRuleLimits > 0 ) .AND. IfValidAnd( Proj:AnalysisVersion >= 190200 )) .AND.
                    IfValidAnd( ResProj:StdDesignIAQType[1] > 0 ) .AND. (ResProj:RunAbbrev == "s" .OR. ResProj:RunAbbrev == "zb" .OR. ResProj:RunAbbrev == "smf"))
                then  if (IfValidAnd( ResProj:StdDesignIAQType[1] >= 3 ))
                      then  ValidOr( ResProj:StdIAQCFMScaleFactor[1], 1 ) * TotalIAQCFM
@@ -823,8 +856,8 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
 
    "Set ResProj:DefaultIAQFanPwr via rulelist"  ResProj:Action = {  EvalRulelist( "Set_ResProj_DefaultIAQFanPwr" )  }
 
-   "Set DwellUnit:ForceStdIAQFanPwr"   DwellUnit:ForceStdIAQFanPwr =          ; SAC 09/01/20    ; added logic to reference ResProj:StdDesignIAQFanPwr[1] - SAC 04/02/21   ; ApplyStdDesignIAQFromTable - SAC 04/03/21
-      {  if (ResProj:ApplyStdDesignIAQFromTable .AND. ResProj:StdDesignFuel >= 11 .AND.
+   "Set DwellUnit:ForceStdIAQFanPwr"   DwellUnit:ForceStdIAQFanPwr =          ; SAC 09/01/20    ; added logic to reference ResProj:StdDesignIAQFanPwr[1] - SAC 04/02/21
+      {  if (ResProj:StdDesignFuel >= 11 .AND.
              IfValidAnd( ResProj:StdDesignIAQFanPwr[1] > 0 ) .AND.
              (ResProj:RunAbbrev == "s" .OR. ResProj:RunAbbrev == "zb" .OR. ResProj:RunAbbrev == "smf"))
          then  ResProj:StdDesignIAQFanPwr[1]
@@ -837,9 +870,9 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
                else  UNDEFINED  endif endif
          else  UNDEFINED  endif endif  }
 
-   "Set DwellUnit:IAQPwr_Exhaust - 1"      DwellUnit:IAQPwr_Exhaust   =       ; ResProj:ApplyStdDesignIAQFromTable - SAC 04/03/21
+   "Set DwellUnit:IAQPwr_Exhaust - 1"      DwellUnit:IAQPwr_Exhaust   =
       {  if (LocalCompAssigned( DwellUnitTypeRef ) == 0 .OR. IfValidAnd( TotalCondFlrArea > 0.1 )==0 .OR. IfValidAnd( DwellUnitTypeRef:IAQDisabled > 0.5 )) then  0
-         else if (DwellUnitTypeRef:IAQOption >= 3 .AND. ((IfValidAnd( ResProj:BypassRuleLimits > 0 ) .AND. IfValidAnd( Proj:AnalysisVersion >= 190200 )) .OR. ResProj:ApplyStdDesignIAQFromTable) .AND.
+         else if (DwellUnitTypeRef:IAQOption >= 3 .AND. (IfValidAnd( ResProj:BypassRuleLimits > 0 ) .AND. IfValidAnd( Proj:AnalysisVersion >= 190200 )) .AND.
                   IfValidAnd( ResProj:StdDesignIAQType[1] > 0 ) .AND. (ResProj:RunAbbrev == "s" .OR. ResProj:RunAbbrev == "zb" .OR. ResProj:RunAbbrev == "smf"))
          then  if (IfValidAnd( ResProj:StdDesignIAQType[1] = 1 ))
                then  IAQCFM_Exhaust * ValidOr( ForceStdIAQFanPwr, min( ResProj:DefaultIAQFanPwr, ValidOr( ResProj:StdDesignIAQWperCFM, 9999 ) ) )
@@ -849,7 +882,7 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
          else   0  endif endif endif endif  }
    "Set DwellUnit:IAQPwr_Supply - 1"      DwellUnit:IAQPwr_Supply      =
       {  if (LocalCompAssigned( DwellUnitTypeRef ) == 0 .OR. IfValidAnd( TotalCondFlrArea > 0.1 )==0 .OR. IfValidAnd( DwellUnitTypeRef:IAQDisabled > 0.5 )) then  0
-         else if (DwellUnitTypeRef:IAQOption >= 3 .AND. ((IfValidAnd( ResProj:BypassRuleLimits > 0 ) .AND. IfValidAnd( Proj:AnalysisVersion >= 190200 )) .OR. ResProj:ApplyStdDesignIAQFromTable) .AND.
+         else if (DwellUnitTypeRef:IAQOption >= 3 .AND. (IfValidAnd( ResProj:BypassRuleLimits > 0 ) .AND. IfValidAnd( Proj:AnalysisVersion >= 190200 )) .AND.
                   IfValidAnd( ResProj:StdDesignIAQType[1] > 0 ) .AND. (ResProj:RunAbbrev == "s" .OR. ResProj:RunAbbrev == "zs" .OR. ResProj:RunAbbrev == "smf"))
          then  if (IfValidAnd( ResProj:StdDesignIAQType[1] = 2 ))
                then  IAQCFM_Supply * ValidOr( ForceStdIAQFanPwr, min( ResProj:DefaultIAQFanPwr, ValidOr( ResProj:StdDesignIAQWperCFM, 9999 ) ) )
@@ -858,7 +891,7 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
    "Set DwellUnit:IAQHRVPwr"           DwellUnit:IAQHRVPwr    = {
          if (LocalCompAssigned( DwellUnitTypeRef ) > 0 .AND. IfValidAnd( TotalCondFlrArea > 0.1 ) .AND.
              IfValidAnd( DwellUnitTypeRef:IAQDisabled > 0.5 )==0)
-         then  if (DwellUnitTypeRef:IAQOption >= 3 .AND. ((IfValidAnd( ResProj:BypassRuleLimits > 0 ) .AND. IfValidAnd( Proj:AnalysisVersion >= 190200 )) .OR. ResProj:ApplyStdDesignIAQFromTable) .AND.
+         then  if (DwellUnitTypeRef:IAQOption >= 3 .AND. (IfValidAnd( ResProj:BypassRuleLimits > 0 ) .AND. IfValidAnd( Proj:AnalysisVersion >= 190200 )) .AND.
                    IfValidAnd( ResProj:StdDesignIAQType[1] > 0 ) .AND. (ResProj:RunAbbrev == "s" .OR. ResProj:RunAbbrev == "zb" .OR. ResProj:RunAbbrev == "smf"))
                then  if (IfValidAnd( ResProj:StdDesignIAQType[1] >= 3 ))
                      then  IAQHRVCFM * ValidOr( ForceStdIAQFanPwr, min( ResProj:DefaultIAQFanPwr, ValidOr( ResProj:StdDesignIAQWperCFM, 9999 ) ) )
@@ -868,7 +901,7 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
    "Set DwellUnit:IAQBalPwr"           DwellUnit:IAQBalPwr    = {
          if (LocalCompAssigned( DwellUnitTypeRef ) > 0 .AND. IfValidAnd( TotalCondFlrArea > 0.1 ) .AND.
              IfValidAnd( DwellUnitTypeRef:IAQDisabled > 0.5 )==0)
-         then  if (DwellUnitTypeRef:IAQOption >= 3 .AND. ((IfValidAnd( ResProj:BypassRuleLimits > 0 ) .AND. IfValidAnd( Proj:AnalysisVersion >= 190200 )) .OR. ResProj:ApplyStdDesignIAQFromTable) .AND.
+         then  if (DwellUnitTypeRef:IAQOption >= 3 .AND. (IfValidAnd( ResProj:BypassRuleLimits > 0 ) .AND. IfValidAnd( Proj:AnalysisVersion >= 190200 )) .AND.
                    IfValidAnd( ResProj:StdDesignIAQType[1] > 0 ) .AND. (ResProj:RunAbbrev == "s" .OR. ResProj:RunAbbrev == "zb" .OR. ResProj:RunAbbrev == "smf"))
                then  if (IfValidAnd( ResProj:StdDesignIAQType[1] >= 3 ))
                      then  IAQBalCFM * ValidOr( ForceStdIAQFanPwr, min( ResProj:DefaultIAQFanPwr, ValidOr( ResProj:StdDesignIAQWperCFM, 9999 ) ) )
@@ -884,7 +917,7 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
    "Set DwellUnit:IAQHRVCFMxSRE"    DwellUnit:IAQHRVCFMxSRE    = {
          if (LocalCompAssigned( DwellUnitTypeRef ) > 0 .AND. IfValidAnd( TotalCondFlrArea > 0.1 ) .AND.
              IfValidAnd( DwellUnitTypeRef:IAQDisabled > 0.5 )==0)
-         then  if (DwellUnitTypeRef:IAQOption >= 3 .AND. ((IfValidAnd( ResProj:BypassRuleLimits > 0 ) .AND. IfValidAnd( Proj:AnalysisVersion >= 190200 )) .OR. ResProj:ApplyStdDesignIAQFromTable) .AND.
+         then  if (DwellUnitTypeRef:IAQOption >= 3 .AND. (IfValidAnd( ResProj:BypassRuleLimits > 0 ) .AND. IfValidAnd( Proj:AnalysisVersion >= 190200 )) .AND.
                    IfValidAnd( ResProj:StdDesignIAQType[1] > 0 ) .AND. (ResProj:RunAbbrev == "s" .OR. ResProj:RunAbbrev == "zb" .OR. ResProj:RunAbbrev == "smf"))
                then  if (IfValidAnd( ResProj:StdDesignIAQType[1] = 4 ) .AND. IfValidAnd( ResProj:StdIAQHtRec_SRE[1] > 0 ) .AND. IfValidAnd( ResProj:StdIAQHtRec_ASRE[1] > 0 ))
                      then  IAQBalCFM * ResProj:StdIAQHtRec_SRE[1]
@@ -894,7 +927,7 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
    "Set DwellUnit:IAQHRVCFMxASRE"    DwellUnit:IAQHRVCFMxASRE    = {
          if (LocalCompAssigned( DwellUnitTypeRef ) > 0 .AND. IfValidAnd( TotalCondFlrArea > 0.1 ) .AND.
              IfValidAnd( DwellUnitTypeRef:IAQDisabled > 0.5 )==0)
-         then  if (DwellUnitTypeRef:IAQOption >= 3 .AND. ((IfValidAnd( ResProj:BypassRuleLimits > 0 ) .AND. IfValidAnd( Proj:AnalysisVersion >= 190200 )) .OR. ResProj:ApplyStdDesignIAQFromTable) .AND.
+         then  if (DwellUnitTypeRef:IAQOption >= 3 .AND. (IfValidAnd( ResProj:BypassRuleLimits > 0 ) .AND. IfValidAnd( Proj:AnalysisVersion >= 190200 )) .AND.
                    IfValidAnd( ResProj:StdDesignIAQType[1] > 0 ) .AND. (ResProj:RunAbbrev == "s" .OR. ResProj:RunAbbrev == "zb" .OR. ResProj:RunAbbrev == "smf"))
                then  if (IfValidAnd( ResProj:StdDesignIAQType[1] = 4 ) .AND. IfValidAnd( ResProj:StdIAQHtRec_SRE[1] > 0 ) .AND. IfValidAnd( ResProj:StdIAQHtRec_ASRE[1] > 0 ))
                      then  IAQBalCFM * ResProj:StdIAQHtRec_ASRE[1]
@@ -904,7 +937,7 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
 
    ; adjust IAQ fan powers for StdDesignIAQWperCFM if specified - SAC 5/13/20
    "Call subordinate rulelist to adjust DwellUnit IAQPwr properties in Std/DRtg runs"     DwellUnit:Action =      ; SAC 6/12/20 - split out to allow eval in earlier stages of std design setup
-      {  if (IfValidAnd( DwellUnitTypeRef:IAQDisabled > 0 ) .OR. (IfValidAnd( ResProj:BypassRuleLimits > 0 )==0 .AND. ResProj:ApplyStdDesignIAQFromTable < 1) .OR.
+      {  if (IfValidAnd( DwellUnitTypeRef:IAQDisabled > 0 ) .OR. IfValidAnd( ResProj:BypassRuleLimits > 0 )==0 .OR.
              (GlobalStatus( ResProj:StdDesignIAQWperCFM ) < 4 .AND. LocalStatus( DwellUnitTypeRef:MaxStdDesignIAQWperCFM ) < 4) .OR.
              (ResProj:RunAbbrev != "s" .AND. ResProj:RunAbbrev != "zb" .AND. ResProj:RunAbbrev != "smf" .AND. (ResProj:RunAbbrev != "dr" .OR. IfValidAnd( ResProj:ApplyStdIAQMaxPwrToDRtg > 0 )==0))) then  UNCHANGED
          else  EvalRulelist( "StandardDefaulting_DwellUnit_IAQPower", 1 )  endif  }
@@ -932,10 +965,13 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
          then  1
          else  UNDEFINED  endif  }
 
+   ; revised for DwellUnitTypeRef:HtEqpUsedAsDHWHtr (DHWCombo) - SAC 10/15/24 (tic #3629)
 	"Set DwellUnit:TotalDHWFlrArea"			DwellUnit:TotalDHWFlrArea	= {	if (LocalCompAssigned( DwellUnitTypeRef ) == 0) then  0
+                                                                           else if (ParentComponentType() == "ResZn" .AND. IfValidAnd( DwellUnitTypeRef:HtEqpUsedAsDHWHtr > 0 ))
+                                                                           then  Count * ValidOr( CondFlrArea, 0 )
 																									else if (ParentComponentType() == "ResZn" .AND. IfValidAnd( DwellUnitTypeRef:DHWSysAssignFrac > 0 ))
 																									then  Count * DwellUnitTypeRef:DHWFlrAreaPerSys / DwellUnitTypeRef:DHWSysAssignFrac
-																									else  0  endif endif  }
+																									else  0  endif endif endif  }
 																					;				else if (IfValidAnd( DwellUnitTypeRef:ServedByDHWSys > 0.5 )) then  TotalCondFlrArea  else  0  endif endif  }
 
    "Set DwellUnit:Description"				DwellUnit:Description		= {	if (LocalCompAssigned( DwellUnitTypeRef ) == 0) then  "No DwellUnitType assigned"
@@ -949,9 +985,9 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
                                                                            endif endif  }
    "Set DwellUnit:TreeDescrip"				DwellUnit:TreeDescrip		= {	Description  }    ; SAC 12/14/21 
 
-	"Set DwellUnitType:AssignedDUFlrArea"	DwellUnitType:AssignedDUFlrArea	= {	SumRevRef( DwellUnit:DwellUnitTypeRef, DwellUnit:TotalCondFlrArea )  }
+	"Set DwellUnitType:AssignedDUFlrArea"	DwellUnitType:AssignedDUFlrArea	= {	SumRevRef( DwellUnit:DwellUnitTypeRef, DwellUnit:TotalCondFlrAreaWithMult )  }      ; TotalCondFlrAreaWithMult - SAC 04/27/23 (tic #3392)
 
-	"Set DwellUnitType:NumAssigningDUs"		DwellUnitType:NumAssigningDUs		= {	SumRevRef( DwellUnit:DwellUnitTypeRef, DwellUnit:Count )  }
+	"Set DwellUnitType:NumAssigningDUs"		DwellUnitType:NumAssigningDUs		= {	SumRevRef( DwellUnit:DwellUnitTypeRef, DwellUnit:CountWithMult )  }     ; CountWithMult - SAC 04/26/23 (tic #3392)
 
    "Set DwellUnitType:NumCWashers"        DwellUnitType:NumCWashers =      ; SAC 03/02/22
       {  if (IfValidAnd( HaveWasher > 0 )==0) then  0
@@ -1025,29 +1061,29 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
 
 	"Default Zone:Volume"			Zone:Volume			= {	if (LocalStatus( CeilingHeight ) < 1 .OR. LocalStatus( FloorArea ) < 1) then  UNDEFINED
 																			else  CeilingHeight * FloorArea  endif  }
-	"Default OtherZone:Volume"		OtherZone:Volume	= {	if (LocalStatus( CeilingHeight ) < 1 .OR. LocalStatus( Area ) < 1) then  UNDEFINED
-																			else  CeilingHeight * Area  endif  }
+;	"Default OtherZone:Volume"		OtherZone:Volume	= {	if (LocalStatus( CeilingHeight ) < 1 .OR. LocalStatus( Area ) < 1) then  UNDEFINED
+;																			else  CeilingHeight * Area  endif  }
 																			
-	"Default OtherZone:Perim"			OtherZone:Perim	= {	if (Area > 0) then  sqrt( Area ) * 4 else  0  endif  }
+;	"Default OtherZone:Perim"			OtherZone:Perim	= {	if (Area > 0) then  sqrt( Area ) * 4 else  0  endif  }
 
 ; SAC 9/12/12 - migrated old (bogus) WinHHTop default to WinHeadHeight
 ;	"Zone:WinHHTop"					Zone:WinHHTop		= {	if (LocalStatus( CeilingHeight ) < 1) then  7.67
 ;																			else  max( 1, Local( CeilingHeight ) - 0.33 )  endif  }
 	"Default Zone:WinHeadHeight"	Zone:WinHeadHeight	= {	if (LocalStatus( CeilingHeight ) < 1) then  7.67
 																				else  max( 1, Local( CeilingHeight ) - 1.33 )  endif  }
-	"Default OtherZone:WinHeadHeight"	OtherZone:WinHeadHeight	= {	if (LocalStatus( CeilingHeight ) < 1) then  7.67
-																				else  max( 1, Local( CeilingHeight ) - 1.33 )  endif  }
+;	"Default OtherZone:WinHeadHeight"	OtherZone:WinHeadHeight	= {	if (LocalStatus( CeilingHeight ) < 1) then  7.67
+;																				else  max( 1, Local( CeilingHeight ) - 1.33 )  endif  }
 ; SAC 6/17/14 - switched to array of 3 for nat vent testing
 ;	"Set Zone:WinVentHtDiff"		Zone:WinVentHtDiff 	= {	2.0  }
 	"Set Zone:WinVentHtDiff[1]"		Zone:WinVentHtDiff[1] 	= {	-999.0  }
 	"Set Zone:WinVentHtDiff[2]"		Zone:WinVentHtDiff[2] 	= {	-999.0  }
 	"Set Zone:WinVentHtDiff[3]"		Zone:WinVentHtDiff[3] 	= {	-999.0  }
-	"Set OtherZone:WinVentHtDiff[1]"		OtherZone:WinVentHtDiff[1] 	= {	-999.0  }
-	"Set OtherZone:WinVentHtDiff[2]"		OtherZone:WinVentHtDiff[2] 	= {	-999.0  }
-	"Set OtherZone:WinVentHtDiff[3]"		OtherZone:WinVentHtDiff[3] 	= {	-999.0  }
+;	"Set OtherZone:WinVentHtDiff[1]"		OtherZone:WinVentHtDiff[1] 	= {	-999.0  }
+;	"Set OtherZone:WinVentHtDiff[2]"		OtherZone:WinVentHtDiff[2] 	= {	-999.0  }
+;	"Set OtherZone:WinVentHtDiff[3]"		OtherZone:WinVentHtDiff[3] 	= {	-999.0  }
 
 	"Zone:FloorHeight default"		      Zone:FloorHeight	      = {	max( ValidOr( CeilingHeight, 5 )+1, 9 )  }
-	"OtherZone:FloorHeight default"		OtherZone:FloorHeight	= {	max( ValidOr( CeilingHeight, 5 )+1, 9 )  }   ; mod to prevent undefined data error - SAC 05/28/21
+;	"OtherZone:FloorHeight default"		OtherZone:FloorHeight	= {	max( ValidOr( CeilingHeight, 5 )+1, 9 )  }   ; mod to prevent undefined data error - SAC 05/28/21
 
 	; SAC 3/28/13 - expanded default logic
 	"Zone:Bottom default"			Zone:Bottom			= {	if (ChildCount( SlabFloor ) > 0) then  0.67
@@ -1055,6 +1091,7 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
 																			else if (ChildCount( ResExtFlr  ) > 0) then  max( 0, MinChild( ResExtFlr:FloorZ ) )
 																			else if (ChildCount( ResIntFlr  ) > 0) then  max( 0, MinChild( ResIntFlr:FloorZ ) )
 																			else  0  endif endif endif endif  }
+   ; restored following rule to prevent rule eval error due to undefined data - SAC 06/26/24
 	"OtherZone:Bottom default"			OtherZone:Bottom			= {	if (ChildCount( SlabFloor ) > 0) then  0.67
 																			else if (ChildCount( FloorOverCrawl ) > 0) then  max( 0, (Global( CrawlSpace:AvgWallHeight ) - 0.67) )
 																			else if (ChildCount( ResExtFlr  ) > 0) then  max( 0, MinChild( ResExtFlr:FloorZ ) )
@@ -1062,19 +1099,24 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
 																			else  0  endif endif endif endif  }
 
 	"Zone:NumStories default"		Zone:NumStories	= {	1  }
-	"OtherZone:NumStories default"		OtherZone:NumStories	= {	1  }
+;	"OtherZone:NumStories default"		OtherZone:NumStories	= {	1  }
 
 	"Set Zone:GrndFlrClgHeight"	Zone:GrndFlrClgHeight	= {	if (Bottom > -4 .AND. Bottom < 4)
 																					then  CeilingHeight  else  UNDEFINED  endif  }	; SAC 2/4/13 - help to specify Garage EaveZ
-	"Set OtherZone:GrndFlrClgHeight"	OtherZone:GrndFlrClgHeight	= {	if (Bottom > -4 .AND. Bottom < 4)
-																					then  CeilingHeight  else  UNDEFINED  endif  }	; SAC 2/4/13 - help to specify Garage EaveZ
+;	"Set OtherZone:GrndFlrClgHeight"	OtherZone:GrndFlrClgHeight	= {	if (Bottom > -4 .AND. Bottom < 4)
+;																					then  CeilingHeight  else  UNDEFINED  endif  }	; SAC 2/4/13 - help to specify Garage EaveZ
 
 	"Set Zone:TreeDescrip"			Zone:TreeDescrip	= {	if (IfValidAnd( FloorArea > 0.1 ))
 																			then  Format( "%s ft2, %s dwellings", FltToStr( FloorArea ), FltToStr( ValidOr( NumDwellingUnits, 0 ) ) )
 																			else  "no floor area specified"  endif  }
-	"Set OtherZone:TreeDescrip"	OtherZone:TreeDescrip	= {	if (IfValidAnd( Area > 0.1 ))
-																			then  Format( "%s, %s ft2", EnumString( SpcFunc ), FltToStr( Area ) )
-																			else  Format( "%s, no floor area specified", EnumString( SpcFunc ) )  endif  }
+;	"Set OtherZone:TreeDescrip"	OtherZone:TreeDescrip	= {	if (IfValidAnd( Area > 0.1 ))
+;																			then if( Type = 1 )
+;																			     then Format( "%s, %s %s, %s ft2", EnumString( SpcFunc ), EnumString( CondType ), EnumString( Type ), FltToStr( Area ) )
+;																			     else Format( "%s, %s, %s ft2", EnumString( SpcFunc ), EnumString( Type ), FltToStr( Area ) ) endif
+;																			else if( Type = 1 )
+;																			     then Format( "%s, %s %s, no floor area specified", EnumString( SpcFunc ), EnumString( CondType ), EnumString( Type ) )
+;																			     else Format( "%s, %s, no floor area specified", EnumString( SpcFunc ), EnumString( Type ) )  endif  
+;																			endif }
 
 	"Set Zone:ZnModel"			Zone:ZnModel	= {	switch( Local( Type ) )
 																		case  1 :	3	; "Conditioned"   -> "CZM"
@@ -1087,37 +1129,41 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
 	"Default Zone:InfELA"      Zone:InfELA 	= {	0  }
 	"Default Zone:InfShld"     Zone:InfShld	= {	4  }	; 0s defaults of old infiltration models
 	
-	"Set OtherZone:ZnModel"			OtherZone:ZnModel	= {	switch( Local( Type ) )
-																		case  1 :	3	; "Conditioned"   -> "CZM"
-																		case 10 :	4	; "Unconditioned" -> "UZM"
-																		default :   3
-																	endswitch  }	; 1-"CNE", 2-"CSE", 3-"CZM", 4-"UZM", 5-"UZX"
-	"Default OtherZone:InfAC"       OtherZone:InfAC  	= {	0  }	; 0s defaults of old infiltration models
-	"Default OtherZone:InfELA"      OtherZone:InfELA 	= {	0  }
-	"Default OtherZone:InfShld"     OtherZone:InfShld	= {	4  }	; 0s defaults of old infiltration models
+;	"Set OtherZone:ZnModel"			OtherZone:ZnModel	= {	switch( Local( Type ) )
+;																		case  1 :	3	; "Conditioned"   -> "CZM"
+;																		case 10 :	4	; "Unconditioned" -> "UZM"
+;																		default :   3
+;																	endswitch  }	; 1-"CNE", 2-"CSE", 3-"CZM", 4-"UZM", 5-"UZX"
+;	"Default OtherZone:InfAC"       OtherZone:InfAC  	= {	0  }	; 0s defaults of old infiltration models
+;	"Default OtherZone:InfELA"      OtherZone:InfELA 	= {	0  }
+;	"Default OtherZone:InfShld"     OtherZone:InfShld	= {	4  }	; 0s defaults of old infiltration models
 
 	"Default Zone:ZnHIRatio"		Zone:ZnHIRatio		= {  10  }     ; SAC 02/11/22
 
 	"Set Zone:CondFloorArea"		Zone:CondFloorArea		= {	if (Local( Type ) <  10) then  Local( FloorArea )  else  0  endif  }
+	"Set Zone:CondFloorAreaWithMult" Zone:CondFloorAreaWithMult = {	CondFloorArea * ValidOr( Mult, 1 )  }    ; SAC 04/27/23 (3392)
 	"Set Zone:UncondFloorArea"		Zone:UncondFloorArea		= {	if (Local( Type ) == 10) then  Local( FloorArea )  else  0  endif  }
    "Set Zone:LvgCondFloorArea"	Zone:LvgCondFloorArea   = {   if (Local( Type ) ==  2) then  Local( FloorArea )  else  0  endif  }
    "Set Zone:SlpCondFloorArea"	Zone:SlpCondFloorArea   = {   if (Local( Type ) ==  3) then  Local( FloorArea )  else  0  endif  }
+   ; restored removed OtherZone rules to prevent incorrect setting of ResProj properties - SAC 10/09/24 (tic #3630)
    "Set OtherZone:CondFloorArea"    OtherZone:CondFloorArea  = {  if (Type < 10) then  Area  else  0  endif  }       ; SAC 9/10/19 (MFamProto)
+	"Set OtherZone:CondFloorAreaWithMult" OtherZone:CondFloorAreaWithMult = {	CondFloorArea * ValidOr( Mult, 1 )  }    ; SAC 04/27/23 (3392)
+   "Set OtherZone:NewOrAltHVACFloorArea" OtherZone:NewOrAltHVACFloorArea = {  if (IfValidAnd( HVACSysStatus = 1 )==0) then  CondFloorArea  else  0  endif  }      ; SAC 06/28/23 (tic #3479)
 ; SAC 4/8/15 - moved up again to set prior to ResProj:PVDwellUnitSize
 ;	mjb	4/14/14	moved CondFloorArea rule up - needed for CoolVent rules
 	"Set ResProj:CondFloorArea"		ResProj:CondFloorArea		= {	SumAll( Zone:CondFloorArea ) + SumAll( OtherZone:CondFloorArea )  }
-
+	"Set ResProj:CondFloorAreaWithMult" ResProj:CondFloorAreaWithMult = {	SumAll( Zone:CondFloorAreaWithMult ) + SumAll( OtherZone:CondFloorAreaWithMult )  }    ; SAC 04/27/23 (tic #3392)
    "Set ResProj:UncondFloorArea - sum of attic, garage, uncond zone areas"    ResProj:UncondFloorArea =     ; SAC 12/01/20
       {  SumAll( Attic:FloorArea ) + SumAll( Garage:Area ) + SumAll( Zone:FloorArea ) + SumAll( OtherZone:Area ) - CondFloorArea  }
 
 ; mjb	4/28/14	added Conditioned Volume at Zone level to be summed for ResProject - needed to convert ACH50 to CFM50, to be in correct reporting units
 ; add logic to use Flr-to-Ceiling height for Top Floors only, and Flr-to-Flr height for all other zones - SAC 7/19/20 (MFamProto)
-	"Default Zone:CondVolume"        Zone:CondVolume      = {  ValidOr( CondFloorArea, 0 ) * ValidOr( CeilingHeight, 0 )  }
+	"Default Zone:CondVolume"        Zone:CondVolume      = {  ValidOr( CondFloorArea, 0 ) * ValidOr( CeilingHeight, 0 ) * ValidOr( Mult, 1 )  }      ; incl. Mult - SAC 04/28/23 (tic #3392)
    ; rolled BACK Flr-to-Flr CondVolume change - SAC 7/20/20 (MFamProto)
    ;   {  if ((ValidOr( FloorArea, 0 )/2) > (SumChildren( CeilingBelowAttic:Area ) + SumChildren( CathedralCeiling:Area )))
    ;      then  CondFloorArea * FloorHeight
    ;      else  CondFloorArea * CeilingHeight  endif  }
-	"Default OtherZone:CondVolume"   OtherZone:CondVolume = {  ValidOr( CondFloorArea, 0 ) * ValidOr( CeilingHeight, 9 )  }      ; mod to prevent undefined data error - SAC 05/28/21
+;	"Default OtherZone:CondVolume"   OtherZone:CondVolume = {  ValidOr( CondFloorArea, 0 ) * ValidOr( CeilingHeight, 9 ) * ValidOr( Mult, 1 )  }      ; mod to prevent undefined data error - SAC 05/28/21  ; incl. Mult - SAC 04/28/23 (tic #3392)
    ;   {  if ((ValidOr( Area, 0 )/2) > (SumChildren( CeilingBelowAttic:Area ) + SumChildren( CathedralCeiling:Area )))
    ;      then  CondFloorArea * FloorHeight
    ;      else  CondFloorArea * CeilingHeight  endif  }
@@ -1131,6 +1177,7 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
 																																				then	EvalRulelist( "ForceReset_AddAloneAreas" )
 																																				else	UNCHANGED  endif endif  }
 	"Default ResProj:AddAloneAddedArea"		ResProj:AddAloneAddedArea	= {	if (RunScope == 1 .AND. IsAddAlone == 1) then	SumAll( Zone:FloorArea ) + SumAll( OtherZone:Area )  else  UNDEFINED  endif  }
+	"Default ResProj:AddAloneAddedAreaWithMult"		ResProj:AddAloneAddedAreaWithMult	= {	if (RunScope == 1 .AND. IsAddAlone == 1) then	SumAll( Zone:CondFloorAreaWithMult ) + SumAll( OtherZone:CondFloorAreaWithMult )  else  UNDEFINED  endif  }
 	"Default ResProj:AddAloneExistArea"		ResProj:AddAloneExistArea	= {	if (RunScope == 1 .AND. IsAddAlone == 1) then	0                         else  UNDEFINED  endif  }
 	"Default ResProj:AddAloneTotalArea"		ResProj:AddAloneTotalArea	= {	if (RunScope == 1 .AND. IsAddAlone == 1) then	AddAloneAddedArea + AddAloneExistArea  else  UNDEFINED  endif  }
 	"Default ResProj:AdditionCFAFrac"		ResProj:AdditionCFAFrac		= {	if (RunScope == 1 .AND. IsAddAlone == 1)
@@ -1142,31 +1189,34 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
 ; mjb 4/24/14	- Additions Alone added
 	"Set Zone:AdditionCFA"			Zone:AdditionCFA			= {	if (( ResProj:RunScope == 2 .AND. Status = 3) .OR. (ResProj:RunScope == 1 .AND. ResProj:IsAddAlone > 0.5) ) then  CondFloorArea  
 																						else  0  endif  }
-	"Set ResProj:AdditionCFA"			ResProj:AdditionCFA			= {	SumChildren( Zone:AdditionCFA )  }
+	"Set ResProj:AdditionCFA"			ResProj:AdditionCFA			= {	SumAll( ResZn:AdditionCFA )  }   ; was:  SumChildren( Zone:AdditionCFA )  }  - SAC 02/28/24
 
 	; SAC 2/20/15 - for EAA addition window areas
 	"Set Zone:IsEAAAdditionZone"	Zone:IsEAAAdditionZone	= {	if (ResProj:RunScope == 2 .AND. Status = 3) then  1  else  0  endif  }
-	"Set OtherZone:IsEAAAdditionZone"	OtherZone:IsEAAAdditionZone	= {	0  }        ; SAC 9/19/19 (MFamProto)
+;	"Set OtherZone:IsEAAAdditionZone"	OtherZone:IsEAAAdditionZone	= {	0  }        ; SAC 9/19/19 (MFamProto)
 
 ;EM 2/19/15
 	; SAC 9/16/15 - NOTE: (from DeeAnne @ CEC) - RunScope = New & AdditionAlone checked does NOT get accumulated into *AdditionSize - those models are treated like New Cons, not E+A+A
 	"Set ResProj:AdditionSize"			ResProj:AdditionSize			= {	if (RunScope == 2) then  SumAcrossIf( Zone:FloorArea,     Zone:Status = 3 )  else  -1  endif  }
+	"Set ResProj:AdditionSizeWithMult"	ResProj:AdditionSizeWithMult	= {	if (RunScope == 2) then  SumAcrossIf( Zone:CondFloorAreaWithMult,     Zone:Status = 3 )  else  -1  endif  }
 	"Set ResProj:CondAdditionSize"	ResProj:CondAdditionSize	= {	if (RunScope == 2) then  SumAcrossIf( Zone:CondFloorArea, Zone:Status = 3 )  else   0  endif  }
+	"Set ResProj:CondAdditionSizeWithMult"	ResProj:CondAdditionSizeWithMult	= {	if (RunScope == 2) then  SumAcrossIf( Zone:CondFloorAreaWithMult, Zone:Status = 3 )  else   0  endif  }  ; SAC 04/27/23 (tic #3392)
 
   ; SAC 12/5/13 - added to facilitate HVACSys:FloorAreaServed defaulting
-	"Set Zone:HVACNewCondFloorArea"		Zone:HVACNewCondFloorArea	= {	if (ResProj:RunScope == 2)
-																								then	if (HVACSysStatus == 3) then  CondFloorArea  else  0  endif
-																								else	CondFloorArea  endif  }
-	"Set Zone:HVACAltCondFloorArea"		Zone:HVACAltCondFloorArea	= {	if (ResProj:RunScope == 2 .AND. HVACSysStatus == 2) then  CondFloorArea  else  0  endif  }
-	"Set Zone:HVACExCondFloorArea"		Zone:HVACExCondFloorArea	= {	if (ResProj:RunScope == 2 .AND. HVACSysStatus == 1) then  CondFloorArea  else  0  endif  }
-	"Set Zone:HVACExVCondFloorArea"		Zone:HVACExVCondFloorArea	= {	if (ResProj:RunScope == 2 .AND. HVACSysStatus == 2 .AND. HVACSysVerified) then  CondFloorArea  else  0  endif  }
-	"Set OtherZone:HVACNewCondFloorArea"	OtherZone:HVACNewCondFloorArea	= {	CondFloorArea   }
+  ; JP 6/26/23 - included multiplier
+	"Set Zone:HVACNewCondFloorAreaWithMult"		Zone:HVACNewCondFloorAreaWithMult	= {	if (ResProj:RunScope == 2)
+																								then	if (HVACSysStatus == 3) then  CondFloorAreaWithMult  else  0  endif
+																								else  CondFloorAreaWithMult  endif  }
+	"Set Zone:HVACAltCondFloorAreaWithMult"		Zone:HVACAltCondFloorAreaWithMult	= {	if (ResProj:RunScope == 2 .AND. HVACSysStatus == 2) then  CondFloorAreaWithMult  else  0  endif  }
+	"Set Zone:HVACExCondFloorAreaWithMult"		Zone:HVACExCondFloorAreaWithMult	= {	if (ResProj:RunScope == 2 .AND. HVACSysStatus == 1) then  CondFloorAreaWithMult  else  0  endif  }
+	"Set Zone:HVACExVCondFloorAreaWithMult"		Zone:HVACExVCondFloorAreaWithMult	= {	if (ResProj:RunScope == 2 .AND. HVACSysStatus == 2 .AND. HVACSysVerified) then  CondFloorAreaWithMult  else  0  endif  }
+;	"Set OtherZone:HVACNewCondFloorAreaWithMult"	OtherZone:HVACNewCondFloorAreaWithMult	= {	if(CondType = 1) then CondFloorAreaWithMult else 0 endif }
 	                                                               ;      if (ResProj:RunScope == 2)
 																						;		then	if (HVACSysStatus == 3) then  CondFloorArea  else  0  endif
 																						;		else	CondFloorArea  endif  }
-	"Set OtherZone:HVACAltCondFloorArea"	OtherZone:HVACAltCondFloorArea	= {	0  }   ; if (ResProj:RunScope == 2 .AND. HVACSysStatus == 2) then  CondFloorArea  else  0  endif  }
-	"Set OtherZone:HVACExCondFloorArea"		OtherZone:HVACExCondFloorArea		= {	0  }   ; if (ResProj:RunScope == 2 .AND. HVACSysStatus == 1) then  CondFloorArea  else  0  endif  }
-	"Set OtherZone:HVACExVCondFloorArea"	OtherZone:HVACExVCondFloorArea	= {	0  }   ; if (ResProj:RunScope == 2 .AND. HVACSysStatus == 2 .AND. HVACSysVerified) then  CondFloorArea  else  0  endif  }
+;	"Set OtherZone:HVACAltCondFloorAreaWithMult"	OtherZone:HVACAltCondFloorAreaWithMult	= {	0  }   ; if (ResProj:RunScope == 2 .AND. HVACSysStatus == 2) then  CondFloorArea  else  0  endif  }
+;	"Set OtherZone:HVACExCondFloorAreaWithMult"		OtherZone:HVACExCondFloorAreaWithMult		= {	0  }   ; if (ResProj:RunScope == 2 .AND. HVACSysStatus == 1) then  CondFloorArea  else  0  endif  }
+;	"Set OtherZone:HVACExVCondFloorAreaWithMult"	OtherZone:HVACExVCondFloorAreaWithMult	= {	0  }   ; if (ResProj:RunScope == 2 .AND. HVACSysStatus == 2 .AND. HVACSysVerified) then  CondFloorArea  else  0  endif  }
   ; SAC 12/19/13 - added new property to help facilitate checks to determine if there is a valid (new/alt/ex-specific) HVAC system assigned
 ;	"Set Zone:ActiveHVACSystem"			Zone:ActiveHVACSystem		= {	if (ResProj:RunScope != 2 .OR. HVACSysStatus == 3) then  HVACSystem
 ;																								else if (ResProj:RunScope == 2 .AND. HVACSysStatus == 2) then  AltHVACSystem
@@ -1177,14 +1227,19 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
 																								else if (ResProj:RunScope == 2 .AND. HVACSysStatus == 2) then  AltHVACSystem
 																								else if ((ResProj:RunScope == 2 .OR. ResProj:IsAddAlone > 0.5) .AND. HVACSysStatus == 1) then  exHVACSystem
 																								else  UNDEFINED  endif endif endif  }
-	"Set OtherZone:ActiveHVACSystem"		OtherZone:ActiveHVACSystem	= {	ozHVACSystem  }
+   ; restored copy of ResOtherZn:ActiveHVACSystem rule here to ensure it is valid prior to following rules related to DHW - SAC 10/14/24 (tic #3629)
+	"Set ResOtherZn:ActiveHVACSystem"   ResOtherZn:ActiveHVACSystem  =            ; {  ozHVACSystem  } - restored logic defaulting of ActiveHVACSystem - SAC 06/25/23 (tic #3479)
+	   {  if      (Type < 10 .AND. CondType = 1 .AND. Proj:ResCompOpt > 1 .AND. HVACSysStatus == 2) then  AltHVACSystem
+			else if (Type < 10 .AND. CondType = 1 .AND. Proj:ResCompOpt > 1 .AND. HVACSysStatus == 1) then  exHVACSystem
+         else if (Type < 10 .AND. CondType = 1) then  ozHVACSystem
+         else  UNDEFINED  endif endif endif  }
 	                                                               ;      if ((ResProj:RunScope != 2 .AND. ResProj:IsAddAlone < 0.5) .OR. HVACSysStatus == 3) then  HVACSystem
 																						;		else if (ResProj:RunScope == 2 .AND. HVACSysStatus == 2) then  UNDEFINED  ; AltHVACSystem
 																						;		else if ((ResProj:RunScope == 2 .OR. ResProj:IsAddAlone > 0.5) .AND. HVACSysStatus == 1) then  UNDEFINED  ; exHVACSystem
 																						;		else  UNDEFINED  endif endif endif  }
 
-	"Set OtherZone:ServedByAirSys"		OtherZone:ServedByAirSys	=     ; SAC 05/17/22
-      {  if (LocalCompAssigned( ActiveHVACSystem ) == ComponentType( "AirSys" )) then  1  else  0  endif  }
+;	"Set OtherZone:ServedByAirSys"		OtherZone:ServedByAirSys	=     ; SAC 05/17/22
+;      {  if (LocalCompAssigned( ActiveHVACSystem ) == ComponentType( "AirSys" )) then  1  else  0  endif  }
 
 ;	mjb	4/18/14	- added to keep track of existing floor area based on Zone Status
 	"Set Zone:exCondFloorArea"			Zone:exCondFloorArea		= {	if (Status == 1) then CondFloorArea else 0 endif	}
@@ -1215,20 +1270,20 @@ RULELIST "ProposedInput_Shell" 0 0 0 0
 		; (#3a in Internal Mass write-up) create & assign SURFACE objects (to Conditioned zones only)...
 	"Set Zone:znCAir"				Zone:znCAir = {	if (Type < 10) then  ValidOr( CondFloorArea, 0 ) * 2.
 																else  UNDEFINED  endif	}
-	"Set OtherZone:znCAir"		OtherZone:znCAir = {	if (Type < 10) then  ValidOr( CondFloorArea, 0 ) * 2.
-																else  UNDEFINED  endif	}
+;	"Set OtherZone:znCAir"		OtherZone:znCAir = {	if (Type < 10) then  ValidOr( CondFloorArea, 0 ) * 2.
+;																else  UNDEFINED  endif	}
 
 	"Set Zone:ClgBlwAtticArea"			Zone:ClgBlwAtticArea		= {	SumChildren( CeilingBelowAttic:Area )  }
 	"Set Zone:CondClgBlwAtticArea"	Zone:CondClgBlwAtticArea ={	if (Type < 10) then  ClgBlwAtticArea  else  0  endif  }
 	"Set Zone:HasCondClgBlwAttic"		Zone:HasCondClgBlwAttic	= {	if (CondClgBlwAtticArea > 0.1) then  1  else  0  endif  }
-	"Set OtherZone:ClgBlwAtticArea"		OtherZone:ClgBlwAtticArea		= {	SumChildren( CeilingBelowAttic:Area )  }
-	"Set OtherZone:CondClgBlwAtticArea"	OtherZone:CondClgBlwAtticArea ={	if (Type < 10) then  ClgBlwAtticArea  else  0  endif  }
-	"Set OtherZone:HasCondClgBlwAttic"	OtherZone:HasCondClgBlwAttic	= {	if (CondClgBlwAtticArea > 0.1) then  1  else  0  endif  }
+;	"Set OtherZone:ClgBlwAtticArea"		OtherZone:ClgBlwAtticArea		= {	SumChildren( CeilingBelowAttic:Area )  }
+;	"Set OtherZone:CondClgBlwAtticArea"	OtherZone:CondClgBlwAtticArea ={	if (Type < 10) then  ClgBlwAtticArea  else  0  endif  }
+;	"Set OtherZone:HasCondClgBlwAttic"	OtherZone:HasCondClgBlwAttic	= {	if (CondClgBlwAtticArea > 0.1) then  1  else  0  endif  }
 
 ; SAC 12/1/13 - moved setting of Zone:HVACSysAssigned up HERE into ProposedInput rulelist to use in UI
 ;	mjb	4/18/14 - changed HVACSystem to ActiveHVACSystem in next rule, to work with E+A+A too
 	"Set Zone:HVACSysAssigned"			Zone:HVACSysAssigned		= {	if (Type < 10 .AND. LocalCompAssigned( ActiveHVACSystem ) > 0) then  1  else  0  endif  }
-	"Set OtherZone:HVACSysAssigned"	OtherZone:HVACSysAssigned	= {	if (Type < 10 .AND. LocalCompAssigned( ActiveHVACSystem ) > 0) then  1  else  0  endif  }
+;	"Set OtherZone:HVACSysAssigned"	OtherZone:HVACSysAssigned	= {	if (Type < 10 .AND. LocalCompAssigned( ActiveHVACSystem ) > 0) then  1  else  0  endif  }
 
 ; object enabling heat transfer through openings between zones - SAC 07/30/20 (MFamProto)
 ;     Opening:Outside - The name of the zone that this opening joins       	    Required,   0,    1,   1,    1,  1,  1
@@ -1275,6 +1330,17 @@ RULELIST "ProposedInput_Garage" 0 0 0 0
 	"Set Garage:TreeDescrip"		Garage:TreeDescrip	= {	if (Global( ResProj:HasGarage ) > 0.1)
 																				then  Format( "%s SqFt", FltToStr( Local( Area ) ) )
 																				else  "activate on ResProject dialog, Building tab"  endif  }
+END
+;*************************************************************************
+RULELIST "ProposedInput_Garage_Com" 0 0 0 0
+;************************************************************************* SAC 12/21/22
+   "delete ResGarage from CBECC models when no data specified by user"     ResGarage:Action = 
+      {  if (LocalStatus( Area ) < 4 .AND. LocalStatus( Volume ) < 4 .AND. LocalStatus( Bottom ) < 4 .AND.
+             IfValidAnd( ExtWallAreaByWallType[1] > 0 )==0 .AND. IfValidAnd( ExtWallAreaByWallType[2] > 0 )==0 .AND.
+             IfValidAnd( ExtWallAreaByWallType[3] > 0 )==0 .AND. IfValidAnd( ExtWallAreaByWallType[4] > 0 )==0 .AND.
+             IfValidAnd( ExtWallDoorAreaByWallType[1] > 0 )==0 .AND. IfValidAnd( ExtWallDoorAreaByWallType[2] > 0 )==0 .AND.
+             IfValidAnd( ExtWallDoorAreaByWallType[3] > 0 )==0 .AND. IfValidAnd( ExtWallDoorAreaByWallType[4] > 0 )==0 )
+         then  DeleteComp()  else  UNCHANGED  endif  }
 END
 ;*************************************************************************
 
@@ -1470,8 +1536,8 @@ RULELIST "ProposedInput_SurfacesAndInterZoneAreas" 0 0 0 0
 	"Set CathedralCeiling:RoofPitch"		CathedralCeiling:RoofPitch	= {	RoofRise / 12  }
 	"Set CathedralCeiling:RoofTilt"			CathedralCeiling:RoofTilt	= {	if (RoofPitch == 0) then  0
 																			else  atan( RoofPitch ) * 180 / 3.14159265  endif  }
-	"Set CathedralCeiling:SteepSlope"		CathedralCeiling:SteepSlope	= {
-		if (RoofRise > 2) then  1  else  0  endif  }
+	"Set CathedralCeiling:SteepSlope"		CathedralCeiling:SteepSlope	=     ; fix logic to set Steep to 1 if RoofRise EQUAL 2:12 (previsouly only if it was > 2:12) - SAC 06/30/23 (tic #3479)
+		{  if (RoofRise >= 2) then  1  else  0  endif  }
 
 	; SAC 9/23/15 - properties used to setup 2016 standard design roof constructions based on roof pitch
 	"Set CathedralCeiling:SteepRoofArea"	CathedralCeiling:SteepRoofArea	= {
@@ -1902,19 +1968,19 @@ RULELIST "ProposedInput_SurfacesAndInterZoneAreas" 0 0 0 0
 		SumChildren( ResIntWall:PartyEdgeArea ) + SumChildren( ResIntFlr:PartyEdgeArea ) +
 		SumChildren( InteriorCeiling:PartyEdgeArea )}
 
-   ; SAC 9/20/19 - OtherZone (MFamProto)
-	"Set OtherZone:InterCondZnArea"		OtherZone:InterCondZnArea		= {
-		if (Type > 9) then  0
-		else	SumChildren(         ResIntWall:InterCondZnArea ) +
-				SumChildren( InteriorCeiling:InterCondZnArea ) +
-				SumChildren(   ResIntFlr:InterCondZnArea ) +
-				SumRevRef(         ResIntWall:Outside,         ResIntWall:InterCondZnArea ) +
-				SumRevRef( InteriorCeiling:Outside, InteriorCeiling:InterCondZnArea ) +
-				SumRevRef(   ResIntFlr:Outside,   ResIntFlr:InterCondZnArea )    endif  }
+;   ; SAC 9/20/19 - OtherZone (MFamProto)
+;	"Set OtherZone:InterCondZnArea"		OtherZone:InterCondZnArea		= {
+;		if (Type > 9) then  0
+;		else	SumChildren(         ResIntWall:InterCondZnArea ) +
+;				SumChildren( InteriorCeiling:InterCondZnArea ) +
+;				SumChildren(   ResIntFlr:InterCondZnArea ) +
+;				SumRevRef(         ResIntWall:Outside,         ResIntWall:InterCondZnArea ) +
+;				SumRevRef( InteriorCeiling:Outside, InteriorCeiling:InterCondZnArea ) +
+;				SumRevRef(   ResIntFlr:Outside,   ResIntFlr:InterCondZnArea )    endif  }
 
-	"Set OtherZone:PartyEdgeArea"		OtherZone:PartyEdgeArea		= {
-		SumChildren( ResIntWall:PartyEdgeArea ) + SumChildren( ResIntFlr:PartyEdgeArea ) +
-		SumChildren( InteriorCeiling:PartyEdgeArea )}
+;	"Set OtherZone:PartyEdgeArea"		OtherZone:PartyEdgeArea		= {
+;		SumChildren( ResIntWall:PartyEdgeArea ) + SumChildren( ResIntFlr:PartyEdgeArea ) +
+;		SumChildren( InteriorCeiling:PartyEdgeArea )}
 
 
    ;--------------------------------------------------------------------
@@ -2256,8 +2322,8 @@ RULELIST "ProposedInput_SurfacesAndInterZoneAreas" 0 0 0 0
           then if( IsClerestory = 1 .AND. ResExtWall:TrueOrientationIdx != 1 )
                then 1 else 0 endif
           else 0 endif }
-  "Set ClerestoryPAFAllowed"  ResOtherZn:ClerestoryPAFAllowed = {
-          if( SumChildren( ResWin:ClerestoryPAFAllowed ) >= 1 ) then 1 else 0 endif }
+;  "Set ClerestoryPAFAllowed"  ResOtherZn:ClerestoryPAFAllowed = {
+;          if( SumChildren( ResWin:ClerestoryPAFAllowed ) >= 1 ) then 1 else 0 endif }
 
    ;--------------------------------------------------------------------
    ; ProposedInput: ResSkylt Rules   (Sklylights entered via UI)
@@ -2384,7 +2450,7 @@ RULELIST "ProposedInput_Shell_AtticAndCoolVent" 0 0 0 0
 ;																									else	0  endif  }
 	"Set Attic:EdgeLength"						Attic:EdgeLength  			= {	sqrt( FloorArea ) * 4 * EdgeLengthFactor  }
 	"Default Zone:AtcEdg_CeilBlwAtcArea"	Zone:AtcEdg_CeilBlwAtcArea	= {	SumChildren( CeilingBelowAttic:Area )  }
-	"Default OtherZone:AtcEdg_CeilBlwAtcArea"	OtherZone:AtcEdg_CeilBlwAtcArea	= {	SumChildren( CeilingBelowAttic:Area )  }  ; SAC 9/10/19 (MFamProto)
+;	"Default OtherZone:AtcEdg_CeilBlwAtcArea"	OtherZone:AtcEdg_CeilBlwAtcArea	= {	SumChildren( CeilingBelowAttic:Area )  }  ; SAC 9/10/19 (MFamProto)
 ;	"Default CeilingBelowAttic:AtcEdg_Length"		CeilingBelowAttic:AtcEdg_Length	= {	if (ParentComponentType() == "ResZn")
 ;																													then	if (Parent( AtcEdg_CeilBlwAtcArea ) > 0)
 ;																															then	Parent( AtcEdg_Length ) * Area / Parent( AtcEdg_CeilBlwAtcArea )
@@ -2440,8 +2506,8 @@ RULELIST "ProposedInput_Shell_AtticAndCoolVent" 0 0 0 0
 		if (ParentComponentType() != "ResGarage" .AND. LocalCompAssigned( AtticZone ) > 0) then Area    else  0  endif  }
 	"Set Zone:ClVentableClgArea"					Zone:ClVentableClgArea					= {
 		SumChildren( CeilingBelowAttic:ClVentableArea )  }
-	"Set OtherZone:ClVentableClgArea"			OtherZone:ClVentableClgArea			=     ; SAC 10/2/19 - MFamProto
-		{  SumChildren( CeilingBelowAttic:ClVentableArea )  }
+;	"Set OtherZone:ClVentableClgArea"			OtherZone:ClVentableClgArea			=     ; SAC 10/2/19 - MFamProto
+;		{  SumChildren( CeilingBelowAttic:ClVentableArea )  }
 
 ; SAC 4/28/14 - moved up to above attic edge calcs (where it can now be referenced) 
 ;	"Set Attic:RoofTilt"			Attic:RoofTilt		= {	if (Local( RoofPitch ) == 0) then  0
@@ -2470,10 +2536,10 @@ RULELIST "ProposedInput_Shell_AtticAndCoolVent" 0 0 0 0
 	"Set Zone:AtticArea"								Zone:AtticArea								= {
 		SumChildren( CeilingBelowAttic:Area )  }
 
-	"Set OtherZone:AtticArea"					OtherZone:AtticArea			=         ; SAC 9/20/19 - OtherZone (MFamProto) 
-		{  SumChildren( CeilingBelowAttic:Area )  }
-	"Set OtherZone:UncondAtticArea"			OtherZone:UncondAtticArea	= 
-		{  if (Type > 9) then  0  else  AtticArea  endif  }
+;	"Set OtherZone:AtticArea"					OtherZone:AtticArea			=         ; SAC 9/20/19 - OtherZone (MFamProto) 
+;		{  SumChildren( CeilingBelowAttic:Area )  }
+;	"Set OtherZone:UncondAtticArea"			OtherZone:UncondAtticArea	= 
+;		{  if (Type > 9) then  0  else  AtticArea  endif  }
 
 			; to support multiple attics
 	"Set Zone:MaxClVentableVolume"		Zone:MaxClVentableVolume	= {
@@ -2506,7 +2572,8 @@ RULELIST "Default_Attic"  0 0 0 0
   ; default rules that feed into attic edge defaults in the Cons object
 	"Default Attic:RoofRise"	Attic:RoofRise		= {	5 }
 	"Set Attic:RoofPitch"		Attic:RoofPitch	= {	if (IfValidAnd( RoofRise > 0 )) then  RoofRise / 12  else  0  endif  }
-	"Set Attic:SteepSlope"		Attic:SteepSlope	= {	if (IfValidAnd( RoofRise > 2 )) then  1  else  0  endif  }
+   ; fix logic to set Steep to 1 if RoofRise EQUAL 2:12 (previsouly only if it was > 2:12) - SAC 07/01/23 (tic #3479)
+	"Set Attic:SteepSlope"		Attic:SteepSlope	= {	if (IfValidAnd( RoofRise >= 2 )) then  1  else  0  endif  }
 ; SAC 4/28/14 - moved up here from below to ensure that Attic:RoofTilt is set prior to attic edge calcs (where it can now be referenced)
 	"Set Attic:RoofTilt"			Attic:RoofTilt		= {	if (IfValidAnd( RoofPitch > 0)) then  atan( RoofPitch ) * 180 / 3.14159265
 																		else  0  endif  }
@@ -2525,7 +2592,14 @@ RULELIST "Default_AtticAreas"  0 0 0 0
 
 		;EM 2/11/15
 	"Set Attic:FloorAreaOverNewZone"		Attic:FloorAreaOverNewZone	= {	SumRevRef( CeilingBelowAttic:AtticZone, CeilingBelowAttic:AreaOverNewZone )  }
-	
+
+	"Set Attic:NewAltLowSlopeAtticRoof"    Attic:NewAltLowSlopeAtticRoof	=              ; SAC 07/01/23 (tic #3479)
+      {	if (FloorAreaOverCond < 1 .OR. SteepSlope > 0 .OR. Status == 1) then  0
+         else  FloorAreaOverCond  endif  }
+	"Set Attic:NewAltHiSlopeAtticRoof"     Attic:NewAltHiSlopeAtticRoof	= 
+      {	if (FloorAreaOverCond < 1 .OR. SteepSlope < 1 .OR. Status == 1) then  0
+         else  FloorAreaOverCond  endif  }
+
 	"Set Attic:OnlyOverUncond"			Attic:OnlyOverUncond		= {	if (IfValidAnd( FloorArea > 0.1 ) .AND. IfValidAnd( FloorAreaOverCond > 0.1 )==0) then  1  else  0  endif  }	; SAC 11/19/14
 
 ; SAC 10/14/14 - added properties needed to enable multiple Attic obejcts per model
@@ -2552,35 +2626,64 @@ RULELIST  "Set_ResExtWallAz_WinAreaByOrientation"  1 0 0 0
       {  if (ParentComponentType() != "ResZn" .AND. ParentComponentType() != "ResOtherZn") then  UNCHANGED
          else  Azimuth + ValidOr( ZnAzm, 0 )  endif  }
    "Correct Azimuth for radial deg"    ResExtWall:Azimuth   =
-      {  if (Azimuth >= 360) then  Azimuth - 360
-         else  UNCHANGED  endif  }
-   "Set ResExtWall:TrueOrientationIdx - (1-N, 2-E, 3-S, 4-W)"     ResExtWall:TrueOrientationIdx =        ; SAC 7/12/20
-      {  if (     Azimuth >  45 .AND. Azimuth <= 135) then  2
-         else if (Azimuth > 135 .AND. Azimuth <= 225) then  3
-         else if (Azimuth > 225 .AND. Azimuth <= 315) then  4
-         else  1  endif endif endif  }
+      {  if (     Azimuth >= 360) then  Azimuth - 360
+         else if (Azimuth <    0) then  Azimuth + 360
+         else  UNCHANGED  endif endif  }
    "Sum window area into parent ResExtWall objects[1] - total"    ResExtWall:TotWinArea[1]  = {  SumChildren( ResWin:TotAreaInclMult[1] )  }
 
-   "Set Zone:WinAreaByOrientation[1]-N"   Zone:WinAreaByOrientation[1] =
-      {  SumChildrenIf( ResExtWall:TotWinArea[1], ResExtWall:TrueOrientationIdx = 1 )  }
-   "Set Zone:WinAreaByOrientation[2]-E"   Zone:WinAreaByOrientation[2] =
-      {  SumChildrenIf( ResExtWall:TotWinArea[1], ResExtWall:TrueOrientationIdx = 2 )  }
-   "Set Zone:WinAreaByOrientation[3]-S"   Zone:WinAreaByOrientation[3] =
-      {  SumChildrenIf( ResExtWall:TotWinArea[1], ResExtWall:TrueOrientationIdx = 3 )  }
-   "Set Zone:WinAreaByOrientation[4]-W"   Zone:WinAreaByOrientation[4] =
-      {  SumChildrenIf( ResExtWall:TotWinArea[1], ResExtWall:TrueOrientationIdx = 4 )  }
-   "Set Zone:NumWinOrientations - 1 (N)"     Zone:NumWinOrientations = {  if (WinAreaByOrientation[1] > 0.1) then  1  else  0  endif  }
-   "Set Zone:NumWinOrientations - 2 (E)"     Zone:NumWinOrientations = {  if (WinAreaByOrientation[2] > 0.1) then  NumWinOrientations + 1  else  UNCHANGED  endif  }
-   "Set Zone:NumWinOrientations - 3 (S)"     Zone:NumWinOrientations = {  if (WinAreaByOrientation[3] > 0.1) then  NumWinOrientations + 1  else  UNCHANGED  endif  }
-   "Set Zone:NumWinOrientations - 4 (W)"     Zone:NumWinOrientations = {  if (WinAreaByOrientation[4] > 0.1) then  NumWinOrientations + 1  else  UNCHANGED  endif  }
-   "Set Zone:NatVentWindPresCoefMult - mult on natural vent wind pressure coefficient"    Zone:NatVentWindPresCoefMult =      ; SAC 7/13/20
-      {  switch (NumWinOrientations)
-            case  1 :  ValidOr( ResProj:NatVentWindPresCoefMult[1], 1 )
-            case  2 :  ValidOr( ResProj:NatVentWindPresCoefMult[2], 1 )
-            case  3 :  ValidOr( ResProj:NatVentWindPresCoefMult[3], 1 )
-            case  4 :  ValidOr( ResProj:NatVentWindPresCoefMult[4], 1 )
-            default :  1
-         endswitch  }
+   ; calc adjustments to wall/win area orientation for models where surfaces stradle 45deg orientations - SAC 04/18/24 (tic #3554)
+   "Set 'testing' ResExtWall:TrueOrientationIdx - (0 or 1-2 for close to 45deg)"    ResExtWall:TrueOrientationIdx = 
+      {  if (     Azimuth <=  45 .AND. Azimuth >  42) then  1
+         else if (Azimuth >   45 .AND. Azimuth <  48) then  2
+         else if (Azimuth <= 135 .AND. Azimuth > 132) then  1
+         else if (Azimuth >  135 .AND. Azimuth < 138) then  2
+         else if (Azimuth <= 225 .AND. Azimuth > 222) then  1
+         else if (Azimuth >  225 .AND. Azimuth < 228) then  2
+         else if (Azimuth <= 315 .AND. Azimuth > 312) then  1
+         else if (Azimuth >  315 .AND. Azimuth < 318) then  2
+         else  0  endif endif endif endif endif endif endif endif  }
+   "Set ResProj:WinOrientAdj"    ResProj:WinOrientAdj =              ; SAC 04/18/24 (tic #3554)
+      {  if ( SumAcrossIf( ResExtWall:TotWinArea[1], ResExtWall:TrueOrientationIdx = 1 ) < 1 .AND.
+              SumAcrossIf( ResExtWall:TotWinArea[1], ResExtWall:TrueOrientationIdx = 2 ) < 1 )
+         then   0
+         else if ( SumAcrossIf( ResExtWall:TotWinArea[1], ResExtWall:TrueOrientationIdx = 1 ) >
+                   SumAcrossIf( ResExtWall:TotWinArea[1], ResExtWall:TrueOrientationIdx = 2 ) )
+         then  -5
+         else   5  endif endif  }
+            ;   "dbg" ResProj:Action = { if (IfValidAnd( DefaultingRounds = 2 )) then  PostMessageToLog( "   WinOrientAdj = %g based on %gSF windows <= 45 vs. %gSF wins > 45", WinOrientAdj, SumAcrossIf( ResExtWall:TotWinArea[1], ResExtWall:TrueOrientationIdx = 1 ), SumAcrossIf( ResExtWall:TotWinArea[1], ResExtWall:TrueOrientationIdx = 2 ) )  else UNCHANGED endif }
+
+   "Set ResExtWall:TrueOrientationIdx - (1-N, 2-E, 3-S, 4-W)"     ResExtWall:TrueOrientationIdx =        ; SAC 7/12/20
+      {  if (     (Azimuth + ResProj:WinOrientAdj) >  45 .AND. (Azimuth + ResProj:WinOrientAdj) <= 135) then  2
+         else if ((Azimuth + ResProj:WinOrientAdj) > 135 .AND. (Azimuth + ResProj:WinOrientAdj) <= 225) then  3
+         else if ((Azimuth + ResProj:WinOrientAdj) > 225 .AND. (Azimuth + ResProj:WinOrientAdj) <= 315) then  4
+         else  1  endif endif endif  }
+
+   "Set Zone:WinAreaByOrientation[1-4]-NESW"  for:#O=(1to4)  Zone:WinAreaByOrientation[#O] = {  SumChildrenIf( ResExtWall:TotWinArea[1], ResExtWall:TrueOrientationIdx = #O )  }
+   "Set Zone:NumWinOrientations - 1 (N)"                     Zone:NumWinOrientations = {  if (WinAreaByOrientation[1]  > 0.1) then  1  else  0  endif  }
+   "Set Zone:NumWinOrientations - 2-4 (ESW)"  for:#O=(2to4)  Zone:NumWinOrientations = {  if (WinAreaByOrientation[#O] > 0.1) then  NumWinOrientations + 1  else  UNCHANGED  endif  }
+
+   ; second round of NumWinOrientations defaulting ignoring orientations w/ little area - SAC 04/18/24 (tic #3554)  ; fix divide by zero error - SAC 05/14/24
+   "Set Zone:MinWinOrientArea"      Zone:MinWinOrientArea = {  if (IfValidAnd( NumWinOrientations > 0 )==0) then  0.1
+                                                               else  max( 0.1, (SumChildren( ResExtWall:TotWinArea[1] ) / NumWinOrientations) / 5 )  endif  }
+   ; "Set Zone:MinWinOrientArea"      Zone:MinWinOrientArea = {  max( 0.1, SumChildren( ResExtWall:TotWinArea[1] ) / (NumWinOrientations + 4) )  }
+            ;   "dbg" Zone:Action = { if (IfValidAnd( Proj:DefaultingRounds = 2 ) .AND. 
+            ;               ( (WinAreaByOrientation[1] > 0.1 .AND. WinAreaByOrientation[1] <= MinWinOrientArea) .OR. (WinAreaByOrientation[2] > 0.1 .AND. WinAreaByOrientation[2] <= MinWinOrientArea) .OR.
+            ;                 (WinAreaByOrientation[3] > 0.1 .AND. WinAreaByOrientation[3] <= MinWinOrientArea) .OR. (WinAreaByOrientation[4] > 0.1 .AND. WinAreaByOrientation[4] <= MinWinOrientArea) ))
+            ;            then  PostMessageToLog( "   Zone '%s' reducing # win orientations from %g:  min area  %g  vs. areas  %g,  %g,  %g,  %g", Name, NumWinOrientations, MinWinOrientArea, WinAreaByOrientation[1], WinAreaByOrientation[2], WinAreaByOrientation[3], WinAreaByOrientation[4] )  else UNCHANGED endif }
+   "Set Zone:NumWinOrientations - 1 (N) rnd2"                     Zone:NumWinOrientations = {  if (WinAreaByOrientation[1]  > MinWinOrientArea) then  1  else  0  endif  }
+   "Set Zone:NumWinOrientations - 2-4 (ESW) rnd2"  for:#O=(2to4)  Zone:NumWinOrientations = {  if (WinAreaByOrientation[#O] > MinWinOrientArea) then  NumWinOrientations + 1  else  UNCHANGED  endif  }
+
+   "Set Zone:NatVentWindPresCoefMult - mult on natural vent wind pressure coefficient"    Zone:NatVentWindPresCoefMult =      ; SAC 7/13/20  ; ResZnGrp:HasIntCorridors - SAC 04/22/24 (tic #3554)
+      {  if (IfValidAnd( ResZnGrp:HasIntCorridors > 0 )==0 .OR. IfValidAnd( NumDwellingUnits = 1 ))
+         then  switch (NumWinOrientations)
+                  case  2 :  ValidOr( ResProj:NatVentWindPresCoefMult[2], 0.5  )
+                  case  3 :  ValidOr( ResProj:NatVentWindPresCoefMult[3], 1 )
+                  case  4 :  ValidOr( ResProj:NatVentWindPresCoefMult[4], 1 )
+                  default :  ValidOr( ResProj:NatVentWindPresCoefMult[1], 0.25 )   ; 1
+               endswitch 
+         else  ; has interior corridors -and- more than 1 dwelling
+               0.25   ; no cross ventilation
+         endif  }
 
    "Set OtherZone:WinAreaByOrientation[1]-N"    OtherZone:WinAreaByOrientation[1] =
       {  SumChildrenIf( ResExtWall:TotWinArea[1], ResExtWall:TrueOrientationIdx = 1 )  }
@@ -2594,14 +2697,18 @@ RULELIST  "Set_ResExtWallAz_WinAreaByOrientation"  1 0 0 0
    "Set OtherZone:NumWinOrientations - 2 (E)"   OtherZone:NumWinOrientations = {  if (WinAreaByOrientation[2] > 0.1) then  NumWinOrientations + 1  else  UNCHANGED  endif  }
    "Set OtherZone:NumWinOrientations - 3 (S)"   OtherZone:NumWinOrientations = {  if (WinAreaByOrientation[3] > 0.1) then  NumWinOrientations + 1  else  UNCHANGED  endif  }
    "Set OtherZone:NumWinOrientations - 4 (W)"   OtherZone:NumWinOrientations = {  if (WinAreaByOrientation[4] > 0.1) then  NumWinOrientations + 1  else  UNCHANGED  endif  }
-   "Set OtherZone:NatVentWindPresCoefMult - mult on natural vent wind pressure coefficient"     OtherZone:NatVentWindPresCoefMult =       ; SAC 7/13/20
-      {  switch (NumWinOrientations)
-            case  1 :  ValidOr( ResProj:NatVentWindPresCoefMult[1], 1 )
-            case  2 :  ValidOr( ResProj:NatVentWindPresCoefMult[2], 1 )
-            case  3 :  ValidOr( ResProj:NatVentWindPresCoefMult[3], 1 )
-            case  4 :  ValidOr( ResProj:NatVentWindPresCoefMult[4], 1 )
-            default :  1
-         endswitch  }
+   ; SAC 7/13/20  ; ResZnGrp:HasIntCorridors - SAC 04/22/24 (tic #3554)
+   "Set OtherZone:NatVentWindPresCoefMult - mult on natural vent wind pressure coefficient"     OtherZone:NatVentWindPresCoefMult =       ; no nat vent when no windows - SAC 04/23/24 (tic #3554)
+      {  if (NumWinOrientations < 1)
+         then  0.0
+         else if (IfValidAnd( ResZnGrp:HasIntCorridors > 0 ))
+         then  0.25
+         else  switch (NumWinOrientations)
+                  case  2 :  ValidOr( ResProj:NatVentWindPresCoefMult[2], 0.5  )
+                  case  3 :  ValidOr( ResProj:NatVentWindPresCoefMult[3], 1 )
+                  case  4 :  ValidOr( ResProj:NatVentWindPresCoefMult[4], 1 )
+                  default :  ValidOr( ResProj:NatVentWindPresCoefMult[1], 0.25 )   ; 1 orientation
+               endswitch  endif endif  }
 END
 ;*************************************************************************
 
@@ -2727,10 +2834,47 @@ RULELIST "Default_DHWHeater_AreaServedAndHydronic"  0 0 0 0
 																						then  ( (21.4 + (0.00679 * min( SumAll( ResProj:AddAloneTotalArea ), 2500 ))) * DHWSysAssignFrac / SumAll( Zone:HasDHWUse ) ) * ResProj:AdditionCFAFrac
 																						else	  (21.4 + (0.00679 * min( SumAll( Zone:CondFloorArea     ), 2500 ))) * DHWSysAssignFrac / SumAll( Zone:HasDHWUse )  endif endif  }
 
-   "Set OtherZone:DHWFloorArea"           OtherZone:DHWFloorArea        = {   if (LocalCompAssigned( ozDHWSys ) == 0) then  0  else  Area  endif  }
-   ; removed CondFloorArea & LaundryArea conditions and added conditions that ozDHWSys be assigned & SpaceFunctionData:HotWtrHrlyUsePerPers > 0 - SAC 08/30/20 (MFamProto)
+   "Set OtherZone:HotWtrHrlyUsePerPers"   OtherZone:HotWtrHrlyUsePerPers  =      ; SAC 02/20/23 (tic #3418)
+      {  if (  (SpcFunc == 231 .OR. SpcFunc == 342) .AND.      ; 231, "Laundry Area"
+               SumRevRef( DwellUnit:WasherZoneRef, DwellUnit:CentralLaundryAssigned ) > 0.5)
+         then  0   ; DHW load based on res central DHW assignments
+         else if (SpcFunc < 200) then  0
+         else  SpaceFunctionData:HotWtrHrlyUsePerPers("FuncType",EnumString(SpcFunc))      
+         endif endif  }
+   "Set ResOtherZn:HotWtrUsePerDay"       ResOtherZn:HotWtrUsePerDay =           ; SAC 10/10/24 (tic #3630)
+      {  HotWtrHrlyUsePerPers * ValidOr( OccNumSim, 1 ) * 24  }
+
+   "Set ResOtherZn:HtEqpUsedAsDHWHtr flag"      ResOtherZn:HtEqpUsedAsDHWHtr  =     ; SAC 10/14/24 (tic #3629)
+      {  if (IfValidAnd( ActiveHVACSystem:Type = 2 ) .AND. IfValidAnd( ActiveHVACSystem:NumHtPumpSystemTypes > 0 ) .AND.
+             IfValidAnd( ActiveHVACSystem:HtPumpSystem[1]:CanBeDHWHtr > 0.1 ) .AND. IfValidAnd( ActiveHVACSystem:ServesAsDHWHtr > 0.1 ))
+         then  1  else  0  endif  }
+
+   "Set ResOtherZn:HVACSysDHWFlrArea flag"      ResOtherZn:HVACSysDHWFlrArea  =     ; SAC 10/15/24 (tic #3629)
+      {  if (HtEqpUsedAsDHWHtr > 0 .AND. HotWtrUsePerDay > 0.1) then  CondFloorAreaWithMult
+         else  UNDEFINED  endif  }
+
+   "Set OtherZone:ShowDHWSysAssignment"   OtherZone:ShowDHWSysAssignment  =      ; SAC 02/21/23 (tic #3418)
+      {  if (HtEqpUsedAsDHWHtr > 0.1) then  0
+         else if ( SpcFunc == 231 .OR. SpcFunc == 342 .OR.      ; 231, "Laundry Area"
+                   HotWtrHrlyUsePerPers > 0 )
+         then  1  else  0  endif endif  }
+
+;   "Force reset of DwellUnitType:DHWSysRef[1]"		DwellUnitType:Action		=
+;      {  if (HtEqpUsedAsDHWHtr < 1 .OR. LocalCompAssigned( DHWSysRef[1] ) < 1) then  UNCHANGED
+;         else	EvalRulelist( "ForceReset_DwellUnitType_DHWSysRef_1", 1 )  endif  }
+
+   "Set OtherZone:ActiveDHWSystem"		OtherZone:Action	=                 ; SAC 06/25/23 (tic #3479)
+      {  EvalRulelist( "Default_ResOtherZn_ActiveDHWSystem", 1 )  }        ; SAC 10/16/24 (tic #3629)
+
+   "Set OtherZone:HotWtrUseDUEquiv"    OtherZone:HotWtrUseDUEquiv  =       ; SAC 03/16/23 (tic #3418)
+      {  HotWtrHrlyUsePerPers * ValidOr( OccNumSim, 0 ) * ValidOr( Mult, 1 ) * 8 / 50  }
+         ; gal/h-person * #people * multiplier * est'd GPD/GPH / est'd DU GPD/pers
+
+   "Set OtherZone:DHWFloorArea"           OtherZone:DHWFloorArea        =
+      {  if (LocalCompAssigned( ActiveDHWSystem ) > 0 .OR. HtEqpUsedAsDHWHtr > 0.1) then  Area  else  0  endif  }
+   ; removed CondFloorArea & LaundryArea conditions and added conditions that ActiveDHWSystem be assigned & SpaceFunctionData:HotWtrHrlyUsePerPers > 0 - SAC 08/30/20 (MFamProto)
 	"Set OtherZone:HasDHWUse"					OtherZone:HasDHWUse				=                          ; SAC 9/20/19 - OtherZone (MFamProto)
-      {	if (LocalCompAssigned( ozDHWSys ) < 1 .OR. SpcFunc < 200) then  0
+      {	if ((HtEqpUsedAsDHWHtr < 1 .AND. LocalCompAssigned( ActiveDHWSystem ) < 1) .OR. SpcFunc < 200) then  0
          else if (SpaceFunctionData:HotWtrHrlyUsePerPers( "FuncType", EnumString( SpcFunc ) ) < 0.001) then  0
          else  1  endif endif  }     
 	"Set OtherZone:DHWDailyConsPerSys"		OtherZone:DHWDailyConsPerSys	= {	0  }
@@ -2787,39 +2931,55 @@ RULELIST "Default_DHWHeater_AreaServedAndHydronic"  0 0 0 0
     else 0
     endif }
 
-
-
 ;	"debug"		Zone:Action	= {	MessageBox( "PROP INPUT -- Zone '%s':  DHWSys1NewCondFloorArea = %g, DHWSys1AltCondFloorArea = %g, DHWSys1ExCondFloorArea = %g", Name, DHWSys1NewCondFloorArea, DHWSys1AltCondFloorArea, DHWSys1ExCondFloorArea )  }
+
+   ; added to ensure proper Alt/Ex system assignment setup - SAC 06/26/24
+   "Set ResOtherZn:NewValidResDHWSysRef"  ResOtherZn:NewValidResDHWSysRef =               ; further mods to set valid DHWSys refs only when HotWtrHrlyUsePerPers > 0 - SAC 07/08/24
+      {  if (ShowDHWSysAssignment > 0 .AND. DHWSysStatus == 3 .AND. LocalCompAssigned(  ozDHWSys ) > 0 .AND. IfValidAnd( HotWtrHrlyUsePerPers > 0 ))
+         then   ozDHWSys  else  UNDEFINED  endif  }
+   "Set ResOtherZn:AltValidResDHWSysRef"  ResOtherZn:AltValidResDHWSysRef = 
+      {  if (ShowDHWSysAssignment > 0 .AND. DHWSysStatus == 2 .AND. LocalCompAssigned( AltDHWSys ) > 0 .AND. IfValidAnd( HotWtrHrlyUsePerPers > 0 ) .AND. Proj:ResCompOpt > 1)
+         then  AltDHWSys  else  UNDEFINED  endif  }
+   "Set ResOtherZn:ExValidResDHWSysRef"   ResOtherZn:ExValidResDHWSysRef  = 
+      {  if (ShowDHWSysAssignment > 0 .AND. DHWSysStatus == 1 .AND. LocalCompAssigned(  exDHWSys ) > 0 .AND. IfValidAnd( HotWtrHrlyUsePerPers > 0 ) .AND. Proj:ResCompOpt > 1)
+         then   exDHWSys  else  UNDEFINED  endif  }
+
+   "Init DHWSys:NResFloorAreaServed"      DHWSys:NResFloorAreaServed = {  0  }      ; SAC 02/24/23 (tic #3418)
+   "Set DHWSys:NResFloorAreaServed from ResOtherZn"   ResOtherZn:ActiveDHWSystem:NResFloorAreaServed =       ; Mult - SAC 04/27/23 (tic #3392)
+      {  if (Proj:IsComRuleset .AND. IfValidAnd( HotWtrHrlyUsePerPers > 0 ) .AND. HtEqpUsedAsDHWHtr < 0.1)
+         then  ActiveDHWSystem:NResFloorAreaServed + (ValidOr( Area, 0 ) * ValidOr( Mult, 1 ))
+         else  UNCHANGED  endif  }     ; further mods needed for EAA!
 
 ; mjb 12/18/13 - need to keep track of floor area served by DHWSys
 ; SAC 6/27/14 - rules to track MFam DwellUnit floor area served by each DHWSys
 ; SAC 9/23/15 - added 'ResProj:IsMultiFamily > 0.5 .AND. ' to following rules to ensure that DUT & DU objects milling around in SFam models don't effect setting of these properties
-	"Set DHWSys:FloorAreaServed[1] - Init"		DHWSys:FloorAreaServed[1]	= {	0  }
-	"Set DHWSys:FloorAreaServed[1] - MFam-1"	DwellUnit:DwellUnitTypeRef:DHWSysRef[1]:FloorAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. DwellUnitTypeRef:NumDHWSysTypes > 0) then  TotalDHWFlrArea + DwellUnitTypeRef:DHWSysRef[1]:FloorAreaServed[1]  else  UNCHANGED  endif  }
-	"Set DHWSys:FloorAreaServed[1] - MFam-2"	DwellUnit:DwellUnitTypeRef:DHWSysRef[2]:FloorAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. DwellUnitTypeRef:NumDHWSysTypes > 1) then  TotalDHWFlrArea + DwellUnitTypeRef:DHWSysRef[2]:FloorAreaServed[1]  else  UNCHANGED  endif  }
-	"Set DHWSys:FloorAreaServed[1] - MFam-3"	DwellUnit:DwellUnitTypeRef:DHWSysRef[3]:FloorAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. DwellUnitTypeRef:NumDHWSysTypes > 2) then  TotalDHWFlrArea + DwellUnitTypeRef:DHWSysRef[3]:FloorAreaServed[1]  else  UNCHANGED  endif  }
-	"Set DHWSys:FloorAreaServed[1] - MFam-4"	DwellUnit:DwellUnitTypeRef:DHWSysRef[4]:FloorAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. DwellUnitTypeRef:NumDHWSysTypes > 3) then  TotalDHWFlrArea + DwellUnitTypeRef:DHWSysRef[4]:FloorAreaServed[1]  else  UNCHANGED  endif  }
-	"Set DHWSys:FloorAreaServed[1] - MFam-5"	DwellUnit:DwellUnitTypeRef:DHWSysRef[5]:FloorAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. DwellUnitTypeRef:NumDHWSysTypes > 4) then  TotalDHWFlrArea + DwellUnitTypeRef:DHWSysRef[5]:FloorAreaServed[1]  else  UNCHANGED  endif  }
+	"Set DHWSys:FloorAreaServed[1] - Init"		DHWSys:FloorAreaServed[1]	= {	NResFloorAreaServed  }
+	"Set DHWSys:FloorAreaServed[1] - MFam-1"	DwellUnit:DwellUnitTypeRef:DHWSysRef[1]:FloorAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. DwellUnitTypeRef:NumDHWSysTypes > 0) then  (TotalDHWFlrArea * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[1]:FloorAreaServed[1]  else  UNCHANGED  endif  }
+	"Set DHWSys:FloorAreaServed[1] - MFam-2"	DwellUnit:DwellUnitTypeRef:DHWSysRef[2]:FloorAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. DwellUnitTypeRef:NumDHWSysTypes > 1) then  (TotalDHWFlrArea * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[2]:FloorAreaServed[1]  else  UNCHANGED  endif  }
+	"Set DHWSys:FloorAreaServed[1] - MFam-3"	DwellUnit:DwellUnitTypeRef:DHWSysRef[3]:FloorAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. DwellUnitTypeRef:NumDHWSysTypes > 2) then  (TotalDHWFlrArea * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[3]:FloorAreaServed[1]  else  UNCHANGED  endif  }
+	"Set DHWSys:FloorAreaServed[1] - MFam-4"	DwellUnit:DwellUnitTypeRef:DHWSysRef[4]:FloorAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. DwellUnitTypeRef:NumDHWSysTypes > 3) then  (TotalDHWFlrArea * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[4]:FloorAreaServed[1]  else  UNCHANGED  endif  }
+	"Set DHWSys:FloorAreaServed[1] - MFam-5"	DwellUnit:DwellUnitTypeRef:DHWSysRef[5]:FloorAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. DwellUnitTypeRef:NumDHWSysTypes > 4) then  (TotalDHWFlrArea * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[5]:FloorAreaServed[1]  else  UNCHANGED  endif  }
 	; SAC 12/23/14 - extension of above, but individually for existing/altered/new
 	; SAC 4/25/16 - fix bug where Zone:Status used as basis of Ex/Alt/New floor area served, rather than Zone:DHWSys1Status (reported by LF 4/15/16 & 4/22/16)
-	"Set DHWSys:ExFlrAreaServed[1] - Init"		DHWSys:ExFlrAreaServed[1]	= {	0  }
-	"Set DHWSys:ExFlrAreaServed[1] - MFam-1"	DwellUnit:DwellUnitTypeRef:DHWSysRef[1]:ExFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. (ResProj:RunScope == 2 .OR. ResProj:IsAddAlone > 0) .AND. Zone:DHWSys1Status == 1 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 1) then  TotalDHWFlrArea + DwellUnitTypeRef:DHWSysRef[1]:ExFlrAreaServed[1]  else  UNCHANGED  endif  }
-	"Set DHWSys:ExFlrAreaServed[1] - MFam-2"	DwellUnit:DwellUnitTypeRef:DHWSysRef[2]:ExFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. (ResProj:RunScope == 2 .OR. ResProj:IsAddAlone > 0) .AND. Zone:DHWSys1Status == 1 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 2) then  TotalDHWFlrArea + DwellUnitTypeRef:DHWSysRef[2]:ExFlrAreaServed[1]  else  UNCHANGED  endif  }
-	"Set DHWSys:ExFlrAreaServed[1] - MFam-3"	DwellUnit:DwellUnitTypeRef:DHWSysRef[3]:ExFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. (ResProj:RunScope == 2 .OR. ResProj:IsAddAlone > 0) .AND. Zone:DHWSys1Status == 1 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 3) then  TotalDHWFlrArea + DwellUnitTypeRef:DHWSysRef[3]:ExFlrAreaServed[1]  else  UNCHANGED  endif  }
-	"Set DHWSys:ExFlrAreaServed[1] - MFam-4"	DwellUnit:DwellUnitTypeRef:DHWSysRef[4]:ExFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. (ResProj:RunScope == 2 .OR. ResProj:IsAddAlone > 0) .AND. Zone:DHWSys1Status == 1 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 4) then  TotalDHWFlrArea + DwellUnitTypeRef:DHWSysRef[4]:ExFlrAreaServed[1]  else  UNCHANGED  endif  }
-	"Set DHWSys:ExFlrAreaServed[1] - MFam-5"	DwellUnit:DwellUnitTypeRef:DHWSysRef[5]:ExFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. (ResProj:RunScope == 2 .OR. ResProj:IsAddAlone > 0) .AND. Zone:DHWSys1Status == 1 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 5) then  TotalDHWFlrArea + DwellUnitTypeRef:DHWSysRef[5]:ExFlrAreaServed[1]  else  UNCHANGED  endif  }
-	"Set DHWSys:AltFlrAreaServed[1] - Init"	DHWSys:AltFlrAreaServed[1]	= {	0  }
-	"Set DHWSys:AltFlrAreaServed[1] - MFam-1"	DwellUnit:DwellUnitTypeRef:DHWSysRef[1]:AltFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. ResProj:RunScope == 2 .AND. Zone:DHWSys1Status == 2 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 1) then  TotalDHWFlrArea + DwellUnitTypeRef:DHWSysRef[1]:AltFlrAreaServed[1]  else  UNCHANGED  endif  }
-	"Set DHWSys:AltFlrAreaServed[1] - MFam-2"	DwellUnit:DwellUnitTypeRef:DHWSysRef[2]:AltFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. ResProj:RunScope == 2 .AND. Zone:DHWSys1Status == 2 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 2) then  TotalDHWFlrArea + DwellUnitTypeRef:DHWSysRef[2]:AltFlrAreaServed[1]  else  UNCHANGED  endif  }
-	"Set DHWSys:AltFlrAreaServed[1] - MFam-3"	DwellUnit:DwellUnitTypeRef:DHWSysRef[3]:AltFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. ResProj:RunScope == 2 .AND. Zone:DHWSys1Status == 2 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 3) then  TotalDHWFlrArea + DwellUnitTypeRef:DHWSysRef[3]:AltFlrAreaServed[1]  else  UNCHANGED  endif  }
-	"Set DHWSys:AltFlrAreaServed[1] - MFam-4"	DwellUnit:DwellUnitTypeRef:DHWSysRef[4]:AltFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. ResProj:RunScope == 2 .AND. Zone:DHWSys1Status == 2 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 4) then  TotalDHWFlrArea + DwellUnitTypeRef:DHWSysRef[4]:AltFlrAreaServed[1]  else  UNCHANGED  endif  }
-	"Set DHWSys:AltFlrAreaServed[1] - MFam-5"	DwellUnit:DwellUnitTypeRef:DHWSysRef[5]:AltFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. ResProj:RunScope == 2 .AND. Zone:DHWSys1Status == 2 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 5) then  TotalDHWFlrArea + DwellUnitTypeRef:DHWSysRef[5]:AltFlrAreaServed[1]  else  UNCHANGED  endif  }
-	"Set DHWSys:NewFlrAreaServed[1] - Init"	DHWSys:NewFlrAreaServed[1]	= {	0  }
-	"Set DHWSys:NewFlrAreaServed[1] - MFam-1"	DwellUnit:DwellUnitTypeRef:DHWSysRef[1]:NewFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. Zone:DHWSys1Status == 3 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 1) then  TotalDHWFlrArea + DwellUnitTypeRef:DHWSysRef[1]:NewFlrAreaServed[1]  else  UNCHANGED  endif  }
-	"Set DHWSys:NewFlrAreaServed[1] - MFam-2"	DwellUnit:DwellUnitTypeRef:DHWSysRef[2]:NewFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. Zone:DHWSys1Status == 3 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 2) then  TotalDHWFlrArea + DwellUnitTypeRef:DHWSysRef[2]:NewFlrAreaServed[1]  else  UNCHANGED  endif  }
-	"Set DHWSys:NewFlrAreaServed[1] - MFam-3"	DwellUnit:DwellUnitTypeRef:DHWSysRef[3]:NewFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. Zone:DHWSys1Status == 3 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 3) then  TotalDHWFlrArea + DwellUnitTypeRef:DHWSysRef[3]:NewFlrAreaServed[1]  else  UNCHANGED  endif  }
-	"Set DHWSys:NewFlrAreaServed[1] - MFam-4"	DwellUnit:DwellUnitTypeRef:DHWSysRef[4]:NewFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. Zone:DHWSys1Status == 3 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 4) then  TotalDHWFlrArea + DwellUnitTypeRef:DHWSysRef[4]:NewFlrAreaServed[1]  else  UNCHANGED  endif  }
-	"Set DHWSys:NewFlrAreaServed[1] - MFam-5"	DwellUnit:DwellUnitTypeRef:DHWSysRef[5]:NewFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. Zone:DHWSys1Status == 3 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 5) then  TotalDHWFlrArea + DwellUnitTypeRef:DHWSysRef[5]:NewFlrAreaServed[1]  else  UNCHANGED  endif  }
+   ; revised following rules to be sensistive to DHW status of resotherZn assignments - SAC 06/26/24  - further mods starting w/ all flr, not just ResOtherZn:CondFlr - SAC 07/08/24
+	"Set DHWSys:ExFlrAreaServed[1] - Init"		DHWSys:ExFlrAreaServed[1]	= {	SumRevRef( ResOtherZn:ExValidResDHWSysRef,  ResOtherZn:FlrAreaWithMult )  }
+	"Set DHWSys:ExFlrAreaServed[1] - MFam-1"	DwellUnit:DwellUnitTypeRef:DHWSysRef[1]:ExFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. (ResProj:RunScope == 2 .OR. ResProj:IsAddAlone > 0) .AND. Zone:DHWSys1Status == 1 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 1) then  (TotalDHWFlrArea * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[1]:ExFlrAreaServed[1]  else  UNCHANGED  endif  }
+	"Set DHWSys:ExFlrAreaServed[1] - MFam-2"	DwellUnit:DwellUnitTypeRef:DHWSysRef[2]:ExFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. (ResProj:RunScope == 2 .OR. ResProj:IsAddAlone > 0) .AND. Zone:DHWSys1Status == 1 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 2) then  (TotalDHWFlrArea * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[2]:ExFlrAreaServed[1]  else  UNCHANGED  endif  }
+	"Set DHWSys:ExFlrAreaServed[1] - MFam-3"	DwellUnit:DwellUnitTypeRef:DHWSysRef[3]:ExFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. (ResProj:RunScope == 2 .OR. ResProj:IsAddAlone > 0) .AND. Zone:DHWSys1Status == 1 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 3) then  (TotalDHWFlrArea * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[3]:ExFlrAreaServed[1]  else  UNCHANGED  endif  }
+	"Set DHWSys:ExFlrAreaServed[1] - MFam-4"	DwellUnit:DwellUnitTypeRef:DHWSysRef[4]:ExFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. (ResProj:RunScope == 2 .OR. ResProj:IsAddAlone > 0) .AND. Zone:DHWSys1Status == 1 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 4) then  (TotalDHWFlrArea * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[4]:ExFlrAreaServed[1]  else  UNCHANGED  endif  }
+	"Set DHWSys:ExFlrAreaServed[1] - MFam-5"	DwellUnit:DwellUnitTypeRef:DHWSysRef[5]:ExFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. (ResProj:RunScope == 2 .OR. ResProj:IsAddAlone > 0) .AND. Zone:DHWSys1Status == 1 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 5) then  (TotalDHWFlrArea * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[5]:ExFlrAreaServed[1]  else  UNCHANGED  endif  }
+	"Set DHWSys:AltFlrAreaServed[1] - Init"	DHWSys:AltFlrAreaServed[1]	= {	SumRevRef( ResOtherZn:AltValidResDHWSysRef, ResOtherZn:FlrAreaWithMult )  }
+	"Set DHWSys:AltFlrAreaServed[1] - MFam-1"	DwellUnit:DwellUnitTypeRef:DHWSysRef[1]:AltFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. ResProj:RunScope == 2 .AND. Zone:DHWSys1Status == 2 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 1) then  (TotalDHWFlrArea * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[1]:AltFlrAreaServed[1]  else  UNCHANGED  endif  }
+	"Set DHWSys:AltFlrAreaServed[1] - MFam-2"	DwellUnit:DwellUnitTypeRef:DHWSysRef[2]:AltFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. ResProj:RunScope == 2 .AND. Zone:DHWSys1Status == 2 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 2) then  (TotalDHWFlrArea * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[2]:AltFlrAreaServed[1]  else  UNCHANGED  endif  }
+	"Set DHWSys:AltFlrAreaServed[1] - MFam-3"	DwellUnit:DwellUnitTypeRef:DHWSysRef[3]:AltFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. ResProj:RunScope == 2 .AND. Zone:DHWSys1Status == 2 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 3) then  (TotalDHWFlrArea * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[3]:AltFlrAreaServed[1]  else  UNCHANGED  endif  }
+	"Set DHWSys:AltFlrAreaServed[1] - MFam-4"	DwellUnit:DwellUnitTypeRef:DHWSysRef[4]:AltFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. ResProj:RunScope == 2 .AND. Zone:DHWSys1Status == 2 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 4) then  (TotalDHWFlrArea * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[4]:AltFlrAreaServed[1]  else  UNCHANGED  endif  }
+	"Set DHWSys:AltFlrAreaServed[1] - MFam-5"	DwellUnit:DwellUnitTypeRef:DHWSysRef[5]:AltFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. ResProj:RunScope == 2 .AND. Zone:DHWSys1Status == 2 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 5) then  (TotalDHWFlrArea * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[5]:AltFlrAreaServed[1]  else  UNCHANGED  endif  }
+	"Set DHWSys:NewFlrAreaServed[1] - Init"	DHWSys:NewFlrAreaServed[1]	= {	SumRevRef( ResOtherZn:NewValidResDHWSysRef, ResOtherZn:FlrAreaWithMult )  }    ; was: NResFloorAreaServed  }
+	"Set DHWSys:NewFlrAreaServed[1] - MFam-1"	DwellUnit:DwellUnitTypeRef:DHWSysRef[1]:NewFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. Zone:DHWSys1Status == 3 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 1) then  (TotalDHWFlrArea * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[1]:NewFlrAreaServed[1]  else  UNCHANGED  endif  }
+	"Set DHWSys:NewFlrAreaServed[1] - MFam-2"	DwellUnit:DwellUnitTypeRef:DHWSysRef[2]:NewFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. Zone:DHWSys1Status == 3 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 2) then  (TotalDHWFlrArea * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[2]:NewFlrAreaServed[1]  else  UNCHANGED  endif  }
+	"Set DHWSys:NewFlrAreaServed[1] - MFam-3"	DwellUnit:DwellUnitTypeRef:DHWSysRef[3]:NewFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. Zone:DHWSys1Status == 3 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 3) then  (TotalDHWFlrArea * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[3]:NewFlrAreaServed[1]  else  UNCHANGED  endif  }
+	"Set DHWSys:NewFlrAreaServed[1] - MFam-4"	DwellUnit:DwellUnitTypeRef:DHWSysRef[4]:NewFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. Zone:DHWSys1Status == 3 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 4) then  (TotalDHWFlrArea * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[4]:NewFlrAreaServed[1]  else  UNCHANGED  endif  }
+	"Set DHWSys:NewFlrAreaServed[1] - MFam-5"	DwellUnit:DwellUnitTypeRef:DHWSysRef[5]:NewFlrAreaServed[1]	= {	if (ResProj:IsMultiFamily > 0.5 .AND. Zone:DHWSys1Status == 3 .AND. DwellUnitTypeRef:NumDHWSysTypes >= 5) then  (TotalDHWFlrArea * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[5]:NewFlrAreaServed[1]  else  UNCHANGED  endif  }
 
    "Adjust ResDHWSys floor area served values for (Com Hotel/Motel) Spc assignments"   Proj:Action =     ; SAC 02/26/22
       {  if (IsComRuleset)
@@ -3006,13 +3166,40 @@ RULELIST "Default_DHWHeater_AreaServedAndHydronic"  0 0 0 0
 	"Set DHWSys:AreaServedDetails[5] - Altered, Central"			DHWSys:AreaServedDetails[5]	= {	if (IfValidAnd( CentralDHW > 0.5 )) then  AltFlrAreaServed[1]  else  0  endif  }
 	"Set DHWSys:AreaServedDetails[6] - Existing, Central"			DHWSys:AreaServedDetails[6]	= {	if (IfValidAnd( CentralDHW > 0.5 )) then   ExFlrAreaServed[1]  else  0  endif  }
 
+	"Set DHWSys:StdEqProp[2]"	   DHWSys:StdEqProp[2]	= {	StdEqProp[1]  }      ; SAC 05/01/23 (tic #3489)
+	"Set DHWSys:StdEqProp[3]"	   DHWSys:StdEqProp[3]	= {	StdEqProp[1]  }
+	"Set DHWSys:StdEqProp[4]"	   DHWSys:StdEqProp[4]	= {	StdEqProp[1]  }
+	"Set DHWSys:StdEqProp[5]"	   DHWSys:StdEqProp[5]	= {	StdEqProp[1]  }
+	"Set DHWSys:StdEqProp[6]"	   DHWSys:StdEqProp[6]	= {	StdEqProp[1]  }
+	"Set DHWHeater:StdEqProp"		DHWHeater:StdEqProp  = {	SumRevRef( DHWSys:DHWHeater, DHWSys:StdEqProp )  }
+
 	; SAC 7/7/15
-	"Set DHWSys:DailyHWConsumption - Init"		DHWSys:DailyHWConsumption	= {	0  }
-	"Set DHWSys:DailyHWConsumption - MFam-1"	DwellUnit:DwellUnitTypeRef:DHWSysRef[1]:DailyHWConsumption	= {	if (DwellUnitTypeRef:NumDHWSysTypes > 0) then  (DwellUnitTypeRef:DHWDailyConsPerSys * Count) + DwellUnitTypeRef:DHWSysRef[1]:DailyHWConsumption  else  UNCHANGED  endif  }
-	"Set DHWSys:DailyHWConsumption - MFam-2"	DwellUnit:DwellUnitTypeRef:DHWSysRef[2]:DailyHWConsumption	= {	if (DwellUnitTypeRef:NumDHWSysTypes > 1) then  (DwellUnitTypeRef:DHWDailyConsPerSys * Count) + DwellUnitTypeRef:DHWSysRef[2]:DailyHWConsumption  else  UNCHANGED  endif  }
-	"Set DHWSys:DailyHWConsumption - MFam-3"	DwellUnit:DwellUnitTypeRef:DHWSysRef[3]:DailyHWConsumption	= {	if (DwellUnitTypeRef:NumDHWSysTypes > 2) then  (DwellUnitTypeRef:DHWDailyConsPerSys * Count) + DwellUnitTypeRef:DHWSysRef[3]:DailyHWConsumption  else  UNCHANGED  endif  }
-	"Set DHWSys:DailyHWConsumption - MFam-4"	DwellUnit:DwellUnitTypeRef:DHWSysRef[4]:DailyHWConsumption	= {	if (DwellUnitTypeRef:NumDHWSysTypes > 3) then  (DwellUnitTypeRef:DHWDailyConsPerSys * Count) + DwellUnitTypeRef:DHWSysRef[4]:DailyHWConsumption  else  UNCHANGED  endif  }
-	"Set DHWSys:DailyHWConsumption - MFam-5"	DwellUnit:DwellUnitTypeRef:DHWSysRef[5]:DailyHWConsumption	= {	if (DwellUnitTypeRef:NumDHWSysTypes > 4) then  (DwellUnitTypeRef:DHWDailyConsPerSys * Count) + DwellUnitTypeRef:DHWSysRef[5]:DailyHWConsumption  else  UNCHANGED  endif  }
+	"Set DHWSys:DailyHWConsumption - Init"		   DHWSys:DailyHWConsumption	= {	0  }
+	"Set DHWSys:DailyHWConsumption - MFam-1-5"	for:#DS=(1to5)  DwellUnit:DwellUnitTypeRef:DHWSysRef[#DS]:DailyHWConsumption	=
+      {  if (DwellUnitTypeRef:NumDHWSysTypes >= #DS) then  (DwellUnitTypeRef:DHWDailyConsPerSys * Count * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[#DS]:DailyHWConsumption
+         else  UNCHANGED  endif  }
+     ; {  if (IfValidAnd( DwellUnitTypeRef:HtEqpUsedAsDHWHtr > 0 )) then  UNCHANGED
+	; "Set DHWSys:DailyHWConsumption - MFam-2"	DwellUnit:DwellUnitTypeRef:DHWSysRef[2]:DailyHWConsumption	= {	if (DwellUnitTypeRef:NumDHWSysTypes > 1) then  (DwellUnitTypeRef:DHWDailyConsPerSys * Count * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[2]:DailyHWConsumption  else  UNCHANGED  endif  }
+	; "Set DHWSys:DailyHWConsumption - MFam-3"	DwellUnit:DwellUnitTypeRef:DHWSysRef[3]:DailyHWConsumption	= {	if (DwellUnitTypeRef:NumDHWSysTypes > 2) then  (DwellUnitTypeRef:DHWDailyConsPerSys * Count * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[3]:DailyHWConsumption  else  UNCHANGED  endif  }
+	; "Set DHWSys:DailyHWConsumption - MFam-4"	DwellUnit:DwellUnitTypeRef:DHWSysRef[4]:DailyHWConsumption	= {	if (DwellUnitTypeRef:NumDHWSysTypes > 3) then  (DwellUnitTypeRef:DHWDailyConsPerSys * Count * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[4]:DailyHWConsumption  else  UNCHANGED  endif  }
+	; "Set DHWSys:DailyHWConsumption - MFam-5"	DwellUnit:DwellUnitTypeRef:DHWSysRef[5]:DailyHWConsumption	= {	if (DwellUnitTypeRef:NumDHWSysTypes > 4) then  (DwellUnitTypeRef:DHWDailyConsPerSys * Count * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[5]:DailyHWConsumption  else  UNCHANGED  endif  }
+
+   ; added to track DHW use for space heating (DHWCombo) HPs (serving as wtr htrs) - SAC 10/15/24 (tic #3629)
+   "Set DwellUnit:DailyHtEqpHWConsumption"      DwellUnit:DailyHtEqpHWConsumption =
+      {  if (IfValidAnd( DwellUnitTypeRef:HtEqpUsedAsDHWHtr > 0 ))
+         then  DwellUnitTypeRef:DHWDailyConsPerSys * Count * Parent( Mult )
+         else  0  endif  }
+
+	"Set DHWSys:DailyCommonHWConsumption - Init"    DHWSys:DailyCommonHWConsumption  = {  0  }      ; SAC 10/10/24 (tic #3630)
+	"Set DHWSys:DailyCommonHWConsumption"     ResOtherZn:ActiveDHWSystem:DailyCommonHWConsumption  =
+      {  if (IfValidAnd( ShowDHWSysAssignment > 0)==0) then  UNCHANGED
+         else  ActiveDHWSystem:DailyCommonHWConsumption + (ValidOr( HotWtrUsePerDay, 0 ) * Parent( Mult ))  endif  }
+
+	"Set DHWSys:NumAssignedCommonDUEquiv - Init"    DHWSys:NumAssignedCommonDUEquiv  = {  0  }      ; SAC 10/10/24 (tic #3630)
+	"Set DHWSys:NumAssignedCommonDUEquiv"     ResOtherZn:ActiveDHWSystem:NumAssignedCommonDUEquiv  =
+      {  if (IfValidAnd( ShowDHWSysAssignment > 0)==0) then  UNCHANGED
+         else  ActiveDHWSystem:NumAssignedCommonDUEquiv + ValidOr( HotWtrUseDUEquiv, 0 )  endif  }
+
 	"Set DHWSys:DailyHWConsumption - SFam"		DHWSys:DailyHWConsumption	= {	if (Proj:IsComRuleset)	then  UNCHANGED
 																										else	SumRevRef( Zone:DHWSys1,	Zone:DHWDailyConsPerSys ) + SumRevRef( Zone:AltDHWSys1, Zone:DHWDailyConsPerSys ) +
 																												SumRevRef( Zone:ExDHWSys1,	Zone:DHWDailyConsPerSys ) +
@@ -3021,25 +3208,29 @@ RULELIST "Default_DHWHeater_AreaServedAndHydronic"  0 0 0 0
 
 	; SAC 10/21/15
 	"Set DHWSys:NumDUsServed - Init"		DHWSys:NumDUsServed	= {	0  }
-	"Set DHWSys:NumDUsServed - MFam-1"	DwellUnit:DwellUnitTypeRef:DHWSysRef[1]:NumDUsServed	= {	if (DwellUnitTypeRef:NumDHWSysTypes > 0) then  Count + DwellUnitTypeRef:DHWSysRef[1]:NumDUsServed  else  UNCHANGED  endif  }
-	"Set DHWSys:NumDUsServed - MFam-2"	DwellUnit:DwellUnitTypeRef:DHWSysRef[2]:NumDUsServed	= {	if (DwellUnitTypeRef:NumDHWSysTypes > 1) then  Count + DwellUnitTypeRef:DHWSysRef[2]:NumDUsServed  else  UNCHANGED  endif  }
-	"Set DHWSys:NumDUsServed - MFam-3"	DwellUnit:DwellUnitTypeRef:DHWSysRef[3]:NumDUsServed	= {	if (DwellUnitTypeRef:NumDHWSysTypes > 2) then  Count + DwellUnitTypeRef:DHWSysRef[3]:NumDUsServed  else  UNCHANGED  endif  }
-	"Set DHWSys:NumDUsServed - MFam-4"	DwellUnit:DwellUnitTypeRef:DHWSysRef[4]:NumDUsServed	= {	if (DwellUnitTypeRef:NumDHWSysTypes > 3) then  Count + DwellUnitTypeRef:DHWSysRef[4]:NumDUsServed  else  UNCHANGED  endif  }
-	"Set DHWSys:NumDUsServed - MFam-5"	DwellUnit:DwellUnitTypeRef:DHWSysRef[5]:NumDUsServed	= {	if (DwellUnitTypeRef:NumDHWSysTypes > 4) then  Count + DwellUnitTypeRef:DHWSysRef[5]:NumDUsServed  else  UNCHANGED  endif  }
+	"Set DHWSys:NumDUsServed - MFam-1"	DwellUnit:DwellUnitTypeRef:DHWSysRef[1]:NumDUsServed	= {	if (DwellUnitTypeRef:NumDHWSysTypes > 0) then  (Count * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[1]:NumDUsServed  else  UNCHANGED  endif  }
+	"Set DHWSys:NumDUsServed - MFam-2"	DwellUnit:DwellUnitTypeRef:DHWSysRef[2]:NumDUsServed	= {	if (DwellUnitTypeRef:NumDHWSysTypes > 1) then  (Count * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[2]:NumDUsServed  else  UNCHANGED  endif  }
+	"Set DHWSys:NumDUsServed - MFam-3"	DwellUnit:DwellUnitTypeRef:DHWSysRef[3]:NumDUsServed	= {	if (DwellUnitTypeRef:NumDHWSysTypes > 2) then  (Count * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[3]:NumDUsServed  else  UNCHANGED  endif  }
+	"Set DHWSys:NumDUsServed - MFam-4"	DwellUnit:DwellUnitTypeRef:DHWSysRef[4]:NumDUsServed	= {	if (DwellUnitTypeRef:NumDHWSysTypes > 3) then  (Count * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[4]:NumDUsServed  else  UNCHANGED  endif  }
+	"Set DHWSys:NumDUsServed - MFam-5"	DwellUnit:DwellUnitTypeRef:DHWSysRef[5]:NumDUsServed	= {	if (DwellUnitTypeRef:NumDHWSysTypes > 4) then  (Count * Parent( Mult )) + DwellUnitTypeRef:DHWSysRef[5]:NumDUsServed  else  UNCHANGED  endif  }
+
+   "Set DHWSys:NumResOtherZnsServed"   DHWSys:NumResOtherZnsServed =       ; SAC 03/16/23 (tic #3418)
+      {  SumRevRef( ResOtherZn:ActiveDHWSystem, ResOtherZn:HotWtrUseDUEquiv )  }
 
    "Set ResDHWSys Consumption & NumDUsServed for (Com Hotel/Motel) models"    Proj:Action =     ; SAC 02/26/22
       {  if (IsComRuleset)
          then  EvalRulelist( "AdjustCom_ResDHWSys_ConsumptionAndNumDUsServed" )
          else  UNCHANGED  endif  }
 
-	"Set ResProj:DailyHWConsumption"			ResProj:DailyHWConsumption		= {	SumAll( DHWSys:DailyHWConsumption )  }
+	"Set ResProj:DailyHWConsumption"			ResProj:DailyHWConsumption		=        ; added DwellUnit:DailyHtEqpHWConsumption (DHWCombo) - SAC 10/15/24 (tic #3629)
+      {  SumAll( DHWSys:DailyHWConsumption ) + SumAll( DwellUnit:DailyHtEqpHWConsumption )  }
 
 	"Set DHWSys:NumDUsServed - SFam"		DHWSys:NumDUsServed	= {	if (Proj:IsComRuleset .OR. IfValidAnd( DailyHWConsumption > 0 )==0)	then  UNCHANGED
 																						else  1  endif  }
 
    "Set DHWSys:NumSystemsInBldg - # occurrences of this system in the building"     DHWSys:NumSystemsInBldg  =       ; SAC 6/14/20 - to populate CF1R F07_ResidentialWaterHeatingSystemCount (tic #1185)
       {  if (Proj:IsComRuleset .AND. IfValidAnd( CentralDHW > 0.5 ))
-         then  1  else  NumDUsServed  endif  }
+         then  1  else  NumDUsServed + NumResOtherZnsServed  endif  }
 
 	; SAC 10/22/15 - based on stds, table 120.3-A, which for all pipe diameters >= 1 in. and in the temperature range 105-140 is simply 1.5 in.
 	"Default DHWSys:LoopPipeInsulThk"	DHWSys:LoopPipeInsulThk		= {	1.5  }
@@ -3169,6 +3360,17 @@ RULELIST "Default_DHWHeater_AreaServedAndHydronic"  0 0 0 0
 
    "Check for, initiate and log/notify user of forced updates to DHWHeater:TankType"  ResProj:Action  =   ; SAC 5/27/19 (tic #1096)
       {  EvalRulelist( "CheckForUpdateNeeded_DHWHeater_OldTankType" )  }
+END
+;*************************************************************************
+
+; moved into separate rulelist to facilitate calling from elsewhere - SAC 10/16/24 (tic #3629)
+;*************************************************************************
+RULELIST "Default_ResOtherZn_ActiveDHWSystem"  0 0 0 0
+   "Set ResOtherZn:ActiveDHWSystem"		ResOtherZn:ActiveDHWSystem	=           ; SAC 06/25/23 (tic #3479)
+      {  if      ((ShowDHWSysAssignment > 0 .OR. HtEqpUsedAsDHWHtr > 0.1) .AND. Proj:ResCompOpt > 1 .AND. DHWSysStatus == 2) then  AltDHWSys
+         else if ((ShowDHWSysAssignment > 0 .OR. HtEqpUsedAsDHWHtr > 0.1) .AND. Proj:ResCompOpt > 1 .AND. DHWSysStatus == 1) then  exDHWSys
+         else if ((ShowDHWSysAssignment > 0 .OR. HtEqpUsedAsDHWHtr > 0.1)) then  ozDHWSys
+         else  UNDEFINED  endif endif endif  }
 END
 ;*************************************************************************
 
@@ -3328,6 +3530,10 @@ RULELIST "Set_AddAloneAreas_basedon_AdditionCFAFrac" 1 0 1 0
       if (IfValidAnd( AdditionCFAFrac > 0 ) .AND. IfValidAnd( AdditionCFAFrac <= 1 ))
       then	SumAll( Zone:FloorArea )
       else	0  endif  }
+	"Set ResProj:AddAloneAddedAreaWithMult (based on AdditionCFAFrac)"		ResProj:AddAloneAddedAreaWithMult	= {
+      if (IfValidAnd( AdditionCFAFrac > 0 ) .AND. IfValidAnd( AdditionCFAFrac <= 1 ))
+      then	SumAll( Zone:CondFloorAreaWithMult )
+      else	0  endif  }
 	"Set ResProj:AddAloneExistArea (based on AdditionCFAFrac)"		ResProj:AddAloneExistArea	= {
       if (IfValidAnd( AdditionCFAFrac > 0 ) .AND. IfValidAnd( AdditionCFAFrac <= 1 ) .AND. IfValidAnd( AddAloneAddedArea > 0 ))
       then	AddAloneAddedArea / AdditionCFAFrac
@@ -3337,6 +3543,7 @@ END
 RULELIST "ForceReset_AddAloneAreas" 1 0 0 0
 	"Force reset ResProj:AddAloneExistArea"	ResProj:AddAloneExistArea	= {	UNDEFINED  }		; SAC 12/28/15
 	"Force reset ResProj:AddAloneAddedArea"	ResProj:AddAloneAddedArea	= {	UNDEFINED  }
+	"Force reset ResProj:AddAloneAddedAreaWithMult"	ResProj:AddAloneAddedAreaWithMult	= {	UNDEFINED  }
 END
 ;*************************************************************************
 

@@ -234,6 +234,26 @@ RULE Proj:CompOptNew
     endif
 ENDRULE
 
+// ----------------------------------------------------------------------------- MFam EAA - SAC 05/19/23 (tic #3479)
+//         Compliance Scope Options - Res
+RULE Proj:ResCompOpt
+  DESCRIPTION
+    "Multifamily residential compliance scope."
+  OPTION
+    Newly Constructed
+    New - Addition Alone
+    Addition and/or Alteration
+  RESETS
+    ResetTheFollowingWhenThisIsModified
+      Proj:ResCompType
+      Proj:ResCompOptNew
+  DEFAULT
+    if (CompOptNew == 0)
+    then  "Addition and/or Alteration"
+    else  "Newly Constructed"
+    endif
+ENDRULE
+
 // -----------------------------------------------------------------------------
 //         Compliance Scope Options - New
 RULE Proj:ResCompOptNew
@@ -242,12 +262,21 @@ RULE Proj:ResCompOptNew
   INPUTCLASS
     NotInput
   DEFAULT : T24N_2022 T24N_2025
-    if( IfValidAnd( Proj:ResDwellUnits > 0 ) )
+    if( IfValidAnd( Proj:ResDwellUnits > 0 ) .AND.
+        ResCompOpt == "Newly Constructed" )
     then
       1
+    else if( IfValidAnd( Proj:ResDwellUnits > 0 ) .AND.
+        ResCompOpt == "New - Addition Alone" )
+    then
+      2
+    else if( IfValidAnd( Proj:ResDwellUnits > 0 ) .AND.
+        ResCompOpt == "Addition and/or Alteration" )
+    then
+      3
     else
       0
-    endif
+    endif endif endif
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -280,8 +309,16 @@ RULE Proj:CompOptExist
       PostError("Analysis scope has Existing checked but both Addition and Alterations 
                  unchecked, which is not allowed.  One of these options 
                  must be checked.")
+    else if( ResDwellUnits > 0 .AND. ResCompOpt = "New - Addition Alone" .AND. CompType <> "AdditionComplete" )
+    then
+      PostError("Nonresidential analysis scope must be set to AdditionComplete if
+                 Multifamily analysis scope is selected as New - AdditionAlone")
+    else if( ResDwellUnits > 0 .AND. ResCompOpt = "Addition and/or Alteration" .AND. ( IsNewEnv .OR. IsNewMech .OR. CompType = "AdditionComplete" ) )
+    then
+      PostError("Nonresidential analysis scope must be set to Existing scopes except AdditionComplete
+                 if Multifamily analysis scope is selected as Addition and/or Alteration")
     else UNCHANGED
-    endif endif endif
+    endif endif endif endif endif
 ENDRULE
 
 
@@ -667,9 +704,15 @@ RULE Proj:ResCompType
     if( ResCompOptNew = 1 .AND. ResCompOptEnve = 1 .AND. ResCompOptLtg = 1 .AND. ResCompOptMech = 1 .AND. ResCompOptDHW = 1 )
     then
      "NewComplete"
+    else if ( ResCompOptNew = 2 )
+    then
+      "AdditionComplete"
+    else if ( ResCompOptNew = 3)
+    then
+      "ExistingAdditionAndAlteration"
     else
       "NA"
-    endif
+    endif endif endif
 ENDRULE
 
 
@@ -1242,11 +1285,12 @@ ENDRULE
 // ********** Ventilation Standard *********************************************
 RULE Proj:VentStd
   DESCRIPTION
-    "Type ventilation standard for the project."
+    "The default VentilationStandard for the project."
   HELP
-    "Used to default the specification for ThermalZones."
+    "Currently, the VentilationStandard can only be changed at the ThermalZone.
+     For 'Healthcare' zones, it is automatically defaulted to 'Other'."
   INPUTCLASS : T24N
-    NotInput  IgnoreUserInput  "ExcptCondWtrHtr removed prior to release of 2016.3.0"
+    NotInput  IgnoreUserInput  "Proj:VentStd is not a valid input"
   INPUTCLASS : S901G
     Default
   OPTION : T24N_2013 
@@ -1281,10 +1325,10 @@ ENDRULE
 
 RULE Proj:VentStdDesc
   DESCRIPTION
-    "A short description of the 'Other' Ventilation Standard used for the project."
+    "A short description of the 'Other' VentilationStandard used for the project."
   HELP
-    "This input is used to default all of the Ventilation Standard descriptions
-     defined in the ThermalZones." 
+    "This is the default description used for all ThermalZones that have
+     VentilationStandard = 'Other'."
   INPUTCLASS
     Optional
 ENDRULE
@@ -2365,6 +2409,28 @@ RULE NEW Proj:ExhTolMinLimNonRes
     0.03
 ENDRULE
 
+RULE NEW Proj:BalancedVentTolNonRes
+  DATATYPE
+    Float
+  LONGFORM
+    BalancedVentilationToleranceResidential
+  DESCRIPTION
+    "The tolerance between supply and return or exhaust air flows
+     for a ventilation system to be considered 'balanced'. Applies to
+     high-rise residential spaces only"
+  HELP
+    "The tolerance is applied as to the following ratio:
+     ( Supply - Return/Exhaust ) / Supply."
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N_2016
+    1 // No tolerance
+  DEFAULT : T24N
+    0.05 // we were using ExhTolMinLimNonRes which is 5%. Reivse it to match Res 30%? See ticket 3057
+  DEFAULT : S901G ECBC
+    0.03
+ENDRULE
+
 //------------------------------------------------------------------------------
 // Tolerances for residential spaces
 RULE NEW Proj:ExhVentMultLimRes
@@ -2623,6 +2689,31 @@ RULE Proj:CompReportNum
              IfValidAnd( CompReportPDF > 0 ) .AND.
              IfValidAnd( CompReportStd > 0 )==0) then  2
     else  0  endif endif endif endif endif endif endif
+ENDRULE
+
+; SAC 06/20/23 (gh LMCC #24)
+RULE Proj:SoftwareVendor
+  DESCRIPTION
+    "Software product/vendor ID"
+  INPUTCLASS 
+    Default  
+  DEFAULT
+    if (LocalStatus( SoftwareVersion ) > 0)
+    then  if (strlen( SoftwareVersion ) > 0 .AND.
+              find(   SoftwareVersion, " " ) > 1 .AND.
+              find(   SoftwareVersion, " " ) < strlen( SoftwareVersion ))
+          then  substr( SoftwareVersion, 0, find( SoftwareVersion, " " )-1 )
+          else  SoftwareVersion  endif
+    else  UNDEFINED  endif
+  ANNUAL_PROPOSED
+    if (LocalStatus( SoftwareVendor ) > 0) then  UNCHANGED
+    else if (LocalStatus( SoftwareVersion ) > 0)
+    then  if (strlen( SoftwareVersion ) > 0 .AND.
+              find(   SoftwareVersion, " " ) > 1 .AND.
+              find(   SoftwareVersion, " " ) < strlen( SoftwareVersion ))
+          then  substr( SoftwareVersion, 0, find( SoftwareVersion, " " )-1 )
+          else  SoftwareVersion  endif
+    else  UNCHANGED  endif endif
 ENDRULE
 
 
@@ -3326,9 +3417,18 @@ RULE AirSys:ServesResZn
   INPUTCLASS
     NotInput
   DEFAULT
-    if( SumRevRef(ResOtherZn:ozHVACSystem, ResOtherZn:Area) > 1 )
+    if( SumRevRef(ResOtherZn:ActiveHVACSystem, ResOtherZn:Area) > 1 )
     then 1
     else 0
+    endif
+  CHECKSIM
+    if( ServesResZn > 0 .AND.
+        MaxRevRef(ResOtherZn:ActiveHVACSystem, ResOtherZn:Area) !=
+        SumRevRef(ResOtherZn:ActiveHVACSystem, ResOtherZn:Area) )
+    then PostError( "AirSys '%s' serves more than one ResOtherZn. This is 
+                     currently not supported. Combine the ResOtherZns into one
+                     or create AirSys for each ResOtherZn.", name )
+    else UNCHANGED
     endif
 ENDRULE 
 
@@ -3540,6 +3640,37 @@ RULE Proj:CSE_AllowCentralDHW
 ENDRULE
 
 
+// ------------ Main Compliance Metric Labels ----------------------------- SAC 01/26/23
+RULE NEW Proj:CompMetricLbl_Short
+  DATATYPE
+    String
+  LONGFORM
+    ComplianceMetricLabel_Short
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (IfValidAnd( EngyCodeYearNum >= 2025 ))
+    then  "LSC"
+    else  "TDV"
+    endif
+ENDRULE
+
+      ; Systemwide -> System - SAC 02/02/23
+RULE NEW Proj:CompMetricLbl_Long
+  DATATYPE
+    String
+  LONGFORM
+    ComplianceMetricLabel_Long
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (IfValidAnd( EngyCodeYearNum >= 2025 ))
+    then  "Long-term System Cost"
+    else  "Time Dependent Valuation"
+    endif
+ENDRULE
+
+
 // ------------ Results (multiple sets) Calcs Data ----------------------------- SAC 11/03/19
 // NumberOfT24NResultsSets:NumSets("CodeVint",EngyCodeYearNum)
 TABLE NumberOfT24NResultsSets
@@ -3637,16 +3768,51 @@ RULE NEW Proj:ResultSetSector
     endif
 ENDRULE
 
+RULE Proj:InclSrcEngyInCompTest
+  DESCRIPTION
+    "whether to include Source Energy in Compliance test"
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N
+    if (IfValidAnd( AnalysisVersion >= 220000 )==0)
+    then  0
+    else if ( IfValidAnd( AnalysisVersion >= 220300 ) .AND.
+              IfValidAnd( ResDwellUnits > 0 ) .AND.
+              IfValidAnd( ResCompOpt = "Newly Constructed" ) )
+    then  1
+    else if ( IfValidAnd( AnalysisVersion >= 220300 ) .AND.
+              ( ( IfValidAnd( ResDwellUnits > 0 ) .AND.
+                  IfValidAnd( ResCompOpt = "Addition and/or Alteration" ) ) .OR.
+                ( IfValidAnd( CompOptExist > 0 ) .AND.
+                  IfValidAnd( CompOptAlt   > 0 ) ) ) )
+    then  0
+    else  1  endif endif endif
+  DEFAULT
+    0
+ENDRULE
+RULE EUseSummary:HideCompSmrySrc
+  DEFAULT
+    if (LocalStatus( HideCompSmrySrc ) < 1)
+    then  0
+    else  UNCHANGED  endif
+ENDRULE
+RULE EUseSummary:HideCompSmryTot
+  DEFAULT
+    if (LocalStatus( HideCompSmryTot ) < 1)
+    then  0
+    else  UNCHANGED  endif
+ENDRULE
+
 // T24NResultSetData:NumSets("CodeVint", EngyCodeYearNum, "Sector", ResultSetSector, "SetID", #)   - This Table uses 15 year gas and other CO2 factors.
 // NOTE:  changes to resutls sets below must include corresponding changes to PrimResultSet & PrimResultSetIdx RULEs above (incl. enumeration backward compatibility) - SAC 3/21/20
 // added SetID 2 to represent 2022 Residential tables & multipliers, for when model is >= 80% Res spaces - SAC 03/18/21
 // updated 2025 TDV, source energy and CO2 emisions tables to latest 2025 data - SAC 10/25/22
 TABLE T24NResultSetData
     CodeVint   Sector   SetID   ResultSetName                    TDVTableName                            ElecDemTableName                         CO2ElecTableName                     CO2NatGasTableName               CO2NatGasMult        CO2OtherTableName                 CO2OtherMult    SrcEngyTableName
-    2025       Com      1       Metrics 2025 (Oct 2022)          2025NR_TDVbyCZandFuel                   CANonResDemandMultipliers:DemMult        2025NR_CO2ElecEmissionsbyCZ          n                                0.0054633            n                                 0.006288        2025NR_SrcbyCZandFuel      
-    2025       Res      1       Metrics 2025 (Oct 2022)          2025Res_TDVbyCZandFuel                  CANonResDemandMultipliers_Res:DemMult    2025Res_CO2ElecEmissionsbyCZ         n                                0.0060051            n                                 0.006288        2025Res_SrcbyCZandFuel  
-    2022       Com      1       Pol 15% RetAdd CH4Leak 20yr      TDVbyCZandFuel_Pol-15_CH4Leak_20yr      CANonResDemandMultipliers:DemMult        CarbonbyCZandFuel_CH4Leak_20yr       CarbonbyCZandFuel_CH4Leak_20yr   0.0                  CarbonbyCZandFuel_CH4Leak_20yr    0.0             SrcbyCZandFuel_CH4Leak_20yr      
-    2022       Res      1       Res Pol 15% RetAdd CH4Leak 20yr  TDVbyCZandFuel_Pol-15_CH4Leak_20yr_Res  CANonResDemandMultipliers_Res:DemMult    CarbonbyCZandFuel_CH4Leak_20yr_Res   n                                0.0058475            n                                 0.006309        SrcbyCZandFuel_CH4Leak_20yr_Res  
+    2025       Com      1       Metrics 2025 (Oct 2022)          2025NR_SLCCbyCZandFuel                  CA2025DemandMultipliers:DemMult          2025NR_CO2ElecEmissionsbyCZ          n                                0.0054633            n                                 0.006288        2025NR_SOURCEbyCZandFuel  
+    2025       Res      1       Metrics 2025 (Oct 2022)          2025Res_SLCCbyCZandFuel                 CA2025DemandMultipliers:DemMult          2025Res_CO2ElecEmissionsbyCZ         n                                0.0060051            n                                 0.006288        2025Res_SOURCEbyCZandFuel  
+    2022       Com      1       Pol 15% RetAdd CH4Leak 20yr      TDVbyCZandFuel_Pol-15_CH4Leak_20yr      CA2022NonresDemandMultipliers:DemMult    CarbonbyCZandFuel_CH4Leak_20yr       CarbonbyCZandFuel_CH4Leak_20yr   0.0                  CarbonbyCZandFuel_CH4Leak_20yr    0.0             SrcbyCZandFuel_CH4Leak_20yr  
+    2022       Res      1       Res Pol 15% RetAdd CH4Leak 20yr  TDVbyCZandFuel_Pol-15_CH4Leak_20yr_Res  CA2022ResDemandMultipliers:DemMult       CarbonbyCZandFuel_CH4Leak_20yr_Res   n                                0.0058475            n                                 0.006309        SrcbyCZandFuel_CH4Leak_20yr_Res  
     2019       *        *       SummaryResults                   TDVbyCZandFuel                          CANonResDemandMultipliers:DemMult        C02ElecByCZ                          n                                0.0585               n                                 0.07            n  
     *          *        *       SummaryResults                   TDVbyCZandFuel                          CANonResDemandMultipliers:DemMult        n                                    n                                0.0                  n                                 0.0             n  
 ENDTABLE
@@ -4460,6 +4626,7 @@ RULE Proj:ResCO2EmissionsNatGasTable[10]
     else T24NResultSetData:CO2NatGasTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 10)  endif
 ENDRULE
 
+; fix bug where status checked on NRes tables (CO2EmissionsNatGasTable[*]) not Res when setting ResCO2EmissionsNatGasMult[*] - SAC 01/04/23
 RULE Proj:ResCO2EmissionsNatGasMult[1]
   DESCRIPTION
     "natural gas CO2 emissions multiplier (ton/MBtuh) for results set #1"
@@ -4468,7 +4635,7 @@ RULE Proj:ResCO2EmissionsNatGasMult[1]
   UNITS
     ton/MBtuh
   DEFAULT : T24N_2022 T24N_2025
-    if (LocalStatus( CO2EmissionsNatGasTable[1] ) > 0) then  UNDEFINED
+    if (LocalStatus( ResCO2EmissionsNatGasTable[1] ) > 0) then  UNDEFINED
     else T24NResultSetData:CO2NatGasMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 1)  endif
   DEFAULT
     UNDEFINED
@@ -4476,55 +4643,55 @@ ENDRULE
 RULE Proj:ResCO2EmissionsNatGasMult[2]
   DEFAULT : T24N_2022 T24N_2025
     if (IfValidAnd( NumResultsSets >= 2 )==0 .OR.
-        LocalStatus( CO2EmissionsNatGasTable[2] ) > 0) then  UNDEFINED
+        LocalStatus( ResCO2EmissionsNatGasTable[2] ) > 0) then  UNDEFINED
     else  T24NResultSetData:CO2NatGasMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 2)  endif
 ENDRULE
 RULE Proj:ResCO2EmissionsNatGasMult[3]
   DEFAULT : T24N_2022 T24N_2025
     if (IfValidAnd( NumResultsSets >= 3 )==0 .OR.
-        LocalStatus( CO2EmissionsNatGasTable[3] ) > 0) then  UNDEFINED
+        LocalStatus( ResCO2EmissionsNatGasTable[3] ) > 0) then  UNDEFINED
     else  T24NResultSetData:CO2NatGasMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 3)  endif
 ENDRULE
 RULE Proj:ResCO2EmissionsNatGasMult[4]
   DEFAULT : T24N_2022 T24N_2025
     if (IfValidAnd( NumResultsSets >= 4 )==0 .OR.
-        LocalStatus( CO2EmissionsNatGasTable[4] ) > 0) then  UNDEFINED
+        LocalStatus( ResCO2EmissionsNatGasTable[4] ) > 0) then  UNDEFINED
     else  T24NResultSetData:CO2NatGasMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 4)  endif
 ENDRULE
 RULE Proj:ResCO2EmissionsNatGasMult[5]
   DEFAULT : T24N_2022 T24N_2025
     if (IfValidAnd( NumResultsSets >= 5 )==0 .OR.
-        LocalStatus( CO2EmissionsNatGasTable[5] ) > 0) then  UNDEFINED
+        LocalStatus( ResCO2EmissionsNatGasTable[5] ) > 0) then  UNDEFINED
     else  T24NResultSetData:CO2NatGasMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 5)  endif
 ENDRULE
 RULE Proj:ResCO2EmissionsNatGasMult[6]
   DEFAULT : T24N_2022 T24N_2025
     if (IfValidAnd( NumResultsSets >= 6 )==0 .OR.
-        LocalStatus( CO2EmissionsNatGasTable[6] ) > 0) then  UNDEFINED
+        LocalStatus( ResCO2EmissionsNatGasTable[6] ) > 0) then  UNDEFINED
     else  T24NResultSetData:CO2NatGasMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 6)  endif
 ENDRULE
 RULE Proj:ResCO2EmissionsNatGasMult[7]
   DEFAULT : T24N_2022 T24N_2025
     if (IfValidAnd( NumResultsSets >= 7 )==0 .OR.
-        LocalStatus( CO2EmissionsNatGasTable[7] ) > 0) then  UNDEFINED
+        LocalStatus( ResCO2EmissionsNatGasTable[7] ) > 0) then  UNDEFINED
     else  T24NResultSetData:CO2NatGasMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 7)  endif
 ENDRULE
 RULE Proj:ResCO2EmissionsNatGasMult[8]
   DEFAULT : T24N_2022 T24N_2025
     if (IfValidAnd( NumResultsSets >= 8 )==0 .OR.
-        LocalStatus( CO2EmissionsNatGasTable[8] ) > 0) then  UNDEFINED
+        LocalStatus( ResCO2EmissionsNatGasTable[8] ) > 0) then  UNDEFINED
     else  T24NResultSetData:CO2NatGasMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 8)  endif
 ENDRULE
 RULE Proj:ResCO2EmissionsNatGasMult[9]
   DEFAULT : T24N_2022 T24N_2025
     if (IfValidAnd( NumResultsSets >= 9 )==0 .OR.
-        LocalStatus( CO2EmissionsNatGasTable[9] ) > 0) then  UNDEFINED
+        LocalStatus( ResCO2EmissionsNatGasTable[9] ) > 0) then  UNDEFINED
     else  T24NResultSetData:CO2NatGasMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 9)  endif
 ENDRULE
 RULE Proj:ResCO2EmissionsNatGasMult[10]
   DEFAULT : T24N_2022 T24N_2025
     if (IfValidAnd( NumResultsSets >= 10 )==0 .OR.
-        LocalStatus( CO2EmissionsNatGasTable[10] ) > 0) then  UNDEFINED
+        LocalStatus( ResCO2EmissionsNatGasTable[10] ) > 0) then  UNDEFINED
     else  T24NResultSetData:CO2NatGasMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 10)  endif
 ENDRULE
 
@@ -4595,6 +4762,7 @@ RULE Proj:ResCO2EmissionsOtherTable[10]
     else T24NResultSetData:CO2OtherTableName("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 10)  endif
 ENDRULE
 
+; fix bug where status checked on NRes tables (CO2EmissionsOtherTable[*]) not Res when setting ResCO2EmissionsOtherMult[*] - SAC 01/04/23
 RULE Proj:ResCO2EmissionsOtherMult[1]
   DESCRIPTION
     "other fuel CO2 emissions multiplier (ton/MBtuh)"
@@ -4603,7 +4771,7 @@ RULE Proj:ResCO2EmissionsOtherMult[1]
   UNITS
     ton/MBtuh
   DEFAULT : T24N_2022 T24N_2025
-    if (LocalStatus( CO2EmissionsOtherTable[1] ) > 0) then  UNDEFINED
+    if (LocalStatus( ResCO2EmissionsOtherTable[1] ) > 0) then  UNDEFINED
     else  T24NResultSetData:CO2OtherMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 1)  endif
   DEFAULT
     UNDEFINED
@@ -4611,55 +4779,55 @@ ENDRULE
 RULE Proj:ResCO2EmissionsOtherMult[2]
   DEFAULT : T24N_2022 T24N_2025
     if (IfValidAnd( NumResultsSets >= 2 )==0 .OR.
-        LocalStatus( CO2EmissionsOtherTable[2] ) > 0) then  UNDEFINED
+        LocalStatus( ResCO2EmissionsOtherTable[2] ) > 0) then  UNDEFINED
     else  T24NResultSetData:CO2OtherMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 2)  endif
 ENDRULE
 RULE Proj:ResCO2EmissionsOtherMult[3]
   DEFAULT : T24N_2022 T24N_2025
     if (IfValidAnd( NumResultsSets >= 3 )==0 .OR.
-        LocalStatus( CO2EmissionsOtherTable[3] ) > 0) then  UNDEFINED
+        LocalStatus( ResCO2EmissionsOtherTable[3] ) > 0) then  UNDEFINED
     else  T24NResultSetData:CO2OtherMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 3)  endif
 ENDRULE
 RULE Proj:ResCO2EmissionsOtherMult[4]
   DEFAULT : T24N_2022 T24N_2025
     if (IfValidAnd( NumResultsSets >= 4 )==0 .OR.
-        LocalStatus( CO2EmissionsOtherTable[4] ) > 0) then  UNDEFINED
+        LocalStatus( ResCO2EmissionsOtherTable[4] ) > 0) then  UNDEFINED
     else  T24NResultSetData:CO2OtherMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 4)  endif
 ENDRULE
 RULE Proj:ResCO2EmissionsOtherMult[5]
   DEFAULT : T24N_2022 T24N_2025
     if (IfValidAnd( NumResultsSets >= 5 )==0 .OR.
-        LocalStatus( CO2EmissionsOtherTable[5] ) > 0) then  UNDEFINED
+        LocalStatus( ResCO2EmissionsOtherTable[5] ) > 0) then  UNDEFINED
     else  T24NResultSetData:CO2OtherMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 5)  endif
 ENDRULE
 RULE Proj:ResCO2EmissionsOtherMult[6]
   DEFAULT : T24N_2022 T24N_2025
     if (IfValidAnd( NumResultsSets >= 6 )==0 .OR.
-        LocalStatus( CO2EmissionsOtherTable[6] ) > 0) then  UNDEFINED
+        LocalStatus( ResCO2EmissionsOtherTable[6] ) > 0) then  UNDEFINED
     else  T24NResultSetData:CO2OtherMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 6)  endif
 ENDRULE
 RULE Proj:ResCO2EmissionsOtherMult[7]
   DEFAULT : T24N_2022 T24N_2025
     if (IfValidAnd( NumResultsSets >= 7 )==0 .OR.
-        LocalStatus( CO2EmissionsOtherTable[7] ) > 0) then  UNDEFINED
+        LocalStatus( ResCO2EmissionsOtherTable[7] ) > 0) then  UNDEFINED
     else  T24NResultSetData:CO2OtherMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 7)  endif
 ENDRULE
 RULE Proj:ResCO2EmissionsOtherMult[8]
   DEFAULT : T24N_2022 T24N_2025
     if (IfValidAnd( NumResultsSets >= 8 )==0 .OR.
-        LocalStatus( CO2EmissionsOtherTable[8] ) > 0) then  UNDEFINED
+        LocalStatus( ResCO2EmissionsOtherTable[8] ) > 0) then  UNDEFINED
     else  T24NResultSetData:CO2OtherMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 8)  endif
 ENDRULE
 RULE Proj:ResCO2EmissionsOtherMult[9]
   DEFAULT : T24N_2022 T24N_2025
     if (IfValidAnd( NumResultsSets >= 9 )==0 .OR.
-        LocalStatus( CO2EmissionsOtherTable[9] ) > 0) then  UNDEFINED
+        LocalStatus( ResCO2EmissionsOtherTable[9] ) > 0) then  UNDEFINED
     else  T24NResultSetData:CO2OtherMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 9)  endif
 ENDRULE
 RULE Proj:ResCO2EmissionsOtherMult[10]
   DEFAULT : T24N_2022 T24N_2025
     if (IfValidAnd( NumResultsSets >= 10 )==0 .OR.
-        LocalStatus( CO2EmissionsOtherTable[10] ) > 0) then  UNDEFINED
+        LocalStatus( ResCO2EmissionsOtherTable[10] ) > 0) then  UNDEFINED
     else  T24NResultSetData:CO2OtherMult("CodeVint", EngyCodeYearNum, "Sector", "Res", "SetID", 10)  endif
 ENDRULE
 
@@ -5181,9 +5349,12 @@ ENDRULE
 
 // *************** Daylight Saving Time Settings for Simulation ********************
 
-RULE Proj:DayltSavTimeSim
+// renamed - SAC 11/11/22
+RULE Proj:DisableDayltSavTimeSim
+  PREVIOUSNAMES
+    DayltSavTimeSim DaylightSavingTimeSimulation
   DESCRIPTION
-    "Flag to enable or disable Daylight Saving Time in simulation"
+    "Flag to enable or disable Daylight Savings Time in simulation"
   INPUTCLASS 
     Optional
   DEFAULT

@@ -82,19 +82,38 @@ RULE FluidSys:Status
     else "New"
     endif
   CHECKCODE
-    if( ( Proj:IsNewMech .AND. Status != "New" ) .OR.
-        ( Proj:IsAlt = 0 .AND. Status = "Altered" ) )
+    if( ResFlrAreaServed > 0 )
+    then
+      if( ResExistingFlrAreaServed > 0 .AND. Status != "Existing" )
+      then
+        PostError("FluidSystem '%s' whcih serves existing residential system but has a Status of 
+                   '%s'. change to 'Existing' for a valid compliance analysis.", Name, Status)
+      else
+      if( Proj:ResCompOpt != "Addition and/or Alteration" .AND.
+          ( Status = "Existing" .OR. Status = "Altered" ) )
+      then
+        PostWarning("FluidSystem '%s' whcih serves residential spaces has a Status of '%s', 
+                     but residential Compliance Type is '%s'. The status of the system will 
+                     be changed to 'New' for compliance analysis.", Name, Status, Proj:ResCompOpt)
+      else UNCHANGED
+      endif endif
+    else if( ( Proj:IsNewMech .AND. Status != "New" ) .OR.
+             ( Proj:IsAlt = 0 .AND. Status = "Altered" ) )
     then
       PostWarning("FluidSystem '%s' has a Status of '%s', but Compliance Type is '%s'.
                    The status of the system will be changed to 'New' for compliance
                    analysis.", Name, Status, Proj:CompType)
     else UNCHANGED
-    endif
+    endif endif
   SIZING
-    if( IfValidAnd( IsBaseSys > 0 ) .OR. Proj:IsNewMech )
+    if( IfValidAnd( ResFlrAreaServed > 0 ) .AND.
+        Proj:ResCompOpt != "Addition and/or Alteration" .AND.
+        ( Status = "Existing" .OR. Status = "Altered" ) )
+    then "New"
+    else if( IfValidAnd( IsBaseSys > 0 ) .OR. Proj:IsNewMech )
     then "New"
     else u:Status
-    endif
+    endif endif
   ANNUAL
     z:Status
 ENDRULE
@@ -106,9 +125,11 @@ RULE NEW FluidSys:IsExisting
   INPUTCLASS
     NotInput
   DEFAULT
-    if( Status = "Existing" .AND. Proj:IsAddOrAlt ) then 1 else 0 endif
+    if( Status = "Existing" .AND. ( Proj:IsAddOrAlt .OR. Proj:ResCompOpt = "Addition and/or Alteration" ) )
+    then 1 else 0 endif
   SIZING
-    if( Status = "Existing" .AND. Proj:IsAddOrAlt ) then 1 else 0 endif
+    if( Status = "Existing" .AND. ( Proj:IsAddOrAlt .OR. Proj:ResCompOpt = "Addition and/or Alteration" ) )
+    then 1 else 0 endif
   ANNUAL
     z:IsExisting
 ENDRULE
@@ -120,9 +141,11 @@ RULE NEW FluidSys:IsAltered
   INPUTCLASS
     NotInput
   DEFAULT
-    if( Status = "Altered" .AND. Proj:IsAlt ) then 1 else 0 endif
+    if( Status = "Altered" .AND. ( Proj:IsAlt .OR. Proj:ResCompOpt = "Addition and/or Alteration" ) )
+    then 1 else 0 endif
   SIZING
-    if( Status = "Altered" .AND. Proj:IsAlt ) then 1 else 0 endif
+    if( Status = "Altered" .AND. ( Proj:IsAlt .OR. Proj:ResCompOpt = "Addition and/or Alteration" ) )
+    then 1 else 0 endif
   ANNUAL
     z:IsAltered
 ENDRULE
@@ -534,8 +557,11 @@ RULE NEW FluidSys:IsWSHPSys
           SumChildrenIf( FluidSeg:CoilHtExtractionLd, FluidSeg:Type = "PrimarySupply" ) > 0 )
       ) 
     then 1
+    else if( Type = "CondenserWater" .AND.
+             SumRevRef( ResCentralHtgClgSys:CWFluidSysRef, ResCentralHtgClgSys:FloorAreaServed ) > 0 )
+    then 1
     else 0
-    endif
+    endif endif
 ENDRULE
 
 
@@ -1272,6 +1298,18 @@ RULE NEW FluidSeg:CoilClgCapHydronic
       SumRevRef(DwellUnitType:ChWFluidSegOutRef, DwellUnitType:SumCentralClgCap)
     else 0
     endif
+  SIZING_PROPOSED
+    if( IsSupSeg > 0 .OR. IsRetSeg > 0 )
+    then
+      SumRevRef(CoilClg:FluidSegInRef, CoilClg:CapTotGrossRtdSim) + 
+      SumRevRef(CoilClg:FluidSegOutRef, CoilClg:CapTotGrossRtdSim) + 
+      SumRevRef(FluidSeg:PriSegRef, FluidSeg:CoilClgCapHydronic) +
+      SumRevRef(ResHVACSys:ChWFluidSegInRef, ResHVACSys:SumCentralClgCap) + 
+      SumRevRef(ResHVACSys:ChWFluidSegOutRef, ResHVACSys:SumCentralClgCap) +
+      SumRevRef(ResHVACSys:CWFluidSegInRef, ResHVACSys:SumCentralClgCap) + 
+      SumRevRef(ResHVACSys:CWFluidSegOutRef, ResHVACSys:SumCentralClgCap)
+    else 0
+    endif
 ENDRULE
 
 RULE NEW FluidSeg:CoilClgCapHydronicExisting
@@ -1555,6 +1593,16 @@ RULE NEW FluidSeg:CoilHtgCapHydronic
       SumRevRef(DwellUnitType:HWFluidSegOutRef, DwellUnitType:SumCentralHtgCap)
     else 0
     endif
+  SIZING_PROPOSED
+    if( IsSupSeg > 0 .OR. IsRetSeg > 0 )
+    then
+      SumRevRef(CoilHtg:FluidSegInRef, CoilHtg:CapTotGrossRtdSim) + 
+      SumRevRef(CoilHtg:FluidSegOutRef, CoilHtg:CapTotGrossRtdSim) + 
+      SumRevRef(FluidSeg:PriSegRef, FluidSeg:CoilHtgCapHydronic) +
+      SumRevRef(ResHVACSys:HWFluidSegInRef, ResHVACSys:SumCentralHtgCap) +
+      SumRevRef(ResHVACSys:HWFluidSegOutRef, ResHVACSys:SumCentralHtgCap)
+    else 0
+    endif
 ENDRULE
 
 RULE NEW FluidSeg:CoilHtgCapHydronicExisting
@@ -1783,16 +1831,40 @@ RULE FluidSys:IsHlthCareSys
     if( CoilClgCapHydronicHlthCare + CoilHtgCapHydronicHlthCare +
         CoilClgCapWSHPHlthCare + CoilHtgCapWSHPHlthCare > 0 )
     then 1
+    else if( Type = "CondenserWater" .AND. 
+             SumRevRef( FluidSys:CWSysRef, FluidSys:IsHlthCareSys ) > 0 )
+    then 1
     else 0
-    endif
+    endif endif
   ANNUAL : T24N
     if( CoilClgCapHydronicHlthCare + CoilHtgCapHydronicHlthCare +
         CoilClgCapWSHPHlthCare + CoilHtgCapWSHPHlthCare > 0 )
     then 1
+    else if( Type = "CondenserWater" .AND. 
+             SumRevRef( FluidSys:CWSysRef, FluidSys:IsHlthCareSys ) > 0 )
+    then 1
     else 0
+    endif endif
+ENDRULE
+RULE NEW FluidSys:IsBaseHlthCareSys
+  DATATYPE
+    Integer
+  LONGFORM
+    IsBaselineHealthcareSystem
+  DESCRIPTION
+    "A flag that indicates if the FluidSys system is a baseline 'health care' 
+     system which is based on the proposed design but is modified to meet the 
+     requirements described in Standard Section 140.4."
+  INPUTCLASS
+    NotInput
+  SIZING_PROPOSED : T24N
+    0
+  SIZING_BASELINE : T24N
+    if( IsExisting > 0 .OR. IsBaseSys > 0 )
+    then 0
+    else IsHlthCareSys
     endif
 ENDRULE
-
 
 
 RULE NEW FluidSys:CoilHtgTotFlowRt
@@ -1839,6 +1911,16 @@ RULE NEW FluidSeg:CoilHtRejLd
       SumRevRef(DwellUnitType:CWFluidSegOutRef, DwellUnitType:SumCentralHtRejLd)
     else 0
     endif
+  SIZING_PROPOSED
+    if( IsSupSeg > 0 .OR. IsRetSeg > 0 )
+    then
+      SumRevRef(CoilClg:FluidSegInRef, CoilClg:HtRejLdSim) + 
+      SumRevRef(CoilClg:FluidSegOutRef, CoilClg:HtRejLdSim) + 
+      SumRevRef(FluidSeg:PriSegRef, FluidSeg:CoilHtRejLd) +
+      SumRevRef(ResHVACSys:CWFluidSegInRef, ResHVACSys:SumCentralHtRejLd) + 
+      SumRevRef(ResHVACSys:CWFluidSegOutRef, ResHVACSys:SumCentralHtRejLd)
+    else 0
+    endif
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -1865,6 +1947,16 @@ RULE NEW FluidSeg:CoilHtExtractionLd
       SumRevRef(ResHVACSys:CWFluidSegOutRef, ResHVACSys:SumCentralHtExtractionLd) +
       SumRevRef(DwellUnitType:CWFluidSegInRef, DwellUnitType:SumCentralHtExtractionLd) +
       SumRevRef(DwellUnitType:CWFluidSegOutRef, DwellUnitType:SumCentralHtExtractionLd)
+    else 0
+    endif
+  SIZING_PROPOSED
+    if( IsSupSeg > 0 .OR. IsRetSeg > 0 )
+    then
+      SumRevRef(CoilHtg:FluidSegInRef, CoilHtg:HtExtractionLdSim) + 
+      SumRevRef(CoilHtg:FluidSegOutRef, CoilHtg:HtExtractionLdSim) + 
+      SumRevRef(FluidSeg:PriSegRef, FluidSeg:CoilHtExtractionLd) +
+      SumRevRef(ResHVACSys:CWFluidSegInRef, ResHVACSys:SumCentralHtExtractionLd) +
+      SumRevRef(ResHVACSys:CWFluidSegOutRef, ResHVACSys:SumCentralHtExtractionLd)
     else 0
     endif
 ENDRULE
@@ -2802,9 +2894,32 @@ RULE NEW FluidSeg:ResFlrAreaServed
   INPUTCLASS
     NotInput
   DEFAULT
-    SumRevRef( ResCentralHtgClgSys:CWFluidSegInRef, ResCentralHtgClgSys:FloorAreaServed )
+    SumRevRef( ResCentralHtgClgSys:CWFluidSegInRef, ResCentralHtgClgSys:FloorAreaServed ) +
+    SumRevRef( ResCentralHtgClgSys:HWFluidSegInRef, ResCentralHtgClgSys:FloorAreaServed ) +
+    SumRevRef( ResCentralHtgClgSys:ChWFluidSegInRef, ResCentralHtgClgSys:FloorAreaServed )
   ANNUAL
-    SumRevRef( ResCentralHtgClgSys:CWFluidSegInRef, ResCentralHtgClgSys:FloorAreaServed )
+    SumRevRef( ResCentralHtgClgSys:CWFluidSegInRef, ResCentralHtgClgSys:FloorAreaServed ) +
+    SumRevRef( ResCentralHtgClgSys:HWFluidSegInRef, ResCentralHtgClgSys:FloorAreaServed ) +
+    SumRevRef( ResCentralHtgClgSys:ChWFluidSegInRef, ResCentralHtgClgSys:FloorAreaServed )
+ENDRULE
+
+RULE NEW FluidSeg:ResExistingFlrAreaServed
+  DATATYPE 
+    Float
+  LONGFORM
+    ResidentialExistingFloorAreaServed
+  DESCRIPTION
+    "Residential area served (via existing ResCentralHtgClgSys) - based on Inlet segs only"
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    SumRevRef( ResCentralHtgClgSys:CWFluidSegInRef, ResCentralHtgClgSys:exFloorAreaServed ) +
+    SumRevRef( ResCentralHtgClgSys:HWFluidSegInRef, ResCentralHtgClgSys:exFloorAreaServed ) +
+    SumRevRef( ResCentralHtgClgSys:ChWFluidSegInRef, ResCentralHtgClgSys:exFloorAreaServed )
+  ANNUAL
+    SumRevRef( ResCentralHtgClgSys:CWFluidSegInRef, ResCentralHtgClgSys:exFloorAreaServed ) +
+    SumRevRef( ResCentralHtgClgSys:HWFluidSegInRef, ResCentralHtgClgSys:exFloorAreaServed ) +
+    SumRevRef( ResCentralHtgClgSys:ChWFluidSegInRef, ResCentralHtgClgSys:exFloorAreaServed )
 ENDRULE
 
 RULE NEW FluidSys:ResFlrAreaServed
@@ -2822,6 +2937,21 @@ RULE NEW FluidSys:ResFlrAreaServed
     SumChildren( FluidSeg:ResFlrAreaServed )
 ENDRULE
 
+RULE NEW FluidSys:ResExistingFlrAreaServed
+  DATATYPE 
+    Float
+  LONGFORM
+    ResidentialExistingFloorAreaServed
+  DESCRIPTION
+    "Residential area served (via existing ResCentralHtgClgSys) - based on child Inlet segs only"
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    SumChildren( FluidSeg:ResExistingFlrAreaServed )
+  ANNUAL
+    SumChildren( FluidSeg:ResExistingFlrAreaServed )
+ENDRULE
+
 RULE NEW ResCentralHtgClgSys:CSELoadPassing
   DATATYPE 
     Integer
@@ -2833,13 +2963,13 @@ RULE NEW ResCentralHtgClgSys:CSELoadPassing
     if (IfValidAnd( FloorAreaServed > 0 )==0) then  0
     else  switch (Type)
             case "Water source heat pump" :  1
+            case "Four-pipe fan coil"     :  1
             default  :  0
           endswitch
     endif
   ANNUAL
     ValidOr( CSELoadPassing, 0 )
 ENDRULE
-;2,              1,    "Four-pipe fan coil"
 ;; 2,              3,    "Hydronic heating only"
 ;2,              4,    "Variable refrigerant flow"
 
@@ -2851,7 +2981,9 @@ RULE NEW FluidSeg:CSELoadPassing
   INPUTCLASS
     NotInput
   DEFAULT
-    SumRevRef( ResCentralHtgClgSys:CWFluidSegInRef, ResCentralHtgClgSys:CSELoadPassing )
+    SumRevRef( ResCentralHtgClgSys:CWFluidSegInRef, ResCentralHtgClgSys:CSELoadPassing ) +
+    SumRevRef( ResCentralHtgClgSys:HWFluidSegInRef, ResCentralHtgClgSys:CSELoadPassing ) +
+    SumRevRef( ResCentralHtgClgSys:ChWFluidSegInRef, ResCentralHtgClgSys:CSELoadPassing ) 
   ANNUAL
     ValidOr( CSELoadPassing, 0 )
 ENDRULE

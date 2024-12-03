@@ -44,19 +44,15 @@
 //     SpaceUseDefaults
 
 // --------------  Receptacle Power Density Exceptional Condition --------------------
-RULE Spc:RecptPwrExcptCond
+RULE Spc:RecptPwrDensExcptCond
   RULESETS
     S901G ECBC
   DESCRIPTION
-    "Used when the baseline receptacle power density is different than the proposed."
+    "A flag that indicates the baseline receptacle power density is different than the proposed."
   INPUTCLASS
     Optional
   DEFAULT
-    1
-  SIZING
-    u:RecptPwrExcptCond
-  ANNUAL
-    z:RecptPwrExcptCond
+    0
 ENDRULE
 
 // -------------- Gas Equipmrnet Power Density Exceptional Condition --------------------
@@ -64,15 +60,11 @@ RULE Spc:GasEqpPwrDensExcptCond
   RULESETS
     S901G ECBC
   DESCRIPTION
-    "Used when the baseline gas equipment power density is different than the proposed."
+    "A flag that indicates the baseline gas equipment power density is different than the proposed."
   INPUTCLASS
     Optional
   DEFAULT
-    1
-  SIZING
-    u:GasEqpPwrDensExcptCond
-  ANNUAL
-    z:GasEqpPwrDensExcptCond
+    0
 ENDRULE
 
 // -------------- Baseline Receptacle Power Density --------------------
@@ -96,26 +88,21 @@ RULE Spc:BaseRecptPwrDens
   UNITS 
     W per ft2
   DEFAULT
-    if( RecptPwrExcptCond = 0 )
-    then
+    if( RecptPwrDensExcptCond > 0 )
+    then 
       if( HasNoInternalLds )
       then UNDEFINED
-      else SpaceFunctionData:RecptPwrDens("FuncType",SpcFunc)
+      else RecptPwrDens 
       endif
     else UNDEFINED
     endif
   SIZING
-    if( u:BaseRecptPwrDens = 0 .OR.
-        LocalStatus(u:BaseRecptPwrDens) = 0 )
-    then UNDEFINED
-    else
-      if( RecptPwrExcptCond = 0 )
-      then u:BaseRecptPwrDens
-      else UNDEFINED
-      endif
+    if( IfValidAnd( BaseRecptPwrDens >= 0 ) .AND.
+        RecptPwrDensExcptCond > 0 )
+    then // User has selected baseline as being different than proposed
+      u:BaseRecptPwrDens
+    else UNDEFINED
     endif
-  ANNUAL
-    z:BaseRecptPwrDens
 ENDRULE
 
 
@@ -147,8 +134,8 @@ RULE Spc:RecptPwrDens
     then // Default to value specified by SpcFuncDefaults
       SpcFuncDefaultsRef:RecptPwrDens
     else if( SpcFunc = "Computer Room" )
-    then // 20 W/ft2 is Standard's definition for 'Computer Room'
-      20 
+    then // greater than 20 W/ft2 is Standard's definition for 'Computer Room'
+      20.001
     else // Set to table value
       SpaceFunctionData:RecptPwrDens("FuncType",SpcFunc)
     endif endif endif endif
@@ -162,67 +149,48 @@ RULE Spc:RecptPwrDens
       SpaceFunctionData:RecptPwrDens("FuncType",SpcFunc)
     endif endif
   CHECKCODE : T24N
-    // Data Centers or Computer Rooms must have a RecptPwrDens of 20 w/ft2 or 
-    // more.  If not, then send a message to the user.  
-    if( SpcFunc = "Computer Room" .AND. IfValidAnd( RecptPwrDens < 20 ) )
+    if( SpcFunc != "Computer Room" .AND. LocalStatus( RecptPwrDens ) > 4 )
+    then // User-defined value will be ignored
+      PostWarning("Space '%s' has a user-defined receptacle load density. For all space functions
+                   except 'Computer Room', this input is prescribed for compliance analysis.", Name)
+    else
+    if( SpcFunc = "Computer Room" .AND. IfValidAnd( RecptPwrDens <= 20 ) )
     then 
-      PostWarning("Space '%s' is a 'Computer Room. For compliance analysis,
-                   the receptacle power will be increased to 20 W/ft2, per the
+    // Data Centers or Computer Rooms must have a RecptPwrDens greater than 20 w/ft2. 
+    // If not, then send a message to the user.  
+      PostWarning("Space '%s' is a 'Computer Room'. For compliance analysis,
+                   the receptacle power will be increased to 20.001 W/ft2, per the
                    Standards definition. If the design receptacle load is not
                    a 'Computer Room', assign a different space function.",
                    Name)
     else UNCHANGED
-    endif
+    endif endif
   SIZING_PROPOSED
     if( HasNoInternalLds )
     then UNDEFINED
     else if (IsRes .AND. IfValidAnd( DwellingUnitMscTVSTBCmpEnergyTot > 0 ))
     then  DwellingUnitMscTVSTBCmpEnergyTot * 1000 / FlrArea   ; prescribed for Res spaces
     else if( SpcFunc = "Computer Room" )
-    then Max( ValidOr( u:RecptPwrDens, 0 ), 20 )
+    then Max( ValidOr( u:RecptPwrDens, 0 ), 20.001 )
     else // Prescribe value to T24
       SpaceFunctionData:RecptPwrDens("FuncType",SpcFunc)
     endif endif endif
   SIZING_PROPOSED : S901G
-    if( u:RecptPwrDens = 0 .OR.
-        LocalStatus(u:RecptPwrDens) = 0 )
+    if( HasNoInternalLds )
     then UNDEFINED
-    else
-      if( HasNoInternalLds )
-      then UNDEFINED
-      else // User value for 90.1
-        u:RecptPwrDens
-      endif
+    else // User value for 90.1
+      u:RecptPwrDens
     endif
   SIZING_BASELINE
     zp:RecptPwrDens
   SIZING_BASELINE : S901G
-    if( u:RecptPwrDens = 0 .OR.
-        LocalStatus(u:RecptPwrDens) = 0 )
-    then UNDEFINED
-      else
-      if( RecptPwrExcptCond = 0 )
-      then z:BaseRecptPwrDens
-      else zp:RecptPwrDens
-      endif
+    if( RecptPwrDensExcptCond > 0 )
+    then u:BaseRecptPwrDens // Baseline is different from proposed 
+    else zp:RecptPwrDens
     endif
   ANNUAL
     z:RecptPwrDens
 ENDRULE
-
-
-//   Certain Space Types have special requirements.  This table provides 
-//      criteria to determine whether a space is one of those space types. 
-;TABLE ProcSpcCrit
-;    FuncType         MinRecptPwrDens    UserRecptPwrDens    MinExhRate
-; //                  W/ft²              Use user value?     cfm/ft²
-;    "Data Center"    20                 1                   -1  
-;    "Computer Room"  20                 1                   -1
-;    Kitchen          -1                 -1                  0.5
-;    Laboratory       -1                 -1                  0.75
-;    *                -1                 -1                  -1
-;ENDTABLE
-
 
 
 // -------------- Receptacle Radiation Fraction --------------------
@@ -391,7 +359,7 @@ RULE Spc:BaseRecptSchRef
   INPUTCLASS
     Default
 //  DEFAULT
-//    if( RecptPwrExcptCond = 0 )
+//    if( RecptPwrDensExcptCond > 0 )
 //    then RuleLibrary(Schedule,(SpaceFunctionGroups:RecptSchRef("FuncGroup",FuncSchGrp)))
 //    else UNDEFINED
 //    endif
@@ -400,12 +368,12 @@ RULE Spc:BaseRecptSchRef
         LocalStatus(u:RecptPwrDens) = 0 )
     then UNDEFINED
     else
-      if( RecptPwrExcptCond = 0 )
+      if( RecptPwrDensExcptCond > 0 )
       then
         if( (u:BaseRecptSchRef = "- none -" .OR.
              LocalCompAssigned(u:BaseRecptSchRef) = 0) .AND.
              IfValidAnd(u:RecptPwrDens > 0) )
-        then RuleLibrary(Schedule,(SpaceFunctionGroups:RecptSchRef("FuncGroup",u:FuncSchGrp)))
+        then RuleLibrary(Schedule,(SpaceFunctionGroups:RecptSchRef("FuncGroup",FuncSchGrpSim)))
         else 
           if( (u:BaseRecptSchRef = "- none -" .OR.
                LocalCompAssigned(u:BaseRecptSchRef) = 0) .AND.
@@ -483,11 +451,11 @@ RULE Spc:RecptSchRef
                    (DwellingUnitSTBEnergyTot / DwellingUnitMscTVSTBCmpEnergyTot),
                    (DwellingUnitCmpEnergyTot / DwellingUnitMscTVSTBCmpEnergyTot) ) 
     else
-      RuleLibrary(Schedule,(SpaceFunctionGroups:RecptSchRef("FuncGroup",FuncSchGrp)))
+      RuleLibrary(Schedule,(SpaceFunctionGroups:RecptSchRef("FuncGroup",FuncSchGrpSim)))
     endif endif ; endif endif
   SIZING_BASELINE : S901G ECBC
-    if( RecptPwrExcptCond = 0 )
-    then zb:BaseRecptSchRef
+    if( RecptPwrDensExcptCond > 0 )
+    then u:BaseRecptSchRef
     else zp:RecptSchRef
     endif
   SIZING_BASELINE
@@ -517,7 +485,7 @@ RULE Spc:BaseGasEqpPwrDens
   UNITS 
     Btu/hr-ft2
   DEFAULT
-    if( GasEqpPwrDensExcptCond = 0 )
+    if( GasEqpPwrDensExcptCond > 0 )
     then
       if( HasNoInternalLds )
       then UNDEFINED
@@ -530,7 +498,7 @@ RULE Spc:BaseGasEqpPwrDens
         LocalStatus(u:BaseGasEqpPwrDens) = 0 )
     then UNDEFINED
     else
-      if( GasEqpPwrDensExcptCond = 0 )
+      if( GasEqpPwrDensExcptCond > 0 )
       then u:BaseGasEqpPwrDens
       else UNDEFINED
       endif
@@ -543,9 +511,10 @@ ENDRULE
 // -------------- Gas Equipment Power Density --------------------
 RULE Spc:GasEqpPwrDens
   DESCRIPTION
-    "The use of gas devices represented by a gas equipment power density
-     (Btu/h-ft2) and associated with the occupancy type selected from the
-     Area Category Method or Complete Building Method in ACM Appendix 5.4A."
+    "The use of gas devices represented by a gas equipment annual average 
+     power density (Btu/h-ft2) and associated with the occupancy type 
+     selected from the Area Category Method or Complete Building Method in 
+     ACM Appendix 5.4A."
   INPUTCLASS
     Default
   MINIMUM 
@@ -573,16 +542,17 @@ RULE Spc:GasEqpPwrDens
     if ( SpcFunc = "Scientific Laboratory Area" .OR. Spc:IsHlthCare .OR.
          SpcFunc = "Laboratory, Scientific" ) ; JP 211130 space type name change (tic #3301)
     then UNCHANGED
-    else 
-	    if( Proj:GasType = "None" .AND. IfValidAnd( GasEqpPwrDens > 0 ) )
-	    then
-	      PostError("Space '%s' specifies process gas equipment 
+    else if( Proj:GasType = "None" .AND. IfValidAnd( GasEqpPwrDens > 0 ) )
+	  then PostError("Space '%s' specifies process gas equipment 
 	                 but the project gas type is specified as none.  Make the 
 	                 process gas equipment load zero or change the project gas 
 	                 type.", Name)
-	    else UNCHANGED
-	    endif
-    endif
+	  else if( Proj:GasType != "None" .AND. IfValidAnd( GasEqpPwrDens < SpaceFunctionData:GasEqpPwrDens("FuncType", SpcFunc) ) )
+	  then PostError("Space '%s' specifies process gas equipment 
+	                 power lower than the prescribed value.  Make the process gas
+	                 equipment power equal or greater than the default value.", Name) 
+	  else UNCHANGED
+    endif endif endif
   SIZING_PROPOSED : S901G ECBC
     if( u:GasEqpPwrDens = 0 .OR.
         LocalStatus(u:GasEqpPwrDens) = 0 )
@@ -609,13 +579,14 @@ RULE Spc:GasEqpPwrDens
     then  UNDEFINED
     else u:GasEqpPwrDens
     endif endif endif
+; ; JP 12/8/22 (tic 3415) This value will be converted to peak value in the end of SIZING_PROPOSED (see PreSim.rule)
   SIZING_BASELINE : S901G ECBC
     if( u:GasEqpPwrDens = 0 .OR.
         LocalStatus(u:GasEqpPwrDens) = 0 )
     then UNDEFINED
     else
-      if( GasEqpPwrDensExcptCond = 0 )
-      then z:BaseGasEqpPwrDens
+      if( GasEqpPwrDensExcptCond > 0 )
+      then u:BaseGasEqpPwrDens
       else zp:GasEqpPwrDens
       endif
     endif
@@ -765,7 +736,7 @@ RULE Spc:BaseGasEqpSchRef
   INPUTCLASS
     Default
 //  DEFAULT
-//    if( GasEqpPwrDensExcptCond = 0 )
+//    if( GasEqpPwrDensExcptCond > 0 )
 //    then RuleLibrary(Schedule,(SpaceFunctionGroups:GasEqpSchRef("FuncGroup",FuncSchGrp)))
 //    else UNDEFINED
 //    endif
@@ -774,12 +745,12 @@ RULE Spc:BaseGasEqpSchRef
         LocalStatus(u:GasEqpPwrDens) = 0 )
     then UNDEFINED
     else
-      if( GasEqpPwrDensExcptCond = 0 )
+      if( GasEqpPwrDensExcptCond > 0 )
       then
         if( (u:BaseGasEqpSchRef = "- none -" .OR.
              LocalCompAssigned(u:BaseGasEqpSchRef) = 0) .AND.
              IfValidAnd(u:GasEqpPwrDens > 0) )
-        then RuleLibrary(Schedule,(SpaceFunctionGroups:GasEqpSchRef("FuncGroup",u:FuncSchGrp)))
+        then RuleLibrary(Schedule,(SpaceFunctionGroups:GasEqpSchRef("FuncGroup",FuncSchGrpSim)))
         else 
           if( (u:BaseGasEqpSchRef = "- none -" .OR.
                LocalCompAssigned(u:BaseGasEqpSchRef) = 0) .AND.
@@ -833,7 +804,7 @@ RULE Spc:GasEqpSchRef
   SIZING_PROPOSED
     if( HasNoInternalLds = 0 .AND.
         LocalStatus(GasEqpPwrDens) > 0 ) 
-    then RuleLibrary(Schedule,(SpaceFunctionGroups:GasEqpSchRef("FuncGroup",FuncSchGrp)))
+    then RuleLibrary(Schedule,(SpaceFunctionGroups:GasEqpSchRef("FuncGroup",FuncSchGrpSim)))
     else UNDEFINED
     endif
   SIZING_BASELINE : S901G ECBC
@@ -841,8 +812,8 @@ RULE Spc:GasEqpSchRef
         LocalStatus(u:GasEqpPwrDens) = 0 )
     then UNDEFINED
     else
-      if( GasEqpPwrDensExcptCond = 0 )
-      then zb:BaseGasEqpSchRef
+      if( GasEqpPwrDensExcptCond > 0 )
+      then u:BaseGasEqpSchRef
       else zp:GasEqpSchRef
       endif
     endif
@@ -850,6 +821,175 @@ RULE Spc:GasEqpSchRef
     zp:GasEqpSchRef
   ANNUAL
     z:GasEqpSchRef
+ENDRULE
+
+// ------------------------ Electric Equipment ------------------------
+// -------------- Electric Equipment Power Density --------------------
+RULE Spc:ElecEqpPwrDens
+  DESCRIPTION
+    "The use of electric devices represented by a electric equipment annual average 
+     power density (W/ft2) and associated with the occupancy type 
+     selected from the Area Category Method or Complete Building Method in 
+     ACM Appendix 5.4A."
+  INPUTCLASS
+    Default
+  MINIMUM 
+    0
+  COMMONMAXIMUM
+    20
+  MAXIMUM 
+    100
+  UNITS 
+    W/ft2
+  DEFAULT
+    if( HasNoInternalLds )
+    then UNDEFINED
+    else if( IsProcExhSpc > 0 .AND. HasProcExh = 0 )  
+    then UNDEFINED // See issue 1032, comment #10
+    else if (IsRes)
+    then  UNDEFINED
+    else if( LocalCompAssigned(SpcFuncDefaultsRef) .AND. LocalStatus(SpcFunc)<5) 
+    then SpcFuncDefaultsRef:ElecEqpPwrDens
+    else if( Proj:GasType != "None" )
+    then 0
+    else SpaceFunctionData:GasEqpPwrDens("FuncType",SpcFunc) / 3.412
+    endif endif endif endif endif
+  CHECKCODE
+    if ( SpcFunc = "Scientific Laboratory Area" .OR. Spc:IsHlthCare .OR.
+         SpcFunc = "Laboratory, Scientific" )
+    then UNCHANGED
+	  else if( Proj:GasType = "None" .AND. IfValidAnd( ElecEqpPwrDens < SpaceFunctionData:GasEqpPwrDens("FuncType", SpcFunc) / 3.412 ) )
+	  then PostError("Space '%s' specifies electric equipment 
+	                 power lower than the prescribed value.  Make the electric
+	                 equipment power equal or greater than the default value.", Name) 
+	  else UNCHANGED
+    endif endif
+  SIZING_PROPOSED : T24N
+    if( HasNoInternalLds )
+    then UNDEFINED
+    else if( IsProcExhSpc > 0 .AND. HasProcExh = 0 ) 
+    then UNDEFINED
+    else if (IsRes)
+    then  UNDEFINED
+    else u:ElecEqpPwrDens
+    endif endif endif
+    ; JP 12/8/22 (tic 3415) This value will be converted to peak value in the end of SIZING_PROPOSED (see PreSim.rule)
+  SIZING_BASELINE
+    zp:ElecEqpPwrDens
+  ANNUAL
+    z:ElecEqpPwrDens
+ENDRULE
+
+// -------------- Electric Equipment Radiation Fraction --------------------
+RULE Spc:ElecEqpRadFrac
+  DESCRIPTION
+    "The fraction of radiant heat gain to a space based on appliance energy use."
+  HELP
+    "Fraction convective (sensible) is typically equal to 1.0 minus fraction
+     radiant, minus fraction latent, minus fraction lost."
+  INPUTCLASS
+    Default
+  DEFAULT
+    if( LocalStatus(ElecEqpPwrDens) = 0 )
+    then UNDEFINED
+    else 0.15
+    endif
+  SIZING_PROPOSED
+    if( LocalStatus(ElecEqpPwrDens) = 0 )
+    then UNDEFINED
+    else 0.15
+    endif
+  SIZING_BASELINE
+    zp:ElecEqpRadFrac
+  ANNUAL
+    z:ElecEqpRadFrac
+ENDRULE
+
+// -------------- Electric Equipment Latent Fraction --------------------
+RULE Spc:ElecEqpLatFrac
+  DESCRIPTION
+    "The fraction of latent heat gain to a space based on appliance energy
+     use."
+  HELP
+    "Fraction convective (sensible) is typically equal to 1.0 minus fraction
+     radiant, minus fraction latent, minus fraction lost."
+  INPUTCLASS
+    Default
+  DEFAULT
+    if( LocalStatus(ElecEqpPwrDens) = 0 )
+    then UNDEFINED
+    else 0
+    endif
+  SIZING_PROPOSED
+    if( LocalStatus(ElecEqpPwrDens) = 0 )
+    then UNDEFINED
+    else 0 // Per 8/18 conference with JA and RHe
+    endif
+  SIZING_BASELINE
+    zp:ElecEqpLatFrac
+  ANNUAL
+    z:ElecEqpLatFrac
+ENDRULE
+
+// -------------- Electric Equipment lost Fraction --------------------
+RULE Spc:ElecEqpLostFrac
+  DESCRIPTION
+    "The fraction of heat lost to the exterior based on appliance energy use."
+  HELP
+    "Fraction convective (sensible) is typically equal to 1.0 minus fraction
+     radiant, minus fraction latent, minus fraction lost."
+  INPUTCLASS
+    Default
+  DEFAULT
+    if( LocalStatus(ElecEqpPwrDens) = 0 )
+    then UNDEFINED
+    else 0.85
+    endif
+  CHECKSIM
+    if( Int( ValidOr( ElecEqpRadFrac ,0 ) *100 )/100 + 
+        Int( ValidOr( ElecEqpLatFrac ,0 ) *100 )/100 + 
+        Int( ValidOr( ElecEqpLostFrac ,0 ) *100 )/100 > 1.0 )
+    then 
+      PostError("The sum of the electric equipment radiant, latent, and lost fractions
+                 is greater than 1.0. Revise for consistency with this requirement.")
+    else UNCHANGED
+    endif
+  SIZING_PROPOSED
+    if( LocalStatus(ElecEqpPwrDens) = 0 )
+    then UNDEFINED
+    else 0.85 // Per 8/18 conference with JA and RHe
+    endif
+  SIZING_BASELINE
+    zp:ElecEqpLostFrac
+  ANNUAL
+    z:ElecEqpLostFrac
+ENDRULE
+
+// -------------- Electric Equipment Schedule --------------------
+RULE Spc:ElecEqpSchRef
+  DESCRIPTION
+    "The use of electric equipment represented by a a 24 hour schedule
+    (fraction of density) associated with the occupancy type selected from the
+     Area Category Method or Complete Building Method in ACM Appendix 5.4B."  
+  INPUTCLASS
+    Prescribed
+  DEFAULT
+    if( LocalStatus(ElecEqpPwrDens) = 0 ) 
+    then UNDEFINED
+    else if( LocalCompAssigned(SpcFuncDefaultsRef) .AND. LocalStatus(SpcFunc)<5) 
+    then SpcFuncDefaultsRef:ElecEqpSchRef
+    else UNDEFINED
+    endif endif
+  SIZING_PROPOSED
+    if( HasNoInternalLds = 0 .AND.
+        LocalStatus(ElecEqpPwrDens) > 0 ) 
+    then RuleLibrary(Schedule,(SpaceFunctionGroups:GasEqpSchRef("FuncGroup",FuncSchGrpSim)))
+    else UNDEFINED
+    endif
+  SIZING_BASELINE
+    zp:ElecEqpSchRef
+  ANNUAL
+    z:ElecEqpSchRef
 ENDRULE
 
 

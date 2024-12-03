@@ -60,7 +60,6 @@ RULELIST "CSE_SimulationPrep_Com" 1 0 0 1
       {  if (RptFuelUseAs == 1 .OR. (RptFuelUseAs == -1 .AND. GasType == "NaturalGas")) then  UNDEFINED
 			else  CreateComp( cseMETER, "MtrOther" )  endif  }
 
-
 ; removed rules not related to DHW
 ;	"Setup CSE Zones and Internal Gains data"		Proj:Action	= {	EvalRulelist( "CSE_SimulationPrep_Zones_IntGains" )  }		; SAC 5/16/16
 
@@ -105,9 +104,12 @@ RULELIST "CSE_SimulationPrep_Com" 1 0 0 1
 ;   "Delete CSE IMPORTFILE object used to support simulation of battery control"  Proj:BattCtrlImportFile  = {
 ;         if (LocalCompAssigned( BattCtrlImportFile )) then  DeleteComp()  else  UNCHANGED  endif  }
    ; SAC 4/28/17 - revised logic to enable battery simulation in 2016 runs
+   ; add check for BattCapMult > 0 - SAC 01/19/23
+   ; prevent battery setup if no Batt:MaxChrgPwr - SAC 05/04/23
    "Create and setup cseBATTERY object"   Proj:Action = {
          if ( ( ComponentCount( csePVARRAY ) < 1 .AND. IfValidAnd( HaveStandaloneBatt > 0 )==0 ) .OR.
-              SumAll( Batt:MaxCap ) < 0.1 )
+               SumAll( Batt:MaxChrgPwr ) < 0.1 .OR.
+               SumAll( Batt:MaxCap ) < 0.1 .OR. IfValidAnd( BattCapMult > 0 )==0 )
          then  UNCHANGED
          else  EvalRulelist( "CSE_SimulationPrep_Battery" )  endif  }
 ;         else if (Proj:RunAbbrev == "s"  .OR. Proj:RunAbbrev == "S" .OR. Proj:RunAbbrev == "smf" .OR.
@@ -228,8 +230,10 @@ RULELIST "CSE_Defaulting_Project_Com" 1 0 0 1
 	"Default cseTOP:wfName"			cseTOP:wfName	= {	Proj:AnnualWeatherFile  }
 
    "Set cseTOP:doMainSim"     cseTOP:doMainSim  =        ; Main/annual (YES) vs. HVAC Sizing (NO) - SAC 05/09/22
-      {  if (IfValidAnd( Proj:HVACAutoSizing > 0 ))
-         then  "NO"  else  UNDEFINED  endif  }
+      {  UNDEFINED  }
+   ; removed old logic that prevents sim of PV/Battery when E+ HVAC autosizing toggled on in Proj object - SAC 05/09/24
+   ;   {  if (IfValidAnd( Proj:HVACAutoSizing > 0 ))
+   ;      then  "NO"  else  UNDEFINED  endif  }
 
 ;	"Default cseTOP:begDay=Jan 1                     //
 ;	"Default cseTOP:endDay=Dec 31                    //
@@ -462,7 +466,9 @@ RULELIST "CSE_SimulationPrep_DHW_MFam_wsDayUse_Com" 1 0 0 1
 ;  																									else	  CreateChildren( DwellUnitDHW, DwellingUnitTypeCnt[ 1] * Mult, Name + " DU0", "Setup_DwellUnitDHW_Studio_Com" )  endif  }
 ;  	"Create 1-Bedrm DwellUnitDHW children for each Spc"	Spc:Action	= {	if ((SpcFunc != "High-Rise Residential Living Spaces" .AND.
 ;                                                                                  SpcFunc != "Hotel/Motel Guest Room") .OR.
+   ; added logic to prevent creation of DwellUnitDHW when no ResDHWSys is assigned AND ExcludeWtrHtg - SAC 06/16/24
 	"Create 1-Bedrm DwellUnitDHW children for each Spc"	Spc:Action	= {	if (SpcFunc != "Hotel/Motel Guest Room" .OR.
+                                                                               ( LocalCompAssigned( ResDHWSysRef )==0 .AND. Proj:ExcludeWtrHtg ) .OR.
                                                                                HaveResDHW < 0.5 .OR. IfValidAnd( DwellingUnitTypeArea[2] > 0 )==0 .OR.
 																																	  IfValidAnd( DwellingUnitTypeCnt[ 2] > 0 )==0) then  UNCHANGED
 																									else	  CreateChildren( DwellUnitDHW, DwellingUnitTypeCnt[ 2] * Mult, Name + " DU1", "Setup_DwellUnitDHW_1Bedroom_Com" )  endif  }
@@ -866,6 +872,25 @@ RULELIST "CSE_SimulationPrep_LoadMeters" 1 0 0 1
       {  if (IfValidAnd( LdPassingOnly > 0 )) then  DeleteComp()
          else  UNCHANGED  endif  }
 
+   ; rules to facilitate load submeters (in support of ResZnGrp:Mult > 1) - SAC 05/26/23 (tic #3392)
+   ;"dbg" Proj:Action = { if (SumAll( FluidSys:CSELoadPassing ) > 0) then  PostMessageToLog( "run %s: about to create FluidSys LoadMeter(s)", RunAbbrev )  else UNCHANGED endif }   ; debugging - SAC 05/26/23 (tic #3392)
+   "Init FluidSys:NumResZnsByZnGrpMult[*]"  for:#ZGM=(1to20)  FluidSys:NumResZnsByZnGrpMult[#ZGM] = { 0 }
+   "Increment FluidSys:NumResZnsByZnGrpMult by ResZn"       for:#ZGM=(2to20)  ResZn:CWFluidSysRef:NumResZnsByZnGrpMult[#ZGM] =
+      {  if (IfValidAnd( Mult = #ZGM ) .AND. IfValidAnd( CWFluidSysRef:CSELoadPassing > 0 )) then  CWFluidSysRef:NumResZnsByZnGrpMult[#ZGM] + 1  else  UNCHANGED  endif  }
+   "Increment FluidSys:NumResZnsByZnGrpMult by ResOtherZn"  for:#ZGM=(2to20)  ResOtherZn:CWFluidSysRef:NumResZnsByZnGrpMult[#ZGM] =
+      {  if (IfValidAnd( Mult = #ZGM ) .AND. IfValidAnd( CWFluidSysRef:CSELoadPassing > 0 )) then  CWFluidSysRef:NumResZnsByZnGrpMult[#ZGM] + 1  else  UNCHANGED  endif  }
+   ; extended CW FluidSys load submeters rules to apply to ChW & HW systems (in support of ResZnGrp:Mult > 1) - SAC 06/22/23 (tic #3392)
+   "Increment CHW FluidSys:NumResZnsByZnGrpMult by ResZn"       for:#ZGM=(2to20)  ResZn:ChWFluidSysRef:NumResZnsByZnGrpMult[#ZGM] =
+      {  if (IfValidAnd( Mult = #ZGM ) .AND. IfValidAnd( ChWFluidSysRef:CSELoadPassing > 0 )) then  ChWFluidSysRef:NumResZnsByZnGrpMult[#ZGM] + 1  else  UNCHANGED  endif  }
+   "Increment CHW FluidSys:NumResZnsByZnGrpMult by ResOtherZn"  for:#ZGM=(2to20)  ResOtherZn:ChWFluidSysRef:NumResZnsByZnGrpMult[#ZGM] =
+      {  if (IfValidAnd( Mult = #ZGM ) .AND. IfValidAnd( ChWFluidSysRef:CSELoadPassing > 0 )) then  ChWFluidSysRef:NumResZnsByZnGrpMult[#ZGM] + 1  else  UNCHANGED  endif  }
+   "Increment HW FluidSys:NumResZnsByZnGrpMult by ResZn"        for:#ZGM=(2to20)  ResZn:HWFluidSysRef:NumResZnsByZnGrpMult[#ZGM] =
+      {  if (IfValidAnd( Mult = #ZGM ) .AND. IfValidAnd(  HWFluidSysRef:CSELoadPassing > 0 )) then  HWFluidSysRef:NumResZnsByZnGrpMult[#ZGM] + 1  else  UNCHANGED  endif  }
+   "Increment HW FluidSys:NumResZnsByZnGrpMult by ResOtherZn"   for:#ZGM=(2to20)  ResOtherZn:HWFluidSysRef:NumResZnsByZnGrpMult[#ZGM] =
+      {  if (IfValidAnd( Mult = #ZGM ) .AND. IfValidAnd(  HWFluidSysRef:CSELoadPassing > 0 )) then  HWFluidSysRef:NumResZnsByZnGrpMult[#ZGM] + 1  else  UNCHANGED  endif  }
+   "Create FluidSys cseLOADMETER submeters"  for:#ZGM=(2to20)  FluidSys:CSE_LoadSubMeters[#ZGM] = 
+      {  if (NumResZnsByZnGrpMult[#ZGM] > 0) then  CreateComp( cseLOADMETER, Format( "ldsubmtr-%s ZGM %g", substr( Name, 0, 46 ), #ZGM ) )  else  UNCHANGED  endif  }
+
    "call rulelist to setup cseLOADMETER for each applicable FluidSys"   FluidSys:Action =
       {  if (IfValidAnd( CSELoadPassing > 0 ))
          then  EvalRulelist( "CSE_SimulationPrep_LoadMeters_FluidSys", 1 )
@@ -874,6 +899,13 @@ RULELIST "CSE_SimulationPrep_LoadMeters" 1 0 0 1
       {  if (SumAll( FluidSys:CSELoadMeterIdx ) > 0)
          then  EvalRulelist( "CSE_SimulationPrep_LoadMeters_Export" )
          else  UNCHANGED  endif  }
+
+   ; rules to add load submeters to the main load meter by FluidSys - SAC 05/26/23 (tic #3392)
+   "add FluidSys:CSE_LoadMeter submeters"       for:#ZGM=(2to20)  FluidSys:CSE_LoadMeter:lmtSubMeters[1] =
+      {  if (NumResZnsByZnGrpMult[#ZGM] > 0) then  SetNextArrayElement( CSE_LoadSubMeters[#ZGM]:Name )  else  UNCHANGED  endif  }
+   "add FluidSys:CSE_LoadMeter submeter mults"  for:#ZGM=(2to20)  FluidSys:CSE_LoadMeter:lmtSubMeterMults[1] =
+      {  if (NumResZnsByZnGrpMult[#ZGM] > 0) then  SetNextArrayElement( #ZGM )  else  UNCHANGED  endif  }
+
 ; moved call to evaluate to end of ANNUAL transform, so that done before SDD XML file - SAC 03/19/22
 ;   "call rulelist to setup ProcLds for each applicable FluidSys"   FluidSys:Action =   ; SAC 03/19/22
 ;      {  if (IfValidAnd( CSELoadPassing > 0 ))
@@ -966,45 +998,77 @@ RULELIST "CSE_SimulationPrep_LoadMeters_Export_FluidSys" 1 0 0 1
    "Set FluidSys:CSE_LoadPassingExportCol[1]:Parent"        FluidSys:CSE_LoadPassingExportCol[1]:Parent    = {  Proj:CSE_LoadPassingExport:Name  }
    ;"Set FluidSys:CSE_LoadPassingExportCol[1]:colhead"       FluidSys:CSE_LoadPassingExportCol[1]:colhead   = {  "SysName"  }
    "Set FluidSys:CSE_LoadPassingExportCol[1]:colhead"       FluidSys:CSE_LoadPassingExportCol[1]:colhead   = {  Name + "-HtgLd (Btu)"  }
-   "Set FluidSys:CSE_LoadPassingExportCol[1]:colVal_x"      FluidSys:CSE_LoadPassingExportCol[1]:colVal_x  = {  Format( "@LOADMETER[%c%s%c].H.qHtg", 34, CSE_LoadMeter:Name, 34 )  }
+   "Set FluidSys:CSE_LoadPassingExportCol[1]:colVal_x"      FluidSys:CSE_LoadPassingExportCol[1]:colVal_x  = 
+      {  if( Type = "ChilledWater" ) 
+         then Format( "@LOADMETER[%c%s%c].H.qHtg * 0", 34, CSE_LoadMeter:Name, 34 )
+         else Format( "@LOADMETER[%c%s%c].H.qHtg", 34, CSE_LoadMeter:Name, 34 ) endif }
 
    "Create FluidSys:CSE_LoadPassingExportCol[2] - ClgLdBtu" FluidSys:CSE_LoadPassingExportCol[2]  = {  CreateComp( cseEXPORTCOL, "xc-" + substr( Name, 0, 38 ) + "-clgLdB" )  }
    "Set FluidSys:CSE_LoadPassingExportCol[2]:Parent"        FluidSys:CSE_LoadPassingExportCol[2]:Parent    = {  Proj:CSE_LoadPassingExport:Name  }
    "Set FluidSys:CSE_LoadPassingExportCol[2]:colhead"       FluidSys:CSE_LoadPassingExportCol[2]:colhead   = {  "ClgLd (Btu)"  }
-   "Set FluidSys:CSE_LoadPassingExportCol[2]:colVal_x"      FluidSys:CSE_LoadPassingExportCol[2]:colVal_x  = {  Format( "@LOADMETER[%c%s%c].H.qClg", 34, CSE_LoadMeter:Name, 34 )  }
+   "Set FluidSys:CSE_LoadPassingExportCol[2]:colVal_x"      FluidSys:CSE_LoadPassingExportCol[2]:colVal_x  = 
+      {  if( Type = "HotWater" ) 
+         then Format( "@LOADMETER[%c%s%c].H.qClg * 0", 34, CSE_LoadMeter:Name, 34 )
+         else Format( "@LOADMETER[%c%s%c].H.qClg", 34, CSE_LoadMeter:Name, 34 ) endif }
 
    "Create FluidSys:CSE_LoadPassingExportCol[3] - NetLdBtu" FluidSys:CSE_LoadPassingExportCol[3]  = {  CreateComp( cseEXPORTCOL, "xc-" + substr( Name, 0, 38 ) + "-netLdB" )  }
    "Set FluidSys:CSE_LoadPassingExportCol[3]:Parent"        FluidSys:CSE_LoadPassingExportCol[3]:Parent    = {  Proj:CSE_LoadPassingExport:Name  }
    "Set FluidSys:CSE_LoadPassingExportCol[3]:colhead"       FluidSys:CSE_LoadPassingExportCol[3]:colhead   = {  "NetLd (Btu)"  }
-   "Set FluidSys:CSE_LoadPassingExportCol[3]:colVal_x"      FluidSys:CSE_LoadPassingExportCol[3]:colVal_x  = {  Format( "@LOADMETER[%c%s%c].H.qHtg + @LOADMETER[%c%s%c].H.qClg", 34, CSE_LoadMeter:Name, 34, 34, CSE_LoadMeter:Name, 34 )  }
-
+   "Set FluidSys:CSE_LoadPassingExportCol[3]:colVal_x"      FluidSys:CSE_LoadPassingExportCol[3]:colVal_x  = 
+      { switch( type )
+        Case "ChilledWater" : Format( "@LOADMETER[%c%s%c].H.qClg", 34, CSE_LoadMeter:Name, 34 )
+        case "HotWater"     : Format( "@LOADMETER[%c%s%c].H.qHtg", 34, CSE_LoadMeter:Name, 34 )
+        default             : Format( "@LOADMETER[%c%s%c].H.qHtg + @LOADMETER[%c%s%c].H.qClg", 34, CSE_LoadMeter:Name, 34, 34, CSE_LoadMeter:Name, 34 )
+        endswitch } 
 
    "Create FluidSys:CSE_LoadPassingExportCol[4] - DFlwGpm"  FluidSys:CSE_LoadPassingExportCol[4]  = {  CreateComp( cseEXPORTCOL, "xc-" + substr( Name, 0, 35 ) + "-demFlwGPM" )  }
    "Set FluidSys:CSE_LoadPassingExportCol[4]:Parent"        FluidSys:CSE_LoadPassingExportCol[4]:Parent    = {  Proj:CSE_LoadPassingExport:Name  }
    "Set FluidSys:CSE_LoadPassingExportCol[4]:colhead"       FluidSys:CSE_LoadPassingExportCol[4]:colhead   = {  "DemFlw (gpm)"  }
-   "Set FluidSys:CSE_LoadPassingExportCol[4]:colVal_x"      FluidSys:CSE_LoadPassingExportCol[4]:colVal_x  = {  Format( "abs( @LOADMETER[%c%s%c].H.qHtg + @LOADMETER[%c%s%c].H.qClg ) / 500.19 / %g", 34, CSE_LoadMeter:Name, 34, 34, CSE_LoadMeter:Name, 34, ValidOr( DsgnSupWtrDelT, 10 ) )  }
-
+   "Set FluidSys:CSE_LoadPassingExportCol[4]:colVal_x"      FluidSys:CSE_LoadPassingExportCol[4]:colVal_x  = 
+      { switch( type )
+        Case "ChilledWater" : Format( "abs( @LOADMETER[%c%s%c].H.qClg ) / 500.19 / %g", 34, CSE_LoadMeter:Name, 34, ValidOr( DsgnSupWtrDelT, 10 ) )
+        case "HotWater"     : Format( "abs( @LOADMETER[%c%s%c].H.qHtg ) / 500.19 / %g", 34, CSE_LoadMeter:Name, 34, ValidOr( DsgnSupWtrDelT, 10 ) )
+        default             : Format( "abs( @LOADMETER[%c%s%c].H.qHtg + @LOADMETER[%c%s%c].H.qClg ) / 500.19 / %g", 34, CSE_LoadMeter:Name, 34, 34, CSE_LoadMeter:Name, 34, ValidOr( DsgnSupWtrDelT, 10 ) )
+        endswitch } 
+   
    "Create FluidSys:CSE_LoadPassingExportCol[5] - AFlwGpm"  FluidSys:CSE_LoadPassingExportCol[5]  = {  CreateComp( cseEXPORTCOL, "xc-" + substr( Name, 0, 35 ) + "-actFlwGPM" )  }
    "Set FluidSys:CSE_LoadPassingExportCol[5]:Parent"        FluidSys:CSE_LoadPassingExportCol[5]:Parent    = {  Proj:CSE_LoadPassingExport:Name  }
    "Set FluidSys:CSE_LoadPassingExportCol[5]:colhead"       FluidSys:CSE_LoadPassingExportCol[5]:colhead   = {  "ActualFlw (gpm)"  }
    "Set FluidSys:CSE_LoadPassingExportCol[5]:colVal_x"      FluidSys:CSE_LoadPassingExportCol[5]:colVal_x  =
       {  if (IfValidAnd( DemandSidePumpSpdCtrl = "VariableSpeed" ))
-         then  Format( "abs( @LOADMETER[%c%s%c].H.qHtg + @LOADMETER[%c%s%c].H.qClg ) / 500.19 / %g", 34, CSE_LoadMeter:Name, 34, 34, CSE_LoadMeter:Name, 34, ValidOr( DsgnSupWtrDelT, 10 ) )
+         then switch( type )
+              case "ChilledWater" : Format( "abs( @LOADMETER[%c%s%c].H.qClg ) / 500.19 / %g", 34, CSE_LoadMeter:Name, 34, ValidOr( DsgnSupWtrDelT, 10 ) )
+              case "HotWater"     : Format( "abs( @LOADMETER[%c%s%c].H.qHtg ) / 500.19 / %g", 34, CSE_LoadMeter:Name, 34, ValidOr( DsgnSupWtrDelT, 10 ) )
+              default             : Format( "abs( @LOADMETER[%c%s%c].H.qHtg + @LOADMETER[%c%s%c].H.qClg ) / 500.19 / %g", 34, CSE_LoadMeter:Name, 34, 34, CSE_LoadMeter:Name, 34, ValidOr( DsgnSupWtrDelT, 10 ) )
+              endswitch
          else  Format( "%g", ValidOr( DemandSidePumpFlowCap, 100 ) )
          endif  }
 
    "Create FluidSys:CSE_LoadPassingExportCol[6] - NetLdW"   FluidSys:CSE_LoadPassingExportCol[6]  = {  CreateComp( cseEXPORTCOL, "xc-" + substr( Name, 0, 38 ) + "-netLdW" )  }
    "Set FluidSys:CSE_LoadPassingExportCol[6]:Parent"        FluidSys:CSE_LoadPassingExportCol[6]:Parent    = {  Proj:CSE_LoadPassingExport:Name  }
    "Set FluidSys:CSE_LoadPassingExportCol[6]:colhead"       FluidSys:CSE_LoadPassingExportCol[6]:colhead   = {  "NetLd (W)"  }
-   "Set FluidSys:CSE_LoadPassingExportCol[6]:colVal_x"      FluidSys:CSE_LoadPassingExportCol[6]:colVal_x  = {  Format( "(@LOADMETER[%c%s%c].H.qHtg + @LOADMETER[%c%s%c].H.qClg) / 3.412", 34, CSE_LoadMeter:Name, 34, 34, CSE_LoadMeter:Name, 34 )  }
+   "Set FluidSys:CSE_LoadPassingExportCol[6]:colVal_x"      FluidSys:CSE_LoadPassingExportCol[6]:colVal_x  = 
+      { switch( type )
+        case "ChilledWater" : Format( "(@LOADMETER[%c%s%c].H.qClg) / 3.412", 34, CSE_LoadMeter:Name, 34 ) 
+        case "HotWater"     : Format( "(@LOADMETER[%c%s%c].H.qHtg) / 3.412", 34, CSE_LoadMeter:Name, 34 ) 
+        default             : Format( "(@LOADMETER[%c%s%c].H.qHtg + @LOADMETER[%c%s%c].H.qClg) / 3.412", 34, CSE_LoadMeter:Name, 34, 34, CSE_LoadMeter:Name, 34 ) 
+        endswitch }
 
    "Create FluidSys:CSE_LoadPassingExportCol[7] - FlwFrac"  FluidSys:CSE_LoadPassingExportCol[7]  = {  CreateComp( cseEXPORTCOL, "xc-" + substr( Name, 0, 37 ) + "-flwFrac" )  }
    "Set FluidSys:CSE_LoadPassingExportCol[7]:Parent"        FluidSys:CSE_LoadPassingExportCol[7]:Parent    = {  Proj:CSE_LoadPassingExport:Name  }
    "Set FluidSys:CSE_LoadPassingExportCol[7]:colhead"       FluidSys:CSE_LoadPassingExportCol[7]:colhead   = {  "FlowFrac"  }
    "Set FluidSys:CSE_LoadPassingExportCol[7]:colVal_x"      FluidSys:CSE_LoadPassingExportCol[7]:colVal_x  =
       {  if (IfValidAnd( DemandSidePumpSpdCtrl = "VariableSpeed" ))
-         then  Format( "abs( @LOADMETER[%c%s%c].H.qHtg + @LOADMETER[%c%s%c].H.qClg ) / 500.19 / %g / 15852", 34, CSE_LoadMeter:Name, 34, 34, CSE_LoadMeter:Name, 34, ValidOr( DsgnSupWtrDelT, 10 ) )
-         else  Format( "select( (@LOADMETER[%c%s%c].H.qHtg + @LOADMETER[%c%s%c].H.qClg) == 0, 0, default %g / 15852 )", 34, CSE_LoadMeter:Name, 34, 34, CSE_LoadMeter:Name, 34, ValidOr( DemandSidePumpFlowCap, 100 ) )
+         then switch( Type )
+              case "ChilledWater" : Format( "abs( @LOADMETER[%c%s%c].H.qClg ) / 500.19 / %g / 15852", 34, CSE_LoadMeter:Name, 34, ValidOr( DsgnSupWtrDelT, 10 ) )
+              case "HotWater"     : Format( "abs( @LOADMETER[%c%s%c].H.qHtg ) / 500.19 / %g / 15852", 34, CSE_LoadMeter:Name, 34, ValidOr( DsgnSupWtrDelT, 10 ) )
+              default             : Format( "abs( @LOADMETER[%c%s%c].H.qHtg + @LOADMETER[%c%s%c].H.qClg ) / 500.19 / %g / 15852", 34, CSE_LoadMeter:Name, 34, 34, CSE_LoadMeter:Name, 34, ValidOr( DsgnSupWtrDelT, 10 ) )
+              endswitch
+         else switch( Type )
+              case "ChilledWater" : Format( "select( (@LOADMETER[%c%s%c].H.qClg) == 0, 0, default %g / 15852 )", 34, CSE_LoadMeter:Name, 34, ValidOr( DemandSidePumpFlowCap, 100 ) )
+              case "HotWater"     : Format( "select( (@LOADMETER[%c%s%c].H.qHtg) == 0, 0, default %g / 15852 )", 34, CSE_LoadMeter:Name, 34, ValidOr( DemandSidePumpFlowCap, 100 ) )
+              default             : Format( "select( (@LOADMETER[%c%s%c].H.qHtg + @LOADMETER[%c%s%c].H.qClg) == 0, 0, default %g / 15852 )", 34, CSE_LoadMeter:Name, 34, 34, CSE_LoadMeter:Name, 34, ValidOr( DemandSidePumpFlowCap, 100 ) )
+              endswitch
          endif  }
          ; was:  else  Format( "%g / 15852", ValidOr( DemandSidePumpFlowCap, 100 ) )
 

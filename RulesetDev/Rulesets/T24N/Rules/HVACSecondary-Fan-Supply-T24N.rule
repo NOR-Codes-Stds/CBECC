@@ -48,7 +48,9 @@ RULE NEW AirSys:BaseFanModelingMthd
   INPUTCLASS
     NotInput
   ANNUAL
-    if( BaseSysNum > 0 )
+    if( BaseSysNum > 0 .OR. 
+        IsLrgHlthCareFanSys > 0 .OR.
+        IsHlthCareDOAS > 0 )
     then "PowerPerUnitFlow"
     else "NA"
     endif
@@ -69,10 +71,10 @@ RULE NEW AirSys:BaseFanPwrIdx
         IfValidAnd( SupFanCap > 0 ) )
     then
       switch( BaseSysNum )
-        // Fan power allowances for System 3 are the same as 7
         case   5 : T24N_2022BaseFanPwrIdx:Sys5( "FlowCap", SupFanCap ) // PVAV
         case   6 : T24N_2022BaseFanPwrIdx:Sys6( "FlowCap", SupFanCap ) // VAV
-        case   7 : if( BaseSysNumOpt = "a" ) // NRes SZVAV
+        case   7 : if( BaseSysNumOpt = "a" ) // NRes SZ or SZVAV,
+                   // Fan power allowances for System 3 are the same as 7
                    then // System 7a
                      T24N_2022BaseFanPwrIdx:Sys7a( "FlowCap", SupFanCap )
                    else if( BaseSysNumOpt = "b" )
@@ -82,13 +84,14 @@ RULE NEW AirSys:BaseFanPwrIdx
                      T24N_2022BaseFanPwrIdx:Sys7c( "FlowCap", SupFanCap )
                    endif endif
         case   9 : T24N_2022BaseFanPwrIdx:Sys9( "FlowCap", SupFanCap )
-        case  10 : 0.58 // CRAC
-        case  11 : 0.58 // CRAH
+        case  10 : 0.58 // CRAH
+        case  11 : 0.58 // CRAC
         case 101 : if( IfValidAnd( IsBalancedVentSys > 0 ) ) // HRR Vent, no longer used
                    then 0.70 // For balanced
                    else 0.35 // For unbalanced (supply or exhaust)
                    endif
         case 201 : if( BaseSysNumOpt = "a" ) // ResBaseAirSys
+                   // Fan power allowances for System 3 are the same as 7
                    then // System 7a = 3a
                      T24N_2022BaseFanPwrIdx:Sys7a( "FlowCap", SupFanCap )
                    else if( BaseSysNumOpt = "b" )
@@ -132,6 +135,10 @@ RULE NEW AirSys:BaseFanPwrIdx
                   endif endif endif endif endif
                   endif endif endif
       endswitch
+    else // Healthcare facilities fan
+    if( IsLrgHlthCareFanSys + IsHlthCareDOAS > 0 .AND. 
+        IfValidAnd( SupFanCap > 0 ) )
+    then SupFanPwrIdxAllow
     else // Rules for HRR ventilation
     if( SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:BaseSysNum ) > 0 .AND.
         SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:ResVentEquipChkReq ) > 0 .AND. 
@@ -143,7 +150,7 @@ RULE NEW AirSys:BaseFanPwrIdx
       else 0.35 // For supply only
       endif
     else 0
-    endif endif
+    endif endif endif
 ENDRULE
 // Calculate baseline fan power allowance in kW
 RULE NEW AirSys:BaseFanPwrAllowance
@@ -157,7 +164,7 @@ RULE NEW AirSys:BaseFanPwrAllowance
     kW  
   ANNUAL
 // For 2022, the *FanPwrAdj values have the units of kW
-    if( BaseSysNum > 0 )
+    if( BaseSysNum > 0 .OR. IsLrgHlthCareFanSys > 0 .OR. IsHlthCareDOAS > 0 )
     then BaseFanPwrIdx * SupFanCap / 1000
     else 0
     endif
@@ -184,8 +191,11 @@ RULE NEW AirSys:BaseFanPwrWithAdj
       else // All other cases, add TotSysFanPwrAdj + ERV adjustment, if applicable
         BaseFanPwrAllowance + TotSysFanPwrAdj + BaseERVPwrAdj 
       endif
+    else // Healthcare facilities fan power adjustment is included in FanPwrIdxAllow
+    if( IsLrgHlthCareFanSys + IsHlthCareDOAS > 0 )
+    then BaseFanPwrAllowance
     else 0
-    endif
+    endif endif
 ENDRULE
 
 // Adjust supply/return fan power ratios if standard has ERV but proposed does not have
@@ -236,8 +246,11 @@ RULE NEW ZnSys:BaseFanModelingMthd
         case 11 : "PowerPerUnitFlow" // CRAH
         default : "BrakeHorsePower"  // All others
       endswitch 
+    else 
+    if( IsLrgHlthCareFanSys + IsHlthCareDOAS > 0 )
+    then "PowerPerUnitFlow"
     else UNDEFINED
-    endif
+    endif endif
 ENDRULE
 // Set baseline fan power index (W/cfm) for systems that use PowerPerUnitFlow method
 RULE NEW ZnSys:BaseFanPwrIdx
@@ -287,6 +300,9 @@ RULE NEW ZnSys:BaseFanPwrIdx
         default  : 0    // All others use BHP method
       endswitch
     else
+    if( IsLrgHlthCareFanSys + IsHlthCareDOAS > 0 )
+    then SupFanPwrIdxAllow
+    else
     if( SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:BaseSysNum ) > 0 .AND.
         SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:ResVentEquipChkReq ) > 0 .AND. 
         SumRevRef( ThrmlZn:VentSysRef, ThrmlZn:ResVentEquipIsAccessible ) = 0 )
@@ -297,7 +313,7 @@ RULE NEW ZnSys:BaseFanPwrIdx
       else 0.35 // For unbalanced (supply or exhaust)
       endif
     else UNDEFINED
-    endif endif
+    endif endif endif
 ENDRULE
 // Calculate baseline fan power allowance in kW
 RULE NEW ZnSys:BaseFanPwrAllowance
@@ -313,7 +329,7 @@ RULE NEW ZnSys:BaseFanPwrAllowance
     UNDEFINED    
   ANNUAL : T24N
 // For 2022, the *FanPwrAdj values have the units of kW
-    if( BaseSysNum > 0 )
+    if( BaseSysNum > 0 .OR. ( IsLrgHlthCareFanSys + IsHlthCareDOAS > 0 .AND. SupFanCap > 0 ) )
     then BaseFanPwrIdx * SupFanCap / 1000
     else 0
     endif
@@ -348,8 +364,11 @@ RULE NEW ZnSys:BaseFanPwrWithAdj
 ;      else // All other cases, add TotSysFanPwrAdj + ERV adjustment, if applicable
         BaseFanPwrAllowance + TotSysFanPwrAdj + BaseERVPwrAdj 
       endif
+    else // Healthcare facilities fan power adjustment is included in FanPwrIdxAllow
+    if( IsLrgHlthCareFanSys + IsHlthCareDOAS > 0 )
+    then BaseFanPwrAllowance
     else 0
-    endif
+    endif endif
 ENDRULE
 
 // ********** HRR Fan Power Adjustment ***************************************
@@ -441,7 +460,7 @@ RULE Fan:ModelingMthd
 //DEFAULT : T24N
 //  "PowerPerUnitFlow"
   ANNUAL
-    if( BaseSysNum > 0 )
+    if( BaseSysNum > 0 .OR. IsBaseHlthCare > 0 )
     then "PowerPerUnitFlow"
     else z:ModelingMthd  
     endif
@@ -741,8 +760,22 @@ RULE Fan:PwrIdx
       else // Allowance + adjustment x (1 - Ret - Relief + Exh proposed fan power ratios) 
         ZnSys:BaseFanPwrWithAdj * 1000 * ( 1 - ZnSys:RetFanPwrRat - ZnSys:ReliefFanPwrRat - ZnSys:ExhFanPwrRat  ) / ZnSys:SupFanCap
       endif endif endif endif
+    else
+    if( IsBaseHlthCare > 0 .AND. ParentComp = "AirSys" )
+    then 
+      if( AirSeg:Type = "Supply" )
+      then AirSys:BaseFanPwrIdx
+      else UNCHANGED
+      endif
+    else
+    if( IsBaseHlthCare > 0 .AND. ParentComp = "ZnSys" )
+    then 
+      if( EnumValue( ZnSys:Type < 30 ) ) // if not Exhaust or VentilationOnly
+      then ZnSys:BaseFanPwrIdx
+      else UNCHANGED
+      endif
     else UNCHANGED 
-    endif endif
+    endif endif endif endif
 ENDRULE
 // Default PwrIdx for exhaust fans for AutoEffInput rules
 RULE Fan:PwrIdx 
@@ -873,24 +906,38 @@ RULE Fan:MtrBHP
         endif endif
       else 0.35 * FlowCap * 0.9 / 745.6 // ~ 0.35 W/cfm
       endif endif
-;    else
-;    // Calculated from TotStaticPress
-;    if( ModelingMthd = "StaticPressure" .AND.
-;        IfValidAnd( FlowCap > 0 ) .AND. 
-;        IfValidAnd( TotStaticPress > 0 ) .AND. 
-;        IfValidAnd( FlowEff > 0 ) )
-;    then FlowCap * TotStaticPress * ( 0.1175 /  745.6 ) / FlowEff
-;    else
-;    // Calculated from PwrIdx
-;    if( ModelingMthd = "PowerPerUnitFlow" .AND.
-;        IfValidAnd( PwrIdx > 0 ) .AND. 
-;        IfValidAnd( FlowCap > 0 ) .AND.
-;        IfValidAnd( MtrEff > 0 ) ) 
-;    then PwrIdx * FlowCap * MtrEff / 745.6
     else
       UNCHANGED // MtrBHP calculated at end based on TotStaticPress
     endif
 ENDRULE 
+
+RULE NEW Fan:UserMtrBHP
+  DATATYPE
+    Float
+  DESCRIPTION
+    "The design motor shaft brake horsepower of the fan, calculated 
+     from user inputs for the selected ModelingMethod."
+  INPUTCLASS
+    NotINput
+  UNITS 
+    hp
+  DEFAULT
+    // Calculated from TotStaticPress
+    if( ModelingMthd = "StaticPressure" .AND.
+        IfValidAnd( FlowCap > 0 ) .AND. 
+        IfValidAnd( TotStaticPress > 0 ) .AND. 
+        IfValidAnd( FlowEff > 0 ) )
+    then FlowCap * TotStaticPress * ( 0.1175 /  745.6 ) / FlowEff
+    else
+    // Calculated from PwrIdx
+    if( ModelingMthd = "PowerPerUnitFlow" .AND.
+        IfValidAnd( PwrIdx > 0 ) .AND. 
+        IfValidAnd( FlowCap > 0 ) .AND.
+        IfValidAnd( MtrEff > 0 ) ) 
+    then PwrIdx * FlowCap * MtrEff / 745.6
+    else ValidOr( MtrBHP, 0 )
+    endif endif
+ENDRULE     
 
 // ********** Total Static Pressure *****************************************
 RULE Fan:TotStaticPress
@@ -1034,7 +1081,7 @@ RULE AirSys:AirSeg:Fan:FlowEff
     else ValidOr( FlowEff, 0.65 )
     endif
   ANNUAL
-    if( BaseSysNum > 0 )
+    if( BaseSysNum > 0 .OR. IsBaseHlthCare > 0 )
     then
       if( AirSeg:Type = "Supply" )
       then 0.65
@@ -1071,7 +1118,7 @@ RULE ZnSys:Fan:FlowEff
     else FlowEff
     endif
   ANNUAL
-    if( BaseSysNum > 0 )
+    if( BaseSysNum > 0 .OR. IsBaseHlthCare > 0 )
     then 0.5 // Default assumption for baseline ZnSys fans  
     else z:FlowEff 
     endif
@@ -1097,7 +1144,7 @@ RULE NEW Fan:MtrBHPStart
     else UNDEFINED
     endif
   ANNUAL
-    if( BaseSysNum > 0 .AND. 
+    if( ( BaseSysNum > 0 .OR. IsBaseHlthCare > 0 ) .AND. 
         ModelingMthd = "PowerPerUnitFlow" .AND.
         IfValidAnd( PwrIdx > 0 ) .AND. 
         IfValidAnd( FlowCap > 0 ) )
@@ -1292,8 +1339,16 @@ RULE Fan:MtrHP
       PostError("Fan '%s' does not have Motor HP defined.", Name )
     else UNCHANGED
     endif endif
+  CHECKCODE
+     if( IfValidAnd( UserMtrBHP > MtrHP ) )
+     then
+       PostWarning("The (nameplate) Motor HP of fan '%s' is %.3f, which is less than 
+                    the calculated motor BHP, %.3f, using the selected fan power modeling method
+                    and the relevant inputs.", Name, MtrHP, UserMtrBHP )   
+     else UNCHANGED
+     endif
   ANNUAL
-    if( BaseSysNum > 0 .AND.
+    if( ( BaseSysNum > 0 .OR. IsBaseHlthCare > 0 ) .AND.
         IfValidAnd( MtrHPIdxFinal > 0 ) )
     then StdElecMtrPerf:MotorHPValue("MotorHPIndex", MtrHPIdxFinal)  
     else UNCHANGED
@@ -1316,7 +1371,8 @@ RULE NEW Fan:MtrPerfIdx
     else UNDEFINED
     endif
   ANNUAL
-    if( BaseSysNum > 0 .AND. IfValidAnd( MtrHP > 0 ) )
+    if( ( BaseSysNum > 0 .OR. IsBaseHlthCare > 0 ) .AND. 
+        IfValidAnd( MtrHP > 0 ) )
     then StdElecMtrSize:MotorHPIndex("InputMotorHP", MtrHP)
     else UNCHANGED
     endif
@@ -1366,7 +1422,8 @@ RULE Fan:MtrEff
     else ValidOr( MtrEff, 0.855 )
     endif
   ANNUAL
-    if( BaseSysNum > 0 .AND. IfValidAnd( MtrPerfIdx > 0 ) )
+    if( ( BaseSysNum > 0  .OR. IsBaseHlthCare > 0 ) .AND. 
+        IfValidAnd( MtrPerfIdx > 0 ) )
     then StdElecMtrPerf:MotorEfficiency("MotorHPIndex", MtrPerfIdx)   
     else UNCHANGED
     endif
@@ -1440,42 +1497,28 @@ RULE Fan:MtrBHP
     else
     if( IfValidAnd( MtrBHP > 0 ) = 0 .AND. ModelingMthd = "BrakeHorsePower" )
     then // MtrBHP is UNDEFINED or is 0
-      PostError("MotorBHP is a required input for fan '%s' if ModelingMethod = 
+      PostError("Motor BHP is a required input for fan '%s' if ModelingMethod = 
                  'BrakeHorsePower'.", Name)   
     else
-    if( IfValidAnd( MtrBHP < MinMtrBHP ) .AND.
+    if( IfValidAnd( UserMtrBHP < MinMtrBHP ) .AND.
         IfValidAnd( MtrHP >= 0.125) .AND.
         IsNew > 0 .AND.
         IsHlthCare = 0 )
     then // User specified MtrBHP is less than ACM required BHP based on user
          // specified MtrHP (applies only to 1/8 HP and larger motors)
-      PostWarning("MotorBHP for fan '%s' is less than the ACM required value
-                   for the user-specified MotorHP. The proposed MotorBHP will
-                   be set to %.3f hp for compliance analysis.", Name, MinMtrBHP)
+      PostWarning("The calculated Motor BHP of fan '%s' is %.3f hp, which less than the ACM required value
+                   for the user-specified (nameplate) Motor HP, %.3f. The proposed Motor BHP will
+                   be set to %.3f hp for compliance analysis.", Name, UserMtrBHP, MtrHP, MinMtrBHP)
     else UNCHANGED
     endif endif endif
   SIZING
     if( BaseSysNum > 0 )
     then // Fan power for sizing is set to 0
       0
-;    else
-;    // Calculated from TotStaticPress
-;    if( ModelingMthd = "StaticPressure" .AND.
-;        IfValidAnd( FlowCap > 0 ) .AND. 
-;        IfValidAnd( TotStaticPress > 0 ) .AND. 
-;        IfValidAnd( FlowEff > 0 ) )
-;    then FlowCap * TotStaticPress * ( 0.1175 /  745.6 ) / FlowEff
-;    else
-;    // Calculated from PwrIdx
-;    if( ModelingMthd = "PowerPerUnitFlow" .AND.
-;        IfValidAnd( PwrIdx > 0 ) .AND. 
-;        IfValidAnd( FlowCap > 0 ) .AND.
-;        IfValidAnd( MtrEff > 0 ) ) 
-;    then PwrIdx * FlowCap * MtrEff / 745.6
     else UNCHANGED
     endif
   ANNUAL
-    if( BaseSysNum > 0 .AND. 
+    if( ( BaseSysNum > 0  .OR. IsBaseHlthCare > 0 ).AND. 
         LocalStatus( PwrIdx ) > 0 .AND. 
         LocalStatus( FlowCap ) > 0 .AND.
         LocalStatus( MtrEff ) > 0 ) 
@@ -1489,8 +1532,22 @@ RULE Fan:MtrBHP
     then // Use NACM calculated MinMtrBHP
          // MinMtrBHP = 95% x MtrHPi-1, only applies to non-fractional HP motors
       MinMtrBHP
-    else UNCHANGED
-    endif endif
+    else
+     // Calculated from TotStaticPress
+    if( ModelingMthd = "StaticPressure" .AND.
+        IfValidAnd( FlowCap > 0 ) .AND. 
+        IfValidAnd( TotStaticPress > 0 ) .AND. 
+        IfValidAnd( FlowEff > 0 ) )
+    then FlowCap * TotStaticPress * ( 0.1175 /  745.6 ) / FlowEff
+    else
+    // Calculated from PwrIdx
+    if( ModelingMthd = "PowerPerUnitFlow" .AND.
+        IfValidAnd( PwrIdx > 0 ) .AND. 
+        IfValidAnd( FlowCap > 0 ) .AND.
+        IfValidAnd( MtrEff > 0 ) ) 
+    then PwrIdx * FlowCap * MtrEff / 745.6    
+    else UNCHANGED // Use user-defined MtrBHP
+    endif endif endif endif
 ENDRULE
 // Calculate normalized BHP for reference
 RULE NEW Fan:MtrBHPIdx
@@ -1615,7 +1672,7 @@ RULE Fan:TotStaticPress
       UNCHANGED 
     endif endif endif
   ANNUAL
-    if( BaseSysNum > 0 .AND.  
+    if( ( BaseSysNum > 0  .OR. IsBaseHlthCare > 0 ).AND.  
         IfValidAnd( PwrIdx > 0 ) .AND. 
         IfValidAnd( TotEff >= 0 ) )
     then // Is baseline calculate from PwrIdx
@@ -1624,7 +1681,7 @@ RULE Fan:TotStaticPress
     if( IfValidAnd( MtrBHP > 0 ) .AND.
         IfValidAnd( FlowEff >= 0 ) .AND.
         IfValidAnd( FlowCap > 0 ) )
-    then // Recalculate using BHP, which reflects mtr size adjustment
+    then // Recalculate using BHP, which reflects NACM mtr size adjustment; see Fan:MtrBHP rule above
       MtrBHP * FlowEff / FlowCap / ( 0.1175 / 745.6 )
     else
       UNCHANGED
@@ -1723,6 +1780,16 @@ RULE NEW Fan:FanHtDsgn
     NotInput
   UNITS
     Btu/hr
+  DEFAULT
+    if( IfValidAnd( MtrBHP > 0 ) .AND.
+        IfValidAnd( MtrEff > 0 ) )
+    then 
+      if( MtrPos = "InAirStream" )
+      then MtrBHP * 745.6 * 3.412 / MtrEff
+      else MtrBHP * 745.6 * 3.412
+      endif
+    else 0
+    endif
   ANNUAL
     if( IfValidAnd( MtrBHP > 0 ) .AND.
         IfValidAnd( MtrEff > 0 ) )

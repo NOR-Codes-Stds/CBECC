@@ -172,6 +172,24 @@ RULE NEW ThrmlZn:TotSysZnCodeExhFlowSim
   ANNUAL  
     z:TotSysZnCodeExhFlowSim
 ENDRULE
+// Determine whether the zone has an exhaust fan system 
+// subject to the 140.4(c) prescriptive requiremt 
+RULE NEW ThrmlZn:HasBaseHlthCareExh
+  DATATYPE
+    Integer
+  LONGFORM
+    HasBaselineHealthcareExhaust
+  DESCRIPTION
+    "Whether the zone includes healthcare facility and has an exhaust fan system
+     subject to the 140.4(c) prescriptive fan power requiremt."
+  INPUTCLASS
+      NotInput
+  SIZING
+    if( RunAbbrev = "zb" .AND. LocalCompAssigned( ExhSysRef ) )
+    then ExhSysRef:IsLrgHlthCareFanSys
+    else 0
+    endif
+ENDRULE
 
 // Identify at thermal zone whether the proposed lab system has anemometer or
 // contaminant based controls. If so, fan power adjustment will be applied
@@ -247,8 +265,11 @@ RULE NEW ThrmlZn:ExhFanFlowEff
         then 0.5
         else 0.65 // Standard assumption for other systems
         endif endif
+      else // Healthcare facility baseline
+      if( HasBaseHlthCareExh > 0 )
+      then 0.65
       else ValidOr( ExhFanFlowEff, 0.65 )
-      endif
+      endif endif
     else UNCHANGED
     endif
 ENDRULE
@@ -350,11 +371,23 @@ RULE NEW ThrmlZn:ExhSysPwrIdx
       then// Calculate baseline exahust fan power using 140.4(c) fan power allowance rules
           PriAirCondgSysRef[1]:BaseFanPwrWithAdj * PriAirCondgSysRef[1]:ExhFanPwrRat * 1000 *
           ZnToSysPropExhFanPwrRat / ExhFlow
-      else 0.2 // Nominal W/cfm for non-compliance exhaust 
+      else // Same as proposed or 0.2
+        Max( ValidOr( ap:ExhSysPwrIdx, 0 ), 0.2 ) 
       endif endif endif endif endif
+    else
+    if( HasBaseHlthCareExh > 0  )
+    then // Healthcare facility baseline
+      if( PropVentSysIsExh > 0 .AND. LocalCompAssigned( VentSysRef ) )
+      then // Ventilation system is exhaust
+        VentSysRef:ExhFanPwrIdxAllow
+      else // Other exhaust systems
+      if( LocalCompAssigned( ExhSysRef ) )
+      then ExhSysRef:ExhFanPwrIdxAllow
+      else 0
+      endif endif
     else // Based on proposed 
     if( IfValidAnd( ExhSysPwrIdx > 0 ) )
-    then
+    then // Make adjustments to proposed exhaust fan power based on controls
       if( PrkgGarArea > 0 .AND. ExhCtrlMthd = "COControl" )
       then // Reduction for CO controls
         ExhSysPwrIdx * 0.125 // Reduction for CO controls
@@ -362,14 +395,14 @@ RULE NEW ThrmlZn:ExhSysPwrIdx
       if( LabArea > 0 )
       then // Adjust lab exhaust fan power for applicable controls
         ExhSysPwrIdx - ExhLabCtrlPwrIdxAdj
-      else UNCHANGED
+      else // No adjustment to proposed
+        ExhSysPwrIdx
       endif endif
-    else
-    if( IfValidAnd( ExhSysPwrIdx = 0 ) .AND. ExhFlow > 0 )
-    then
-      0.2 // Nominal W/cfm for non-compliance exhaust 
+    else 
+    if( ExhFlow > 0 )
+    then 0.2 // Nominal W/cfm for non-compliance exhaust 
     else 0
-    endif endif endif
+    endif endif endif endif
 ENDRULE
 
 // ********** Baseline Fan Mtr Size ********************************************
@@ -382,7 +415,8 @@ RULE NEW ThrmlZn:ExhFanMtrBHPStart
   LONGFORM
     ExhaustFanMotorBrakeHorsePowerStart
   ANNUAL
-    if( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 )
+    if( ( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 ) .OR.
+        ( HasBaseHlthCareExh > 0 .AND. ExhFlow > 0  ) )
     then ExhFlow * ExhSysPwrIdx / 745.6  
     else UNCHANGED
     endif
@@ -393,7 +427,8 @@ RULE NEW ThrmlZn:ExhFanMtrHPIdxStart
   LONGFORM
     ExhaustFanMotorMotorHorsePowerIndexStart
   ANNUAL
-    if( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 .AND.
+    if( ( ( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 ) .OR.
+          ( HasBaseHlthCareExh > 0 .AND. ExhFlow > 0  ) ) .AND.
         IfValidAnd( ExhFanMtrBHPStart > 0 ) )
     then StdElecMtrSize:MotorHPIndex("InputMotorHP", ExhFanMtrBHPStart)  
     else UNCHANGED
@@ -405,8 +440,9 @@ RULE NEW ThrmlZn:ExhFanMtrEffStart
   LONGFORM
     ExhaustFanMotorEfficiencyStart
   ANNUAL
-    if( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 .AND.
-         IfValidAnd( ExhFanMtrHPIdxStart > 0 ) )
+    if( ( ( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 ) .OR.
+          ( HasBaseHlthCareExh > 0 .AND. ExhFlow > 0  ) ) .AND.
+        IfValidAnd( ExhFanMtrHPIdxStart > 0 ) )
     then StdElecMtrPerf:MotorEfficiency("MotorHPIndex", ExhFanMtrHPIdxStart)  
     else UNCHANGED
     endif
@@ -417,7 +453,8 @@ RULE NEW ThrmlZn:ExhFanMtrBHPGuess1
   LONGFORM
     ExhaustFanMotorBrakeHorsePowerGuess1
   ANNUAL
-    if( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 .AND.
+    if( ( ( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 ) .OR.
+          ( HasBaseHlthCareExh > 0 .AND. ExhFlow > 0  ) ) .AND.
         IfValidAnd( ExhFanMtrBHPStart > 0 ) .AND.
         IfValidAnd( ExhFanMtrEffStart > 0 ) )
     then ExhFanMtrBHPStart * ExhFanMtrEffStart
@@ -430,7 +467,8 @@ RULE NEW ThrmlZn:ExhFanMtrHPIdxGuess1
   LONGFORM
     ExhaustFanMotorMotorHorsePowerIndexGuess1
   ANNUAL
-    if( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 .AND.
+    if( ( ( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 ) .OR.
+          ( HasBaseHlthCareExh > 0 .AND. ExhFlow > 0 ) ) .AND.
         IfValidAnd( ExhFanMtrBHPGuess1 > 0 ) )
     then StdElecMtrSize:MotorHPIndex("InputMotorHP", ExhFanMtrBHPGuess1)  
     else UNCHANGED
@@ -442,7 +480,8 @@ RULE NEW ThrmlZn:ExhFanMtrEffGuess1
   LONGFORM
     ExhaustFanMotorEfficiencyGuess1
   ANNUAL
-    if( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 .AND.
+    if( ( ( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 ) .OR.
+          ( HasBaseHlthCareExh > 0 .AND. ExhFlow > 0  ) ) .AND.
         IfValidAnd( ExhFanMtrHPIdxGuess1 > 0 ) )
     then StdElecMtrPerf:MotorEfficiency("MotorHPIndex", ExhFanMtrHPIdxGuess1)  
     else UNCHANGED
@@ -454,7 +493,8 @@ RULE NEW ThrmlZn:ExhFanMtrHPIdxFinal
   LONGFORM
     ExhaustFanMotorMotorHorsePowerIndexFinal
   ANNUAL
-    if( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 .AND.
+    if( ( ( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 ) .OR.
+          ( HasBaseHlthCareExh > 0 .AND. ExhFlow > 0  ) ) .AND.
         IfValidAnd( ExhFanMtrHPIdxGuess1 > 0 ) )
     then ExhFanMtrHPIdxGuess1
     else UNCHANGED
@@ -466,7 +506,8 @@ RULE NEW ThrmlZn:ExhFanMtrEffFinal
   LONGFORM
     ExhaustFanMotorEfficiencyStart
   ANNUAL
-    if( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 .AND.
+    if( ( ( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 ) .OR.
+          ( HasBaseHlthCareExh > 0 .AND. ExhFlow > 0  ) ) .AND.
         IfValidAnd( ExhFanMtrEffGuess1 > 0 ) )
     then ExhFanMtrEffGuess1
     else UNCHANGED
@@ -496,7 +537,9 @@ RULE NEW ThrmlZn:ExhFanMtrPerfIdx
   ANNUAL
     if( ExhFlow > 0 )
     then
-      if( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. IfValidAnd( ExhFanMtrHPIdxFinal > 0 ) )
+      if( ( ( BaseSysNum > 0 .AND. IsNewExh != 0 ) .OR.
+            ( HasBaseHlthCareExh > 0 .AND. ExhFlow > 0  ) ) .AND. 
+          IfValidAnd( ExhFanMtrHPIdxFinal > 0 ) )
       then ExhFanMtrHPIdxFinal
       else 
       if( IfValidAnd( PropExhSysTotFanMtrHP > 0 ) ) 
@@ -540,14 +583,14 @@ RULE ThrmlZn:ExhTotEff
   INPUTCLASS 
     NotInput
   DEFAULT
-    if( IfValidAnd( ExhFlow > 0 ) .AND.
+    if( IfValidAnd( ExhFlowSim > 0 ) .AND.
         IfValidAnd( ExhFanFlowEff > 0 ) .AND.
         IfValidAnd( ExhFanMtrEff > 0 ) )
     then ExhFanFlowEff * ExhFanMtrEff
     else UNDEFINED
     endif 
   ANNUAL
-    if( IfValidAnd( ExhFlow > 0 ) .AND.
+    if( IfValidAnd( ExhFlowSim > 0 ) .AND.
         IfValidAnd( ExhFanFlowEff > 0 ) .AND.
         IfValidAnd( ExhFanMtrEff > 0 ) )
     then ExhFanFlowEff * ExhFanMtrEff
@@ -593,7 +636,7 @@ RULE ThrmlZn:ExhTotStaticPress
   UNITS
     inchesH2O 
   DEFAULT
-    if( IfValidAnd( ExhFlow > 0 ) .AND.
+    if( IfValidAnd( ExhFlowSim > 0 ) .AND.
         IfValidAnd( ExhSysPwrIdx > 0 ) .AND.
         IfValidAnd( ExhTotEff > 0 ) )
     then ExhSysPwrIdx * ExhTotEff / 0.1175 
@@ -609,7 +652,7 @@ RULE ThrmlZn:ExhTotStaticPress
     else UNDEFINED
     endif endif
   ANNUAL
-    if( IfValidAnd( ExhFlow > 0 ) .AND.
+    if( IfValidAnd( ExhFlowSim > 0 ) .AND.
         IfValidAnd( ExhSysPwrIdx > 0 ) .AND.
         IfValidAnd( ExhTotEff > 0 ) )
     then ExhSysPwrIdx * ExhTotEff / 0.1175 

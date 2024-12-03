@@ -236,6 +236,33 @@ RULE NEW Proj:FlowCapTolLim
     0.10
 ENDRULE
 
+RULE NEW FluidSeg:WtrFlowCap
+  DATATYPE
+    Float
+  INPUTCLASS
+    NotInput
+  SIZING_PROPOSED
+    ; define again for MF to avoid double counting fo ResHVACSys and DwellUnitType
+    if( FluidSys:Type = "ChilledWater" )
+    then
+      SumRevRef( Chlr:EvapFluidSegInRef, Chlr:WtrFlowCap ) + // return side
+      SumRevRef( Chlr:EvapFluidSegOutRef, Chlr:WtrFlowCap ) // supply side
+    else
+    if( FluidSys:Type = "CondenserWater" )
+    then
+      Max( ( SumRevRef( HtRej:FluidSegInRef, HtRej:WtrFlowCap ) + // return side
+             SumRevRef( HtRej:FluidSegOutRef, HtRej:WtrFlowCap ) ), // supply side  
+           ( SumRevRef( Blr:FluidSegInRef, Blr:WtrFlowCap ) + // return side
+             SumRevRef( Blr:FluidSegOutRef, Blr:WtrFlowCap ) ) // supply side  
+         ) 
+    else
+    if( FluidSys:Type = "HotWater" )
+    then
+      SumRevRef( Blr:FluidSegInRef, Blr:WtrFlowCap ) + // return side
+      SumRevRef( Blr:FluidSegOutRef, Blr:WtrFlowCap ) // supply side    
+    else 0
+    endif endif endif
+ENDRULE
 // -----------------------------------------------------------------------------
 RULE Pump:FlowCap
   DESCRIPTION
@@ -1318,13 +1345,13 @@ RULE Pump:FlowMin
       else
       if( ParentComponentType() = "ThrmlEngyStor" )
       then 0
-      else 
-      if( FluidSys:IsWSHPSys > 0 )
-      then // Set min flow to 30% to avoid simulation failure. See Ticket 3257
-        ValidOr( FlowCap, 0 ) * 0.3
+;      else // No longer needed, we resolve the simulation failure by setting WSHP off cycle power use to 0. See Ticket 3502
+;      if( FluidSys:IsWSHPSys > 0 )
+;      then // Set min flow to 30% to avoid simulation failure. See Ticket 3257
+;        ValidOr( FlowCap, 0 ) * 0.3
       else // All others, set to 10% min per NACM that indicates 10% min speed
         Max( ValidOr( FlowMin, 0 ), ValidOr( FlowCap, 0 ) * 0.1 )
-      endif endif endif
+      endif endif
     else UNDEFINED
     endif
   ANNUAL
@@ -1336,13 +1363,13 @@ RULE Pump:FlowMin
       else
       if( ParentComponentType() = "ThrmlEngyStor" )
       then 0
-      else
-      if( FluidSys:IsWSHPSys > 0 )
-      then // Set min flow to 30% to avoid simulation failure. See Ticket 3257
-        ValidOr( FlowCap, 0 ) * 0.3
+;      else // No longer needed, we resolve the simulation failure by setting WSHP off cycle power use to 0. See Ticket 3502
+;      if( FluidSys:IsWSHPSys > 0 )
+;      then // Set min flow to 30% to avoid simulation failure. See Ticket 3257
+;        ValidOr( FlowCap, 0 ) * 0.3
       else // All others, set to 10% min per NACM that indicates 10% min speed
         Max( ValidOr( FlowMin, 0 ), ValidOr( FlowCap, 0 ) * 0.1 )
-      endif endif endif
+      endif endif
     else UNDEFINED
     endif
 ENDRULE
@@ -1359,11 +1386,7 @@ RULE Pump:FlowMinRat
     2
   DEFAULT
     if( Proj:HVACAutoSizing > 0 .AND. SpdCtrl = "VariableSpeed" )
-    then
-      if( FluidSys:IsWSHPSys > 0 )
-      then 0.3
-      else 0.1
-      endif
+    then 0.1
     else UNDEFINED
     endif
 ENDRULE
@@ -1532,7 +1555,7 @@ RULE NEW Pump:HtRejParentRef
   DEFAULT
     if( ParentComponentType() = "HtRej" )
     then HtRej:Name
-    else UNCHANGED
+    else UNDEFINED
     endif
   SIZING
     if( ParentComponentType() = "HtRej" )
@@ -1542,13 +1565,13 @@ RULE NEW Pump:HtRejParentRef
   ANNUAL
     if( ParentComponentType() = "HtRej" )
     then HtRej:Name
-    else UNCHANGED
+    else UNDEFINED
     endif
 ENDRULE   
 
 RULE Pump:Parent
   SIZING
-    if( LocalCompAssigned( HtRejParentRef ) .AND.
+    if( ParentComponentType() = "HtRej" .AND.
         IfValidAnd( FluidSys:HtRejCnt = 1 ) .AND. 
         IfValidAnd( FluidSys:BlrCnt > 0 ) = 0 )
     then // Only 1 CT and is not a WSHP loop, move CW pump to child of 
@@ -1557,7 +1580,7 @@ RULE Pump:Parent
     else UNCHANGED
     endif   
   ANNUAL
-    if( LocalCompAssigned( HtRejParentRef ) .AND.
+    if( ParentComponentType() = "HtRej" .AND.
         IfValidAnd( FluidSys:HtRejCnt = 1 ) .AND. 
         IfValidAnd( FluidSys:BlrCnt > 0 ) = 0 ) 
     then // Baseline has only 1 CT, move baseline pump to be child of FluidSeg
@@ -1570,6 +1593,7 @@ ENDRULE
 // Work around #2 for issue w/ E+9.4 sim failure for models with 1 CT.
 // See ticket 3221
 // See Pump:Parent for work-around #2
+// See ticket 3494 make bypass NotInput and include it in all cases
 RULE HtRej:HasBypass
   DESCRIPTION
     "A flag that indicates there is parallel bypass branch added to the 
@@ -1578,14 +1602,12 @@ RULE HtRej:HasBypass
     "Selecting this option adds an adiabatic pipe segment branch in parallel to
      the other supply side branches of plant loop. Only 1 bypass branch is added
      if any of the primary equipment has this option specified."
+  INPUTCLASS
+    NotInput IgnoreUserInput "HtRej:HasBypass no longer an allowed input as of version 2022.2.1 SP1"
+  DEFAULT
+    1
   SIZING
-    if( FluidSys:Type = "CondenserWater" .AND.
-        ( IfValidAnd( FluidSys:HtRejCnt = 1 ) .AND. ChildCount( Pump ) > 0 ) .AND. 
-        IfValidAnd( FluidSys:BlrCnt > 0 ) )
-    then 1 // Is a WSHP loop with 1 tower with a child pump, add bypass
-    else UNCHANGED // Allow user to set bypass if they would like to.
-    endif
-// A WSHP loop w/o a child pumps for CT/Boiler doesn't need a bypass
+    1
 ENDRULE
 
 RULE Chlr:EvapHasBypass
@@ -1596,6 +1618,12 @@ RULE Chlr:EvapHasBypass
     "Selecting this option adds an adiabatic pipe segment branch in parallel to
      the other supply side branches of plant loop. Only 1 bypass branch is added
      if any of the primary equipment has this option specified."
+  INPUTCLASS
+    NotInput IgnoreUserInput "Chlr:EvapHasBypass no longer an allowed input as of version 2022.2.1 SP1"
+  DEFAULT
+    1
+  SIZING
+    1
 ENDRULE
 
 RULE Blr:HasBypass
@@ -1606,6 +1634,12 @@ RULE Blr:HasBypass
     "Selecting this option adds an adiabatic pipe segment branch in parallel to
      the other supply side branches of plant loop. Only 1 bypass branch is added
      if any of the primary equipment has this option specified."
+  INPUTCLASS
+    NotInput IgnoreUserInput "Blr:HasBypass no longer an allowed input as of version 2022.2.1 SP1"
+  DEFAULT
+    1
+  SIZING
+    1
 ENDRULE
 
 

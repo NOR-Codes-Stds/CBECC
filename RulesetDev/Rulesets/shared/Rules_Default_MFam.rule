@@ -646,10 +646,11 @@ RULELIST "ProposedInput_MFam" 0 0 0 0
 	"Set DHWHeater floor area served properties"
       Proj:Action		= {	EvalRulelist( "Default_DHWHeater_AreaServedAndHydronic" )  }
 
-   ; SAC 9/3/19 - added to facilitate new MFam prototypes including common spaces (MFamProto)
-   "Default OtherZone (MF common area) properties"
-      ResProj:Action = {   if (EnergyCodeYearNum < 2019) then  UNCHANGED
-                        else  EvalRulelist( "ProposedInput_ResOtherZone" )  endif  }
+; JP 2/20/24 - convert all rules in the rulelist to data model format
+;   ; SAC 9/3/19 - added to facilitate new MFam prototypes including common spaces (MFamProto)
+;   "Default OtherZone (MF common area) properties"
+;      ResProj:Action = {   if (EnergyCodeYearNum < 2019) then  UNCHANGED
+;                        else  EvalRulelist( "ProposedInput_ResOtherZone" )  endif  }
 
 
 ; duplicate or unnecessary rules, those needed mostly ported to Com's Project-Multifamily.rule module - SAC 10/07/21 & 10/07/21
@@ -745,9 +746,11 @@ RULELIST "ProposedInput_MFam" 0 0 0 0
    "Default cool vent, IAQ & internal gains properties"
       ResProj:Action = {   EvalRulelist( "ProposedInput_CoolVent_IAQ_IntGains" )  }
 
-   ; SAC 10/24/16 - new rulelist to default Garage properties
+   ; SAC 10/24/16 - new rulelist to default Garage properties   ; added call to separate 'Com' rulelist to fix ResGarage issues - SAC 12/21/22
    "Default Garage properties"
-      ResProj:Action = {   EvalRulelist( "ProposedInput_Garage" )  }
+      ResProj:Action = {   if (IfValidAnd( Proj:IsComRuleset > 0 ))
+                           then  EvalRulelist( "ProposedInput_Garage_Com" )
+                           else  EvalRulelist( "ProposedInput_Garage" )  endif  }
 
    ; SAC 5/15/17 - added compressed R-value selections - R-val = (SymVal-mod(SymVal,10))/100  (tic #761)  - SAC 5/18/18 - COPIED rule here to evaluate before EAA_Shell rules (tic #798)
    "Set Cons:CavityLayerRVal (incl. compressed R-vals)"     Cons:CavityLayerRVal  = {
@@ -1187,8 +1190,10 @@ RULELIST "ProposedInput_MFam" 0 0 0 0
          if (CSERpt_Mtr_All_HD < 1 .OR. Fuel_HaveOther  < 1) then  0  else  1  endif  }
 
    ; moved StdDesignFuel & DRtgDesignFuel rules down from above since now can depend on other model defaulting - SAC 02/05/21
-   "Set ResProj:NumProposedHPWHs - # of active/assigned (& new) HPWHs in proposed model"     ; SAC 02/05/21
-      ResProj:NumProposedHPWHs = {  SumAll( ResWtrHtr:IsNewAssignedHPWH )  }
+   "Set ResProj:NumProposedHPWHs - # of active/assigned (& new) HPWHs in proposed model"     ; SAC 02/05/21   ; add DHWSys:IsNewAssignedAWHP sum - SAC 09/20/24 (tic #3629)
+      ResProj:NumProposedHPWHs = {  SumAll( ResWtrHtr:IsNewAssignedHPWH ) +
+                                    SumAll( ResDHWSys:IsNewAssignedAWHP )  }
+
    "Blast user-defined ResProj:AllowStdDesignFuel if not research mode"    ResProj:Action =     ; SAC 07/29/22
       {  if (Proj:EnableResearchMode > 0 .OR. LocalStatus( AllowStdDesignFuel ) < 5) then  UNCHANGED
          else  EvalRulelist( "Blast_ResProj_AllowStdDesignFuel" )  endif  }
@@ -1333,7 +1338,8 @@ END
 ;************************************************************************* SAC 08/27/20
 RULELIST "Set_ResProj_DefaultIAQFanPwr" 0 0 0 0
    "Default ResProj:IAQSupInletsAccessible - supply air filters, outside air inlets, and H/ERV recovery cores are readily accessible"     ; SAC 01/20/21 (tic #1243)
-      ResProj:IAQSupInletsAccessible = {  0  }
+      ResProj:IAQSupInletsAccessible = {  
+        if( IfValidAnd( Proj:IsComRuleset > 0 ) ) then 1 else 0 endif } ; Set to 1 so no adjustment at project level for MFam - JP 11/23/22 (tic #3425)
    "Set ResProj:IAQSupInletsAccessMsg"    ResProj:IAQSupInletsAccessMsg =        ; SAC 01/21/21 (tic #1243)   ; updated label - SAC 10/28/21 (tic #1282)
       {  if (IAQSupInletsAccessible == 0)
          then  "Supply air filters, inlets and H/ERV cores must be accessible to receive IAQ compliance credit"
@@ -1341,7 +1347,8 @@ RULELIST "Set_ResProj_DefaultIAQFanPwr" 0 0 0 0
       ;   then  "Inaccessible inlets/filters/cores will prevent any compliance credit for efficient IAQ systems"
 
    "Default ResProj:IAQHasFID - system has FID"       ; SAC 08/22/21 (tic #1243)
-      ResProj:IAQHasFID = {  0  }
+      ResProj:IAQHasFID = { 
+        if( IfValidAnd( Proj:IsComRuleset > 0 ) ) then 1 else 0 endif } ; Set to 1 so no adjustment at project level for MFam - JP 11/23/22 (tic #3425)
 
    "Set ResProj:MaxStdIAQCFMRatio"     ResProj:MaxStdIAQCFMRatio = 
       {  if (IfValidAnd( AnalysisVersion >= 190200 ))
@@ -1582,6 +1589,20 @@ RULELIST  "Force_StdDesignFuel_2022Final"  1 0 1 1
 END
 ;*************************************************************************
 
+
+;************************************************************************* prevent use of user-specified IntSurfHoleSzRatio[*] when not research mode - SAC 10/09/23
+RULELIST  "RemoveInput_ResProj_IntSurfHoleSzRatio"  1 0 0 0
+   "Blast ResProj:IntSurfHoleSzRatio[1]"  ResProj:IntSurfHoleSzRatio[1] = {  UNDEFINED  }
+   "Blast ResProj:IntSurfHoleSzRatio[2]"  ResProj:IntSurfHoleSzRatio[2] = {  UNDEFINED  }
+END
+;************************************************************************* prevent use of user-specified NatVentWindPresCoefMult[*] when not research mode - SAC 10/09/23
+RULELIST  "RemoveInput_ResProj_NatVentWindPresCoefMult"  1 0 0 0
+   "Blast ResProj:NatVentWindPresCoefMult[1]"   ResProj:NatVentWindPresCoefMult[1] = {  UNDEFINED  }
+   "Blast ResProj:NatVentWindPresCoefMult[2]"   ResProj:NatVentWindPresCoefMult[2] = {  UNDEFINED  }
+   "Blast ResProj:NatVentWindPresCoefMult[3]"   ResProj:NatVentWindPresCoefMult[3] = {  UNDEFINED  }
+   "Blast ResProj:NatVentWindPresCoefMult[4]"   ResProj:NatVentWindPresCoefMult[4] = {  UNDEFINED  }
+END
+;*************************************************************************
 
 
 ;*************************************************************************

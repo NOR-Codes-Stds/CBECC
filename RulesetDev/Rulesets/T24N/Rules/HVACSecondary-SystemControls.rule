@@ -973,27 +973,29 @@ RULE AirSys:OptStart
   ANNUAL : T24N
 // When OptStart is not desired, it MUST be UNDEFINED, not 0. If 0, OS still creates
 // AM:OptimumStart. See ticket 3264
-    if( IsExhSys > 0 )
-    then UNDEFINED
-    else
-    if( LabArea > 0 .OR. FuncGrpAreaResidentialCommon > 0 )
-    then UNDEFINED // OptStart not used for systems that run continuously.
-    else
-    if( ServesResZn > 0 )
-    then UNDEFINED
-    else
-    if( BaseSysNum > 0 )
-    then
-      if( IfValidAnd( CtrlSysType = "DDCToZone" ) )
-      then 1 // OptStart is required if system has DDCToZone
-      else UNDEFINED
-      endif
-    else 
-      if( IfValidAnd( u:OptStart > 0 ) )
-      then 1 
-      else UNDEFINED
-      endif
-    endif endif endif endif
+// We stop modeling optimum start in EnergyPlus, see ticket 3607
+    UNDEFINED
+//    if( IsExhSys > 0 )
+//    then UNDEFINED
+//    else
+//    if( LabArea > 0 .OR. FuncGrpAreaResidentialCommon > 0 )
+//    then UNDEFINED // OptStart not used for systems that run continuously.
+//    else
+//    if( ServesResZn > 0 )
+//    then UNDEFINED
+//    else
+//    if( BaseSysNum > 0 )
+//    then
+//      if( IfValidAnd( CtrlSysType = "DDCToZone" ) )
+//      then 1 // OptStart is required if system has DDCToZone
+//      else UNDEFINED
+//      endif
+//    else 
+//      if( IfValidAnd( u:OptStart > 0 ) )
+//      then 1 
+//      else UNDEFINED
+//      endif
+//    endif endif endif endif
   ANNUAL : S901G ECBC
     if( IsExhSys > 0 )
     then UNDEFINED
@@ -1551,7 +1553,8 @@ RULE AirSys:ClgCtrl
 
 
      'WarmestReset' means the SAT is adjusted to meet the demands of warmest
-     zone by adjusting supply air flow before resetting temperature.  
+     zone by adjusting supply air flow before resetting temperature which is
+     equivalent to 'WarmestResetFlowFirst'.
 
 
      'FixedDualSetpoint' means the SAT is controlled to not be outside
@@ -1578,6 +1581,7 @@ RULE AirSys:ClgCtrl
 ;    WarmestResetTemperatureFirst
 ;    FixedDualSetpoint  // See issue 1220 for background
 ;    ScheduledDualSetpoint // See issue 1220 for background
+;    OutsideAirResetDualSetpoint  // See issue 3322
 ;    StagedSetpoint  // Currently not supported
 ;  DEFAULT - Defined in BEMEnums, for reference
 ;    See BEMEnums
@@ -1698,7 +1702,7 @@ RULE AirSys:ClgFixedSupTemp
     else UNDEFINED
     endif
   CHECKSIM
-    if( BypassCheckSim > 0 .OR. IsExhSys = 0 )
+    if( BypassCheckSim > 0 .OR. IsExhSys > 0 )
     then UNCHANGED
     else
     if( ( IfValidAnd( ClgCtrl = "Fixed" ) .OR. 
@@ -1717,7 +1721,7 @@ RULE AirSys:ClgFixedSupTemp
     if( IfValidAnd( ClgCtrl = "Fixed" ) = 0 .AND.
         IfValidAnd( ClgCtrl = "FixedDualSetpoint" ) = 0 )
     then UNDEFINED // Not used unless these either of these two control methods are specified
-    else u:ClgFixedSupTemp
+    else ClgFixedSupTemp
     endif endif
   ANNUAL 
     if( BaseSysNum > 0 )
@@ -1748,7 +1752,7 @@ RULE AirSys:HtgFixedSupTemp
     else UNDEFINED
     endif
   CHECKSIM
-    if( BypassCheckSim > 0 .OR. IsExhSys = 0 )
+    if( BypassCheckSim > 0 .OR. IsExhSys > 0 )
     then UNCHANGED
     else
     if( IfValidAnd( ClgCtrl = "FixedDualSetpoint" ) .AND. 
@@ -1764,7 +1768,7 @@ RULE AirSys:HtgFixedSupTemp
     else
     if( IfValidAnd( ClgCtrl = "FixedDualSetpoint" ) = 0 )
     then UNDEFINED // Not used unless "FixedDualSetpoint' is specified
-    else u:HtgFixedSupTemp
+    else HtgFixedSupTemp
     endif endif
   ANNUAL 
     z:HtgFixedSupTemp
@@ -1776,8 +1780,8 @@ ENDRULE
 // -----------------------------------------------------------------------------
 RULE AirSys:ClRstSupLow
   DESCRIPTION
-    "The outdoor air temperature at the corresponds to the low reset supply air 
-     temperature"  
+    "The minimum (low) reset supply air temperature for Temperature Ctrl =
+     OutsideAirReset and WarmestReset* options."
   HELP
     "If Temperature Ctrl = OutsideAirReset, specifies the lower supply air temperature
      setpoint at the specified corresponding outdoor air temperature. Between the 
@@ -1802,10 +1806,13 @@ RULE AirSys:ClRstSupLow
         ClgDsgnSupAirTemp
       else 55
       endif
+    else
+    if( IfValidAnd( ClgCtrl = "OutsideAirResetDualSetpoint" ) )
+    then 65
     else UNDEFINED
-    endif 
+    endif endif
   CHECKSIM
-    if( BypassCheckSim > 0 .OR. IsExhSys = 0 )
+    if( BypassCheckSim > 0 .OR. IsExhSys > 0 )
     then UNCHANGED
     else
     if( ( IfValidAnd( ClgCtrl = "OutsideAirReset" ) .OR. IsWarmestCtrl > 0 ) .AND.
@@ -1819,7 +1826,8 @@ RULE AirSys:ClRstSupLow
     if( BaseSysNum > 0 )
     then UNDEFINED // Used fixed temp for sizing. See issue 1375
     else
-    if( IfValidAnd( ClgCtrl = "OutsideAirReset" ) .OR. IsWarmestCtrl > 0 )
+    if( IfValidAnd( ClgCtrl = "OutsideAirReset" ) .OR. IsWarmestCtrl > 0 .OR.
+        IfValidAnd( ClgCtrl = "OutsideAirResetDualSetpoint" ) )
     then ClRstSupLow
     else UNDEFINED
     endif endif
@@ -1854,17 +1862,21 @@ RULE AirSys:ClRstSupHi
   COMMONMINIMUM
     55
   COMMONMAXIMUM
-    70
+    75
   DEFAULT
     if( IfValidAnd( ClgCtrl = "OutsideAirReset" ) .OR. IsWarmestCtrl > 0 )
     then ClRstSupLow + 5
+    else
+    if( IfValidAnd( ClgCtrl = "OutsideAirResetDualSetpoint" ) )
+    then 75
     else UNDEFINED
-    endif 
+    endif endif
   CHECKSIM
-    if( BypassCheckSim > 0 .OR. IsExhSys = 0 )
+    if( BypassCheckSim > 0 .OR. IsExhSys > 0 )
     then UNCHANGED
     else
-    if( ( IfValidAnd( ClgCtrl = "OutsideAirReset" ) .OR. IsWarmestCtrl > 0 ) .AND.
+    if( ( IfValidAnd( ClgCtrl = "OutsideAirReset" ) .OR. IsWarmestCtrl > 0 .OR.
+        IfValidAnd( ClgCtrl = "OutsideAirResetDualSetpoint" ) ) .AND.
         LocalStatus( ClRstSupHi ) = 0 ) 
       then
       PostError("CoolingResetSupplyHigh for AirSystem '%s' is required if 
@@ -1875,7 +1887,8 @@ RULE AirSys:ClRstSupHi
     if( BaseSysNum > 0 )
     then UNDEFINED // Used fixed temp for sizing. See issue 1375
     else
-    if( IfValidAnd( ClgCtrl = "OutsideAirReset" ) .OR. IsWarmestCtrl > 0 )
+    if( IfValidAnd( ClgCtrl = "OutsideAirReset" ) .OR. IsWarmestCtrl > 0 .OR.
+        IfValidAnd( ClgCtrl = "OutsideAirResetDualSetpoint" ) )
     then ClRstSupHi
     else UNDEFINED
     endif endif
@@ -1910,10 +1923,13 @@ RULE AirSys:ClRstOutdrHi
   DEFAULT
     if( IfValidAnd( ClgCtrl = "OutsideAirReset" ) )
     then 60  
+    else
+    if( IfValidAnd( ClgCtrl = "OutsideAirResetDualSetpoint" ) )
+    then 75
     else UNDEFINED
-    endif 
+    endif endif
   CHECKSIM
-    if( BypassCheckSim > 0 .OR. IsExhSys = 0 )
+    if( BypassCheckSim > 0 .OR. IsExhSys > 0 )
     then UNCHANGED
     else
     if( IfValidAnd( ClgCtrl = "OutsideAirReset" ) .AND. 
@@ -1924,9 +1940,11 @@ RULE AirSys:ClRstOutdrHi
     else UNCHANGED
     endif endif
   SIZING
-    if( BaseSysNum > 0 .OR. IfValidAnd( ClgCtrl = "OutsideAirReset" ) = 0 )
+    if( BaseSysNum > 0 .OR. 
+        ( IfValidAnd( ClgCtrl = "OutsideAirReset" ) = 0 .AND.
+          IfValidAnd( ClgCtrl = "OutsideAirResetDualSetpoint" ) = 0 ) )
     then UNDEFINED // Baseline systems do not use this control scheme
-    else u:ClRstOutdrHi
+    else ClRstOutdrHi
     endif
   ANNUAL 
     z:ClRstOutdrHi
@@ -1947,10 +1965,13 @@ RULE AirSys:ClRstOutdrLow
   DEFAULT
     if( IfValidAnd( ClgCtrl = "OutsideAirReset" ) )
     then 80  
+    else
+    if( IfValidAnd( ClgCtrl = "OutsideAirResetDualSetpoint" ) )
+    then 85
     else UNDEFINED
-    endif 
+    endif endif
   CHECKSIM
-    if( BypassCheckSim > 0 .OR. IsExhSys = 0 )
+    if( BypassCheckSim > 0 .OR. IsExhSys > 0 )
     then UNCHANGED
     else
     if( IfValidAnd( ClgCtrl = "OutsideAirReset" ) .AND. 
@@ -1961,9 +1982,11 @@ RULE AirSys:ClRstOutdrLow
     else UNCHANGED
     endif endif 
   SIZING
-    if( BaseSysNum > 0 .OR. IfValidAnd( ClgCtrl = "OutsideAirReset" ) = 0 )
+    if( BaseSysNum > 0 .OR. 
+        ( IfValidAnd( ClgCtrl = "OutsideAirReset" ) = 0 .AND.
+          IfValidAnd( ClgCtrl = "OutsideAirResetDualSetpoint" ) = 0 ) )
     then UNDEFINED // Baseline systems do not use this control scheme
-    else u:ClRstOutdrLow
+    else ClRstOutdrLow
     endif
   ANNUAL 
     z:ClRstOutdrLow
@@ -1985,7 +2008,7 @@ RULE AirSys:ClgSetptSchRef
   INPUTCLASS 
     CondRequired
   CHECKSIM
-    if( BypassCheckSim > 0 .OR. IsExhSys = 0 )
+    if( BypassCheckSim > 0 .OR. IsExhSys > 0 )
     then UNCHANGED
     else
     if( ( IfValidAnd( ClgCtrl = "Scheduled" ) .OR. 
@@ -2004,7 +2027,7 @@ RULE AirSys:ClgSetptSchRef
     if( IfValidAnd( ClgCtrl = "Scheduled" ) = 0 .AND. 
         IfValidAnd( ClgCtrl = "ScheduledDualSetpoint" ) = 0 )
     then UNDEFINED // Not used unless these either of these two control methods are specified
-    else u:ClgSetptSchRef
+    else ClgSetptSchRef
     endif endif
   ANNUAL 
     z:ClgSetptSchRef
@@ -2021,7 +2044,7 @@ RULE AirSys:HtgSetptSchRef
   INPUTCLASS 
     CondRequired
   CHECKSIM
-    if( BypassCheckSim > 0 .OR. IsExhSys = 0 )
+    if( BypassCheckSim > 0 .OR. IsExhSys > 0 )
     then UNCHANGED
     else
     if( IfValidAnd( ClgCtrl = "ScheduledDualSetpoint" ) .AND. 
@@ -2036,7 +2059,7 @@ RULE AirSys:HtgSetptSchRef
     then UNDEFINED // Baseline systems do not use this control
     else if( IfValidAnd( ClgCtrl = "ScheduledDualSetpoint" ) = 0 )
     then UNDEFINED // Not used unless these either of these two control methods are specified
-    else u:HtgSetptSchRef
+    else HtgSetptSchRef
     endif endif
   ANNUAL 
     z:HtgSetptSchRef
@@ -2058,7 +2081,7 @@ RULE AirSys:FanPos
   DEFAULT
     "DrawThrough"
   SIZING
-    if( IsExhSys)
+    if( IsExhSys > 0 )
     then UNDEFINED
     else if( BaseSysNum > 0 )
     then "DrawThrough"
@@ -2077,7 +2100,7 @@ RULE ZnSys:FanPos
   DEFAULT
     "DrawThrough"
   SIZING
-    if( Type = "Baseboard" .OR. IsExhSys)
+    if( Type = "Baseboard" .OR. IsExhSys > 0 )
     then UNDEFINED
     else "DrawThrough"
     endif
@@ -2115,7 +2138,7 @@ RULE AirSys:PrehtCtrl
       then "Fixed"
       else UNDEFINED
       endif
-    else u:PrehtCtrl
+    else PrehtCtrl
     endif
   ANNUAL
     if( BaseSysNum > 0 )
@@ -2148,7 +2171,7 @@ RULE AirSys:PrehtFixedSupTemp
     else UNDEFINED
     endif
   CHECKSIM
-    if( BypassCheckSim > 0 .OR. IsExhSys = 0 )
+    if( BypassCheckSim > 0 .OR. IsExhSys > 0 )
     then UNCHANGED
     else
     if( IfValidAnd(PrehtCtrl = "Fixed") .AND. IfValidAnd(PrehtFixedSupTemp >= 0) )
@@ -2184,7 +2207,7 @@ RULE AirSys:PrehtFixedSupTemp
       endif
     else
       if( IfValidAnd(PrehtCtrl = "Fixed") )
-      then u:PrehtFixedSupTemp
+      then PrehtFixedSupTemp
       else UNDEFINED
       endif
     endif
@@ -2457,19 +2480,27 @@ ENDRULE
 ;ENDRULE
 ;
 ;// ********** SAT Reset Limits for OutsideAirReset and WarmestResetFlowFirst ************
-;RULE AirSys:HtRstSupHi
-;  DESCRIPTION
-;    "The maximum (high) reset supply air temperature for the hot duct of dual duct systems."  
-;  HELP
-;    "If heating supply air temperature is reset based on outside air temperature, 
-;     specifies the supply air high setpoint to at the outside drybulb low.
-;     If cooling supply air temperature is reset based on warmest zone, 
-;     specifies the maximum supply air temperature for reset."
-;  REFERENCE 
-;    NACM Section 5.7.2.4    
-;  INPUTCLASS
-;    Optional
-;  CHECKSIM
+RULE AirSys:HtRstSupHi
+  DESCRIPTION
+    "The maximum (high) reset supply air temperature during heating."
+  HELP
+    "If heating supply air temperature is reset based on outside air temperature, 
+     specifies the supply air high setpoint to at the outside drybulb low."
+  INPUTCLASS
+    Optional
+  DEFAULT
+    if( IfValidAnd( ClgCtrl = "OutsideAirResetDualSetpoint" ) )
+    then 70
+    else UNDEFINED
+    endif
+  CHECKSIM
+    if( IfValidAnd( ClgCtrl = "OutsideAirResetDualSetpoint" ) .AND.
+        LocalStatus( HtRstSupHi ) = 0 ) 
+    then
+      PostError("HeatingResetSupplyHigh for AirSystem '%s' is required if 
+                 temperature control = OutsideAirResetDualSetpoint.", Name)
+    else UNCHANGED
+    endif
 ;    if( LocalStatus( u:HtRstSupHi ) > 0 )
 ;      then
 ;      if( u:Type != "DFDD" )
@@ -2489,22 +2520,30 @@ ENDRULE
 ;    UNDEFINED  // Not used for baseline design
 ;  BASELINE  
 ;    UNDEFINED  // Not used for baseline design
-;ENDRULE
+ENDRULE
 ;
 ;// -----------------------------------------------------------------------------
-;RULE AirSys:HtRstSupLow
-;  DESCRIPTION
-;    "The minimum (low) reset supply air temperature during heating."  
-;  HELP
-;    "If heating supply air temperature is reset based on outside air temperature, 
-;     specifies the supply air low setpoint to at the outside drybulb high.
-;     If heating supply air temperature is reset based on warmest zone, 
-;     specifies the minimum supply air temperature for reset."
-;  REFERENCE 
-;    NACM Section 5.7.2.4
-;  INPUTCLASS
-;    Optional
-;  CHECKSIM
+RULE AirSys:HtRstSupLow
+  DESCRIPTION
+    "The minimum (low) reset supply air temperature during heating."  
+  HELP
+    "If heating supply air temperature is reset based on outside air temperature, 
+     specifies the supply air low setpoint to at the outside drybulb high."
+  INPUTCLASS
+    Optional
+  DEFAULT
+    if( IfValidAnd( ClgCtrl = "OutsideAirResetDualSetpoint" ) )
+    then 60
+    else UNDEFINED
+    endif
+  CHECKSIM
+    if( IfValidAnd( ClgCtrl = "OutsideAirResetDualSetpoint" ) .AND.
+        LocalStatus( HtRstSupLow ) = 0 ) 
+    then
+      PostError("HeatingResetSupplyLow for AirSystem '%s' is required if 
+                 temperature control = OutsideAirResetDualSetpoint.", Name)
+    else UNCHANGED
+    endif
 ;    if( LocalStatus( u:HtRstSupLow ) > 0 )
 ;      then
 ;      if( u:Type != "DFDD" )
@@ -2524,21 +2563,32 @@ ENDRULE
 ;    UNDEFINED  // Not used for baseline design
 ;  BASELINE  
 ;    UNDEFINED  // Not used for baseline design
-;ENDRULE
+ENDRULE
 ;
 ;// -----------------------------------------------------------------------------
-;RULE AirSys:HtRstOutdrHi  
-;  DESCRIPTION
-;    "The maximum (high) outdoor air temperature at the low reset supply air 
-;     temperature during heating."  
-;  HELP
-;    "If heating supply air temperature is reset based on outside air temperature,
-;     specifies the supply air low setpoint to at the outside drybulb high."
-;  REFERENCE 
-;    NACM Section 5.7.2.4
-;  INPUTCLASS
-;    Optional
-;  CHECKSIM
+RULE AirSys:HtRstOutdrHi  
+  DESCRIPTION
+    "The outdoor air temperature at the corresponds to the high reset supply air
+     temperature during heating."  
+  HELP
+    "If heating supply air temperature is reset based on outside air temperature,
+     this is the outdoor air temperature that corresponds to high supply air reset 
+     temperature."
+  INPUTCLASS
+    Optional
+  DEFAULT
+    if( IfValidAnd( ClgCtrl = "OutsideAirResetDualSetpoint" ) )
+    then 40
+    else UNDEFINED
+    endif
+  CHECKSIM
+    if( IfValidAnd( ClgCtrl = "OutsideAirResetDualSetpoint" ) .AND.
+        LocalStatus( HtRstOutdrHi ) = 0 ) 
+    then
+      PostError("HeatingResetOutdoorHigh for AirSystem '%s' is required if 
+                 temperature control = OutsideAirResetDualSetpoint.", Name)
+    else UNCHANGED
+    endif    
 ;    if( LocalStatus( u:HtRstOutdrHi ) > 0 )
 ;      then
 ;      if( u:Type != "DFDD" )
@@ -2557,21 +2607,32 @@ ENDRULE
 ;    UNDEFINED  // Not used for baseline design
 ;  BASELINE  
 ;    UNDEFINED  // Not used for baseline design
-;ENDRULE
+ENDRULE
 ;
 ;// -----------------------------------------------------------------------------
-;RULE AirSys:HtRstOutdrLow
-;  DESCRIPTION
-;    "The minimum (low) outdoor air temperature at the high reset supply air 
-;     temperature during cooling."  
-;  HELP
-;    "Applicable when cooling supply air temperature is reset based on outside air
-;     temperature, specifies the outside drybulb low."
-;  REFERENCE 
-;    NACM Section 5.7.2.4  
-;  INPUTCLASS
-;    Optional
-;  CHECKSIM
+RULE AirSys:HtRstOutdrLow
+  DESCRIPTION
+    "The outdoor air temperature at the corresponds to the low reset supply air 
+     temperature during heating."  
+  HELP
+    "If heating supply air temperature is reset based on outside air temperature,
+     this is the outdoor air temperature that corresponds to low supply air reset 
+     temperature."
+  INPUTCLASS
+    Optional
+  DEFAULT
+    if( IfValidAnd( ClgCtrl = "OutsideAirResetDualSetpoint" ) )
+    then 60
+    else UNDEFINED
+    endif
+  CHECKSIM
+    if( IfValidAnd( ClgCtrl = "OutsideAirResetDualSetpoint" ) .AND.
+        LocalStatus( HtRstOutdrLow ) = 0 ) 
+    then
+      PostError("HeatingResetOutdoorLow for AirSystem '%s' is required if 
+                 temperature control = OutsideAirResetDualSetpoint.", Name)
+    else UNCHANGED
+    endif    
 ;    if( LocalStatus( u:HtRstOutdrLow ) > 0 )
 ;      then
 ;      if( u:Type != "DFDD" )
@@ -2590,7 +2651,7 @@ ENDRULE
 ;    UNDEFINED  // Not used for baseline design
 ;  BASELINE  
 ;    UNDEFINED  // Not used for baseline design
-;ENDRULE 
+ENDRULE 
 
 // -----------------------------------------------------------------------------
 RULE AirSys:OptStartRpt

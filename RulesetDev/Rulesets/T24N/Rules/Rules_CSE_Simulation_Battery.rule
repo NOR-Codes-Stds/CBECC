@@ -38,26 +38,44 @@ RULELIST "CSE_SimulationPrep_Battery" 1 0 0 1
 ;   Rules which are executed immediately prior to performing a CSE simulation - covering BATTERY object only
 ;*************************************************************************
 
-	"Create IMPORTFILE for any/all runs including a BATTERY"    Proj:CSE_ElecUseIMPORTFILE	=     ; added check to ensure E+ sim being performed at all b4 creating E+ results importfile - SAC 11/03/21 (MFam)
-	   {  if (IfValidAnd( SimComFlag > 0 )==0) then  UNCHANGED
-         else  CreateComp( cseIMPORTFILE, "EplusElecUseImportFile", "CSE_SimulationPrep_Battery_ImportFile" )  endif  }
-	"Create GAIN to hold E+ elec use from IMPORTFILE (for BATTERY sim)"     Proj:Action =        ; SAC 11/03/21 (MFam)
-	   {  if (IfValidAnd( SimComFlag > 0 )==0) then  UNCHANGED
-         else  CreateComp( cseGAIN, "EplusElecUseGain", "CSE_SimulationPrep_Battery_Gain" )  endif  }
+   ; added check to ensure E+ sim being performed at all b4 creating E+ results importfile - SAC 11/03/21 (MFam)
+	"Create IMPORTFILE for any/all runs including a BATTERY"    Proj:CSE_ElecUseIMPORTFILE	=     ; add check for CSE_SimPVBattOnly to ensure ElecUse import present even when not SimComFlag - SAC 01/14/23
+	   {  if (IfValidAnd( SimComFlag > 0 ) .OR. IfValidAnd( CSE_SimPVBattOnly > 0 )) 
+         then  CreateComp( cseIMPORTFILE, "EplusElecUseImportFile", "CSE_SimulationPrep_Battery_ImportFile" )
+         else  UNCHANGED  endif  }
+	"Create GAIN to hold E+ elec use from IMPORTFILE (for BATTERY sim)"     Proj:Action =        ; SAC 11/03/21 (MFam)  ; SAC 01/14/23
+	   {  if (IfValidAnd( SimComFlag > 0 ) .OR. IfValidAnd( CSE_SimPVBattOnly > 0 )) 
+         then  CreateComp( cseGAIN, "EplusElecUseGain", "CSE_SimulationPrep_Battery_Gain" )
+         else  UNCHANGED  endif  }
 
 	"Create BATTERY (when called for)"  Batt:cseBATTERYRef	= {  CreateComp( cseBATTERY, Name + "-sim" )  }
 
    ; SAC 12/31/17 - added battery degradation
-	"Set cseBATTERY:btMaxCap"		   Batt:cseBATTERYRef:btMaxCap		= {
-	      if (IfValidAnd( DegradePct >= 1 ) .AND.
-	          IfValidAnd( DegradePct <= 100 ))
-	      then  MaxCap * DegradePct / 100
-	      else  MaxCap  endif  }
+   ; apply Proj:BattCapMult - SAC 01/19/23
+	"Set cseBATTERY:btMaxCap"		   Batt:cseBATTERYRef:btMaxCap		=        ; prevent application of Proj:BattCapMult for CUAC runs - SAC 01/23/23
+      {  if (IfValidAnd( Proj:CUACReportID > 0 ))
+         then  if (IfValidAnd( DegradePct >= 1 ) .AND.
+	                IfValidAnd( DegradePct <= 100 ))
+	            then  MaxCap * DegradePct / 100
+	            else  MaxCap
+               endif
+         else  if (IfValidAnd( DegradePct >= 1 ) .AND.
+	                IfValidAnd( DegradePct <= 100 ))
+	            then  ValidOr( Proj:BattCapMult, 1 ) * MaxCap * DegradePct / 100
+	            else  ValidOr( Proj:BattCapMult, 1 ) * MaxCap
+               endif
+         endif  }
 
 	"Set cseBATTERY:btChgEff"		   Batt:cseBATTERYRef:btChgEff		= {	ChrgEff  }
 	"Set cseBATTERY:btDschgEff"	   Batt:cseBATTERYRef:btDschgEff	   = {	DschrgEff  }
-	"Set cseBATTERY:btMaxChgPwr"		Batt:cseBATTERYRef:btMaxChgPwr	= {	MaxChrgPwr  }
-	"Set cseBATTERY:btMaxDschgPwr"	Batt:cseBATTERYRef:btMaxDschgPwr	= {	MaxDschrgPwr  }
+	"Set cseBATTERY:btMaxChgPwr"		Batt:cseBATTERYRef:btMaxChgPwr	=     ; prevent application of Proj:BattCapMult for CUAC runs - SAC 01/23/23
+      {	if (IfValidAnd( Proj:CUACReportID > 0 ))
+         then  MaxChrgPwr
+         else  ValidOr( Proj:BattCapMult, 1 ) * MaxChrgPwr  endif  }
+	"Set cseBATTERY:btMaxDschgPwr"	Batt:cseBATTERYRef:btMaxDschgPwr	=     ; prevent application of Proj:BattCapMult for CUAC runs - SAC 01/23/23
+      {	if (IfValidAnd( Proj:CUACReportID > 0 ))
+         then  MaxDschrgPwr
+         else  ValidOr( Proj:BattCapMult, 1 ) * MaxDschrgPwr  endif  }
 
 ;   "btChgReq",          BEMP_Flt,  1,  0,  1, "kW",               0,  0,                          3208, "The power request to charge (or discharge if negative) the battery"    
    ; SAC 12/17/17 - altered cseBATTERY:btChgReq_x to include TDVSummerPkFirstHr for TOU BatteryControl expression(tic #941)
@@ -80,14 +98,14 @@ RULELIST "CSE_SimulationPrep_Battery" 1 0 0 1
                         if (IfValidAnd( SimStandaloneBatt > 0 ))
                         then Format( "select( $dsDay>0, 0, $hour > (%g-1) && $hour < (%g+5) , 1000, @Weather.tdvElecPkRank>%g && $hour>(%g-1), -1000, default 0)", StandaloneChgStartHr, StandaloneChgStartHr, NumRankedDays, TDVSummerPkFirstHr)
                         else  UNDEFINED endif
+         case  "- specify -" :         ; restored for CBECC testing/research - SAC 09/16/24
+                        if (LocalStatus( BattChgReq_x ) < 1) then  UNDEFINED
+                        else if (strlen( BattChgReq_x ) < 1) then  UNDEFINED
+                        else  BattChgReq_x
+                        endif endif
          default   :    UNDEFINED
       endswitch  }
 ; likely not in future (was in res for testing/development)
-;         case   99 :  ; "- specify -"
-;                        if (GlobalStatus( Proj:BattChgReq_x ) < 1) then  UNDEFINED
-;                        else if (strlen(  Proj:BattChgReq_x ) < 1) then  UNDEFINED
-;                        else  Proj:BattChgReq_x
-;                        endif endif
 ;         case  100 :  ; "Advanced Control"
 ;                        Format( "import(BTCtrlData,%cBatteryCharge%c)", 34, 34 )    ; ADVANCED CONTROL BATTERY CONTROL EXPRESSION
    ; SAC 8/4/19 - added btControlAlg_x to enable Advanced DR for new CSE simulation feature
@@ -136,6 +154,7 @@ END
 
 ;*************************************************************************
 RULELIST "CSE_SimulationPrep_Battery_ImportFile" 1 0 0 1
+   "Set cseIMPORTFILE:Parent"       cseIMPORTFILE:Parent     = {  Global( cseTOP:Name )  }    ; SAC 10/10/23
    ; "Set cseIMPORTFILE:imFileName"   cseIMPORTFILE:imFileName = {    - CSV filename set in program source code
    "Set cseIMPORTFILE:imTitle"      cseIMPORTFILE:imTitle    = {  "EplusElecUse"  }   ; must be consistent w/ import file title listed in line 3 of file header
    "Set cseIMPORTFILE:imFreq"       cseIMPORTFILE:imFreq     = {  "Hour"  }

@@ -65,7 +65,7 @@ RULELIST "CSE_SimulationPrep_HVAC" 1 0 0 1
                                             ResProj:RunAbbrev != "pp-S" .AND. ResProj:RunAbbrev != "pp-W" )) then  UNDEFINED
          else  CreateComp( cseGAIN, substr( Name, 0, 48 ) + "-cfan" )  endif  }
 	"Set ResZn:GainVCHPCFan parent cseZONE"    ResZn:GainVCHPCFan:Parent   = {  Local( CSE_ZONE )  }
-	"Set ResZn:GainVCHPCFan:gnMeter"           ResZn:GainVCHPCFan:gnMeter  = {  if (Global( ResProj:Fuel_HaveElec ) > 0.5) then  Global( Proj:CSE_ElecMETER )
+	"Set ResZn:GainVCHPCFan:gnMeter"           ResZn:GainVCHPCFan:gnMeter  = {  if (Global( ResProj:Fuel_HaveElec ) > 0.5) then  CSE_ElecMETER
                                                                              else  UNDEFINED  endif  }
 	"Set ResZn:GainVCHPCFan:gnEndUse"          ResZn:GainVCHPCFan:gnEndUse = {  "User1"  }  ; "Fan"  }
 	"Set ResZn:GainVCHPCFan:gnPower_x"         ResZn:GainVCHPCFan:gnPower_x = {
@@ -77,12 +77,33 @@ RULELIST "CSE_SimulationPrep_HVAC" 1 0 0 1
          then  EvalRulelist( "CSE_SimulationPrep_HVAC_Terminal_AirSys" )
          else  UNCHANGED  endif  }
 
+   ; add setting of RSYS elec & fuel meter from ResZn BEFORE referencing global meters - SAC 08/20/22 (CUAC)
+   "Set ResZn:ActiveHVACSystem:cseRSYS:rsElecMtr"  ResZn:ActiveHVACSystem:cseRSYS:rsElecMtr = {  CSE_ElecMETER  }
+   "Set ResZn:ActiveHVACSystem:cseRSYS:rsFuelMtr"  ResZn:ActiveHVACSystem:cseRSYS:rsFuelMtr =
+      {  if (LocalCompAssigned( CSE_NatGasMETER )) then  CSE_NatGasMETER  else  CSE_OtherFuelMETER  endif  }
+
   ; Assign elec/fuel meters to RSYS components
-	"Set cseRSYS:rsElecMtr"		cseRSYS:rsElecMtr		= {	     if (Local( Fuel_HaveElec   ) > 0.5) then  Global( Proj:CSE_ElecMETER )
-																			else  UNDEFINED  endif  }
-	"Set cseRSYS:rsFuelMtr"		cseRSYS:rsFuelMtr		= {	     if (Local( Fuel_HaveNatGas ) > 0.5) then  Global( Proj:CSE_NatGasMETER )
-																			else if (Local( Fuel_HaveOther  ) > 0.5) then  Global( Proj:CSE_OtherFuelMETER )
+	"Set cseRSYS:rsElecMtr"		cseRSYS:rsElecMtr		= {	if (LocalCompAssigned( rsElecMtr )) then  UNCHANGED
+                                                         else if (Local( Fuel_HaveElec   ) > 0.5) then  Global( Proj:CSE_ElecMETER )
 																			else  UNDEFINED  endif endif  }
+	"Set cseRSYS:rsFuelMtr"		cseRSYS:rsFuelMtr		= {	if (LocalCompAssigned( rsFuelMtr )) then  UNCHANGED
+                                                         else if (Local( Fuel_HaveNatGas ) > 0.5) then  Global( Proj:CSE_NatGasMETER )
+																			else if (Local( Fuel_HaveOther  ) > 0.5) then  Global( Proj:CSE_OtherFuelMETER )
+																			else  UNDEFINED  endif endif endif  }
+																			
+   "Calculate total opening/hole area per each zone" cseZONE:SumOpenArea = 
+      { SumRevRef( cseIZXFER:izZn1, cseIZXFER:izALo ) + SumRevRef( cseIZXFER:izZn2, cseIZXFER:izALo ) }
+   "Send warning/error message if opening/hole area is not sufficient" ResOtherZn:Action =      ; avoid divide by zero error - SAC 09/26/23
+      { if( CSE_ZONE:SumOpenArea < 0.0001 )
+        then PostWarning( "ResOtherZn '%s' has no connections to other zones.
+                           This could cause pressure out of range simulation ERROR and CSE simulation not successful. 
+                           Add interior surfaces or openings that connect to other zones for accurate simulation result.", name )
+        else if( abs( ImbalancedAirCFM ) / CSE_ZONE:SumOpenArea > 3200 )
+        then PostWarning( "ResOtherZn '%s' has significant imbalanced air flow but does not have sufficient connections to other zones.
+                           This could cause pressure out of range simulation ERROR and CSE simulation not successful. 
+                           Add interior surfaces or openings that connect to other zones for accurate simulation result.", name )
+        else UNCHANGED endif endif } 
+      
 END
 ;*************************************************************************
 
@@ -103,6 +124,7 @@ RULELIST "HVACSys_CSE_Defaulting" 0 0 0 1
 	"Blast all cseRSYS components"		   Proj:Action		= {	DeleteAllComps( cseRSYS )  }
 	"Blast all cseAIRHANDLER components"	Proj:Action		= {	DeleteAllComps( cseAIRHANDLER )  }     ; SAC 04/26/22
 	"Blast all cseTERMINAL components"		Proj:Action		= {	DeleteAllComps( cseTERMINAL )  }
+	"Delete all csePERFORMANCEMAP components"		Proj:Action = {	DeleteAllComps( csePERFORMANCEMAP )  }    ; SAC 05/21/24 (tic #1379) -> 09/26/24 (tic #3629)
 
   ; CSE RSYS creation & setup
 	"Create a CSE RSYS for each HVACSys"	ResHVACSys:cseRSYS					= {	if (Local( FloorAreaServed[1] ) > 1 .AND.
@@ -117,13 +139,14 @@ RULELIST "HVACSys_CSE_Defaulting" 0 0 0 1
   ; SAC 10/27/15 - added check for design rating run abbreviation (ResProj:RunAbbrev == "dr")
 ; "store BEMProc details"		ResProj:Action = {  StoreBEMProc( Format( "Before RSYS setup-%s", RunAbbrev ), 0 )  }
 ; "debug"	ResProj:Action	= {	MessageBox( "inside HVACSys_CSE_Defaulting" )  }
-	"Set ResHVACSys:cseRSYS:rsType"		ResHVACSys:cseRSYS:rsType	=     ; SAC 03/17/22 (WSHP)
+	"Set ResHVACSys:cseRSYS:rsType"		ResHVACSys:cseRSYS:rsType	=     ; SAC 03/17/22 (WSHP)  ; HeatPumpDHWCombo - SAC 04/02/23 (tic #1349)
 				{	if (Type < 1 .OR. Type > 4) then														0		; -- ERROR --
                else if (Type == 4)     ; Central System
-               then  if (CentralEqpType == 2) then 13 ; WSHP -->> WSHP - SAC 04/05/22
+               then  if (     CentralEqpType == 1) then 32 ; FPFC -->> FANCOIL - JP 11/03/22
+                     else if (CentralEqpType == 2) then 31 ; WSHP -->> WSHP - SAC 04/05/22
                      else if (CentralEqpType == 4) then 12 ; VRF -->> VCHP2 - JP 04/26/22
                      else 			                                                      0		; -- ERROR --
-                     endif endif
+                     endif endif endif
 					else if (Type == 2)
 					then	if (NumHtPumpSystemTypes > 0 .AND. IfValidAnd( HtPumpSystem[1]:Type == 11 ) .AND. 
 								 ResProj:RunAbbrev != "s"  .AND. ResProj:RunAbbrev != "zb" .AND. ResProj:RunAbbrev != "S" .AND. ResProj:RunAbbrev != "smf" .AND.
@@ -133,9 +156,16 @@ RULELIST "HVACSys_CSE_Defaulting" 0 0 0 1
 							      then                                                                                      8     ; ASHPPkgRoom
                            else if (IfValidAnd( HtPumpSysType = 33 ))
                            then                                                                                     12     ; VCHP2 - SAC 11/09/20
+                           else if (IfValidAnd( HtPumpSysType = 36 ))
+                           then                                                                                     15     ; VCHP3 - SAC 05/16/24 (tic #1379)
+                           else if (IfValidAnd( HtPumpSysType = 35 ))
+                           then                                                                                     14     ; ACCOMBINEDHEATDHW
 							      else                                																		3		; ASHP
-							      endif endif
-							else																															0		; -- ERROR --
+							      endif endif endif endif
+							else	if (IfValidAnd( HtPumpSysType = 35 ))
+                           then                                                                                     13     ; COMBINEDHEATDHW
+                           else 																													0		; -- ERROR --
+                           endif
 							endif endif
 					else if (NumCoolSystemTypes > 0 .AND. LocalCompAssigned( CoolSystem[1] ) .AND. HaveHeating)
 					then	if (HaveCooling < 1)
@@ -192,18 +222,20 @@ RULELIST "HVACSys_CSE_Defaulting" 0 0 0 1
 ; SAC 10/3/13 - added logic to AUTOSIZE rules to always autosize rsCapAuxH for RSYSs of type ASHP (3) (as of CSE version 0.732)
 ; SAC 5/22/14 - expanded specification of rsCapAuxH to include cseRSYS:rsType = ASHPHydronic
 ; SAC 10/20/14 - added logic to set AUTOSIZE rsCap47  - ONLY FOR Standard design heat pump simulations
-      ; SAC 6/27/20 - mod to enable HtPumpCap47AutoSz for rsType = ASHPPkgRoom (tic #1225 & #1226)    ; VCHP2 - SAC 11/09/20   ; SAC 03/18/22 (WSHP)   ; SAC 07/22/22 (VRF)
+      ; SAC 6/27/20 - mod to enable HtPumpCap47AutoSz for rsType = ASHPPkgRoom (tic #1225 & #1226)    ; VCHP2 - SAC 11/09/20   ; SAC 03/18/22 (WSHP)   ; SAC 07/22/22 (VRF)  ; VCHP3 - SAC 09/26/24
+      ; added logic to force ResHVACSys:HtPumpCap47AutoSz to 0 for Central systems where CentralSysHtgCap > 0 - SAC 07/13/23
 	"Set ResHVACSys:HtPumpCap47AutoSz"			ResHVACSys:HtPumpCap47AutoSz		= {	if (ResHVACSys:cseRSYS:rsType != 3  .AND. ResHVACSys:cseRSYS:rsType != 8 .AND.
-                                                                                        ResHVACSys:cseRSYS:rsType != 12) then  0
+                                                                                        ResHVACSys:cseRSYS:rsType != 12 .AND. HVACSys:cseRSYS:rsType != 15) then  0
 	                                                                           else if ((Type == 2 .OR. (Type == 4 .AND. (CentralEqpType == 2 .OR. CentralEqpType == 4))) .AND.
                                                                                        IfValidAnd( HPSysAutoSize > 0 )) then  1
 																										else if (IfValidAnd( HPSysCap47 > 0 )) then  0
+                                                                              else if (Type == 4 .AND. IfValidAnd( CentralSysHtgCap > 0 )) then  0
 																										else if (ResProj:RunAbbrev == "s" .OR. ResProj:RunAbbrev == "zb" .OR. ResProj:RunAbbrev == "S" .OR. ResProj:RunAbbrev == "smf" .OR. ResProj:RunAbbrev == "dr") then  1
 																										else	if (Type == 2)
 																												then	if (T24RHeatingEquipment:PropEqStd( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", HtPumpSysTypeAbbrev ) > 0.1)
 																														then  1  else  0  endif
 																												else  0  endif
-																										endif endif endif endif  }
+																										endif endif endif endif endif  }
 
    ; SAC 6/25/20 - added rsType ASHPPkgRoom (8) to list that autosize rsCapAuxH (tic #1225 & #1226)      ; prevent autosize of rsCapAuxH for VCHP2 systems - SAC 11/02/20
    ; RESTORE autosize of rsCapAuxH for VCHP2 systems - SAC 03/22/22
@@ -212,24 +244,27 @@ RULELIST "HVACSys_CSE_Defaulting" 0 0 0 1
 																										else if (LocalRef( cseRSYS:rsType ) == 3 .OR. LocalRef( cseRSYS:rsType ) == 7 .OR.
 																										         LocalRef( cseRSYS:rsType ) == 8 .OR. LocalRef( cseRSYS:rsType ) == 12) then  "rsCapAuxH"
 																										else	UNDEFINED  endif endif endif  }
-	"Set ResHVACSys:cseRSYS:AUTOSIZE_x[2]"		ResHVACSys:cseRSYS:AUTOSIZE_x[2]	= {	if (AutoSizeCool[1] .AND. HaveCooling > 0 .AND. AutoSizeHeat[1]) then  "rsCapH"
+	"Set ResHVACSys:cseRSYS:AUTOSIZE_x[2]"		ResHVACSys:cseRSYS:AUTOSIZE_x[2]	= {	if (cseRSYS:rsType == 13 .OR. cseRSYS:rsType == 14) then  UNDEFINED
+                                                                              else if (AutoSizeCool[1] .AND. HaveCooling > 0 .AND. AutoSizeHeat[1]) then  "rsCapH"
 																										else if (LocalRef( cseRSYS:rsType ) == 3 .OR. LocalRef( cseRSYS:rsType ) == 7 .OR.
 																										         LocalRef( cseRSYS:rsType ) == 8) then  "rsCapAuxH"
 																										else if (HtPumpCap47AutoSz > 0.5 .AND. LocalStatus( cseRSYS:AUTOSIZE_x[1] ) > 0.5) then  "rsCap47"
-																										else	UNDEFINED  endif endif endif  }
+																										else	UNDEFINED  endif endif endif endif  }
    ; revised logic below to autosize rsCapAuxH for VCHP2 systems (per today's conference call) - SAC 07/30/21   ; SAC 04/05/22 (WSHP)
-	"Set ResHVACSys:cseRSYS:AUTOSIZE_x[3]"		ResHVACSys:cseRSYS:AUTOSIZE_x[3]	= {	if (AutoSizeCool[1] .AND. HaveCooling > 0 .AND. 
-                                                                                  (AutoSizeHeat[1] .OR. LocalRef( cseRSYS:rsType ) == 12 .OR. LocalRef( cseRSYS:rsType ) == 13) .AND.
+	"Set ResHVACSys:cseRSYS:AUTOSIZE_x[3]"		ResHVACSys:cseRSYS:AUTOSIZE_x[3]	= {	if (cseRSYS:rsType == 13 .OR. cseRSYS:rsType == 14) then  UNDEFINED
+                                                                              else if (AutoSizeCool[1] .AND. HaveCooling > 0 .AND. 
+                                                                                  (AutoSizeHeat[1] .OR. LocalRef( cseRSYS:rsType ) == 12 .OR. LocalRef( cseRSYS:rsType ) == 31) .AND.
 																												(LocalRef( cseRSYS:rsType ) == 3 .OR. LocalRef( cseRSYS:rsType ) == 7 .OR.
 																										       LocalRef( cseRSYS:rsType ) == 8 .OR. LocalRef( cseRSYS:rsType ) == 12 .OR.
-                                                                                     LocalRef( cseRSYS:rsType ) == 13)) then  "rsCapAuxH"
+                                                                                     LocalRef( cseRSYS:rsType ) == 31)) then  "rsCapAuxH"
 																										else if (HtPumpCap47AutoSz > 0.5 .AND. LocalStatus( cseRSYS:AUTOSIZE_x[2] ) > 0.5 .AND.
 																												IfValidAnd( ResHVACSys:cseRSYS:AUTOSIZE_x[2] == "rsCap47" )==0 ) then  "rsCap47"
-																										else	UNDEFINED  endif endif  }
-	"Set ResHVACSys:cseRSYS:AUTOSIZE_x[4]"		ResHVACSys:cseRSYS:AUTOSIZE_x[4]	= {	if (HtPumpCap47AutoSz > 0.5 .AND. LocalStatus( cseRSYS:AUTOSIZE_x[3] ) > 0.5 .AND.
+																										else	UNDEFINED  endif endif endif  }
+	"Set ResHVACSys:cseRSYS:AUTOSIZE_x[4]"		ResHVACSys:cseRSYS:AUTOSIZE_x[4]	= {	if (cseRSYS:rsType == 13 .OR. cseRSYS:rsType == 14) then  UNDEFINED
+                                                                              else if (HtPumpCap47AutoSz > 0.5 .AND. LocalStatus( cseRSYS:AUTOSIZE_x[3] ) > 0.5 .AND.
 																												IfValidAnd( ResHVACSys:cseRSYS:AUTOSIZE_x[3] == "rsCap47" )==0 .AND.
 																												IfValidAnd( ResHVACSys:cseRSYS:AUTOSIZE_x[2] == "rsCap47" )==0 ) then  "rsCap47"
-																										else	UNDEFINED  endif  }
+																										else	UNDEFINED  endif endif  }
 
    ; VCHP2 - SAC 11/02/20
    ; REMOVED specification of rsCapAuxH = 0 for VCHP2 (per today's conference call) - SAC 07/30/21
@@ -242,11 +277,15 @@ RULELIST "HVACSys_CSE_Defaulting" 0 0 0 1
       {  if (HtPumpCap47AutoSz > 0.5)
          then  if (IfValidAnd( ResProj:RunAbbrev == "s" ) .OR. Proj:RunAbbrev == "zb" .OR.
                    IfValidAnd( ResProj:RunAbbrev == "smf" ) .OR. IfValidAnd( ResProj:RunAbbrev == "dr" )) 
-               then  0.75
+               then  if (ResProj:EnergyCodeYearNum < 2025)
+                     then  0.75
+                     else  1.1   endif
                else if (IfValidAnd( Proj:EnableResearchMode > 0.5 ) .AND.
                         IfValidAnd( HtPumpSystem[1]:HtgSizingFactor > 0 ))
                then  HtPumpSystem[1]:HtgSizingFactor
-               else  ValidOr( HtSysSizingFactor, 1.2 )  endif endif
+               else  if (ResProj:EnergyCodeYearNum < 2025)
+                     then  ValidOr( HtSysSizingFactor, 1.2 )
+                     else  ValidOr( HtSysSizingFactor, 1.1 )  endif endif endif
 			else if (AutoSizeHeat[1] == 0) then  UNDEFINED
 			else if (IfValidAnd( HtSysSizingFactor > 0 ))
 			then  HtSysSizingFactor
@@ -289,12 +328,12 @@ RULELIST "HVACSys_CSE_Defaulting" 0 0 0 1
 		; SAC 5/13/13 -  ResHVACSys:HtOrClDucted => 1-Heat / 2-Cool / 3-Ht&Cl / 0-neither
 	; SAC 12/22/14 - REMOVED logic referencing cseRSYS:Cr8SupplyDuct & :Cr8ReturnDuct when setting rsDSEH/rsDSEC so that combination of NO ht or cl ducts & LowLlCod or related settings don't prevent setting of '1' (GC issue 432)
 	"Set ResHVACSys:cseRSYS:rsDSEH"				ResHVACSys:cseRSYS:rsDSEH			= {
-         if (HaveHtPump > 0 .AND. (HtPumpSysType == 22 .OR. HtPumpSysType == 33 .OR. IfValidAnd( CentralEqpType = 4 ))) then  UNDEFINED     ; SAC 11/4/18 - VCHP   ; VCHP2 - SAC 11/01/20 ; VRF - JP 04/28/22
+         if (HaveHtPump > 0 .AND. (HtPumpSysType == 22 .OR. HtPumpSysType == 33 .OR. HtPumpSysType == 36 .OR. IfValidAnd( CentralEqpType = 4 ))) then  UNDEFINED     ; SAC 11/4/18 - VCHP   ; VCHP2 - SAC 11/01/20 ; VRF - JP 04/28/22  ; VCHP3 - SAC 09/26/24
          else if (	; removed - (LocalRef(cseRSYS:Cr8SupplyDuct) > 0 .OR. LocalRef(cseRSYS:Cr8ReturnDuct) > 0) .AND.
                    (HtOrClDucted == 0 .OR. HtOrClDucted == 2) ) then  1.0
          else  UNDEFINED  endif endif  }
 	"Set ResHVACSys:cseRSYS:rsDSEC"				ResHVACSys:cseRSYS:rsDSEC			= {
-         if (HaveHtPump > 0 .AND. (HtPumpSysType == 22 .OR. HtPumpSysType == 33 .OR. IfValidAnd( CentralEqpType = 4 ))) then  UNDEFINED     ; SAC 11/4/18 - VCHP   ; VCHP2 - SAC 11/01/20 ; VRF - JP 04/28/22
+         if (HaveHtPump > 0 .AND. (HtPumpSysType == 22 .OR. HtPumpSysType == 33 .OR. HtPumpSysType == 36 .OR. IfValidAnd( CentralEqpType = 4 ))) then  UNDEFINED     ; SAC 11/4/18 - VCHP   ; VCHP2 - SAC 11/01/20 ; VRF - JP 04/28/22  ; VCHP3 - SAC 09/26/24
          else if (	; removed - (LocalRef(cseRSYS:Cr8SupplyDuct) > 0 .OR. LocalRef(cseRSYS:Cr8ReturnDuct) > 0) .AND.
                    (HtOrClDucted == 0 .OR. HtOrClDucted == 1) .AND. HaveCooling > 0 ) then  1.0
          else  UNDEFINED  endif endif  }
@@ -370,7 +409,7 @@ RULELIST "HVACSys_CSE_Defaulting" 0 0 0 1
 																										else  UNDEFINED  endif endif  }
 	; SAC 6/22/20 - revised to ensure writing of COP47 for ASHPPkgRoom (tic #1226)      ; VCHP2 - SAC 11/09/20    ; SAC 04/05/22 (WSHP)
 	"Set ResHVACSys:cseRSYS:rsCOP47"				ResHVACSys:cseRSYS:rsCOP47			= {	if (HaveHtPump < 1 .OR. ((ResProj:ResAnalysisType > 2 .AND. cseRSYS:rsType != 7) .AND.
-	                                                                                                    cseRSYS:rsType != 8 .AND. cseRSYS:rsType != 12 .AND. cseRSYS:rsType != 13)) then  UNDEFINED
+	                                                                                                    cseRSYS:rsType != 8 .AND. cseRSYS:rsType != 12 .AND. cseRSYS:rsType != 31)) then  UNDEFINED
 																										else if (IfValidAnd( HPSysCOP47 > 0 ))
 																										then  HPSysCOP47
 																										else  UNDEFINED  endif endif  }
@@ -423,16 +462,38 @@ RULELIST "HVACSys_CSE_Defaulting" 0 0 0 1
          then  HPLockoutTemp
          else  UNDEFINED  endif  }
 
-  ; SAC 8/29/13 - quick fix for heat pumps from Bruce via e-mail   ; SAC 6/25/20 - prevent rsParElec output for ASHPPkgRoom (8) (tic #1225 & #1226)   ; SAC 03/17/22 (WSHP)
-	"Set ResHVACSys:cseRSYS:rsParElec_x"		ResHVACSys:cseRSYS:rsParElec_x	=
-      {  if (cseRSYS:rsType == 8) then  UNDEFINED
-         else if (IfValidAnd( HaveHtPump > 0 ) .AND. IfValidAnd( NumHtPumpSysUnits > 0 ))
-         then  Format( "($tdboHrAv < 50) * 40 * %g", NumHtPumpSysUnits )
-         else if (Type == 4 .AND. IfValidAnd( CentralEqpType = 2 ) .AND. IfValidAnd( NumCentralEqpUnits > 0 )) ; WSHP
-         then Format( "($tdboHrAv < 50) * 40 * %g", NumCentralEqpUnits )
-         else if (Type == 4 .AND. IfValidAnd( CentralEqpType = 4 ) ) ; VRF
+   ; SAC 8/29/13 - quick fix for heat pumps from Bruce via e-mail   ; SAC 6/25/20 - prevent rsParElec output for ASHPPkgRoom (8) (tic #1225 & #1226)   ; SAC 03/17/22 (WSHP)
+   ; revised logic for new 2022+ crankcase htr formula that now also includes AC units - SAC 03/06/23
+	"Set ResHVACSys:cseRSYS:rsParElec_x"		ResHVACSys:cseRSYS:rsParElec_x	=        ; added AnalysisVersion dependence to rollback for 22.2.1 SP1 release - SAC 05/08/23
+      {  if (Type == 4 .AND. IfValidAnd( CentralEqpType = 4 ) ) ; VRF
          then Format( "($tdboHrAv < %.1f) * %.3f", VRFCrankcaseCtrlTemp, VRFTotCprsrCrankcaseHtrCap )
-         else  UNDEFINED  endif endif endif endif }
+         else if (IfValidAnd( Proj:CompCodeBase >= 2022 ) .AND. IfValidAnd( Proj:AnalysisVersion >= 220202 ))
+         then  switch (cseRSYS:rsType)
+                  case   8 :  UNDEFINED   ; "ASHPPkgRoom" 
+                  case   9 :  UNDEFINED   ; "ACPkgRoom"   
+                  case  10 :  UNDEFINED   ; "ACPkgRoomFurnace" 
+                  case  11 :  UNDEFINED   ; "ACPkgRoomResistance" 
+                  case  32 :  UNDEFINED   ; "FANCOIL"       ; SAC 03/07/23
+                  default  :  Format( "($tdboHrAv < 50.) * (1.-@RSYSRes[%c%s%c].prior.H.hrsOn) * @RSYS[%c%s%c].capNomC * 10./12000.",
+                                       34, cseRSYS:Name, 34, 34, cseRSYS:Name, 34 )
+               endswitch
+         else  if (cseRSYS:rsType == 8) then  UNDEFINED
+               else if (IfValidAnd( HaveHtPump > 0 ) .AND. IfValidAnd( NumHtPumpSysUnits > 0 ))
+               then  Format( "($tdboHrAv < 50) * 40 * %g", NumHtPumpSysUnits )
+               else if (Type == 4 .AND. IfValidAnd( CentralEqpType = 2 ) .AND. IfValidAnd( NumCentralEqpUnits > 0 )) ; WSHP
+               then Format( "($tdboHrAv < 50) * 40 * %g", NumCentralEqpUnits )
+               else if (Type == 4 .AND. IfValidAnd( CentralEqpType = 4 ) ) ; VRF
+               then Format( "($tdboHrAv < %.1f) * %.3f", VRFCrankcaseCtrlTemp, VRFTotCprsrCrankcaseHtrCap )
+               else  UNDEFINED  endif endif endif endif
+         endif endif  }
+     ; {  if (cseRSYS:rsType == 8) then  UNDEFINED
+     ;    else if (IfValidAnd( HaveHtPump > 0 ) .AND. IfValidAnd( NumHtPumpSysUnits > 0 ))
+     ;    then  Format( "($tdboHrAv < 50) * 40 * %g", NumHtPumpSysUnits )
+     ;    else if (Type == 4 .AND. IfValidAnd( CentralEqpType = 2 ) .AND. IfValidAnd( NumCentralEqpUnits > 0 )) ; WSHP
+     ;    then Format( "($tdboHrAv < 50) * 40 * %g", NumCentralEqpUnits )
+     ;    else if (Type == 4 .AND. IfValidAnd( CentralEqpType = 4 ) ) ; VRF
+     ;    then Format( "($tdboHrAv < %.1f) * %.3f", VRFCrankcaseCtrlTemp, VRFTotCprsrCrankcaseHtrCap )
+     ;    else  UNDEFINED  endif endif endif endif }
 
    "Set ResHVACSys:cseRSYS:rsDefrostModel - modeling options for ASHP outdoor coil defrosting when 17°F < TDbO < 45°F"        ; SAC 6/26/20 (tic #1225)
       ResHVACSys:cseRSYS:rsDefrostModel = {  if (cseRSYS:rsType == 8)      ; ASHPPkgRoom
@@ -499,25 +560,82 @@ RULELIST "HVACSys_CSE_Defaulting" 0 0 0 1
 ;	"Set ResHVACSys:cseRSYS:rsMtrC"				ResHVACSys:cseRSYS:rsMtrC			= {	if (LocalCompAssigned( CoolSystem ) == 0) then  UNDEFINED
 ;																										else  Global( ResProj:cseElecHVACMtr )  endif  }
 
+
+   "Set DwellUnitDHW:cseRSYSRef"             DwellUnitDHW:cseRSYSRef             = {  Parent2Ref( ActiveHVACSystem:cseRSYS )  }     ; DHWCombo setup - SAC 09/30/24 (tic #3629)
+   ; "Set DwellUnitDHW:cseRSYSRef"             DwellUnitDHW:cseRSYSRef             = {  Parent2Ref( CSE_ZONE:znRSys )  } 
+   "Set DwellUnitDHW:cseRSYSRef:rsCHDHWSYS"  DwellUnitDHW:cseRSYSRef:rsCHDHWSYS  =
+      {  if ( (cseRSYSRef:rsType == 13 .OR. cseRSYSRef:rsType == 14) .AND.
+              IfValidAnd( DwellUnitTypeRef:HVACSysType = 2 ) .AND.
+              IfValidAnd( DwellUnitTypeRef:HVACHtPumpRef[1]:Type = 35 ) )
+         then  cseDHWSYSRef
+         else  UNCHANGED  endif  }
+
+   ; "Set cseDHWSYS:SourceDHWSys:DHWHtrHVACSysRef[1-6]:cseRSYS:rsCHDHWSYS for HeatPumpDHWCombo"  for:#Htr=(1to6)  cseDHWSYS:SourceDHWSys:DHWHtrHVACSysRef[#Htr]:cseRSYS:rsCHDHWSYS  =   ; HeatPumpDHWCombo - SAC 04/02/23 (tic #1349) - 09/26/24 (tic #3629)
+   ;    {  if (IfValidAnd( SourceDHWSys:HeaterMult[#Htr] > 0 ) .AND.
+   ;           IfValidAnd( SourceDHWSys:DHWHtrHVACSysRef[#Htr]:HtPumpSysType == 35 ))
+   ;       then  Local( Name )
+   ;       else  UNCHANGED  endif  }
+   ; replaced above rule that sets RSYS:rsCHDHWSYS based on multiple zone DHWSys assignments to instead go through ResOtherZn:CSE_ZONE:znRSys - SAC 10/01/24 (tic #3629)
+   "Set cseDHWSYS:SourceOtherZone:ActiveHVACSystem:cseRSYS:rsCHDHWSYS for HeatPumpDHWCombo"     cseDHWSYS:SourceOtherZone:ActiveHVACSystem:cseRSYS:rsCHDHWSYS  =     ; HeatPumpDHWCombo - SAC 10/01/24 (tic #3629)
+      {  if (LocalCompAssigned( SourceOtherZone:ActiveHVACSystem ) == ComponentType( "ResHVACSys" ) .AND.
+             IfValidAnd( SourceOtherZone:ActiveHVACSystem:HaveHtPump > 0 ) .AND.
+             IfValidAnd( SourceOtherZone:ActiveHVACSystem:HtPumpSysType = 35 ))
+         then  Local( Name )
+         else  UNCHANGED  endif  }
+
+	"Set HeatPumpDHWCombo-related cseDHWSYS properties"      cseDHWSYS:Action =                     ; HeatPumpDHWCombo - SAC 04/02/23 (tic #1349)  ; expand for DUT - SAC 09/30/24 (tic #3629)
+      {  if (IfValidAnd( SourceDwellUnitType:HVACSysType = 2 ) .AND.
+             IfValidAnd( SourceDwellUnitType:HVACHtPumpRef[1]:Type = 35 ) .AND.
+             ( Proj:RunAbbrev = "u" .OR. Proj:RunAbbrev = "zp" .OR. Proj:RunAbbrev = "ap" .OR.
+               IfValidAnd( SourceDwellUnitType:HVACHtPumpRef[1]:Status = 1 ) ) )
+         then  EvalRulelist( "DHWSys_SetupDHWSYS_HeatPumpDHWCombo", 1 )
+         else if (LocalCompAssigned( SourceDHWSys:DHWHeater[1] ) == ComponentType( "HVACSys" ))
+         then  if (IfValidAnd( SourceDHWSys:DHWHeater[1]:HtPumpSysType == 35 ))
+               then  EvalRulelist( "DHWSys_SetupDHWSYS_HeatPumpDHWCombo", 1 )
+               else  UNCHANGED  endif
+         else  UNCHANGED  endif endif  }
+
+   ; VCHP3 - SAC 05/16/24 (tic #1379)  ; mod to prevent perf map output for std design systems still referencing VCHP3s - SAC 05/21/24 (tic #1379)
+   "Create & setup csePERFORMANCEMAP objects for VCHP3 HVACHtPump"   HVACHtPump:Action  =       ; added Single Speed option - SAC 07/21/24 (VCHP3) - SAC 09/26/24
+      {  if (Type == 36 .AND. SumRevRef( HVACSys:HtPumpSystem, HVACSys:HtPmpFlrAreaServed ) > 1 .AND.
+             SumRevRef( HVACSys:HtPumpSystem, HVACSys:HtPumpSysType ) > 35 .AND.
+             (LocalCompAssigned( VCHP3PerfMapHtgRef ) < 1 .OR. LocalCompAssigned( VCHP3PerfMapClgRef ) < 1))
+         then  if (Speeds == 1)
+               then  EvalRulelist( "VCHP3_CreatePerformanceMaps_SingleSpeed", 1 )
+               else  EvalRulelist( "VCHP3_CreatePerformanceMaps_Variable",    1 )  endif
+         else  UNCHANGED  endif  }
+
    ; SAC 11/4/18 - separate rules to setup VCHP RSYS inputs  - SAC 11/5/18 - logic to prevent these settings for runs other than User or Prop*   ; VCHP2 - SAC 11/01/20
-   "Setup VCHP or WSHP RSYS"     ResHVACSys:cseRSYS:Action  =     ; SAC 03/17/22 (WSHP)  ; SAC 04/05/22 (WSHP)
+   ; revised logic to ensure proper central CSE prep for Existing systems in Std design model(s) - SAC 07/13/23
+   "Setup VCHP or WSHP RSYS"     ResHVACSys:cseRSYS:Action  =     ; SAC 03/17/22 (WSHP)  ; SAC 04/05/22 (WSHP)  ; VCHP3 & DHWCombo - SAC 09/26/24 (#3629)
       {  if (HaveHtPump > 0 .AND. 
              (ResProj:RunAbbrev = "p"   .OR. ResProj:RunAbbrev = "p-N" .OR. ResProj:RunAbbrev = "p-E" .OR. 
                                           ResProj:RunAbbrev = "p-S" .OR. ResProj:RunAbbrev = "p-W" .OR.
               ResProj:RunAbbrev = "pfx" .OR. ResProj:RunAbbrev = "pfx-N" .OR. ResProj:RunAbbrev = "pfx-E" .OR.
                                           ResProj:RunAbbrev = "pfx-S" .OR. ResProj:RunAbbrev = "pfx-W" .OR.
               ResProj:RunAbbrev = "pp"  .OR. ResProj:RunAbbrev = "pp-N" .OR. ResProj:RunAbbrev = "pp-E" .OR.
-                                          ResProj:RunAbbrev = "pp-S" .OR. ResProj:RunAbbrev = "pp-W" ))
+                                          ResProj:RunAbbrev = "pp-S" .OR. ResProj:RunAbbrev = "pp-W" .OR.  Proj:RunAbbrev = "zp" .OR.
+              ( Proj:ResCompOpt > 1 .AND. Status == 1 .AND. (ResProj:RunAbbrev = "s" .OR. Proj:RunAbbrev = "zb") ) ))
          then  if (HtPumpSysType == 22)
                then  EvalRulelist( "HVACSys_SetupRSYS_VCHP", 1 )
                else if (HtPumpSysType == 33)
                then  EvalRulelist( "HVACSys_SetupRSYS_VCHP2", 1 )
+               else if (HtPumpSysType == 36)
+               then  EvalRulelist( "HVACSys_SetupRSYS_VCHP3", 1 )
+               else if (HtPumpSysType == 34)
+               then  EvalRulelist( "HVACSys_SetupRSYS_AWHP", 1 )
+               else if (HtPumpSysType == 35)
+               then  EvalRulelist( "HVACSys_SetupRSYS_HeatPumpDHWCombo", 1 )
+               else if (Type == 4 .AND. CentralEqpType == 1)
+               then  EvalRulelist( "HVACSys_SetupRSYS_CentralFPFC", 1 )
                else if (Type == 4 .AND. CentralEqpType == 2)
                then  EvalRulelist( "HVACSys_SetupRSYS_CentralWSHP", 1 )
                else if (Type == 4 .AND. CentralEqpType == 4)
                then  EvalRulelist( "HVACSys_SetupRSYS_CentralVRF", 1 )
-               else  UNCHANGED  endif endif endif endif
+               else  UNCHANGED  endif endif endif endif endif endif endif endif
          else  UNCHANGED  endif  }
+   "Setup FPFC RSYS"     ResHVACSys:cseRSYS:Action  =     ; JP 11/03/22 (FPFC)
+    { if (Type == 4 .AND. CentralEqpType == 1) then  EvalRulelist( "HVACSys_SetupRSYS_CentralFPFC", 1 ) else UNCHANGED endif }
 
 ; TO DO - default properly based on the TYPE of HVAC equipment defined
 	"Set ResHVACSys:cseRSYS:Fuel_HaveElec"		ResHVACSys:cseRSYS:Fuel_HaveElec    = {	1  }
@@ -568,12 +686,12 @@ RULELIST "HVACSys_CSE_Defaulting" 0 0 0 1
 							else  LocalRef( SourceZone:HVACSystem:cseRSYS )  endif endif endif
 					endif endif
 			else if (LocalCompAssigned( SourceOtherZone ) > 0)  
-			then       if (LocalCompAssigned( SourceOtherZone:ozHVACSystem ) == 0 .OR.
-                        LocalCompAssigned( SourceOtherZone:ozHVACSystem ) == ComponentType( "AirSys" )) then  UNDEFINED
-					else if (LocalCompAssigned( SourceOtherZone:ozHVACSystem:cseRSYS ) == 0) then  UNDEFINED
-					else if (SourceOtherZone:ozHVACSystem:HaveHeating == 0 .AND.
-								SourceOtherZone:ozHVACSystem:HaveCooling == 0) then  UNDEFINED
-					else  LocalRef( SourceOtherZone:ozHVACSystem:cseRSYS )  endif endif endif
+			then       if (LocalCompAssigned( SourceOtherZone:ActiveHVACSystem ) == 0 .OR.
+                        LocalCompAssigned( SourceOtherZone:ActiveHVACSystem ) == ComponentType( "AirSys" )) then  UNDEFINED
+					else if (LocalCompAssigned( SourceOtherZone:ActiveHVACSystem:cseRSYS ) == 0) then  UNDEFINED
+					else if (SourceOtherZone:ActiveHVACSystem:HaveHeating == 0 .AND.
+								SourceOtherZone:ActiveHVACSystem:HaveCooling == 0) then  UNDEFINED
+					else  LocalRef( SourceOtherZone:ActiveHVACSystem:cseRSYS )  endif endif endif
 			else  UNDEFINED  endif endif  }
 
 ; SAC 5/16/12 - experiment w/out ducts...
@@ -609,7 +727,10 @@ RULELIST "HVACSys_CSE_Defaulting" 0 0 0 1
 																										else  CreateComp( cseDUCTSEG, "SupplyDuct-" + substr( Name, 0, 42 ) )  endif  }
 	"Set cseRSYS:SupplyDuct:Parent"			cseRSYS:SupplyDuct:Parent		= {	Local( Name )  }
 	"Set cseRSYS:SupplyDuct:dsTy"				cseRSYS:SupplyDuct:dsTy			= {	"SUPPLY"  }
-	"Set cseRSYS:SupplyDuct:dsInArea"		cseRSYS:SupplyDuct:dsInArea	= {	SourceHVACSys:DistribSystem:SupplyDuctArea  }
+	"Set cseRSYS:SupplyDuct:dsInArea"		cseRSYS:SupplyDuct:dsInArea	=     ; was: {	SourceHVACSys:DistribSystem:SupplyDuctArea  } - replaced to account for multiple HVACSystems served by a single DistribSystem - SAC 04/02/24
+      {  if (IfValidAnd( SourceHVACSys:FloorAreaServed[1] > 0 ) .AND. IfValidAnd( SourceHVACSys:FloorAreaServed[1] < SourceHVACSys:DistribSystem:FloorAreaServed ))
+         then  SourceHVACSys:DistribSystem:SupplyDuctArea * ( SourceHVACSys:FloorAreaServed[1] / SourceHVACSys:DistribSystem:FloorAreaServed )
+         else  SourceHVACSys:DistribSystem:SupplyDuctArea  endif  }
 	"Set cseRSYS:SupplyDuct:dsDiameter"		cseRSYS:SupplyDuct:dsDiameter	= {	SourceHVACSys:DistribSystem:SupplyDuctDiam / 12  }
 	"Set cseRSYS:SupplyDuct:dsInsulR"		cseRSYS:SupplyDuct:dsInsulR	= {	SourceHVACSys:DistribSystem:DuctInsAdjRval  }
 	"Set cseRSYS:SupplyDuct:dsLeakF"			cseRSYS:SupplyDuct:dsLeakF		= {	SourceHVACSys:DistribSystem:DuctLeakageValUse * 0.585 / 100  }
@@ -642,7 +763,10 @@ RULELIST "HVACSys_CSE_Defaulting" 0 0 0 1
 																										else  CreateComp( cseDUCTSEG, "ReturnDuct-" + substr( Name, 0, 42 ) )  endif  }
 	"Set cseRSYS:ReturnDuct:Parent"			cseRSYS:ReturnDuct:Parent		= {	Local( Name )  }
 	"Set cseRSYS:ReturnDuct:dsTy"				cseRSYS:ReturnDuct:dsTy			= {	"RETURN"  }
-	"Set cseRSYS:ReturnDuct:dsInArea"		cseRSYS:ReturnDuct:dsInArea	= {	SourceHVACSys:DistribSystem:ReturnDuctArea  }
+	"Set cseRSYS:ReturnDuct:dsInArea"		cseRSYS:ReturnDuct:dsInArea	=     ; was: {	SourceHVACSys:DistribSystem:ReturnDuctArea  } - replaced to account for multiple HVACSystems served by a single DistribSystem - SAC 04/02/24
+      {  if (IfValidAnd( SourceHVACSys:FloorAreaServed[1] > 0 ) .AND. IfValidAnd( SourceHVACSys:FloorAreaServed[1] < SourceHVACSys:DistribSystem:FloorAreaServed ))
+         then  SourceHVACSys:DistribSystem:ReturnDuctArea * ( SourceHVACSys:FloorAreaServed[1] / SourceHVACSys:DistribSystem:FloorAreaServed )
+         else  SourceHVACSys:DistribSystem:ReturnDuctArea  endif  }
 	"Set cseRSYS:ReturnDuct:dsDiameter"		cseRSYS:ReturnDuct:dsDiameter	= {	SourceHVACSys:DistribSystem:ReturnDuctDiam / 12  }
 	"Set cseRSYS:ReturnDuct:dsInsulR"		cseRSYS:ReturnDuct:dsInsulR	= {	SourceHVACSys:DistribSystem:RetDuctInsAdjRval  }
 	"Set cseRSYS:ReturnDuct:dsLeakF"			cseRSYS:ReturnDuct:dsLeakF		= {	SourceHVACSys:DistribSystem:DuctLeakageValUse * 0.415 / 100  }
@@ -735,6 +859,156 @@ END
 ;*************************************************************************
 
 
+;************************************************************************* SAC 12/04/22 - SAC 09/26/24
+RULELIST "HVACSys_SetupRSYS_AWHP" 1 0 0 1
+;*************************************************************************
+   "Set HVACSys:cseRSYS:rsFEffC_x"     ResHVACSys:cseRSYS:rsFEffC_x    = {  if (IfValidAnd( ClSysMultiSpeed > 0 )) then  "1/FAWHPC"     else  UNDEFINED  endif  }
+   "Set HVACSys:cseRSYS:rsFanPwrC"     ResHVACSys:cseRSYS:rsFanPwrC    = {  if (IfValidAnd( ClSysMultiSpeed > 0 )) then  UNDEFINED      else  0.45       endif  }
+   "Set HVACSys:cseRSYS:rsFanPwrC_x"   ResHVACSys:cseRSYS:rsFanPwrC_x  = {  if (IfValidAnd( ClSysMultiSpeed > 0 )) then  "0.45*FAWHPC"  else  UNDEFINED  endif  }
+
+   "Set HVACSys:cseRSYS:rsFEffH_x"     ResHVACSys:cseRSYS:rsFEffH_x    = {  if (IfValidAnd( ClSysMultiSpeed > 0 )) then  "1/FAWHPH"     else  UNDEFINED  endif  }
+   "Set HVACSys:cseRSYS:rsFanPwrH"     ResHVACSys:cseRSYS:rsFanPwrH    = {  if (IfValidAnd( ClSysMultiSpeed > 0 ) .OR.  IfValidAnd( HtPumpDucted > 0 )==0) then  UNDEFINED      else  0.45       endif  }
+   "Set HVACSys:cseRSYS:rsFanPwrH_x"   ResHVACSys:cseRSYS:rsFanPwrH_x  = {  if (IfValidAnd( ClSysMultiSpeed > 0 ) .AND. IfValidAnd( HtPumpDucted > 0 )   ) then  "0.45*FAWHPH"  else  UNDEFINED  endif  }
+
+
+
+
+;	"Set HVACSys:cseRSYS:rsFChg"				ResHVACSys:cseRSYS:rsFChg			= {	if (HaveCooling == 0) then  UNDEFINED
+;																										else if (LocalStatus( ClSysRefrigChgAdjFctr ) < 2) then  UNDEFINED
+;																										else if (ClSysRefrigChgAdjFctr > 0 .AND. ClSysRefrigChgAdjFctr <= 1) then  ClSysRefrigChgAdjFctr
+;																										else  UNDEFINED  endif endif endif    }
+;
+;
+;   rsFChg = 0.96                        // Refrigerant charge adjustment factor
+;   rsSEER = 15.052632                   // Cooling SEER
+;   rsEER = 12.1875                      // Cooling EER (required for *PkgRoom types)
+;   rsVfPerTon = 350                     // CFM per Ton (default = 350)
+;   rsFanPwrC = 0.45*FAWHPC              // Cooling fan power.
+
+
+
+   "Blast HVACSys:cseRSYS:rsCap35"     ResHVACSys:cseRSYS:rsCap35      = {  UNDEFINED  }
+   "Blast HVACSys:cseRSYS:rsCap17"     ResHVACSys:cseRSYS:rsCap17      = {  UNDEFINED  }
+
+   "Set HVACSys:cseRSYS:rsDefrostModel"   ResHVACSys:cseRSYS:rsDefrostModel  = {  "REVCYCLE"  }
+END
+;*************************************************************************
+
+;************************************************************************* HeatPumpDHWCombo - SAC 03/31/23 (tic #1349) - SAC 09/26/24
+RULELIST "HVACSys_SetupRSYS_HeatPumpDHWCombo" 1 0 0 1
+;*************************************************************************
+
+;   "Set HVACSys:cseRSYS:rsFEffC_x"     ResHVACSys:cseRSYS:rsFEffC_x    = {  if (IfValidAnd( ClSysMultiSpeed > 0 )) then  "1/FAWHPC"     else  UNDEFINED  endif  }
+;   "Set HVACSys:cseRSYS:rsFanPwrC"     ResHVACSys:cseRSYS:rsFanPwrC    = {  if (IfValidAnd( ClSysMultiSpeed > 0 )) then  UNDEFINED      else  0.45       endif  }
+;   "Set HVACSys:cseRSYS:rsFanPwrC_x"   ResHVACSys:cseRSYS:rsFanPwrC_x  = {  if (IfValidAnd( ClSysMultiSpeed > 0 )) then  "0.45*FAWHPC"  else  UNDEFINED  endif  }
+;
+;   "Set HVACSys:cseRSYS:rsFEffH_x"     ResHVACSys:cseRSYS:rsFEffH_x    = {  if (IfValidAnd( ClSysMultiSpeed > 0 )) then  "1/FAWHPH"     else  UNDEFINED  endif  }
+;   "Set HVACSys:cseRSYS:rsFanPwrH"     ResHVACSys:cseRSYS:rsFanPwrH    = {  if (IfValidAnd( ClSysMultiSpeed > 0 ) .OR.  IfValidAnd( HtPumpDucted > 0 )==0) then  UNDEFINED      else  0.45       endif  }
+;   "Set HVACSys:cseRSYS:rsFanPwrH_x"   ResHVACSys:cseRSYS:rsFanPwrH_x  = {  if (IfValidAnd( ClSysMultiSpeed > 0 ) .AND. IfValidAnd( HtPumpDucted > 0 )   ) then  "0.45*FAWHPH"  else  UNDEFINED  endif  }
+;
+;
+;
+;
+;;	"Set HVACSys:cseRSYS:rsFChg"				ResHVACSys:cseRSYS:rsFChg			= {	if (HaveCooling == 0) then  UNDEFINED
+;;																										else if (LocalStatus( ClSysRefrigChgAdjFctr ) < 2) then  UNDEFINED
+;;																										else if (ClSysRefrigChgAdjFctr > 0 .AND. ClSysRefrigChgAdjFctr <= 1) then  ClSysRefrigChgAdjFctr
+;;																										else  UNDEFINED  endif endif endif    }
+;;
+;;
+;;   rsFChg = 0.96                        // Refrigerant charge adjustment factor
+;;   rsSEER = 15.052632                   // Cooling SEER
+;;   rsEER = 12.1875                      // Cooling EER (required for *PkgRoom types)
+;;   rsVfPerTon = 350                     // CFM per Ton (default = 350)
+;;   rsFanPwrC = 0.45*FAWHPC              // Cooling fan power.
+;
+;
+;
+;   "Blast HVACSys:cseRSYS:rsCap35"     ResHVACSys:cseRSYS:rsCap35      = {  UNDEFINED  }
+;   "Blast HVACSys:cseRSYS:rsCap17"     ResHVACSys:cseRSYS:rsCap17      = {  UNDEFINED  }
+;
+;   "Set HVACSys:cseRSYS:rsDefrostModel"   ResHVACSys:cseRSYS:rsDefrostModel  = {  "REVCYCLE"  }
+
+;"store BEMProc details"  ResHVACSys:Action = {  StoreBEMProc( Format( "HeatPumpDHWCombo-HVAC-%s-%s", Name, Proj:RunAbbrev ), 0 )  }
+
+   "blast HVACSys:cseRSYS:rsFxCapAuxH"    ResHVACSys:cseRSYS:rsFxCapAuxH = {  UNDEFINED  }
+
+   "blast HVACSys:cseRSYS:rsHSPF"         ResHVACSys:cseRSYS:rsHSPF      = {  UNDEFINED  }      ; prevent specification of HSPF for HeatPumpDHWCombo systems - SAC 08/15/23
+
+   "Set HVACSys:cseRSYS:rsSEER"        ResHVACSys:cseRSYS:rsSEER       =
+      {  if (IfValidAnd( HtPumpSystem[1]:IncludesCooling > 0 ) .AND.
+             IfValidAnd( ClSysSEER2 > 0 ) .AND. IfValidAnd( ClSysSEER2perSEER > 0 ))   ; replace w/ check for user-defined cooling
+         then  ClSysSEER2 / ClSysSEER2perSEER
+         else if (T24RCoolingEquipment:SEERValid( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", HtPumpSysTypeAbbrev ) < 1) then  UNDEFINED
+         else     T24RCoolingEquipment:SEER(      "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", HtPumpSysTypeAbbrev )  endif endif  }
+   "Set HVACSys:cseRSYS:rsEER"         ResHVACSys:cseRSYS:rsEER        =
+      {  if (IfValidAnd( HtPumpSystem[1]:IncludesCooling > 0 ) .AND.
+             IfValidAnd( ClSysEER2 > 0 ) .AND. IfValidAnd( ClSysEER2perEER > 0 ))   ; replace w/ check for user-defined cooling
+         then  ClSysEER2 / ClSysEER2perEER
+         else if (T24RCoolingEquipment:EERValid( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", HtPumpSysTypeAbbrev ) < 1) then  UNDEFINED
+         else     T24RCoolingEquipment:EER(      "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", HtPumpSysTypeAbbrev )  endif endif  }
+
+;   "Set HVACSys:cseRSYS:rsCapC"        ResHVACSys:cseRSYS:rsCapC  = {  36000  }     ; hardwire?
+
+   "Blast HVACSys:cseRSYS:rsParElec_x" ResHVACSys:cseRSYS:rsParElec_x  = {  UNDEFINED  }     ; HeatPumpDHWCombo - SAC 04/18/23 (tic #1349)
+   ;"Set HVACSys:cseRSYS:rsParElec_x"   ResHVACSys:cseRSYS:rsParElec_x  = {  "5"  }        ; HeatPumpDHWCombo - SAC 03/31/23 (tic #1349)
+
+   "Set HVACSys:cseRSYS:rsFanMotTy"    ResHVACSys:cseRSYS:rsFanMotTy   = {  "PSC"  }         ; for consistency w/ std design - HeatPumpDHWCombo - SAC 04/18/23 (tic #1349)
+
+; rsFanPwrH per user input?  Default is 0.273 W/cfm for CHDHW
+; rsCapH is ignored, should not be written.
+
+END
+;************************************************************************* HeatPumpDHWCombo - SAC 04/02/23 (tic #1349) - SAC 09/26/24
+RULELIST "DHWSys_SetupDHWSYS_HeatPumpDHWCombo" 1 0 0 1
+;*************************************************************************
+   "Set cseDHWSYS:wsDRMethod"                                     cseDHWSYS:wsDRMethod     = {  "StateOfCharge"  }
+   "Set cseDHWSYS:wsTargetSOC_x"                                  cseDHWSYS:wsTargetSOC_x  = 
+         {  if (IfValidAnd( SourceDwellUnitType:DHWTankVolume > 75 ) .OR.
+                IfValidAnd( SourceDHWSys:DHWHeater[1]:HtPumpSystem[1]:DHWComboTankVol > 75 ))
+            then  Format( "select(\n  $month > 11 || $month < 3,\n      hourval(.70,.70,.70,.70,.70,.70,.70,.30,.95,.95,.95,.95,\n              .95,.95,.95,.95,.95,.70,.70,.70,.70,.70,.70,.70),\n" +
+                  "  $month==3 || $month== 4,\n      hourval(.50,.50,.50,.50,.50,.50,.50,.30,.95,.95,.95,.95,\n              .95,.95,.95,.95,.95,.50,.50,.50,.50,.50,.50,.50),\n" +
+                  "  default\n      hourval(.15,.15,.15,.15,.15,.15,.15,.15,.15,.15,.15,.15,\n              .15,.60,.60,.60,.15,.15,.15,.15,.15,.15,.15,.15))" )
+            else  Format( "select(\n        $month > 11 || $month < 3,\n          hourval(.75,.80,.85,.90,.95,.95,.90,.80,.50,.95,.95,.95,\n                  .95,.95,.95,.95,.70,.40,.40,.40,.40,.40,.40,.50),\n" +
+                  "        $month == 3,\n          hourval(.70,.75,.80,.85,.90,.90,.90,.80,.50,.95,.95,.95,\n                  .95,.95,.95,.95,.70,.40,.40,.40,.40,.40,.40,.40),\n" +
+                  "        $month == 4,\n          hourval(.60,.65,.70,.75,.80,.80,.80,.70,.50,.90,.90,.90,\n                  .90,.90,.90,.90,.70,.40,.40,.40,.40,.40,.40,.40),\n" +
+                  "        $month == 5,\n          hourval(.50,.55,.60,.65,.70,.70,.70,.70,.50,.70,.70,.70,\n                  .70,.70,.70,.70,.70,.30,.30,.30,.30,.30,.30,.30),\n" +
+                  "        $month >=5 && $month <= 10,\n          hourval(.30,.30,.30,.30,.30,.30,.30,.30,.30,.30,.30,.50,\n                  .50,.50,.50,.30,.30,.30,.30,.30,.30,.30,.30,.30),\n" +
+                  "        default\n          hourval(.60,.65,.70,.75,.80,.80,.80,.70,.50,.90,.90,.90,\n                  .90,.90,.90,.90,.70,.40,.40,.40,.40,.40,.40,.40))" )
+            endif  }
+   "Adjust cseDHWSYS:wsTUse (if necessary)"     cseDHWSYS:wsTUse  =                 ; CSE throws error if wsTUse < 120 for DHWSys used for space htg - SAC 04/03/23 (tic #1349)
+      {  if (IfValidAnd( wsTUse >= 120 )==0) then  120  else  UNCHANGED  endif  }
+   "blast cseDHWSYS:wsTSetpoint"    cseDHWSYS:wsTSetpoint = {  UNDEFINED  }      ; SAC 04/11/23 (tic #1349)
+
+   ; use main/local cseDHWSYS as a Central system and create subordinate system as the first in the series of use shuffles - SAC 04/11/23 (tic #1349)
+   "Create cseDHWSYS:FirstSubShuffleDHWSYS"                 cseDHWSYS:FirstSubShuffleDHWSYS  = {  CreateComp( cseDHWSYS, substr( Name, 0, 48 ) + "-1" )  }
+   "Set cseDHWSYS:FirstSubShuffleDHWSYS:wsCentralDHWSYS"    cseDHWSYS:FirstSubShuffleDHWSYS:wsCentralDHWSYS  = {  Name  }
+   ; shift several settings from main central DHWSys to first shuffle DHWSys
+   "Set cseDHWSYS:FirstSubShuffleDHWSYS:wsDayUse_x"         cseDHWSYS:FirstSubShuffleDHWSYS:wsDayUse_x      = {  wsDayUse_x  }
+   "Set cseDHWSYS:FirstSubShuffleDHWSYS:wsMult"             cseDHWSYS:FirstSubShuffleDHWSYS:wsMult          = {  wsMult    }
+   "Set cseDHWSYS:FirstSubShuffleDHWSYS:wsWF"               cseDHWSYS:FirstSubShuffleDHWSYS:wsWF            = {  wsWF      }
+   "Set cseDHWSYS:FirstSubShuffleDHWSYS:wsSDLM"             cseDHWSYS:FirstSubShuffleDHWSYS:wsSDLM          = {  wsSDLM    }
+   "Set cseDHWSYS:FirstSubShuffleDHWSYS:wsDSM"              cseDHWSYS:FirstSubShuffleDHWSYS:wsDSM           = {  wsDSM     }
+   "Set cseDHWSYS:FirstSubShuffleDHWSYS:wsShowerCount"      cseDHWSYS:FirstSubShuffleDHWSYS:wsShowerCount   = {  wsShowerCount  }
+   "Set cseDHWSYS:FirstSubShuffleDHWSYS:wsBathCount"        cseDHWSYS:FirstSubShuffleDHWSYS:wsBathCount     = {  wsBathCount  }
+   "Set cseDHWSYS:FirstSubShuffleDHWSYS:wsFaucetCount"      cseDHWSYS:FirstSubShuffleDHWSYS:wsFaucetCount   = {  wsFaucetCount  }
+   "Set cseDHWSYS:FirstSubShuffleDHWSYS:wsCWashrCount"      cseDHWSYS:FirstSubShuffleDHWSYS:wsCWashrCount   = {  wsCWashrCount  }
+   "Set cseDHWSYS:FirstSubShuffleDHWSYS:wsDWashrCount"      cseDHWSYS:FirstSubShuffleDHWSYS:wsDWashrCount   = {  wsDWashrCount  }
+   ; and blast those properties of the main central DHWSys that were moved to the first shuffle DHWSys
+   "blast cseDHWSYS:wsDayUse_x"      cseDHWSYS:wsDayUse_x      = {  UNDEFINED  }
+   "blast cseDHWSYS:wsMult"          cseDHWSYS:wsMult          = {  UNDEFINED  }
+   "blast cseDHWSYS:wsWF"            cseDHWSYS:wsWF            = {  UNDEFINED  }
+   "blast cseDHWSYS:wsSDLM"          cseDHWSYS:wsSDLM          = {  UNDEFINED  }
+   "blast cseDHWSYS:wsDSM"           cseDHWSYS:wsDSM           = {  UNDEFINED  }
+   "blast cseDHWSYS:wsShowerCount"   cseDHWSYS:wsShowerCount   = {  UNDEFINED  }
+   "blast cseDHWSYS:wsBathCount"     cseDHWSYS:wsBathCount     = {  UNDEFINED  }
+   "Set cseDHWSYS:wsFaucetCount"     cseDHWSYS:wsFaucetCount   = {  UNDEFINED  }
+   "Set cseDHWSYS:wsCWashrCount"     cseDHWSYS:wsCWashrCount   = {  UNDEFINED  }
+   "Set cseDHWSYS:wsDWashrCount"     cseDHWSYS:wsDWashrCount   = {  UNDEFINED  }
+
+END
+;*************************************************************************
+
+
 ;*************************************************************************
 RULELIST "HVACSys_SetupRSYS_VCHP" 1 0 0 1
 ;*************************************************************************
@@ -749,7 +1023,9 @@ RULELIST "HVACSys_SetupRSYS_VCHP" 1 0 0 1
    "Blast ResHVACSys:cseRSYS:rsCap35"     ResHVACSys:cseRSYS:rsCap35      = {  UNDEFINED  }  ; SAC 11/13/18 - removed Cap35 & Cap17 for VCHP
    "Blast ResHVACSys:cseRSYS:rsCap17"     ResHVACSys:cseRSYS:rsCap17      = {  UNDEFINED  }
 
-   "Set ResHVACSys:cseRSYS:rsDefrostModel"   ResHVACSys:cseRSYS:rsDefrostModel  = {  "REVCYCLE"  }
+   "Set HVACSys:cseRSYS:rsDefrostModel"   HVACSys:cseRSYS:rsDefrostModel  = {  UNDEFINED  }   ; switched to undef from: "REVCYCLE" - SAC 06/01/23 (VCHP)
+
+   "Set HVACSys:cseRSYS:rsFEffAuxHDefrost_x" HVACSys:cseRSYS:rsFEffAuxHDefrost_x = {  "1/FVCHPH"  }   ; SAC 06/01/23 (VCHP)
 END
 ;*************************************************************************
 
@@ -967,7 +1243,9 @@ RULELIST "HVACSys_SetupRSYS_VCHP2" 1 0 0 1
       {  if (IfValidAnd( HtPumpSystem[1]:AutoSize > 0 )==0) then  UNDEFINED
          else if (IfValidAnd( ResProj:RunAbbrev = "s" ) .OR. Proj:RunAbbrev == "zb" .OR.
                   IfValidAnd( ResProj:RunAbbrev == "smf" ) .OR. IfValidAnd( ResProj:RunAbbrev == "dr" )) 
-         then  0.75
+         then  if (ResProj:EnergyCodeYearNum < 2025)
+               then  0.75
+               else  1.1   endif
          else if (IfValidAnd( Proj:EnableResearchMode > 0.5 ) .AND.
                   IfValidAnd( HtPumpSystem[1]:HtgSizingFactor > 0 ))
          then  HtPumpSystem[1]:HtgSizingFactor
@@ -978,6 +1256,309 @@ RULELIST "HVACSys_SetupRSYS_VCHP2" 1 0 0 1
          else  UNCHANGED  endif  }
 
    "Set ResHVACSys:cseRSYS:rsDefrostModel"   ResHVACSys:cseRSYS:rsDefrostModel  = {  "REVCYCLE"  }
+END
+;*************************************************************************
+
+;************************************************************************* VCHP3 - SAC 05/16/24 (tic #1379) - SAC 09/26/24
+RULELIST "HVACSys_SetupRSYS_VCHP3" 1 0 0 1
+;*************************************************************************
+   "Set HVACSys:cseRSYS:rsFEffC_x"     ResHVACSys:cseRSYS:rsFEffC_x    = {  UNDEFINED  }   ; for VCHP2 was: "1/FVCHPC" 
+   "Set HVACSys:cseRSYS:rsFanPwrC"     ResHVACSys:cseRSYS:rsFanPwrC    =      ; SAC 05/17/24 (tic #1379)  ; leave fan pwr alone for ducted - SAC 05/21/24 (tic #1379)
+      {  if (IfValidAnd( HtOrClDucted > 0 ))
+         then  UNCHANGED  ; 0.281  
+         else  0.171  endif  }
+   "Set HVACSys:cseRSYS:rsFanPwrC_x"   ResHVACSys:cseRSYS:rsFanPwrC_x  = {  UNDEFINED  }   ; for VCHP2 was: "0.35*FVCHPC" 
+
+   "Set HVACSys:cseRSYS:rsFEffH_x"     ResHVACSys:cseRSYS:rsFEffH_x    = {  UNDEFINED  }   ; for VCHP2 was: "1"      ; don't use VCHP mult for htg - was: 1/FVCHPH - SAC 11/01/20
+   "Set HVACSys:cseRSYS:rsFanPwrH"     ResHVACSys:cseRSYS:rsFanPwrH    =      ; SAC 05/17/24 (tic #1379)  ; leave fan pwr alone for ducted - SAC 05/21/24 (tic #1379)
+      {  if (IfValidAnd( HtOrClDucted > 0 ))
+         then  UNCHANGED  ; 0.281  
+         else  0.171  endif  }
+   "Set HVACSys:cseRSYS:rsFanPwrH_x"   ResHVACSys:cseRSYS:rsFanPwrH_x  = {  UNDEFINED  }   ; for VCHP2 was: "0.35*FVCHPH" 
+
+   "Blast HVACSys:cseRSYS:rsCap17"     ResHVACSys:cseRSYS:rsCap17      = {  UNDEFINED  }     ; removed Cap17 & Cap05 for VCHP2 - SAC 07/26/21
+;   "Blast HVACSys:cseRSYS:rsCap05"     ResHVACSys:cseRSYS:rsCap05      = {  UNDEFINED  } 
+
+   "Blast HVACSys:cseRSYS:rsFxCapAuxH"   ResHVACSys:cseRSYS:rsFxCapAuxH   = {  UNDEFINED  }
+
+	"throw error if HVACSys:cseRSYS:rsOAVType != 'None'"		ResHVACSys:Action		=     ; VCHP2 - SAC 11/10/20
+      {	if (IfValidAnd( cseRSYS:rsOAVType > 0 ))
+         then  switch (cseRSYS:rsOAVType)
+                  case  1 :   PostError( "OAV type 'FixedFlow' incompatible with VCHP2 system '%s' (CSE RSYS '%s')", Name, cseRSYS:Name )
+                  case  2 :   PostError( "OAV type 'VarFlow' incompatible with VCHP2 system '%s' (CSE RSYS '%s')", Name, cseRSYS:Name )
+                  default :  UNCHANGED
+               endswitch
+         else  UNCHANGED  endif  }
+
+   "Set HVACSys:cseRSYS:rsCap17"       ResHVACSys:cseRSYS:rsCap17  = {  UNDEFINED  }
+      ;{  if (IfValidAnd( HtPumpSystem[1]:AutoSize > 0 )==0 .AND.
+      ;       IfValidAnd( HtPumpSystem[1]:Cap17 > 0 ))
+      ;   then  HtPumpSystem[1]:Cap17
+      ;   else  UNDEFINED  endif  }
+   "Set HVACSys:cseRSYS:rsCapRat1747_x" ResHVACSys:cseRSYS:rsCapRat1747_x  = {  UNDEFINED  }
+      ;{  if (IfValidAnd( HtPumpSystem[1]:AutoSize > 0 ) .AND.
+      ;       IfValidAnd( HtPumpSystem[1]:Cap17 > 0 ) .AND.
+      ;       IfValidAnd( HtPumpSystem[1]:Cap47  > 0 ))
+      ;   then  Format( "%.1f/%.1f", HtPumpSystem[1]:Cap17, HtPumpSystem[1]:Cap47 )
+      ;   else  UNDEFINED  endif  }
+   "Set HVACSys:cseRSYS:rsCapRat1747"  ResHVACSys:cseRSYS:rsCapRat1747  = {  UNDEFINED  }
+      ;{  if (LocalStatus( cseRSYS:rsCapRat1747_x ) < 1 .AND.
+      ;       IfValidAnd( HtPumpSystem[1]:AutoSize > 0 ) .AND.
+      ;       IfValidAnd( HtPumpSystem[1]:Cap1747Ratio > 0 ))
+      ;   then  HtPumpSystem[1]:Cap1747Ratio
+      ;   else  UNDEFINED  endif  }
+
+   "Set HVACSys:cseRSYS:rsCap115"      ResHVACSys:cseRSYS:rsCap115  = {  UNDEFINED  }
+      ;{  if (IfValidAnd( HtPumpSystem[1]:AutoSize > 0 )==0 .AND.
+      ;       IfValidAnd( HtPumpSystem[1]:Cap115 > 0 ))
+      ;   then  HtPumpSystem[1]:Cap115
+      ;   else  UNDEFINED  endif  }
+   "Set HVACSys:cseRSYS:rsCapRat11595_x" ResHVACSys:cseRSYS:rsCapRat11595_x  = {  UNDEFINED  }
+      ;{  if (IfValidAnd( HtPumpSystem[1]:AutoSize > 0 ) .AND.
+      ;       IfValidAnd( HtPumpSystem[1]:Cap115 > 0 ) .AND.
+      ;       IfValidAnd( HtPumpSystem[1]:Cap95  > 0 ))
+      ;   then  Format( "%.1f/%.1f", HtPumpSystem[1]:Cap115, HtPumpSystem[1]:Cap95 )
+      ;   else  UNDEFINED  endif  }
+   "Set HVACSys:cseRSYS:rsCapRat11595" ResHVACSys:cseRSYS:rsCapRat11595  = {  UNDEFINED  }
+      ;{  if (LocalStatus( cseRSYS:rsCapRat11595_x ) < 1 .AND.
+      ;       IfValidAnd( HtPumpSystem[1]:AutoSize > 0 ) .AND.
+      ;       IfValidAnd( HtPumpSystem[1]:Cap11595Ratio > 0 ))
+      ;   then  HtPumpSystem[1]:Cap11595Ratio
+      ;   else  UNDEFINED  endif  }
+
+;   "Set HVACSys:cseRSYS:rsCap95"       ResHVACSys:cseRSYS:rsCap95  =             ; SAC 09/22/21
+   "Set HVACSys:cseRSYS:rsCapC"        ResHVACSys:cseRSYS:rsCapC  =              ; SAC 09/23/21
+      {  if (IfValidAnd( HtPumpSystem[1]:AutoSize > 0 )==0 .AND.
+             IfValidAnd( HtPumpSystem[1]:Cap95 > 0 ))
+         then  HtPumpSystem[1]:Cap95
+         else  UNDEFINED  endif  }
+   "Set HVACSys:cseRSYS:rsCapRat9547_x" ResHVACSys:cseRSYS:rsCapRat9547_x  = {  UNDEFINED  }
+      ;{  if (IfValidAnd( HtPumpSystem[1]:AutoSize > 0 ) .AND.
+      ;       IfValidAnd( HtPumpSystem[1]:Cap95 > 0 ) .AND.
+      ;       IfValidAnd( HtPumpSystem[1]:Cap47  > 0 ))
+      ;   then  Format( "%.1f/%.1f", HtPumpSystem[1]:Cap95, HtPumpSystem[1]:Cap47 )
+      ;   else  UNDEFINED  endif  }
+   "Set HVACSys:cseRSYS:rsCapRat9547"  ResHVACSys:cseRSYS:rsCapRat9547  = {  UNDEFINED  }
+      ;{  if (LocalStatus( cseRSYS:rsCapRat9547_x ) < 1 .AND.
+      ;       IfValidAnd( HtPumpSystem[1]:AutoSize > 0 ) .AND.
+      ;       IfValidAnd( HtPumpSystem[1]:Cap95 > 0 ) .AND.
+      ;       IfValidAnd( HtPumpSystem[1]:Cap47 > 0 ))
+      ;   then  HtPumpSystem[1]:Cap95 / HtPumpSystem[1]:Cap47
+      ;   else  UNDEFINED  endif  }
+
+   "Set HVACSys:cseRSYS:rsCap82"       ResHVACSys:cseRSYS:rsCap82  = {  UNDEFINED  }
+      ;{  if (IfValidAnd( HtPumpSystem[1]:AutoSize > 0 )==0 .AND.
+      ;       IfValidAnd( HtPumpSystem[1]:Cap82 > 0 ))
+      ;   then  HtPumpSystem[1]:Cap82
+      ;   else  UNDEFINED  endif  }
+   "Set HVACSys:cseRSYS:rsCapRat8295_x" ResHVACSys:cseRSYS:rsCapRat8295_x  = {  UNDEFINED  }
+      ;{  if (IfValidAnd( HtPumpSystem[1]:AutoSize > 0 ) .AND.
+      ;       IfValidAnd( HtPumpSystem[1]:Cap82 > 0 ) .AND.
+      ;       IfValidAnd( HtPumpSystem[1]:Cap95  > 0 ))
+      ;   then  Format( "%.1f/%.1f", HtPumpSystem[1]:Cap82, HtPumpSystem[1]:Cap95 )
+      ;   else  UNDEFINED  endif  }
+   "Set HVACSys:cseRSYS:rsCapRat8295"  ResHVACSys:cseRSYS:rsCapRat8295  = {  UNDEFINED  }
+      ;{  if (LocalStatus( cseRSYS:rsCapRat8295_x ) < 1 .AND.
+      ;       IfValidAnd( HtPumpSystem[1]:AutoSize > 0 ) .AND.
+      ;       IfValidAnd( HtPumpSystem[1]:Cap8295Ratio > 0 ))
+      ;   then  HtPumpSystem[1]:Cap8295Ratio
+      ;   else  UNDEFINED  endif  }
+
+   "Set HVACSys:cseRSYS:rsCap05"       ResHVACSys:cseRSYS:rsCap05  = {  UNDEFINED  }
+      ;{  if (IfValidAnd( HtPumpSystem[1]:AutoSize > 0 )==0 .AND.
+      ;       IfValidAnd( HtPumpSystem[1]:Cap05 > 0 ))
+      ;   then  HtPumpSystem[1]:Cap05
+      ;   else  UNDEFINED  endif  }
+   "Set HVACSys:cseRSYS:rsCapRat0547_x" ResHVACSys:cseRSYS:rsCapRat0547_x  = {  UNDEFINED  }
+      ;{  if (IfValidAnd( HtPumpSystem[1]:AutoSize > 0 ) .AND.
+      ;       IfValidAnd( HtPumpSystem[1]:Cap05 > 0 ) .AND.
+      ;       IfValidAnd( HtPumpSystem[1]:Cap47  > 0 ))
+      ;   then  Format( "%.1f/%.1f", HtPumpSystem[1]:Cap05, HtPumpSystem[1]:Cap47 )
+      ;   else  UNDEFINED  endif  }
+   "Set HVACSys:cseRSYS:rsCapRat0547"  ResHVACSys:cseRSYS:rsCapRat0547  = {  UNDEFINED  }
+      ;{  if (LocalStatus( cseRSYS:rsCapRat0547_x ) < 1 .AND.
+      ;       IfValidAnd( HtPumpSystem[1]:AutoSize > 0 ) .AND.
+      ;       IfValidAnd( HtPumpSystem[1]:Cap0547Ratio > 0 ))
+      ;   then  HtPumpSystem[1]:Cap0547Ratio
+      ;   else  UNDEFINED  endif  }
+
+   ;"Set HVACSys:cseRSYS:rsCOP115"      ResHVACSys:cseRSYS:rsCOP115      =        ; SAC 09/22/21
+   ;   {  if (IfValidAnd( HtPumpSystem[1]:COP115 > 0 ))
+   ;      then  HtPumpSystem[1]:COP115
+   ;      else  UNDEFINED  endif  }
+   ;"Set HVACSys:cseRSYS:rsCOPMin115"   ResHVACSys:cseRSYS:rsCOPMin115   =  
+   ;   {  if (IfValidAnd( HtPumpSystem[1]:COPMin115 > 0 ))
+   ;      then  HtPumpSystem[1]:COPMin115
+   ;      else  UNDEFINED  endif  }
+
+   ;"Set HVACSys:cseRSYS:rsCOP95"       ResHVACSys:cseRSYS:rsCOP95       =  
+   ;   {  if (IfValidAnd( HtPumpSystem[1]:COP95 > 0 ))
+   ;      then  HtPumpSystem[1]:COP95
+   ;      else  UNDEFINED  endif  }
+   ;"Set HVACSys:cseRSYS:rsCOPMin95"    ResHVACSys:cseRSYS:rsCOPMin95    =  
+   ;   {  if (IfValidAnd( HtPumpSystem[1]:COPMin95 > 0 ))
+   ;      then  HtPumpSystem[1]:COPMin95
+   ;      else  UNDEFINED  endif  }
+
+   ;"Set HVACSys:cseRSYS:rsCOP82"       ResHVACSys:cseRSYS:rsCOP82       =  
+   ;   {  if (IfValidAnd( HtPumpSystem[1]:COP82 > 0 ))
+   ;      then  HtPumpSystem[1]:COP82
+   ;      else  UNDEFINED  endif  }
+   ;"Set HVACSys:cseRSYS:rsCOPMin82"    ResHVACSys:cseRSYS:rsCOPMin82    =  
+   ;   {  if (IfValidAnd( HtPumpSystem[1]:COPMin82 > 0 ))
+   ;      then  HtPumpSystem[1]:COPMin82
+   ;      else  UNDEFINED  endif  }
+
+   ;"Set HVACSys:cseRSYS:rsCOP05"       ResHVACSys:cseRSYS:rsCOP05       =        ; SAC 07/26/21
+   ;   {  if (IfValidAnd( HtPumpSystem[1]:COP05 > 0 ))
+   ;      then  HtPumpSystem[1]:COP05
+   ;      else  UNDEFINED  endif  }
+
+   ;"Set HVACSys:cseRSYS:rsCOPMin47"    ResHVACSys:cseRSYS:rsCOPMin47    =
+   ;   {  if (IfValidAnd( HtPumpSystem[1]:COPMin47 > 0 ))
+   ;      then  HtPumpSystem[1]:COPMin47
+   ;      else  UNDEFINED  endif  }
+   ;"Set HVACSys:cseRSYS:rsCOPMin17"    ResHVACSys:cseRSYS:rsCOPMin17    =
+   ;   {  if (IfValidAnd( HtPumpSystem[1]:COPMin17 > 0 ))
+   ;      then  HtPumpSystem[1]:COPMin17
+   ;      else  UNDEFINED  endif  }
+   ;"Set HVACSys:cseRSYS:rsCOPMin05"    ResHVACSys:cseRSYS:rsCOPMin05    =        ; SAC 07/26/21
+   ;   {  if (IfValidAnd( HtPumpSystem[1]:COPMin05 > 0 ))
+   ;      then  HtPumpSystem[1]:COPMin05
+   ;      else  UNDEFINED  endif  }
+
+   ;"Set HVACSys:cseRSYS:rsLoadFMin115"    ResHVACSys:cseRSYS:rsLoadFMin115   =      ; SAC 09/22/21
+   ;   {  if (IfValidAnd( HtPumpSystem[1]:CapMin115 > 0 ) .AND.
+   ;          IfValidAnd( HtPumpSystem[1]:Cap115    > 0 ))
+   ;      then  (HtPumpSystem[1]:CapMin115 / HtPumpSystem[1]:Cap115)
+   ;      else  UNDEFINED  endif  }
+   ;"Set HVACSys:cseRSYS:rsLoadFMin95"     ResHVACSys:cseRSYS:rsLoadFMin95    =  
+   ;   {  if (IfValidAnd( HtPumpSystem[1]:CapMin95 > 0 ) .AND.
+   ;          IfValidAnd( HtPumpSystem[1]:Cap95    > 0 ))
+   ;      then  (HtPumpSystem[1]:CapMin95 / HtPumpSystem[1]:Cap95)
+   ;      else  UNDEFINED  endif  }
+   ;"Set HVACSys:cseRSYS:rsLoadFMin82"     ResHVACSys:cseRSYS:rsLoadFMin82    =  
+   ;   {  if (IfValidAnd( HtPumpSystem[1]:CapMin82 > 0 ) .AND.
+   ;          IfValidAnd( HtPumpSystem[1]:Cap82    > 0 ))
+   ;      then  (HtPumpSystem[1]:CapMin82 / HtPumpSystem[1]:Cap82)
+   ;      else  UNDEFINED  endif  }
+   ;"Set HVACSys:cseRSYS:rsLoadFMin47"     ResHVACSys:cseRSYS:rsLoadFMin47    =      ; SAC 07/26/21
+   ;   {  if (IfValidAnd( HtPumpSystem[1]:CapMin47 > 0 ) .AND.
+   ;          IfValidAnd( HtPumpSystem[1]:Cap47    > 0 ))
+   ;      then  (HtPumpSystem[1]:CapMin47 / HtPumpSystem[1]:Cap47)
+   ;      else  UNDEFINED  endif  }
+   ;"Set HVACSys:cseRSYS:rsLoadFMin17"     ResHVACSys:cseRSYS:rsLoadFMin17    =
+   ;   {  if (IfValidAnd( HtPumpSystem[1]:CapMin17 > 0 ) .AND.
+   ;          IfValidAnd( HtPumpSystem[1]:Cap17    > 0 ))
+   ;      then  (HtPumpSystem[1]:CapMin17 / HtPumpSystem[1]:Cap17)
+   ;      else  UNDEFINED  endif  }
+   ;"Set HVACSys:cseRSYS:rsLoadFMin05"     ResHVACSys:cseRSYS:rsLoadFMin05    =
+   ;   {  if (IfValidAnd( HtPumpSystem[1]:CapMin05 > 0 ) .AND.
+   ;          IfValidAnd( HtPumpSystem[1]:Cap05    > 0 ))
+   ;      then  (HtPumpSystem[1]:CapMin05 / HtPumpSystem[1]:Cap05)
+   ;      else  UNDEFINED  endif  }
+
+   ; removed 0.75 denominator & default to 1.1 - SAC 02/11/22 (VCHP2)
+   "Set HVACSys:cseRSYS:rsFxCapH"      ResHVACSys:cseRSYS:rsFxCapH      =        ; VCHP2 - SAC 11/10/20  ; default 1.1->1.2 - SAC 02/25/22  ; disable when not autosizing and specify only when EnableResearchMode activated - SAC 03/03/22
+      {  if (IfValidAnd( HtPumpSystem[1]:AutoSize > 0 )==0) then  UNDEFINED
+         else if (ResProj:RunAbbrev == "zb" .OR. ResProj:RunAbbrev == "ab" .OR. ResProj:RunAbbrev == "s" .OR. ResProj:RunAbbrev == "smf" .OR. ResProj:RunAbbrev == "dr") 
+         then  if (ResProj:EnergyCodeYearNum < 2025)
+               then  0.75
+               else  1.1   endif
+         else if (IfValidAnd( Proj:EnableResearchMode > 0.5 ) .AND.
+                  IfValidAnd( HtPumpSystem[1]:HtgSizingFactor > 0 ))
+         then  HtPumpSystem[1]:HtgSizingFactor
+         else  1.1  endif endif endif  }
+      ;{  1.5  }      ; VCHP3 - SAC 05/16/24 (tic #1379)  ; removed and restored prior logic w/ mods to 1.1 for 2025 std + prop - SAC 05/21/24 (tic #1379)
+
+	"Set HVACSys:cseRSYS:rsParElec_x"	ResHVACSys:cseRSYS:rsParElec_x   =        ; VCHP2 - SAC 11/10/20
+      {  if (LocalStatus( HtPumpSystem[1]:ParElecExprs ))
+         then  HtPumpSystem[1]:ParElecExprs
+         else  UNCHANGED  endif  }
+
+   "Set HVACSys:cseRSYS:rsASHPLockOutT"      ResHVACSys:cseRSYS:rsASHPLockOutT =    ; SAC 09/05/24
+      {  if (IfValidAnd( HPLockoutTemp > -999 ))
+         then  HPLockoutTemp
+         else  UNDEFINED  endif  }
+
+   "Set HVACSys:cseRSYS:rsDefrostModel"   ResHVACSys:cseRSYS:rsDefrostModel  = {  "REVCYCLE"  }    ; turned back on - SAC 05/21/24 (tic #1379)
+
+;   "Remove HVACSys:cseRSYS:rsSEER"        ResHVACSys:cseRSYS:rsSEER     = {  UNDEFINED  }
+   "Remove HVACSys:cseRSYS:rsEER"         ResHVACSys:cseRSYS:rsEER      = {  UNDEFINED  }
+;   "Remove HVACSys:cseRSYS:rsHSPF"        ResHVACSys:cseRSYS:rsHSPF     = {  UNDEFINED  }
+   "Hardwire HVACSys:cseRSYS:rsCapAuxH"   ResHVACSys:cseRSYS:rsCapAuxH  = {  65000  }        ; updated 25k -> 65k per group conf. call - SAC 09/06/24
+
+   "Hardwire HVACSys:cseRSYS:rsCdH"       ResHVACSys:cseRSYS:rsCdH      =        ; SAC 09/09/24 (VCHP3)   ; updated to vary by HPSys data - SAC 09/18/24
+      {  if (IfValidAnd( HtPumpSystem[1]:HP3_Cd > 0 )) then  HtPumpSystem[1]:HP3_Cd  else  UNDEFINED  endif  }      
+   "Hardwire HVACSys:cseRSYS:rsCdC"       ResHVACSys:cseRSYS:rsCdC      = {  cseRSYS:rsCdH  } 
+
+   ; VCHP3 - SAC 05/16/24 (tic #1379)
+   "Set HVACSys:cseRSYS:rsPerfMapHtg"   ResHVACSys:cseRSYS:rsPerfMapHtg  = {  if (LocalCompAssigned( HtPumpSystem[1]:VCHP3PerfMapHtgRef ) < 1) then  UNDEFINED
+                                                                           else  HtPumpSystem[1]:VCHP3PerfMapHtgRef:Name  endif  }
+   "Set HVACSys:cseRSYS:rsPerfMapClg"   ResHVACSys:cseRSYS:rsPerfMapClg  = {  if (LocalCompAssigned( HtPumpSystem[1]:VCHP3PerfMapClgRef ) < 1) then  UNDEFINED
+                                                                           else  HtPumpSystem[1]:VCHP3PerfMapClgRef:Name  endif  }
+END
+;*************************************************************************
+
+
+;************************************************************************* - JP 11/03/22 (FPFC)
+RULELIST "HVACSys_SetupRSYS_CentralFPFC" 1 0 0 1
+;*************************************************************************
+; Since for FPFC the reading of rsSrcSideLoadMtr and rsLoadMtr will be the same
+; we use one for chill water system and the other for hot water system.
+; Heating and cooling loads are logged in both meters, but when export the data
+; we only export heating or cooling for each meter.
+
+   ; added rules to assign load submeters for zones w/ Mult > 1 - SAC 06/22/23 (tic #3392)
+   "Set ResHVACSys:cseRSYS:rsSrcSideLoadMtr by SUBmeter"  for:#ZGM=(2to20)  ResHVACSys:cseRSYS:rsSrcSideLoadMtr  =
+      {  if (IfValidAnd( MaxResZnGrpMult = #ZGM ) .AND. IfValidAnd( HVACCentralRef[1]:ChWFluidSysRef:CSELoadPassing > 0 ) .AND.
+             LocalCompAssigned( HVACCentralRef[1]:ChWFluidSysRef:CSE_LoadSubMeters[#ZGM] ) > 0)
+         then  HVACCentralRef[1]:ChWFluidSysRef:CSE_LoadSubMeters[#ZGM]
+         else  UNCHANGED  endif  } 
+   "Set ResHVACSys:cseRSYS:rsSrcSideLoadMtr"    ResHVACSys:cseRSYS:rsSrcSideLoadMtr  =
+      {  if (LocalCompAssigned( cseRSYS:rsSrcSideLoadMtr ) > 0) then  UNCHANGED
+         else if (LocalStatus( HVACCentralRef[1]:ChWFluidSysRef:CSE_LoadMeter ) > 0)
+         then  HVACCentralRef[1]:ChWFluidSysRef:CSE_LoadMeter
+         else  UNDEFINED  endif endif  } 
+
+   "Set ResHVACSys:cseRSYS:rsLoadMtr by SUBmeter"  for:#ZGM=(2to20)  ResHVACSys:cseRSYS:rsLoadMtr  =
+      {  if (IfValidAnd( MaxResZnGrpMult = #ZGM ) .AND. IfValidAnd( HVACCentralRef[1]:HWFluidSysRef:CSELoadPassing > 0 ) .AND.
+             LocalCompAssigned( HVACCentralRef[1]:HWFluidSysRef:CSE_LoadSubMeters[#ZGM] ) > 0)
+         then  HVACCentralRef[1]:HWFluidSysRef:CSE_LoadSubMeters[#ZGM]
+         else  UNCHANGED  endif  } 
+   "Set ResHVACSys:cseRSYS:rsLoadMtr"    ResHVACSys:cseRSYS:rsLoadMtr  =
+      {  if (LocalCompAssigned( cseRSYS:rsLoadMtr ) > 0) then  UNCHANGED
+         else if (LocalStatus( HVACCentralRef[1]:HWFluidSysRef:CSE_LoadMeter ) > 0)
+         then  HVACCentralRef[1]:HWFluidSysRef:CSE_LoadMeter
+         else  UNDEFINED  endif endif  } 
+
+; ResCentralHtgClgSys   User: "FPFC System"  
+;    HWFluidSysRef = RVal: "HWFluidSystem"
+;    ChWFluidSysRef = RVal: "ChWFluidSystem"
+; 
+; FluidSys   User: "HWFluidSystem"  
+;    CSE_LoadMeter = RVal: "LdMtr1"
+; 
+; FluidSys   User: "ChWFluidSystem
+;    CSE_LoadMeter = RVal: "LdMtr2"
+; 
+; LOADMETER   "LdMtr1"
+; LOADMETER   "LdMtr2"
+;
+;RSYS <name>
+;   rsType = "FANCOIL"                    // System type
+;   rsVfPerTon = 350                     // cfm/ton (default = 350)
+;   rsFanPwrH = 0.45                     // Heating fan power, w/cfm
+;   rsFanPwrC = 0.45                     // Cooling fan power, w/cfm
+;   AUTOSIZE rsCapH                      // or hardsized heating capacity, Btuh
+;   AUTOSIZE rsCapC                      // or hardsized cooling capacity, Btuh
+;   rsSHRtarget = .75                    // assumed cooling sensible heat ratio
+;   // rsParElec = 0                     // Parasitic electric use, W (always 0?)
+;   rsElecMtr = "MtrElec"                // Electric use meter
+;   rsFuelMtr = "MtrNatGas"              // Natural gas use meter
+;   rsLoadMtr = "LdMtr1"                 // Load meter (heat transfer to air accumulated here -- .qHtg and .qClg)
+;   rsSrcSideLoadMtr = "LdMtr2"          // Load meter (heat transfer to
+         
 END
 
 ;************************************************************************* - SAC 03/17/22 (WSHP)
@@ -996,10 +1577,19 @@ RULELIST "HVACSys_SetupRSYS_CentralWSHP" 1 0 0 1
                            HVACCentralRef[1]:CWFluidSysRef:FixedSupTemp, HVACCentralRef[1]:CWFluidSysRef:HtgFixedSupTemp )
          else  Format( "select(@RSYS[%c%s%c].modeLastActive == 2, min($tWbOSh + 10, $tdbOSh), default 59)", 34, cseRSYS:Name, 34 )
          endif  } 
-   "Set ResHVACSys:cseRSYS:rsSrcSideLoadMtr"    ResHVACSys:cseRSYS:rsSrcSideLoadMtr  =
-      {  if (LocalStatus( HVACCentralRef[1]:CWFluidSysRef:CSE_LoadMeter ) > 0)
+
+   ; added rule to assign load submeters for zones w/ Mult > 1 - SAC 05/26/23 (tic #3392)
+   ;"dbg" ResHVACSys:Action = { if (LocalStatus( HVACCentralRef[1]:CWFluidSysRef:CSE_LoadMeter ) > 0) then  PostMessageToLog( "run %s, sys '%s': about to set RSYS:rsSrcSideLoadMtr", Proj:RunAbbrev, Name )  else UNCHANGED endif }   ; debugging - SAC 05/26/23 (tic #3392)
+   "set ResHVACSys:cseRSYS:rsSrcSideLoadMtr by SUBmeter"  for:#ZGM=(2to20)  ResHVACSys:cseRSYS:rsSrcSideLoadMtr =
+      {  if (IfValidAnd( MaxResZnGrpMult = #ZGM ) .AND. IfValidAnd( HVACCentralRef[1]:CWFluidSysRef:CSELoadPassing > 0 ) .AND.
+             LocalCompAssigned( HVACCentralRef[1]:CWFluidSysRef:CSE_LoadSubMeters[#ZGM] ) > 0)
+         then  HVACCentralRef[1]:CWFluidSysRef:CSE_LoadSubMeters[#ZGM]
+         else  UNCHANGED  endif  }
+   "Set ResHVACSys:cseRSYS:rsSrcSideLoadMtr to main LoadMtr (if not already set above)"   ResHVACSys:cseRSYS:rsSrcSideLoadMtr  =
+      {  if (LocalCompAssigned( cseRSYS:rsSrcSideLoadMtr ) > 0) then  UNCHANGED
+         else if (LocalStatus( HVACCentralRef[1]:CWFluidSysRef:CSE_LoadMeter ) > 0)
          then  HVACCentralRef[1]:CWFluidSysRef:CSE_LoadMeter
-         else  UNDEFINED  endif  } 
+         else  UNDEFINED  endif endif  } 
 
 ;   rsTdbOut = select(@RSYS["rsys-WSHP HVACSys"].modeLastActive == 2, min($tWbOSh + 10, $tdbOSh), default 59)    // Source side temperature for performance corrections (heat = mode 1, cool = mode 2)
 ;   rsSrcSideLoadMtr = "MtrWSHPSrc"      // LOADMETER used to generate pland load profiles for condenser/boiler loops
@@ -1489,7 +2079,8 @@ RULELIST "Default_CSE_AirNet_ELA" 0 0 0 1
 ;*************************************************************************
 ; SAC 2/2/15 - moved here from following rulelist (SimPrep_CSE_AirNet) to facilitate review and mods in BypassRuleLimits scenarios (analysis R&D)
 ; SAC 7/11/20 - modified to better handle MFam zonal leakage
-	"Set ResProj:EffLeakageArea"		ResProj:EffLeakageArea		= {	Local( CondFloorArea ) * Local( ACH50 ) / (2 * 10000)  }    ; SAC 9/7/12 - restore original formula per write-up v7 // SAC 8/31/12 - revise formula per update in airnet write-up (rev 5->6)
+	"Set ResProj:EffLeakageArea"		ResProj:EffLeakageArea		= {	ValidOr( CondVolume, 0 ) * ACH50 * 0.00000917  }   ; update ELA calc for AirNetAlgorithm v14->15 - SAC 10/09/23 (Res tic #1252)
+                                                                     ;  Local( CondFloorAreaWithMult ) * Local( ACH50 ) / (2 * 10000)  }    ; SAC 9/7/12 - restore original formula per write-up v7 // SAC 8/31/12 - revise formula per update in airnet write-up (rev 5->6)  ; revised to ..WithMult - SAC 04/28/23 (tic #3392)
 	"Set ResProj:SlabRatio"				ResProj:SlabRatio				= {	if (BldgSlabFloorArea < 0.0001 .AND. BldgExtFloorArea < 0.0001 .AND.
 	                                                                BldgOZSlabFloorArea < 0.0001 .AND. BldgOZExtFloorArea < 0.0001) then  0
 																					else  (BldgSlabFloorArea + BldgOZSlabFloorArea) /
@@ -1569,7 +2160,7 @@ RULELIST "SimPrep_CSE_AirNet" 0 0 0 1
 ;																																(AllOrientations > 0.5 .AND. RunNumber < 5) ) ) then  UNCHANGED
    ; modified to prevent ForceDefault_CSE_AirNet_ELA when EnableResearchMode activated - SAC 12/02/20
 	"force-default of (possibly user-defined) AirNet properties"		ResProj:Action	= {	if ((BypassRuleLimits > 0.5 .OR. Proj:EnableResearchMode > 0.5) .AND. 
-	                                                                                          RunAbbrev != "s" .AND. RunAbbrev != "zb" .AND. RunAbbrev != "zb" .AND. ResProj:RunAbbrev != "smf" .AND. RunAbbrev != "dr") then  UNCHANGED
+	                                                                                          RunAbbrev != "s" .AND. RunAbbrev != "zb" .AND. RunAbbrev != "ab" .AND. ResProj:RunAbbrev != "smf" .AND. RunAbbrev != "dr") then  UNCHANGED
 																													else	EvalRulelist( "ForceDefault_CSE_AirNet_ELA" )  endif  }
 ; SAC 2/2/15 - moved various AirNet ELA setting rules from this rulelist to 'Default_CSE_AirNet_ELA' in order to facilitate review and mods in BypassRuleLimits scenarios (analysis R&D)
 	"Default various AirNet ELA settings"	ResProj:Action		= {	EvalRulelist( "Default_CSE_AirNet_ELA" )  }
@@ -1641,24 +2232,29 @@ RULELIST "SimPrep_CSE_AirNet" 0 0 0 1
 
 	"Setup AirNet ResZn IZXFER objects"			ResZn:Action		= {	if (Local( Type ) == 10) then  UNCHANGED		; Unconditioned
 																						else  EvalRulelist( "SimPrep_CSE_AirNet_Zone", 1 )  endif  }
-	"Setup AirNet ResZn IZXFER objects"		ResOtherZn:Action	= {	if (Local( Type ) == 10) then  UNCHANGED		; Unconditioned
-																						else  EvalRulelist( "SimPrep_CSE_AirNet_ResOtherZone", 1 )  endif  }
+	"Setup AirNet ResOtherZn IZXFER objects"		ResOtherZn:Action	= {	EvalRulelist( "SimPrep_CSE_AirNet_ResOtherZone", 1 )  }   ; revised to call for ALL (not just conditioned) zones - SAC 05/24/23
 
    "Setup airnet IZXFERs for CondZn/UncondZn vertical (wall) boundaries (when CSEVentAvailZonal)"   ResProj:Action =    ; SAC 12/01/20
       {  if (CSEVentAvailZonal)
          then  EvalRulelist( "SimPrep_CSE_AirNet_ZoneUncondZone_ByWall" )
          else  UNCHANGED  endif  }
 
-   "Setup MFam DwellingUnit HRV IAQ IZXFERs for individual fans"     DwellingUnit:Action  =     ; SAC 2/6/20 (tic #1174)
-      {  if (IfValidAnd( Proj:AnalysisVersion >= 190200 ) .AND. IfValidAnd( IAQHRVCFMxSRE[1] > 0 ) .AND. ResProj:IsMultiFamily > 0.5)
-         then  EvalRulelist( "Setup_HRVIAQ_IZXFERs_MFamDwellUnit", 0, "ResProj:HRVIAQ_IZXFER_DwellUnitRef" ) 
-         else  UNCHANGED  endif  }
+   ; revised to create Zone Balanced IXZFER MFam HRV using rulelist "SimPrep_CSE_AirNet_Zone"- JP 11/27/22 (tic #3425)
+;   "Setup MFam DwellingUnit HRV IAQ IZXFERs for individual fans"     DwellingUnit:Action  =     ; SAC 2/6/20 (tic #1174)
+;      {  if (IfValidAnd( Proj:AnalysisVersion >= 190200 ) .AND. IfValidAnd( IAQHRVCFMxSRE[1] > 0 ) .AND. ResProj:IsMultiFamily > 0.5)
+;         then  EvalRulelist( "Setup_HRVIAQ_IZXFERs_MFamDwellUnit", 0, "ResProj:HRVIAQ_IZXFER_DwellUnitRef" ) 
+;         else  UNCHANGED  endif  }
 
 	"Setup AirNet (other) IZXFER objects"		ResProj:Action		= {	EvalRulelist( "SimPrep_CSE_AirNet_Other" )  }
 
    ; SAC 10/19/20
-	"Create ResOtherZn:ExhaustIZXFERs[1] (exhaust)"		ResOtherZn:ExhaustIZXFERs[1]	= {	if (PrkgGarExhFlow <= 0 .OR. Area <= 0) then  UNCHANGED
-																														else  CreateComp( cseIZXFER, substr( Name, 0, 44 ) + "-Exhst" )  endif  }
+   ; add logic to PREVENT PrkgGarExhFlow IZXFERs for Non-Garage ResOtherZns - SAC 06/03/24
+   ;                          355 = "Parking Garage Area (Parking Zone and Ramps)"
+   ;                          356 = "Parking Garage Area (Daylight Adaptation Zones)"
+	"Create ResOtherZn:ExhaustIZXFERs[1] (exhaust)"		ResOtherZn:ExhaustIZXFERs[1]	=
+      {  if (PrkgGarExhFlow <= 0 .OR. Area <= 0) then  UNCHANGED
+         else if (SpcFunc != 355 .AND. SpcFunc != 356) then  UNCHANGED
+         else  CreateComp( cseIZXFER, substr( Name, 0, 44 ) + "-Exhst" )  endif endif  }
 	"Set ResOtherZn:ExhaustIZXFERs[1]:izNVType"			ResOtherZn:ExhaustIZXFERs[1]:izNVType		=	{	6  }		; AIRNETEXTFAN  - Fan from exterior to zone
 	"Set ResOtherZn:ExhaustIZXFERs[1]:izZn1"				ResOtherZn:ExhaustIZXFERs[1]:izZn1			=	{	CSE_ZONE  }
 	"Set ResOtherZn:ExhaustIZXFERs[1]:izVFmin"				ResOtherZn:ExhaustIZXFERs[1]:izVFmin			=	{	PrkgGarExhFlow * -1  }
@@ -1716,7 +2312,7 @@ RULELIST "SimPrep_CSE_AirNet_Zone" 0 0 0 1
 ;		"Set ResZn:WinHHTopUse[2]"		ResZn:WinHHTopUse[2]		= {	if (ResProj:IsMultiFamily > 0.5) then  WinHHTopUse[1]
 ;																						else  MaxAll( ResZn:WinHHTopUse[1] )  endif  }
 
-	"Set ResZn:WallHoleSize"			ResZn:WallHoleSize			= {	Local( ELA_XWall ) * 1.45 / 8  }
+	"Set ResZn:WallHoleSize"			ResZn:WallHoleSize			= {	Local( ELA_XWall ) / 8  }        ; removed 1.45 multiplier for AirNet Algorithm v14->15 update - SAC 10/09/23 (Res tic #1252)
 
 	"Create & setup ResZn:AirNetIZXFERs[1-6] iff WallHoleSize > 0"
 			ResZn:Action	 = {	if (WallHoleSize <= 0) then  UNCHANGED
@@ -1818,41 +2414,51 @@ RULELIST "SimPrep_CSE_AirNet_Zone" 0 0 0 1
    ; SAC 3/20/19 - added in references to new IAQCFMScaleFactor[3&4] - used by CEC in testing IAQ CFM limits (tic #1083)
    ; SAC 4/17/19 - removed references to new IAQCFMScaleFactor[3&4] from rules setting izFanElecPwr to ensure same W/CFM between Prop & Std models (tic #1083)
    ; SAC 12/16/19 - switched from Proj to Zone IAQCFMScaleFactors and added use of ResZn:IAQPwrScaleFactor
-  "Create ResZn:IAQVentAirNetIZXFERs[1] (supply)"   ResZn:IAQVentAirNetIZXFERs[1]	= {	if( (IAQCFM_Supply[1] <= 0 .OR. IAQPwr_Supply[1] <= 0 ) .AND. CentralSupplyCFM <= 0 ) then  UNCHANGED
+   ; JP 9/13/24 - adjusted object creation criteria to avoid the creation of system with 0 air flow (tic #3633)
+  "Create ResZn:IAQVentAirNetIZXFERs[1] (supply)"   ResZn:IAQVentAirNetIZXFERs[1]	= {	if( (IAQCFM_Supply[1] <= 1 .OR. IAQPwr_Supply[1] <= 1 ) .AND. CentralSupplyCFM <= 1 ) then  UNCHANGED
 																													                               else  CreateComp( cseIZXFER, substr( Name, 0, 44 ) + "-IAQFanS" )  endif  }
   "Set ResZn:IAQVentAirNetIZXFERs[1]:izNVType"      ResZn:IAQVentAirNetIZXFERs[1]:izNVType     = { if( CentralSupplyCFM > 0 ) then 11 else 6 endif }		; AIRNETEXTFAN  - Fan from exterior to zone
   "Set ResZn:IAQVentAirNetIZXFERs[1]:izZn1"         ResZn:IAQVentAirNetIZXFERs[1]:izZn1        = { CSE_ZONE  }
   "Set ResZn:IAQVentAirNetIZXFERs[1]:izDOAS"        ResZn:IAQVentAirNetIZXFERs[1]:izDOAS       = { if( CentralSupplyCFM > 0 ) then CentralVentSysRef:cseDOAS else UNDEFINED endif }
+  "Set ResZn:IAQVentAirNetIZXFERs[1]:izLinkedFlowMult"  ResZn:IAQVentAirNetIZXFERs[1]:izLinkedFlowMult  =         ; SAC 06/01/23 (tic #3392)
+      {  if( CentralExhaustCFM > 0 .AND. LocalCompAssigned( IAQVentAirNetIZXFERs[1]:izDOAS ) > 0 .AND.
+             IfValidAnd( Mult != 1.0 ) )
+         then  Mult  else  UNDEFINED  endif  }
   "Set ResZn:IAQVentAirNetIZXFERs[1]:izVFmin"       ResZn:IAQVentAirNetIZXFERs[1]:izVFmin      = { if( CentralSupplyCFM > 0 ) then CentralSupplyCFM else IAQCFM_Supply[1] * ValidOr( IAQCFMScaleFactor[1], 1 ) endif }
   "Set ResZn:IAQVentAirNetIZXFERs[1]:izVFmax"       ResZn:IAQVentAirNetIZXFERs[1]:izVFmax      = { if( CentralSupplyCFM > 0 ) then UNDEFINED else IAQCFM_Supply[1] * ValidOr( IAQCFMScaleFactor[1], 1 ) endif }
   "Set ResZn:IAQVentAirNetIZXFERs[1]:izFanVfDs"     ResZn:IAQVentAirNetIZXFERs[1]:izFanVfDs    = { if( CentralSupplyCFM > 0 ) then UNDEFINED else IAQCFM_Supply[1] * ValidOr( IAQCFMScaleFactor[1], 1 ) endif }
   "Set ResZn:IAQVentAirNetIZXFERs[1]:izFanElecPwr"  ResZn:IAQVentAirNetIZXFERs[1]:izFanElecPwr = { if( CentralSupplyCFM > 0 ) then UNDEFINED else IAQPwr_Supply[1] * ValidOr( IAQPwrScaleFactor[1], 1 ) / IAQCFM_Supply[1] endif }
-  "Set ResZn:IAQVentAirNetIZXFERs[1]:izFanMtr"      ResZn:IAQVentAirNetIZXFERs[1]:izFanMtr     = { if( CentralSupplyCFM > 0 ) then UNDEFINED else Proj:CSE_ElecMETER endif }
+  "Set ResZn:IAQVentAirNetIZXFERs[1]:izFanMtr"      ResZn:IAQVentAirNetIZXFERs[1]:izFanMtr     = { if( CentralSupplyCFM > 0 ) then UNDEFINED else CSE_ElecMETER endif }
   "Set ResZn:IAQVentAirNetIZXFERs[1]:izFanEndUse"   ResZn:IAQVentAirNetIZXFERs[1]:izFanEndUse  = { if( CentralSupplyCFM > 0 ) then UNDEFINED else "FANV" endif }
 
-  "Create ResZn:IAQVentAirNetIZXFERs[2] (exhaust)"  ResZn:IAQVentAirNetIZXFERs[2]	= {	if( (IAQCFM_Exhaust[1] <= 0 .OR. IAQPwr_Exhaust[1] <= 0) .AND. CentralExhaustCFM <= 0 ) then  UNCHANGED
+  "Create ResZn:IAQVentAirNetIZXFERs[2] (exhaust)"  ResZn:IAQVentAirNetIZXFERs[2]	= {	if( (IAQCFM_Exhaust[1] <= 1 .OR. IAQPwr_Exhaust[1] <= 1) .AND. CentralExhaustCFM <= 1 ) then  UNCHANGED
   																												                          	else  CreateComp( cseIZXFER, substr( Name, 0, 44 ) + "-IAQFanE" )  endif  }
   "Set ResZn:IAQVentAirNetIZXFERs[2]:izNVType"      ResZn:IAQVentAirNetIZXFERs[2]:izNVType     = { if( CentralExhaustCFM > 0 ) then 11 else 6 endif }		; AIRNETEXTFAN  - Fan from exterior to zone
   "Set ResZn:IAQVentAirNetIZXFERs[2]:izZn1"         ResZn:IAQVentAirNetIZXFERs[2]:izZn1			   = { CSE_ZONE }
   "Set ResZn:IAQVentAirNetIZXFERs[2]:izDOAS"        ResZn:IAQVentAirNetIZXFERs[2]:izDOAS       = { if( CentralExhaustCFM > 0 ) then CentralVentSysRef:cseDOAS else UNDEFINED endif }
+  "Set ResZn:IAQVentAirNetIZXFERs[2]:izLinkedFlowMult"  ResZn:IAQVentAirNetIZXFERs[2]:izLinkedFlowMult  =         ; SAC 06/01/23 (tic #3392)
+      {  if( CentralExhaustCFM > 0 .AND. LocalCompAssigned( IAQVentAirNetIZXFERs[2]:izDOAS ) > 0 .AND.
+             IfValidAnd( Mult != 1.0 ) )
+         then  Mult  else  UNDEFINED  endif  }
   "Set ResZn:IAQVentAirNetIZXFERs[2]:izVFmin"			  ResZn:IAQVentAirNetIZXFERs[2]:izVFmin      = { if( CentralExhaustCFM > 0 ) then -1 * CentralExhaustCFM else IAQCFM_Exhaust[1] * -1 * ValidOr( IAQCFMScaleFactor[1], 1 ) endif }
   "Set ResZn:IAQVentAirNetIZXFERs[2]:izVFmax"			  ResZn:IAQVentAirNetIZXFERs[2]:izVFmax      = { if( CentralExhaustCFM > 0 ) then UNDEFINED else IAQCFM_Exhaust[1] * -1 * ValidOr( IAQCFMScaleFactor[1], 1 ) endif }
   "Set ResZn:IAQVentAirNetIZXFERs[2]:izFanVfDs"     ResZn:IAQVentAirNetIZXFERs[2]:izFanVfDs    = { if( CentralExhaustCFM > 0 ) then UNDEFINED else IAQCFM_Exhaust[1] * ValidOr( IAQCFMScaleFactor[1], 1 ) endif }
   "Set ResZn:IAQVentAirNetIZXFERs[2]:izFanElecPwr"  ResZn:IAQVentAirNetIZXFERs[2]:izFanElecPwr = { if( CentralExhaustCFM > 0 ) then UNDEFINED else IAQPwr_Exhaust[1] * ValidOr( IAQPwrScaleFactor[1], 1 ) / IAQCFM_Exhaust[1] endif }
-  "Set ResZn:IAQVentAirNetIZXFERs[2]:izFanMtr"      ResZn:IAQVentAirNetIZXFERs[2]:izFanMtr     = { if( CentralExhaustCFM > 0 ) then UNDEFINED else Proj:CSE_ElecMETER endif }
+  "Set ResZn:IAQVentAirNetIZXFERs[2]:izFanMtr"      ResZn:IAQVentAirNetIZXFERs[2]:izFanMtr     = { if( CentralExhaustCFM > 0 ) then UNDEFINED else CSE_ElecMETER endif }
   "Set ResZn:IAQVentAirNetIZXFERs[2]:izFanEndUse"   ResZn:IAQVentAirNetIZXFERs[2]:izFanEndUse  = { if( CentralExhaustCFM > 0 ) then UNDEFINED else "FANV" endif}
 
    ; SAC 2/5/20 - mods to BYPASS creation of HRV IZXFER HERE for 2019.2.0+ - now needs to happen by individual zone & fan...
    ; revised to create Zone Balanced IZXFER if any Balanced-only fans assigned - SAC 7/25/20 (tic #1174)
-	"Create ResZn:IAQVentAirNetIZXFERs[3] (balanced)"	ResZn:IAQVentAirNetIZXFERs[3]	= {	if (IAQHRVCFM[1] <= 0 .OR. IAQHRVPwr[1] <= 0 .OR.
-	                                                                                           (IfValidAnd( Proj:AnalysisVersion >= 190200 ) .AND. IfValidAnd( IAQBalCFM[1] = 0 ))) then  UNCHANGED
+   ; revised to create Zone Balanced IXZFER MFam HRV - JP 11/27/22 (tic #3425)
+	"Create ResZn:IAQVentAirNetIZXFERs[3] (balanced)"	ResZn:IAQVentAirNetIZXFERs[3]	= {	if (IAQHRVCFM[1] <= 1 .OR. IAQHRVPwr[1] <= 1 .OR.
+	                                                                                           (IfValidAnd( Proj:AnalysisVersion >= 190200 ) .AND. ResProj:IsMultiFamily < 0.5 .AND. IfValidAnd( IAQBalCFM[1] <= 1 ))) then  UNCHANGED
 																														else  CreateComp( cseIZXFER, substr( Name, 0, 44 ) + "-IAQHRV" )  endif  }
 	"Set ResZn:IAQVentAirNetIZXFERs[3]:izNVType"			ResZn:IAQVentAirNetIZXFERs[3]:izNVType		=	{	10  }		; AIRNETHERV  - IAQ balanced / heat recovery ventilator
 	"Set ResZn:IAQVentAirNetIZXFERs[3]:izZn1"				ResZn:IAQVentAirNetIZXFERs[3]:izZn1			=	{	CSE_ZONE  }
-	"Set ResZn:IAQVentAirNetIZXFERs[3]:izFanVfDs"			ResZn:IAQVentAirNetIZXFERs[3]:izFanVfDs 	=	{	if (IfValidAnd( Proj:AnalysisVersion >= 190200 ))
+	"Set ResZn:IAQVentAirNetIZXFERs[3]:izFanVfDs"			ResZn:IAQVentAirNetIZXFERs[3]:izFanVfDs 	=	{	if (IfValidAnd( Proj:AnalysisVersion >= 190200 ) .AND. ResProj:IsMultiFamily < 0.5)
 	                                                                                                   then  IAQBalCFM[1] * ValidOr( IAQCFMScaleFactor[1], 1 )
 	                                                                                                   else  IAQHRVCFM[1] * ValidOr( IAQCFMScaleFactor[1], 1 )  endif       }
-	"Set ResZn:IAQVentAirNetIZXFERs[3]:izFanElecPwr"		ResZn:IAQVentAirNetIZXFERs[3]:izFanElecPwr	=	{	if (IfValidAnd( Proj:AnalysisVersion >= 190200 ))
+	"Set ResZn:IAQVentAirNetIZXFERs[3]:izFanElecPwr"		ResZn:IAQVentAirNetIZXFERs[3]:izFanElecPwr	=	{	if (IfValidAnd( Proj:AnalysisVersion >= 190200 ) .AND. ResProj:IsMultiFamily < 0.5)
 	                                                                                                   then  IAQBalPwr[1] * ValidOr( IAQPwrScaleFactor[1], 1 ) / IAQBalCFM[1]
 	                                                                                                   else  IAQHRVPwr[1] * ValidOr( IAQPwrScaleFactor[1], 1 ) / IAQHRVCFM[1]  endif   }
 	"Set ResZn:IAQVentAirNetIZXFERs[3]:izASEF"				ResZn:IAQVentAirNetIZXFERs[3]:izASEF			=
@@ -1867,7 +2473,7 @@ RULELIST "SimPrep_CSE_AirNet_Zone" 0 0 0 1
       {  if (IfValidAnd( IAQHRVCFMxSRE[1] > 0 ) .AND. IfValidAnd( IAQHRVCFMxASRE[1] >= IAQHRVCFMxSRE[1] ))
          then  (IAQHRVCFMxASRE[1] / (IAQHRVCFM[1] * ValidOr( IAQCFMScaleFactor[1], 1 ))) / 100
          else  UNDEFINED  endif  }
-	"Set ResZn:IAQVentAirNetIZXFERs[3]:izFanMtr"			ResZn:IAQVentAirNetIZXFERs[3]:izFanMtr  	=	{	Proj:CSE_ElecMETER  }
+	"Set ResZn:IAQVentAirNetIZXFERs[3]:izFanMtr"			ResZn:IAQVentAirNetIZXFERs[3]:izFanMtr  	=	{	CSE_ElecMETER  }
 	"Set ResZn:IAQVentAirNetIZXFERs[3]:izFanEndUse"		ResZn:IAQVentAirNetIZXFERs[3]:izFanEndUse	=	{	"FANV"          }
    ; SAC 2/5/20 - initiate rulelist calls to setup individual HRV IAQ IZXFERs by Fan... (tic #1174)
    "Setup SFam (main home) HRV IAQ IZXFERs for individual fans"      ResZn:Action  =
@@ -1884,7 +2490,7 @@ RULELIST "SimPrep_CSE_AirNet_Zone" 0 0 0 1
 	"Set ResZn:IAQVentAirNetIZXFERs[4]:izVFmax"			ResZn:IAQVentAirNetIZXFERs[4]:izVFmax   	=	{	IAQCFM_Supply[2] * ValidOr( IAQCFMScaleFactor[2], 1 )  }
 	"Set ResZn:IAQVentAirNetIZXFERs[4]:izFanVfDs"			ResZn:IAQVentAirNetIZXFERs[4]:izFanVfDs 	=	{	IAQCFM_Supply[2] * ValidOr( IAQCFMScaleFactor[2], 1 )  }
 	"Set ResZn:IAQVentAirNetIZXFERs[4]:izFanElecPwr"		ResZn:IAQVentAirNetIZXFERs[4]:izFanElecPwr	=	{	IAQPwr_Supply[2] * ValidOr( IAQPwrScaleFactor[2], 1 ) / IAQCFM_Supply[2]   }
-	"Set ResZn:IAQVentAirNetIZXFERs[4]:izFanMtr"			ResZn:IAQVentAirNetIZXFERs[4]:izFanMtr  	=	{	Proj:CSE_ElecMETER  }
+	"Set ResZn:IAQVentAirNetIZXFERs[4]:izFanMtr"			ResZn:IAQVentAirNetIZXFERs[4]:izFanMtr  	=	{	CSE_ElecMETER  }
 	"Set ResZn:IAQVentAirNetIZXFERs[4]:izFanEndUse"		ResZn:IAQVentAirNetIZXFERs[4]:izFanEndUse	=	{	"FANV"          }
 
 	"Create ResZn:IAQVentAirNetIZXFERs[5] (exhaust)"		ResZn:IAQVentAirNetIZXFERs[5]	= {	if (IAQCFM_Exhaust[2] <= 0 .OR. IAQPwr_Exhaust[2] <= 0) then  UNCHANGED
@@ -1895,13 +2501,13 @@ RULELIST "SimPrep_CSE_AirNet_Zone" 0 0 0 1
 	"Set ResZn:IAQVentAirNetIZXFERs[5]:izVFmax"			ResZn:IAQVentAirNetIZXFERs[5]:izVFmax   	=	{	IAQCFM_Exhaust[2] * -1 * ValidOr( IAQCFMScaleFactor[2], 1 )  }
 	"Set ResZn:IAQVentAirNetIZXFERs[5]:izFanVfDs"			ResZn:IAQVentAirNetIZXFERs[5]:izFanVfDs 	=	{	IAQCFM_Exhaust[2]      * ValidOr( IAQCFMScaleFactor[2], 1 )  }
 	"Set ResZn:IAQVentAirNetIZXFERs[5]:izFanElecPwr"		ResZn:IAQVentAirNetIZXFERs[5]:izFanElecPwr	=	{	IAQPwr_Exhaust[2]      * ValidOr( IAQPwrScaleFactor[2], 1 ) / IAQCFM_Exhaust[2]   }
-	"Set ResZn:IAQVentAirNetIZXFERs[5]:izFanMtr"			ResZn:IAQVentAirNetIZXFERs[5]:izFanMtr  	=	{	Proj:CSE_ElecMETER  }
+	"Set ResZn:IAQVentAirNetIZXFERs[5]:izFanMtr"			ResZn:IAQVentAirNetIZXFERs[5]:izFanMtr  	=	{	CSE_ElecMETER  }
 	"Set ResZn:IAQVentAirNetIZXFERs[5]:izFanEndUse"		ResZn:IAQVentAirNetIZXFERs[5]:izFanEndUse	=	{	"FANV"          }
 
    ; SAC 2/6/20 - mods to BYPASS creation of ADU HRV IZXFER HERE for 2019.2.0+ - now needs to happen by individual zone & fan...
    ; revised to create Zone Balanced IZXFER if any Balanced-only fans assigned - SAC 7/25/20 (tic #1174)
 	"Create ResZn:IAQVentAirNetIZXFERs[6] (balanced)"	ResZn:IAQVentAirNetIZXFERs[6]	= {	if (IAQHRVCFM[2] <= 0 .OR. IAQHRVPwr[2] <= 0 .OR.
-	                                                                                           (IfValidAnd( Proj:AnalysisVersion >= 190200 ) .AND. IfValidAnd( IAQBalCFM[2] = 0 ))) then  UNCHANGED
+	                                                                                           (IfValidAnd( Proj:AnalysisVersion >= 190200 ) .AND. ResProj:IsMultiFamily < 0.5 .AND. IfValidAnd( IAQBalCFM[2] = 0 ))) then  UNCHANGED
 																														else  CreateComp( cseIZXFER, substr( Name, 0, 40 ) + "-ADUIAQHRV" )  endif  }
 	"Set ResZn:IAQVentAirNetIZXFERs[6]:izNVType"			ResZn:IAQVentAirNetIZXFERs[6]:izNVType		=	{	10  }		; AIRNETHERV  - IAQ balanced / heat recovery ventilator
 	"Set ResZn:IAQVentAirNetIZXFERs[6]:izZn1"				ResZn:IAQVentAirNetIZXFERs[6]:izZn1			=	{	CSE_ZONE  }
@@ -1923,7 +2529,7 @@ RULELIST "SimPrep_CSE_AirNet_Zone" 0 0 0 1
       {  if (IfValidAnd( IAQHRVCFMxSRE[2] > 0 ) .AND. IfValidAnd( IAQHRVCFMxASRE[2] >= IAQHRVCFMxSRE[2] ))
          then  (IAQHRVCFMxASRE[2] / (IAQHRVCFM[2] * ValidOr( IAQCFMScaleFactor[2], 1 ))) / 100
          else  UNDEFINED  endif  }
-	"Set ResZn:IAQVentAirNetIZXFERs[6]:izFanMtr"			ResZn:IAQVentAirNetIZXFERs[6]:izFanMtr  	=	{	Proj:CSE_ElecMETER  }
+	"Set ResZn:IAQVentAirNetIZXFERs[6]:izFanMtr"			ResZn:IAQVentAirNetIZXFERs[6]:izFanMtr  	=	{	CSE_ElecMETER  }
 	"Set ResZn:IAQVentAirNetIZXFERs[6]:izFanEndUse"		ResZn:IAQVentAirNetIZXFERs[6]:izFanEndUse	=	{	"FANV"          }
    ; SAC 2/6/20 - initiate rulelist calls to setup individual ADU HRV IAQ IZXFERs by Fan... (tic #1174)
    "Setup ADU HRV IAQ IZXFERs for individual fans"    ResZn:Action  =
@@ -1943,7 +2549,7 @@ RULELIST "SimPrep_CSE_AirNet_Zone" 0 0 0 1
 ;	"Set ResZn:IAQVentAirNetIZXFERs[1]:izVFmax"			ResZn:IAQVentAirNetIZXFERs[1]:izVFmax   	=	{	IAQVentSystem:Fan:IAQCFM * CondFloorArea / IAQVentSystem:FloorAreaServed  }
 ;	"Set ResZn:IAQVentAirNetIZXFERs[1]:izFanVfDs"			ResZn:IAQVentAirNetIZXFERs[1]:izFanVfDs 	=	{	IAQVentSystem:Fan:IAQCFM * CondFloorArea / IAQVentSystem:FloorAreaServed  }
 ;	"Set ResZn:IAQVentAirNetIZXFERs[1]:izFanElecPwr"		ResZn:IAQVentAirNetIZXFERs[1]:izFanElecPwr	=	{	IAQVentSystem:Fan:WperCFMIAQ   }
-;	"Set ResZn:IAQVentAirNetIZXFERs[1]:izFanMtr"			ResZn:IAQVentAirNetIZXFERs[1]:izFanMtr  	=	{	Proj:CSE_ElecMETER  }
+;	"Set ResZn:IAQVentAirNetIZXFERs[1]:izFanMtr"			ResZn:IAQVentAirNetIZXFERs[1]:izFanMtr  	=	{	CSE_ElecMETER  }
 ;	"Set ResZn:IAQVentAirNetIZXFERs[1]:izFanEndUse"		ResZn:IAQVentAirNetIZXFERs[1]:izFanEndUse	=	{	"FANV"          }
 ;
 ;	"Create ResZn:IAQVentAirNetIZXFERs[2] (exhaust)"		ResZn:IAQVentAirNetIZXFERs[2]	= {	if (LocalCompAssigned( IAQVentSystem ) == 0) then  UNCHANGED
@@ -1957,7 +2563,7 @@ RULELIST "SimPrep_CSE_AirNet_Zone" 0 0 0 1
 ;	"Set ResZn:IAQVentAirNetIZXFERs[2]:izVFmax"			ResZn:IAQVentAirNetIZXFERs[2]:izVFmax   	=	{	IAQVentSystem:Fan:IAQCFM * -1 * CondFloorArea / IAQVentSystem:FloorAreaServed  }
 ;	"Set ResZn:IAQVentAirNetIZXFERs[2]:izFanVfDs"			ResZn:IAQVentAirNetIZXFERs[2]:izFanVfDs 	=	{	IAQVentSystem:Fan:IAQCFM      * CondFloorArea / IAQVentSystem:FloorAreaServed  }
 ;	"Set ResZn:IAQVentAirNetIZXFERs[2]:izFanElecPwr"		ResZn:IAQVentAirNetIZXFERs[2]:izFanElecPwr	=	{	IAQVentSystem:Fan:WperCFMIAQ   }
-;	"Set ResZn:IAQVentAirNetIZXFERs[2]:izFanMtr"			ResZn:IAQVentAirNetIZXFERs[2]:izFanMtr  	=	{	Proj:CSE_ElecMETER  }
+;	"Set ResZn:IAQVentAirNetIZXFERs[2]:izFanMtr"			ResZn:IAQVentAirNetIZXFERs[2]:izFanMtr  	=	{	CSE_ElecMETER  }
 ;	"Set ResZn:IAQVentAirNetIZXFERs[2]:izFanEndUse"		ResZn:IAQVentAirNetIZXFERs[2]:izFanEndUse	=	{	"FANV"          }
 
 ; SAC 4/18/13 - revised CoolVent whole house fan air net stuff to generate a single whole house fan per system, rather than per zone
@@ -2044,7 +2650,7 @@ RULELIST "SimPrep_CSE_AirNet_Zone_WholeHouseFan_ToAttic" 0 0 0 1
                      T24RClimateZoneCodeBase:WHFcfmdivisor( "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )  }
 
 	"Set ResZn:ClVentAirNetIZXFERs[1]:izFanElecPwr"		ResZn:ClVentAirNetIZXFERs[1]:izFanElecPwr	= {	ClVentPower[1] / ClVentAirFlow[1]   }
-	"Set ResZn:ClVentAirNetIZXFERs[1]:izFanMtr"			ResZn:ClVentAirNetIZXFERs[1]:izFanMtr  		= {	Proj:CSE_ElecMETER  }
+	"Set ResZn:ClVentAirNetIZXFERs[1]:izFanMtr"			ResZn:ClVentAirNetIZXFERs[1]:izFanMtr  		= {	CSE_ElecMETER  }
 	"Set ResZn:ClVentAirNetIZXFERs[1]:izFanEndUse"		ResZn:ClVentAirNetIZXFERs[1]:izFanEndUse	= {	"FANC"          }
 	   ; SAC 2/13/20 - rolled BACK following mod which caused confusion in testing when revising WHF modeling for 2019.2.0+ (tic #175)
 	   ;{  if (IfValidAnd( ResProj:EnableResearchMode > 0.5 ) .AND. GlobalStatus( ResProj:ClVentFanAvailExp ) > 0) then  "FAN"     ; SAC 1/10/20 - TEMPORARY logic to enable quicker ID of WHF energy use during testing (tic #1175)
@@ -2074,7 +2680,7 @@ RULELIST "SimPrep_CSE_AirNet_Zone_WholeHouseFan_ToOutside" 0 0 0 1
                      T24RClimateZoneCodeBase:WHFcfmdivisor( "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )  }
 
 	"Set ResZn:ClVentAirNetIZXFERs[1]:izFanElecPwr"		ResZn:ClVentAirNetIZXFERs[1]:izFanElecPwr	= {	ClVentPower[2] / ClVentAirFlow[2]   }
-	"Set ResZn:ClVentAirNetIZXFERs[1]:izFanMtr"			ResZn:ClVentAirNetIZXFERs[1]:izFanMtr  		= {	Proj:CSE_ElecMETER  }
+	"Set ResZn:ClVentAirNetIZXFERs[1]:izFanMtr"			ResZn:ClVentAirNetIZXFERs[1]:izFanMtr  		= {	CSE_ElecMETER  }
 	"Set ResZn:ClVentAirNetIZXFERs[1]:izFanEndUse"		ResZn:ClVentAirNetIZXFERs[1]:izFanEndUse	= {	"FANC"          }
 	   ; SAC 2/13/20 - rolled BACK following mod which caused confusion in testing when revising WHF modeling for 2019.2.0+ (tic #175)
 	   ;{  if (IfValidAnd( ResProj:EnableResearchMode > 0.5 ) .AND. GlobalStatus( ResProj:ClVentFanAvailExp ) > 0) then  "FAN"     ; SAC 1/10/20 - TEMPORARY logic to enable quicker ID of WHF energy use during testing (tic #1175)
@@ -2395,7 +3001,7 @@ RULELIST "SimPrep_CSE_AirNet_ResOtherZone" 0 0 0 1
    "Set ResOtherZn:ELA_XWall"				ResOtherZn:ELA_XWall				= {   ResProj:BldgELA_WallSF      * ValidOr( ResProj:NResLeakageRatio, 1 ) *  Local( ExtWallArea     )  }
    "Set ResOtherZn:ELA_Floor"				ResOtherZn:ELA_Floor				= {   ResProj:BldgELA_RaisedFlrSF * ValidOr( ResProj:NResLeakageRatio, 1 ) *  Local( ExtFloorArea    )  }
 
-	"Set ResOtherZn:WallHoleSize"			ResOtherZn:WallHoleSize			= {	ELA_XWall * 1.45 / 8  }
+	"Set ResOtherZn:WallHoleSize"			ResOtherZn:WallHoleSize			= {	ELA_XWall / 8  }        ; removed 1.45 multiplier for AirNet Algorithm v14->15 update - SAC 10/09/23 (Res tic #1252)
 
 	"Create & setup ResOtherZn:AirNetIZXFERs[1-6] iff WallHoleSize > 0"
 			ResOtherZn:Action	 = {	if (WallHoleSize <= 0) then  UNCHANGED
@@ -2464,6 +3070,14 @@ RULELIST "SimPrep_CSE_AirNet_ResOtherZone" 0 0 0 1
 ;	"Set ResOtherZn:GrgWallAirNetIZXFERs[2]:izExp"			ResOtherZn:GrgWallAirNetIZXFERs[2]:izExp  	=	{	0.65  }
 ;	"Set ResOtherZn:GrgWallAirNetIZXFERs[2]:izZN2"			ResOtherZn:GrgWallAirNetIZXFERs[2]:izZN2  	=	{	Global( ResGarage:CSE_ZONE )  }
 
+	"Setup AirNet ResOtherZn IZXFER objects"		ResOtherZn:Action	=        ; added rule to call ...Conditioned rules only for cons zones - SAC 05/24/23
+      {  if (Local( Type ) == 10) then  UNCHANGED		; Unconditioned
+         else  EvalRulelist( "SimPrep_CSE_AirNet_ResOtherZone_Conditioned", 1 )  endif  }
+END
+
+;************************************************************************* ; extracted from above to ensure above is run for Uncond zones - SAC 05/24/23
+RULELIST "SimPrep_CSE_AirNet_ResOtherZone_Conditioned" 0 0 0 1
+;*************************************************************************
  ;-----------------------
  ; AirNet for IAQ Ventilation
  ;-----------------------
@@ -2497,6 +3111,10 @@ RULELIST "SimPrep_CSE_AirNet_ResOtherZone" 0 0 0 1
   "Set ResOtherZn:IAQVentAirNetIZXFERs[1]:izNVType"      ResOtherZn:IAQVentAirNetIZXFERs[1]:izNVType     = { if( CentralSupplyCFM > 0 ) then 11 else 6 endif }		; AIRNETEXTFAN  - Fan from exterior to zone
   "Set ResOtherZn:IAQVentAirNetIZXFERs[1]:izZn1"         ResOtherZn:IAQVentAirNetIZXFERs[1]:izZn1        = { CSE_ZONE }
   "Set ResOtherZn:IAQVentAirNetIZXFERs[1]:izDOAS"        ResOtherZn:IAQVentAirNetIZXFERs[1]:izDOAS       = { if( CentralSupplyCFM > 0 ) then CentralVentSysRef:cseDOAS else UNDEFINED endif }
+  "Set ResOtherZn:IAQVentAirNetIZXFERs[1]:izLinkedFlowMult"  ResOtherZn:IAQVentAirNetIZXFERs[1]:izLinkedFlowMult  =        ; SAC 06/01/23 (tic #3392)
+      {  if( CentralExhaustCFM > 0 .AND. LocalCompAssigned( IAQVentAirNetIZXFERs[1]:izDOAS ) > 0 .AND.
+             IfValidAnd( Mult != 1.0 ) )
+         then  Mult  else  UNDEFINED  endif  }
   "Set ResOtherZn:IAQVentAirNetIZXFERs[1]:izVFmin"       ResOtherZn:IAQVentAirNetIZXFERs[1]:izVFmin      = { if( CentralSupplyCFM > 0 ) then CentralSupplyCFM else IAQCFM_Supply[1] * ValidOr( IAQCFMScaleFactor[1], 1 ) endif }
   "Set ResOtherZn:IAQVentAirNetIZXFERs[1]:izVFmax"       ResOtherZn:IAQVentAirNetIZXFERs[1]:izVFmax      = { if( CentralSupplyCFM > 0 ) then UNDEFINED else IAQCFM_Supply[1] * ValidOr( IAQCFMScaleFactor[1], 1 ) endif }
   "Set ResOtherZn:IAQVentAirNetIZXFERs[1]:izFanVfDs"     ResOtherZn:IAQVentAirNetIZXFERs[1]:izFanVfDs    = { if( CentralSupplyCFM > 0 ) then UNDEFINED else IAQCFM_Supply[1] * ValidOr( IAQCFMScaleFactor[1], 1 ) endif }
@@ -2511,6 +3129,10 @@ RULELIST "SimPrep_CSE_AirNet_ResOtherZone" 0 0 0 1
   "Set ResOtherZn:IAQVentAirNetIZXFERs[2]:izNVType"      ResOtherZn:IAQVentAirNetIZXFERs[2]:izNVType     = { if( CentralExhaustCFM > 0 ) then 11 else 6 endif }		; AIRNETEXTFAN  - Fan from exterior to zone
   "Set ResOtherZn:IAQVentAirNetIZXFERs[2]:izZn1"         ResOtherZn:IAQVentAirNetIZXFERs[2]:izZn1			= { CSE_ZONE }
   "Set ResOtherZn:IAQVentAirNetIZXFERs[2]:izDOAS"        ResOtherZn:IAQVentAirNetIZXFERs[2]:izDOAS       = { if( CentralExhaustCFM > 0 ) then CentralVentSysRef:cseDOAS else UNDEFINED endif }
+  "Set ResOtherZn:IAQVentAirNetIZXFERs[2]:izLinkedFlowMult"  ResOtherZn:IAQVentAirNetIZXFERs[2]:izLinkedFlowMult  =        ; SAC 06/01/23 (tic #3392)
+      {  if( CentralExhaustCFM > 0 .AND. LocalCompAssigned( IAQVentAirNetIZXFERs[2]:izDOAS ) > 0 .AND.
+             IfValidAnd( Mult != 1.0 ) )
+         then  Mult  else  UNDEFINED  endif  }
   "Set ResOtherZn:IAQVentAirNetIZXFERs[2]:izVFmin"			ResOtherZn:IAQVentAirNetIZXFERs[2]:izVFmin      = { if( CentralExhaustCFM > 0 ) then -1 * CentralExhaustCFM else IAQCFM_Exhaust[1] * -1 * ValidOr( IAQCFMScaleFactor[1], 1 ) endif }
   "Set ResOtherZn:IAQVentAirNetIZXFERs[2]:izVFmax"			ResOtherZn:IAQVentAirNetIZXFERs[2]:izVFmax      = { if( CentralExhaustCFM > 0 ) then UNDEFINED else IAQCFM_Exhaust[1] * -1 * ValidOr( IAQCFMScaleFactor[1], 1 ) endif }
   "Set ResOtherZn:IAQVentAirNetIZXFERs[2]:izFanVfDs"     ResOtherZn:IAQVentAirNetIZXFERs[2]:izFanVfDs    = { if( CentralExhaustCFM > 0 ) then UNDEFINED else IAQCFM_Exhaust[1] * ValidOr( IAQCFMScaleFactor[1], 1 ) endif }
@@ -2544,6 +3166,14 @@ RULELIST "SimPrep_CSE_AirNet_ResOtherZone" 0 0 0 1
 	"Set ResOtherZn:IAQVentAirNetIZXFERs[3]:izFanMtr"			ResOtherZn:IAQVentAirNetIZXFERs[3]:izFanMtr  	=	{	Proj:CSE_ElecMETER  }
 	"Set ResOtherZn:IAQVentAirNetIZXFERs[3]:izFanEndUse"		ResOtherZn:IAQVentAirNetIZXFERs[3]:izFanEndUse	=	{	"FANV"          }
 
+    ; added exhaust make up air source - JP 6/8/23 (ticket 3488)
+  "Create ResOtherZn:MakeupExhIZXFER"   ResOtherZn:MakeupExhIZXFER	= 
+      {  if( MakeupExhSrc = 1 .AND. MakeupExhCFM > 0 ) 
+         then CreateComp( cseIZXFER, substr( Name, 0, 44 ) + "-MakeupExh" )
+         else UNCHANGED endif  }
+	"Set ResOtherZn:MakeupExhIZXFER:izNVType"			ResOtherZn:MakeupExhIZXFER:izNVType		=	{	8 }		; AIRNETEXTFLOW - Specified flow from exterior to zone
+	"Set ResOtherZn:MakeupExhIZXFER:izZn1"				ResOtherZn:MakeupExhIZXFER:izZn1			=	{	CSE_ZONE }
+	"Set ResOtherZn:MakeupExhIZXFER:izVfMin"			ResOtherZn:MakeupExhIZXFER:izVfMin 	=	{	MakeupExhCFM }
 
 ; ;-----------------------
 ; ; AirNet for Cooling Ventilation (whole house fan / economizer / night breeze)
@@ -2760,13 +3390,13 @@ RULELIST "SimPrep_CSE_AirNet_Other" 0 0 0 1
    ;           		If ceiling below attic
 	;			ELA_Aceil(zone) = ELAceilsf * AceilGross(zone)  //knee walls to attic not included in determining the conditioned to attic leakage distribution of
 	;		If Whole House fan, Ceiling leak through WWF when off   
-	;		     	If Improved WHFAe = .05  //  This is Effective Area Ae, not ELA, so doesn't get the 1.45 conversion multiplier Rev 11
-	;		     	else  WHFAe = .11  // This is Effective Area Ae, not ELA, so doesn't get the 1.45 conversion multiplier Rev 11
+	;		     	If Improved WHFAe = .05  //  Rev 11
+	;		     	else  WHFAe = .11  // Rev 1
 	;      		If ceiling to outside
    ;             		ELA_Xceil(zone) = ELAceilsf * AEdge(zone) + area of exterior ceilings(zone) 
    ;       
-   ;         CeilHole     = (ELA_Aceil(zone) * 1.45) + WHFAe   //Ceil Hole size.  Conversion from ELA to airnet infiltration opening is 1.45* 					Rev 9
-   ;  		 CathCeilHole =  ELA_Xceil(zone) * 1.45       		//Cathedral Ceil  Hole size.  Conversion from ELA to airnet infiltration opening is 1.45* 	Rev 9
+   ;       CeilHole     = ELA_Aceil(zone) + WHFAe //Ceil Hole size.  Rev 9
+   ; 		  CathCeilHole = ELA_Xceil(zone)       //Cathedral Ceil  Hole size. Rev 9
    ;
    ;             Write Airnet Objects to CSE Input
    ;             
@@ -2835,14 +3465,14 @@ RULELIST "SimPrep_CSE_AirNet_Other" 0 0 0 1
 ;PostMessageToLog( "      setting CeilingBelowAttic:CeilAirNetIZXFER:izALo -- ResProj:BldgELA_CeilSF = %g / Area  = %g / ResZn:WHFanHole = %g / ClVentableArea = %g / ResZn:ClVentableClgArea = %g -- for ceiling '%s'",
 ;          ResProj:BldgELA_CeilSF, Area, ResZn:WHFanHole, ClVentableArea, ResZn:ClVentableClgArea, Name )  }
 
-	"Set CeilingBelowAttic:CeilAirNetIZXFER:izALo - xAttic"		CeilingBelowAttic:CeilAirNetIZXFER:izALo	 	=     ; added OtherZone NResLeakageRatio adjustment - SAC 11/30/20
+	"Set CeilingBelowAttic:CeilAirNetIZXFER:izALo - xAttic"		CeilingBelowAttic:CeilAirNetIZXFER:izALo	 	=     ; added OtherZone NResLeakageRatio adjustment - SAC 11/30/20   ; removed 1.45 multiplier for AirNet Algorithm v14->15 update - SAC 10/09/23 (Res tic #1252)
 			{		if (AtticZone:Type == 1 .OR. ClVentableArea < 0.1)
-					then	(ResProj:BldgELA_CeilSF * ClVentableClgArea* 1.45      ) * 10						; SAC 4/25/14 - crank up zone-attic hole for conditioned attics, since not sealed
+					then	(ResProj:BldgELA_CeilSF * ClVentableClgArea      ) * 10						; SAC 4/25/14 - crank up zone-attic hole for conditioned attics, since not sealed
 					else if (ParentComponentType() == "ResZn")
-					then	((ResProj:BldgELA_CeilSF *ClVentableClgArea* 1.45      ) + ResZn:WHFanHole )* ClVentableArea / ResZn:ClVentableClgArea  	; SAC 3/19/13 - excluded WHFanHole from 1.45 multiplication (from AirNetAlgorithm11.txt)
+					then	((ResProj:BldgELA_CeilSF *ClVentableClgArea      ) + ResZn:WHFanHole )* ClVentableArea / ResZn:ClVentableClgArea  	; SAC 3/19/13 - excluded WHFanHole from 1.45 multiplication (from AirNetAlgorithm11.txt)
 					else if (ParentComponentType() == "ResOtherZn")
-					then	((ResProj:BldgELA_CeilSF * ClVentableArea  * 1.45 * ValidOr( ResProj:NResLeakageRatio, 1 ))  )   	; SAC 9/19/19 - OtherZone (MFamProto)   ; SAC 11/30/20
-					else	(ResProj:BldgELA_CeilSF *ClVentableClgArea * 1.45      )+ WHFanHole 			; SAC 12/17/14 - generic IZXFER w/out any ClVent adjustment ??
+					then	((ResProj:BldgELA_CeilSF * ClVentableArea  * ValidOr( ResProj:NResLeakageRatio, 1 ))  )   	; SAC 9/19/19 - OtherZone (MFamProto)   ; SAC 11/30/20
+					else	(ResProj:BldgELA_CeilSF *ClVentableClgArea       ) + WHFanHole 			; SAC 12/17/14 - generic IZXFER w/out any ClVent adjustment ??
 					endif endif endif  }
 	"Set CeilingBelowAttic:CeilAirNetIZXFER:izHD - xAttic"		CeilingBelowAttic:CeilAirNetIZXFER:izHD   	= {	if (ParentComponentType() == "ResOtherZn") then  ResOtherZn:ZoneTopZ
 	                                                                                                               else  ResZn:ZoneTopZ  endif  }
@@ -2858,7 +3488,7 @@ RULELIST "SimPrep_CSE_AirNet_Other" 0 0 0 1
 ;"Post debug message"    ResZn:CeilAirNetIZXFER:Action = {
 ;PostMessageToLog( "      setting ResZn:CeilAirNetIZXFER:izALo -- ELA_XCeil= %g-- '%s'",
 ;          ELA_XCeil, Name )  }
-	"Set ResZn:CeilAirNetIZXFER:izALo - CC"			ResZn:CeilAirNetIZXFER:izALo	 	= {	ELA_XCeil * 1.45  }
+	"Set ResZn:CeilAirNetIZXFER:izALo - CC"			ResZn:CeilAirNetIZXFER:izALo	 	= {	ELA_XCeil  }      ; removed 1.45 multiplier for AirNet Algorithm v14->15 update - SAC 10/09/23 (Res tic #1252)
 	"Set ResZn:CeilAirNetIZXFER:izHD - CC"			ResZn:CeilAirNetIZXFER:izHD   		= {	ZoneTopZ  }
 	"Set ResZn:CeilAirNetIZXFER:izNVEff - CC"		ResZn:CeilAirNetIZXFER:izNVEff  	= {	1  }
 	"Set ResZn:CeilAirNetIZXFER:izExp - CC"			ResZn:CeilAirNetIZXFER:izExp   	= {	0.65  }
@@ -2868,7 +3498,7 @@ RULELIST "SimPrep_CSE_AirNet_Other" 0 0 0 1
 																															else  CreateComp( cseIZXFER, substr( Name, 0, 46 ) + "-CC" )  endif  }
 	"Set ResOtherZn:CeilAirNetIZXFER:izZn1 - CC"		ResOtherZn:CeilAirNetIZXFER:izZn1		= {	Local( CSE_ZONE )  }
 	"Set ResOtherZn:CeilAirNetIZXFER:izNVType - CC"	ResOtherZn:CeilAirNetIZXFER:izNVType	= {	4  }		; AIRNETEXT - Single opening to ambient
-	"Set ResOtherZn:CeilAirNetIZXFER:izALo - CC"		ResOtherZn:CeilAirNetIZXFER:izALo	 	= {	ELA_XCeil * 1.45  }
+	"Set ResOtherZn:CeilAirNetIZXFER:izALo - CC"		ResOtherZn:CeilAirNetIZXFER:izALo	 	= {	ELA_XCeil  }      ; removed 1.45 multiplier for AirNet Algorithm v14->15 update - SAC 10/09/23 (Res tic #1252)
 	"Set ResOtherZn:CeilAirNetIZXFER:izHD - CC"		ResOtherZn:CeilAirNetIZXFER:izHD   	= {	ZoneTopZ  }
 	"Set ResOtherZn:CeilAirNetIZXFER:izNVEff - CC"	ResOtherZn:CeilAirNetIZXFER:izNVEff  = {	1  }
 	"Set ResOtherZn:CeilAirNetIZXFER:izExp - CC"		ResOtherZn:CeilAirNetIZXFER:izExp   	= {	0.65  }
@@ -2897,27 +3527,27 @@ RULELIST "SimPrep_CSE_AirNet_Other" 0 0 0 1
  ;-----------------------
  ;      2.  ELAraisedFloorsf   = ELAtot* (.2* 1-SlabRatio)/( ExFloortotSF-ExFloorSlabSF)
  ;
- ;      e.  Floor over outside
- ;              For each floor over outside calculate       	     	
- ;                     ELAfloor(Name) = ELAraisedFloorsf * AreaExtfloor * 1.45   (floors whose outside condition is Ambiant)
- ;         Write Airnet Object to CSE Input
- ;            IZXFER (Name)  izNVTYPE = AirNetExt izZN1 = (ZoneName) izALo = ELAfloor(Name)  izHD = Floor Height izNVEff = 1 izExp=0.65 izCpr=0.  // located at the Extfloor elevation, no wind effect
- ;       
- ;      e.  Floor over Crawl
- ;              For each floor over outside calculate       	     	
- ;                     ELAfloor(Name) = ELAraisedFloorsf * AreaCrawlfloor * 1.45   (floors whose outside condition is  Crawl)
- ;         Write Airnet Object to CSE Input
- ;            IZXFER (Name)xCrawl  izNVTYPE = AirNetIZ izZN1=(ZoneName) izALo=ELAfloor(Name) izHD = Floor Height izNVEff=1. izExp=0.65 izZN2 = Crawl 
+ ;	     e.  Floor over outside
+ ;	            	For each floor over outside calculate       	     	
+ ;           	     		ELAfloor(Name) = ELAraisedFloorsf * AreaExtfloor   (floors whose outside condition is Ambient)
+ ;	     		Write Airnet Object to CSE Input
+ ;	     			IZXFER (Name)  izNVTYPE = AirNetExt izZN1 = (ZoneName) izALo = ELAfloor(Name)  izHD = Floor Height izNVEff = 1 izExp=0.65 izCpr=0.  // located at the Extfloor elevation, no wind effect
+ ;           
+ ;           e.  Floor over Crawl
+ ;	            	For each floor over outside calculate       	     	
+ ;           	     		ELAfloor(Name) = ELAraisedFloorsf * AreaCrawlfloor   (floors whose outside condition is  Crawl)
+ ;	     		Write Airnet Object to CSE Input
+ ;	     			IZXFER (Name)xCrawl  izNVTYPE = AirNetIZ izZN1=(ZoneName) izALo=ELAfloor(Name) izHD = Floor Height izNVEff=1. izExp=0.65 izZN2 = Crawl 
 
 ; duplicate (but now out incomplete) of formula used in rule in 'Default_CSE_AirNet_ELA' rulelist - SAC 7/12/20
 ;   "Set ResProj:BldgELA_RaisedFlrSF"	ResProj:BldgELA_RaisedFlrSF	= {   if (Local( BldgExtFloorArea ) < 0.0001) then  0
 ;																							else  Local( EffLeakageArea ) * (0.2 * (  1 - Local( SlabRatio ))) /  Local( BldgExtFloorArea )  endif  }
 
-   "Set ResExtFlr:FloorELA_Ext"      ResExtFlr:FloorELA_Ext      =    ; OtherZone adjustment - SAC 11/30/20
+   "Set ResExtFlr:FloorELA_Ext"      ResExtFlr:FloorELA_Ext      =    ; OtherZone adjustment - SAC 11/30/20   ; removed 1.45 multiplier for AirNet Algorithm v14->15 update - SAC 10/09/23 (Res tic #1252)
       {  if (IfValidAnd( Area > 0.1 )==0) then  -1
          else if (ParentComponentType() == "ResOtherZn")
-         then  ResProj:BldgELA_RaisedFlrSF * Area * 1.45 * ValidOr( ResProj:NResLeakageRatio, 1 )
-         else  ResProj:BldgELA_RaisedFlrSF * Area * 1.45
+         then  ResProj:BldgELA_RaisedFlrSF * Area * ValidOr( ResProj:NResLeakageRatio, 1 )
+         else  ResProj:BldgELA_RaisedFlrSF * Area
          endif endif  }
 	"Create ResExtFlr:AirNetIZXFER_Ext"			ResExtFlr:AirNetIZXFER_Ext				= {	if (Local( FloorELA_Ext ) < 0.00001) then  UNCHANGED
 																																	else  CreateComp( cseIZXFER, substr( Name, 0, 46 ) + "-Ext" )  endif  }
@@ -2930,11 +3560,11 @@ RULELIST "SimPrep_CSE_AirNet_Other" 0 0 0 1
 	"Set ResExtFlr:AirNetIZXFER_Ext:izExp"		ResExtFlr:AirNetIZXFER_Ext:izExp		= {	0.65  }
 	"Set ResExtFlr:AirNetIZXFER_Ext:izCpr"		ResExtFlr:AirNetIZXFER_Ext:izCpr		= {	0.0   }
 
-	"Set ResFlrOverCrawlSpc:FloorELA_Crawl"		ResFlrOverCrawlSpc:FloorELA_Crawl		=    ; OtherZone adjustment - SAC 11/30/20
+	"Set ResFlrOverCrawlSpc:FloorELA_Crawl"		ResFlrOverCrawlSpc:FloorELA_Crawl		=    ; OtherZone adjustment - SAC 11/30/20   ; removed 1.45 multiplier for AirNet Algorithm v14->15 update - SAC 10/09/23 (Res tic #1252)
       {  if (IfValidAnd( Area > 0.1 )==0) then  -1
          else if (ParentComponentType() == "ResOtherZn")
-         then  ResProj:BldgELA_RaisedFlrSF * Area * 1.45 * ValidOr( ResProj:NResLeakageRatio, 1 )
-         else  ResProj:BldgELA_RaisedFlrSF * Area * 1.45
+         then  ResProj:BldgELA_RaisedFlrSF * Area * ValidOr( ResProj:NResLeakageRatio, 1 )
+         else  ResProj:BldgELA_RaisedFlrSF * Area
          endif endif  }
 	"Create ResFlrOverCrawlSpc:AirNetIZXFER_Crl"			ResFlrOverCrawlSpc:AirNetIZXFER_Crl				= {	if (Local( FloorELA_Crawl ) < 0.00001 .OR. ComponentCount( CrawlSpace ) < 0.5) then  UNCHANGED
 																																	else  CreateComp( cseIZXFER, substr( Name, 0, 46 ) + "-Crawl" )  endif  }
@@ -2983,7 +3613,7 @@ RULELIST "SimPrep_CSE_AirNet_Other" 0 0 0 1
  ; - based on Floor of a conditioned zone -
 	"Set ResIntFlr:ELA_Floor"		ResIntFlr:ELA_Floor		 =    ; rev for OtherZone surfaces - SAC 11/30/20
       {	ResProj:BldgELA_GarageSF * (ParCndZnAdjUZnArea + ParUZnAdjCndZnArea +
-                                  (ValidOr( ResProj:NResLeakageRatio, 1 ) * (ParCndOZnAdjUZnArea + ParUZnAdjCndOZnArea))) * 1.45  }
+                                  (ValidOr( ResProj:NResLeakageRatio, 1 ) * (ParCndOZnAdjUZnArea + ParUZnAdjCndOZnArea)))  }        ; removed 1.45 multiplier for AirNet Algorithm v14->15 update - SAC 10/09/23 (Res tic #1252)
 	"Create CondZone/Garage IZXFER ResIntFlr:AirNetGarIZXFER"
 			ResIntFlr:AirNetGarIZXFER		= {	if (ELA_Floor < 0.000001) then  UNCHANGED
 																else  CreateComp( cseIZXFER, substr( Name, 0, 46 ) + "xGarage" )  endif  }
@@ -3005,7 +3635,7 @@ RULELIST "SimPrep_CSE_AirNet_Other" 0 0 0 1
 
  ; - based on Ceiling of a Garage zone -
 	"Set ResIntCeiling:ELA_Floor"		ResIntCeiling:ELA_Floor		 =    ; rev for OtherZone surfaces - SAC 11/30/20
-      {  ResProj:BldgELA_GarageSF * (ParUZnAdjCndZnArea + (ValidOr( ResProj:NResLeakageRatio, 1 ) * ParUZnAdjCndOZnArea)) * 1.45  }
+      {  ResProj:BldgELA_GarageSF * (ParUZnAdjCndZnArea + (ValidOr( ResProj:NResLeakageRatio, 1 ) * ParUZnAdjCndOZnArea))  }        ; removed 1.45 multiplier for AirNet Algorithm v14->15 update - SAC 10/09/23 (Res tic #1252)
 	"Create CondZone/Garage IZXFER ResIntCeiling:AirNetGarIZXFER"
 			ResIntCeiling:AirNetGarIZXFER	= {	if (ELA_Floor < 0.000001) then  UNCHANGED
 																else  CreateComp( cseIZXFER, substr( Name, 0, 46 ) + "xGarage" )  endif  }
@@ -3077,10 +3707,10 @@ RULELIST "SimPrep_CSE_AirNet_Other" 0 0 0 1
  ; AirNet for CrawlSpace zone
  ;-----------------------
  ;  from AirNetAlgorithm12.txt  (3/27/13)
- ;  	c.  Crawl space.  Has wall leakage plus optional vents.  3 types of vent.  Leakage = 10 sq.in. per 1,000 sq.ft. of floor area.  1.45 * 10/(144*1000)/ft2 of crawl.  (rev 12)
- ;  	             CrawlWallHeight DEFAULT IS 0.75 FT.  Need new input on Crawlspace screen.
- ;  		          Assume no stack inside crawl so all vents at top of foundation concrete wall, 8" above ground = 0.67  (rev 12)
- ;  		 Calculate  CrwlLeak = Sum of (Floor areas over Crawl) * 0.0001
+ ; 	c.  Crawl space.  Has wall leakage plus optional vents.  3 types of vent.  Leakage = 10 sq.in. per 1,000 sq.ft. of floor area.  10/(144*1000)/ft2 of crawl.  (rev 12)
+ ; 	             CrawlWallHeight DEFAULT IS 0.75 FT.  Need new input on Crawlspace screen.
+ ; 		          Assume no stack inside crawl so all vents at top of foundation concrete wall, 8" above ground = 0.67  (rev 12)
+ ; 		 Calculate  CrwlLeak = Sum of (Floor areas over Crawl) * 0.00007
  ;  		 Write Wall leakage objects:	      
  ;  		      IZXFER CrwlWu  izNVTYPE = AirNetExt izZN1 = (CrawlName) izALo = CrwlLeak/4  izHD = 0.67  izNVEff = 1 izExp=0.65 izCpr=0.6 
  ;  		      IZXFER CrwlWs  izNVTYPE = AirNetExt izZN1 = (CrawlName) izALo = CrwlLeak/2  izHD = 0.67  izNVEff = 1 izExp=0.65 izCpr=-.65
@@ -3095,7 +3725,7 @@ RULELIST "SimPrep_CSE_AirNet_Other" 0 0 0 1
  ;  			IZXFER CrwlVS  izNVTYPE = AirNetExt izZN1 = (CrawlName) izALo = CrwlVent/2  izHD = 10/12  izNVEff = .6 izExp=0.65 izCpr=-.65
  ;  			IZXFER CrwlVD  izNVTYPE = AirNetExt izZN1 = (CrawlName) izALo = CrwlVent/4  izHD = 10/12  izNVEff = .6 izExp=0.65 izCpr=-0.3
  ;-----------------------
-	"Set ResCrawlSpc:WallLeakageArea"		ResCrawlSpc:WallLeakageArea		= {	Area * 0.0001  }     ; for ver. 11 was:  Area / 14400  }
+	"Set ResCrawlSpc:WallLeakageArea"		ResCrawlSpc:WallLeakageArea		= {	Area * 0.00007  }     ; for ver. 11 was:  Area / 14400  }      ; updated 0.0001 multiplier to 0.00007 for AirNet Algorithm v14->15 update - SAC 10/09/23 (Res tic #1252)
 	"Set ResCrawlSpc:VentArea"				ResCrawlSpc:VentArea				= {	switch (Type)
 																										case 0 :	 Area /  150   ; "Normal (vented)"                   
 																										case 1 :  Area / 1500   ; "Insulated w/ Reduced Ventilation"  
@@ -3271,10 +3901,21 @@ RULELIST "SimPrep_CSE_AirNet_Other" 0 0 0 1
 	"Set ResOpening:AirNetIZXFER[2]:izZn2"			ResOpening:AirNetIZXFER[2]:izZn2		= {	Outside:CSE_ZONE  }
 
   ; AirNet for Stairway between Conditioned Zones (via floor or ceiling)
-	"Create ResIntCeiling:AirNetStairIZXFER"			ResIntCeiling:AirNetStairIZXFER		= {	if (InterCondZnArea < 0.5 .OR.
-																													;						(ResProj:IsMultiFamily > 0.5 .AND. IfValidAnd( OutsideDiffUnit > 0.5 ))) then  UNDEFINED
-																																			(IsPartySurface > 0.5 .AND. OtherSideModeled > 0.5 .AND. LocalCompAssigned( Outside ))) then  UNDEFINED
-																																	else CreateComp( cseIZXFER, substr( Parent( CSE_ZONE ), 0, 28 ) + "SCx" + substr( Outside:CSE_ZONE, 0, 28 ) + "SC")  endif  }
+      ; added logic to prevent stairwell AirNet holes when (a) zones on either side of wall are not the same type -OR- (b) when zones on either side are Not CommonlyMultiLevel -OR- (c) RezZns in ComRuleset - SAC 12/22/23
+	"Create ResIntCeiling:AirNetStairIZXFER"			ResIntCeiling:AirNetStairIZXFER		=
+      {	if (InterCondZnArea < 0.5 .OR. LocalCompAssigned( Outside ) < 1) then  UNDEFINED
+         else if ( LocalCompAssigned( Outside ) != ComponentType( ParentCompType ) ) then  UNDEFINED
+         else if ( IfValidAnd( ParentCompType = "ResOtherZn" ) .AND.
+                   LocalCompAssigned( Outside ) == ComponentType( ParentCompType ) )
+         then  if (IfValidAnd( CommonlyMultiLevel > 0 )==0 .OR. IfValidAnd( Outside:CommonlyMultiLevel > 0 )==0) then  UNDEFINED
+               else if (IsPartySurface > 0.5 .AND. OtherSideModeled > 0.5 .AND. LocalCompAssigned( Outside )) then  UNDEFINED
+			      else CreateComp( cseIZXFER, substr( Parent( CSE_ZONE ), 0, 28 ) + "SCx" + substr( Outside:CSE_ZONE, 0, 28 ) + "SC")
+               endif endif 
+         else if ( IfValidAnd( ParentCompType = "ResZn" ) .AND. IfValidAnd( Proj:IsComRuleset > 0 ) ) then  UNDEFINED
+         else if (IsPartySurface > 0.5 .AND. OtherSideModeled > 0.5 .AND. LocalCompAssigned( Outside )) then  UNDEFINED
+			else CreateComp( cseIZXFER, substr( Parent( CSE_ZONE ), 0, 28 ) + "SCx" + substr( Outside:CSE_ZONE, 0, 28 ) + "SC")
+         endif endif endif endif endif  }
+		;						(ResProj:IsMultiFamily > 0.5 .AND. IfValidAnd( OutsideDiffUnit > 0.5 ))) then  UNDEFINED
 	"Set ResIntCeiling:AirNetStairIZXFER:izNVType"	ResIntCeiling:AirNetStairIZXFER:izNVType	= {	5  }   ; AIRNETHORIZ - Horizontal (large) opening between two zones
 	"Set ResIntCeiling:AirNetStairIZXFER:izZn1"		ResIntCeiling:AirNetStairIZXFER:izZn1		= {	Parent( CSE_ZONE )  }
 	"Set ResIntCeiling:AirNetStairIZXFER:izZn2"		ResIntCeiling:AirNetStairIZXFER:izZn2		= {	Outside:CSE_ZONE  }
@@ -3282,11 +3923,21 @@ RULELIST "SimPrep_CSE_AirNet_Other" 0 0 0 1
 	"Set ResIntCeiling:AirNetStairIZXFER:izL2"			ResIntCeiling:AirNetStairIZXFER:izL2			= {	10  }
 	"Set ResIntCeiling:AirNetStairIZXFER:izHD"			ResIntCeiling:AirNetStairIZXFER:izHD			= {	max( Parent( Bottom ), Outside:Bottom )  }
 
-; SAC 6/5/13 - modified rule to REMOVE stairwell hole if this is a multifamily project and the Zone on the other side is that of a different dwelling unit
-	"Create ResIntFlr:AirNetStairIZXFER"				ResIntFlr:AirNetStairIZXFER			= {	if (InterCondZnArea < 0.5 .OR.
-																													;						(ResProj:IsMultiFamily > 0.5 .AND. IfValidAnd( OutsideDiffUnit > 0.5 ))) then  UNDEFINED
-																																			(IsPartySurface > 0.5 .AND. OtherSideModeled > 0.5 .AND. LocalCompAssigned( Outside ))) then  UNDEFINED
-																																	else CreateComp( cseIZXFER, substr( Outside:CSE_ZONE, 0, 28 ) + "Sx" + substr( Parent( CSE_ZONE ), 0, 28 ) + "S")  endif  }
+      ; SAC 6/5/13 - modified rule to REMOVE stairwell hole if this is a multifamily project and the Zone on the other side is that of a different dwelling unit
+	"Create ResIntFlr:AirNetStairIZXFER"				ResIntFlr:AirNetStairIZXFER			=
+      {	if (InterCondZnArea < 0.5 .OR. LocalCompAssigned( Outside ) < 1) then  UNDEFINED
+         else if ( LocalCompAssigned( Outside ) != ComponentType( ParentCompType ) ) then  UNDEFINED
+         else if ( IfValidAnd( ParentCompType = "ResOtherZn" ) .AND.
+                   LocalCompAssigned( Outside ) == ComponentType( ParentCompType ) )
+         then  if (IfValidAnd( CommonlyMultiLevel > 0 )==0 .OR. IfValidAnd( Outside:CommonlyMultiLevel > 0 )==0) then  UNDEFINED
+               else if (IsPartySurface > 0.5 .AND. OtherSideModeled > 0.5 .AND. LocalCompAssigned( Outside )) then  UNDEFINED
+			      else CreateComp( cseIZXFER, substr( Outside:CSE_ZONE, 0, 28 ) + "Sx" + substr( Parent( CSE_ZONE ), 0, 28 ) + "S")
+               endif endif 
+         else if ( IfValidAnd( ParentCompType = "ResZn" ) .AND. IfValidAnd( Proj:IsComRuleset > 0 ) ) then  UNDEFINED
+         else if (IsPartySurface > 0.5 .AND. OtherSideModeled > 0.5 .AND. LocalCompAssigned( Outside )) then  UNDEFINED
+			else CreateComp( cseIZXFER, substr( Outside:CSE_ZONE, 0, 28 ) + "Sx" + substr( Parent( CSE_ZONE ), 0, 28 ) + "S")
+         endif endif endif endif endif  }
+		;						(ResProj:IsMultiFamily > 0.5 .AND. IfValidAnd( OutsideDiffUnit > 0.5 ))) then  UNDEFINED
 	"Set ResIntFlr:AirNetStairIZXFER:izNVType"		ResIntFlr:AirNetStairIZXFER:izNVType		= {	5  }   ; AIRNETHORIZ - Horizontal (large) opening between two zones
 	"Set ResIntFlr:AirNetStairIZXFER:izZn1"			ResIntFlr:AirNetStairIZXFER:izZn1			= {	Outside:CSE_ZONE    }
 	"Set ResIntFlr:AirNetStairIZXFER:izZn2"			ResIntFlr:AirNetStairIZXFER:izZn2			= {	Parent( CSE_ZONE )  }
@@ -3300,7 +3951,7 @@ RULELIST "SimPrep_CSE_AirNet_Other" 0 0 0 1
  ;-----------------------
  ;  from Google Code issue #114   (6/6/13)
  ;  	Add an interzone airnet hole between any 2 zones where one or more party surfaces exist.
- ;    The hole size is the area of the party surface(s) in ft2 * 0.0005.
+ ;    The hole size is the area of the party surface(s) in ft2 * (0.0000036 between res zones or 0.000026 for res/nonres boundaries).
  ;    The Z of the hole should be the midheight of the Party surface(s).
  ;    The area of party surfaces between zones can be summed and one hole created or a a hole can be created for each surface individually.
  ;    Here is an example of the hole for a party floor:
@@ -3320,14 +3971,15 @@ RULELIST "SimPrep_CSE_AirNet_Other" 0 0 0 1
  ;-----------------------
  ; IntWall inter-party surface hole:
   ; SAC 10/7/13 - revised rule to ENSURE creation of PartySurface IZXFERs based on new party surface property (ResIntWall:IsPartySurface)
-   "Create ResIntWall:AirNetPrtySrfIZXFER[1]"            ResIntWall:AirNetPrtySrfIZXFER[1]      =        ; mods to include holes only when both sides Conditioned - SAC 11/30/20
-      {  if (Area < 0.1 .OR. InterCondWallHt < 0.1) then  UNCHANGED
+  ; mods to include holes only when both sides Conditioned - SAC 11/30/20
+   "Create ResIntWall:AirNetPrtySrfIZXFER[1]"            ResIntWall:AirNetPrtySrfIZXFER[1]      =        ; ignore conditioning status, don't require IsPartySurface when ResOtherZn on either side and ignore when Parent==Outside - SAC 08/24/23
+      {  if (Area < 0.1 .OR. InterCondWallHt < 0.1 .OR. LocalCompAssigned( CndUCndAirNetIZXFERs[1] ) > 0) then  UNCHANGED
       ;   else if (ResProj:IsMultiFamily > 0.5 .AND. OutsideDiffUnit > 0.5)
          else if ( (ParentComponentType() == "ResZn" .OR. ParentComponentType() == "ResOtherZn") .AND.
                    (LocalCompAssigned( Outside ) == ComponentType( "ResZn" ) .OR.
                     LocalCompAssigned( Outside ) == ComponentType( "ResOtherZn" )))
-         then  if (IsPartySurface > 0.5 .AND. OtherSideModeled > 0.5 .AND.
-                   Parent( Type ) < 10 .AND. Outside:Type < 10)
+         then  if (OtherSideModeled > 0.5 .AND. Parent( CSE_ZONE ) != Outside:CSE_ZONE .AND. (IsPartySurface > 0.5 .OR.
+                     ParentComponentType() == "ResOtherZn" .OR. LocalCompAssigned( Outside ) == ComponentType( "ResOtherZn" )))
                then  CreateComp( cseIZXFER, substr( Name, 0, 28 ) + "PSHx" + substr( Outside:Name, 0, 28 ) + "PSH")
                else  UNDEFINED  endif
          else  UNDEFINED  endif endif  }
@@ -3337,22 +3989,23 @@ RULELIST "SimPrep_CSE_AirNet_Other" 0 0 0 1
 	"Set ResIntWall:AirNetPrtySrfIZXFER[1]:izALo"			ResIntWall:AirNetPrtySrfIZXFER[1]:izALo		=     ; SAC 7/13/20
       {  if (ResProj:CSEVentAvailZonal)
          then  if (ParentComponentType() == "ResZn" .AND. LocalCompAssigned( Outside ) == ComponentType( "ResZn" ))
-               then  Area * ValidOr( ResProj:IntSurfHoleSzRatio[1], 0.0005 ) / 2
-               else  Area * ValidOr( ResProj:IntSurfHoleSzRatio[2], 0.0005 ) / 2
+               then  Area * ValidOr( ResProj:IntSurfHoleSzRatio[1], 0.0000036 ) / 2
+               else  Area * ValidOr( ResProj:IntSurfHoleSzRatio[2], 0.000026  ) / 2
                endif
          else  Area * 0.00025    endif  }
 	"Set ResIntWall:AirNetPrtySrfIZXFER[1]:izHD"				ResIntWall:AirNetPrtySrfIZXFER[1]:izHD			= {	max( Parent( Bottom ), Outside:Bottom ) + (InterCondWallHt * 0.75)  }
 	"Set ResIntWall:AirNetPrtySrfIZXFER[1]:izNVEff"			ResIntWall:AirNetPrtySrfIZXFER[1]:izNVEff		= {	 1.0   }
 	"Set ResIntWall:AirNetPrtySrfIZXFER[1]:izExp"			ResIntWall:AirNetPrtySrfIZXFER[1]:izExp		= {	 0.65  }
 
-   "Create ResIntWall:AirNetPrtySrfIZXFER[2]"            ResIntWall:AirNetPrtySrfIZXFER[2]      =        ; mods to include holes only when both sides Conditioned - SAC 11/30/20
-      {  if (Area < 0.1 .OR. InterCondWallHt < 0.1) then  UNCHANGED
+   ; mods to include holes only when both sides Conditioned - SAC 11/30/20
+   "Create ResIntWall:AirNetPrtySrfIZXFER[2]"            ResIntWall:AirNetPrtySrfIZXFER[2]      =        ; ignore conditioning status, don't require IsPartySurface when ResOtherZn on either side and ignore when Parent==Outside - SAC 08/24/23
+      {  if (Area < 0.1 .OR. InterCondWallHt < 0.1 .OR. LocalCompAssigned( CndUCndAirNetIZXFERs[1] ) > 0) then  UNCHANGED
       ;   else if (ResProj:IsMultiFamily > 0.5 .AND. OutsideDiffUnit > 0.5)
          else if ( (ParentComponentType() == "ResZn" .OR. ParentComponentType() == "ResOtherZn") .AND.
                    (LocalCompAssigned( Outside ) == ComponentType( "ResZn" ) .OR.
                     LocalCompAssigned( Outside ) == ComponentType( "ResOtherZn" )))
-         then  if (IsPartySurface > 0.5 .AND. OtherSideModeled > 0.5 .AND.
-                   Parent( Type ) < 10 .AND. Outside:Type < 10)
+         then  if (OtherSideModeled > 0.5 .AND. Parent( CSE_ZONE ) != Outside:CSE_ZONE .AND. (IsPartySurface > 0.5 .OR.
+                     ParentComponentType() == "ResOtherZn" .OR. LocalCompAssigned( Outside ) == ComponentType( "ResOtherZn" )))
                then  CreateComp( cseIZXFER, substr( Name, 0, 28 ) + "PSLx" + substr( Outside:Name, 0, 28 ) + "PSL")
                else  UNDEFINED  endif
          else  UNDEFINED  endif endif  }
@@ -3362,8 +4015,8 @@ RULELIST "SimPrep_CSE_AirNet_Other" 0 0 0 1
 	"Set ResIntWall:AirNetPrtySrfIZXFER[2]:izALo"			ResIntWall:AirNetPrtySrfIZXFER[2]:izALo		=     ; SAC 7/13/20
       {  if (ResProj:CSEVentAvailZonal)
          then  if (ParentComponentType() == "ResZn" .AND. LocalCompAssigned( Outside ) == ComponentType( "ResZn" ))
-               then  Area * ValidOr( ResProj:IntSurfHoleSzRatio[1], 0.0005 ) / 2
-               else  Area * ValidOr( ResProj:IntSurfHoleSzRatio[2], 0.0005 ) / 2
+               then  Area * ValidOr( ResProj:IntSurfHoleSzRatio[1], 0.0000036 ) / 2
+               else  Area * ValidOr( ResProj:IntSurfHoleSzRatio[2], 0.000026  ) / 2
                endif
          else  Area * 0.00025    endif  }
 	"Set ResIntWall:AirNetPrtySrfIZXFER[2]:izHD"				ResIntWall:AirNetPrtySrfIZXFER[2]:izHD			= {	max( Parent( Bottom ), Outside:Bottom ) + (InterCondWallHt * 0.25)  }
@@ -3371,55 +4024,128 @@ RULELIST "SimPrep_CSE_AirNet_Other" 0 0 0 1
 	"Set ResIntWall:AirNetPrtySrfIZXFER[2]:izExp"			ResIntWall:AirNetPrtySrfIZXFER[2]:izExp		= {	 0.65  }
  ;
  ; InteriorFloor inter-party surface hole:
-   "Create ResIntFlr:AirNetPrtySrfIZXFER"         ResIntFlr:AirNetPrtySrfIZXFER      =     ; mods to include holes only when both sides Conditioned - SAC 11/30/20
+   ; mods to include holes only when both sides Conditioned - SAC 11/30/20
+   ; ignore conditioning status, don't require IsPartySurface when ResOtherZn on either side and ignore when Parent==Outside - SAC 08/24/23
+   "Create ResIntFlr:AirNetPrtySrfIZXFER"         ResIntFlr:AirNetPrtySrfIZXFER      =     ; ignore OtherSideModeled (as long as both sides are CSE zones) and replace ResOtherZn check w/ one ensuring AirNetStairIZXFER undefined - SAC 12/24/23
       {  if (Area < 0.1) then  UNCHANGED
       ;   else if (ResProj:IsMultiFamily > 0.5 .AND. IfValidAnd( OutsideDiffUnit > 0.5 ))
          else if ( (ParentComponentType() == "ResZn" .OR. ParentComponentType() == "ResOtherZn") .AND.
                    (LocalCompAssigned( Outside ) == ComponentType( "ResZn" ) .OR.
                     LocalCompAssigned( Outside ) == ComponentType( "ResOtherZn" )))
-         then  if (IsPartySurface > 0.5 .AND. OtherSideModeled > 0.5 .AND.
-                   Parent( Type ) < 10 .AND. Outside:Type < 10)
+         then  if (Parent( CSE_ZONE ) != Outside:CSE_ZONE .AND. LocalCompAssigned( AirNetStairIZXFER ) < 1)
                then  CreateComp( cseIZXFER, substr( Outside:Name, 0, 28 ) + "PSx" + substr( Name, 0, 28 ) + "PS")
                else  UNCHANGED  endif
          else  UNCHANGED  endif endif  }
+         ; secondary if statement was (before 12/24/23):
+         ; then  if (OtherSideModeled > 0.5 .AND. Parent( CSE_ZONE ) != Outside:CSE_ZONE .AND. (IsPartySurface > 0.5 .OR.
+         ;             ParentComponentType() == "ResOtherZn" .OR. LocalCompAssigned( Outside ) == ComponentType( "ResOtherZn" )))
 	"Set ResIntFlr:AirNetPrtySrfIZXFER:izNVType"	ResIntFlr:AirNetPrtySrfIZXFER:izNVType	= {	3  }   ; AIRNETIZ - Single opening to another zone     -?->  5  }   ; AIRNETHORIZ - Horizontal (large) opening between two zones
 	"Set ResIntFlr:AirNetPrtySrfIZXFER:izZn1"		ResIntFlr:AirNetPrtySrfIZXFER:izZn1		= {	Outside:CSE_ZONE    }
 	"Set ResIntFlr:AirNetPrtySrfIZXFER:izZn2"		ResIntFlr:AirNetPrtySrfIZXFER:izZn2		= {	Parent( CSE_ZONE )  }
 	"Set ResIntFlr:AirNetPrtySrfIZXFER:izALo"		ResIntFlr:AirNetPrtySrfIZXFER:izALo		=     ; SAC 7/13/20
       {  if (ResProj:CSEVentAvailZonal)
          then  if (ParentComponentType() == "ResZn" .AND. LocalCompAssigned( Outside ) == ComponentType( "ResZn" ))
-               then  Area * ValidOr( ResProj:IntSurfHoleSzRatio[1], 0.0005 )
-               else  Area * ValidOr( ResProj:IntSurfHoleSzRatio[2], 0.0005 )
+               then  Area * ValidOr( ResProj:IntSurfHoleSzRatio[1], 0.0000036 )
+               else  Area * ValidOr( ResProj:IntSurfHoleSzRatio[2], 0.000026  )
                endif
-         else  Area * 0.0005    endif  }
+         else  Area * 0.000026     endif  }
 	"Set ResIntFlr:AirNetPrtySrfIZXFER:izHD"			ResIntFlr:AirNetPrtySrfIZXFER:izHD			= {	Parent( Bottom )  }
 	"Set ResIntFlr:AirNetPrtySrfIZXFER:izNVEff"		ResIntFlr:AirNetPrtySrfIZXFER:izNVEff		= {	1.0   }
 	"Set ResIntFlr:AirNetPrtySrfIZXFER:izExp"		ResIntFlr:AirNetPrtySrfIZXFER:izExp		= {	0.65  }
   ; SAC 8/25/14 - added InteriorCeiling IZXFER (based on int flr)
-   "Create ResIntCeiling:AirNetPrtySrfIZXFER"         ResIntCeiling:AirNetPrtySrfIZXFER      =    ; mods to include holes only when both sides Conditioned - SAC 11/30/20
+   ; mods to include holes only when both sides Conditioned - SAC 11/30/20
+   ; ignore conditioning status, don't require IsPartySurface when ResOtherZn on either side and ignore when Parent==Outside - SAC 08/24/23
+   "Create ResIntCeiling:AirNetPrtySrfIZXFER"         ResIntCeiling:AirNetPrtySrfIZXFER      =    ; ignore OtherSideModeled (as long as both sides are CSE zones) and replace ResOtherZn check w/ one ensuring AirNetStairIZXFER undefined - SAC 12/24/23
       {  if (Area < 0.1) then  UNCHANGED
       ;   else if (ResProj:IsMultiFamily > 0.5 .AND. IfValidAnd( OutsideDiffUnit > 0.5 ))
          else if ( (ParentComponentType() == "ResZn" .OR. ParentComponentType() == "ResOtherZn") .AND.
                    (LocalCompAssigned( Outside ) == ComponentType( "ResZn" ) .OR.
                     LocalCompAssigned( Outside ) == ComponentType( "ResOtherZn" )))
-         then  if (IsPartySurface > 0.5 .AND. OtherSideModeled > 0.5 .AND.
-                   Parent( Type ) < 10 .AND. Outside:Type < 10)
+         then  if (Parent( CSE_ZONE ) != Outside:CSE_ZONE .AND. LocalCompAssigned( AirNetStairIZXFER ) < 1)
                then  CreateComp( cseIZXFER, substr( Outside:Name, 0, 28 ) + "PSCx" + substr( Name, 0, 28 ) + "PSC")
                else  UNCHANGED  endif
          else  UNCHANGED  endif endif  }
+         ; secondary if statement was (before 12/24/23):
+         ; then  if (OtherSideModeled > 0.5 .AND. Parent( CSE_ZONE ) != Outside:CSE_ZONE .AND. (IsPartySurface > 0.5 .OR.
+         ;             ParentComponentType() == "ResOtherZn" .OR. LocalCompAssigned( Outside ) == ComponentType( "ResOtherZn" )))
 	"Set ResIntCeiling:AirNetPrtySrfIZXFER:izNVType"	ResIntCeiling:AirNetPrtySrfIZXFER:izNVType	= {	3  }   ; AIRNETIZ - Single opening to another zone     -?->  5  }   ; AIRNETHORIZ - Horizontal (large) opening between two zones
 	"Set ResIntCeiling:AirNetPrtySrfIZXFER:izZn1"		ResIntCeiling:AirNetPrtySrfIZXFER:izZn1		= {	Parent( CSE_ZONE )  }
 	"Set ResIntCeiling:AirNetPrtySrfIZXFER:izZn2"		ResIntCeiling:AirNetPrtySrfIZXFER:izZn2		= {	Outside:CSE_ZONE    }
 	"Set ResIntCeiling:AirNetPrtySrfIZXFER:izALo"		ResIntCeiling:AirNetPrtySrfIZXFER:izALo		=     ; SAC 7/13/20
       {  if (ResProj:CSEVentAvailZonal)
          then  if (ParentComponentType() == "ResZn" .AND. LocalCompAssigned( Outside ) == ComponentType( "ResZn" ))
-               then  Area * ValidOr( ResProj:IntSurfHoleSzRatio[1], 0.0005 )
-               else  Area * ValidOr( ResProj:IntSurfHoleSzRatio[2], 0.0005 )
+               then  Area * ValidOr( ResProj:IntSurfHoleSzRatio[1], 0.0000036 )
+               else  Area * ValidOr( ResProj:IntSurfHoleSzRatio[2], 0.000026  )
                endif
-         else  Area * 0.0005    endif  }
+         else  Area * 0.000026     endif  }
 	"Set ResIntCeiling:AirNetPrtySrfIZXFER:izHD"		ResIntCeiling:AirNetPrtySrfIZXFER:izHD		= {	Outside:Bottom  }		; Parent( Bottom )  }
 	"Set ResIntCeiling:AirNetPrtySrfIZXFER:izNVEff"	ResIntCeiling:AirNetPrtySrfIZXFER:izNVEff	= {	1.0   }
 	"Set ResIntCeiling:AirNetPrtySrfIZXFER:izExp"		ResIntCeiling:AirNetPrtySrfIZXFER:izExp		= {	0.65  }
+
+   ; added new IZXFERs to interior walls to serve as relief when no other IZXFERs present (for the surface) - SAC 09/30/23
+   ; revised -relief vent IZXFER logic to ensure creation if new SimWithReliefVent flag is set (and other IZXFERs not present) - SAC 02/02/24
+   "Create relief vent when needed: ResIntWall:AirNetReliefIZXFER"     ResIntWall:AirNetReliefIZXFER =
+      {  if (IfValidAnd( SimWithReliefVent > 0 )==0 .AND. IsPartySurface < 0.5 .AND. Parent( Name ) == ValidOr( Outside:Name, "zznullzz" )) then  UNDEFINED
+         else if (IfValidAnd( SimWithReliefVent > 0 )==0 .AND. IsPartySurface > 0.5 .AND. OtherSideModeled > 0.5 .AND. Parent( Name ) == ValidOr( Outside:Name, "zznullzz" )) then  UNDEFINED
+         else if (LocalCompAssigned( AirNetGarIZXFER ) > 0 .OR. LocalCompAssigned( AirNetDoorIZXFER[1] ) > 0 .OR. LocalCompAssigned( AirNetDoorIZXFER[2] ) > 0 .OR.
+                  LocalCompAssigned( AirNetPrtySrfIZXFER[1]  ) > 0 .OR. LocalCompAssigned( AirNetPrtySrfIZXFER[2]  ) > 0 .OR. 
+                  LocalCompAssigned( CndUCndAirNetIZXFERs[1] ) > 0 .OR. LocalCompAssigned( CndUCndAirNetIZXFERs[2] ) > 0) then  UNDEFINED
+         else  CreateComp( cseIZXFER, substr( Name, 0, 45 ) + "-relief" )
+         endif endif endif  }
+      ; population of IZXFER details based on rules for ResIntWall:AirNetPrtySrfIZXFER[*]
+   "Set ResIntWall:AirNetReliefIZXFER:izNVType"    ResIntWall:AirNetReliefIZXFER:izNVType = {   4  }     ; "AIRNETEXT" - Single opening to ambient
+   "Set ResIntWall:AirNetReliefIZXFER:izZn1"       ResIntWall:AirNetReliefIZXFER:izZn1    = {   Parent( CSE_ZONE )  }
+   "Set ResIntWall:AirNetReliefIZXFER:izALo"       ResIntWall:AirNetReliefIZXFER:izALo    =  
+      {  if (ResProj:CSEVentAvailZonal)
+         then  Area * ValidOr( ResProj:IntSurfHoleSzRatio[2], 0.000026  )
+         else  Area * 0.000026     endif  }
+   "Set ResIntWall:AirNetReliefIZXFER:izHD"        ResIntWall:AirNetReliefIZXFER:izHD     = {   Parent( Bottom ) + (max( InterCondWallHt, CeilingHeight ) * 0.5)  }
+   "Set ResIntWall:AirNetReliefIZXFER:izNVEff"     ResIntWall:AirNetReliefIZXFER:izNVEff  = {    1.0   }
+   "Set ResIntWall:AirNetReliefIZXFER:izExp"       ResIntWall:AirNetReliefIZXFER:izExp    = {    0.65  }
+   "Set ResIntWall:AirNetReliefIZXFER:izTEx_x"     ResIntWall:AirNetReliefIZXFER:izTEx_x  = {  Format( "@zone[%c%s%c].tzls", 34, CSE_ZONE:Name, 34 )  }
+   "Set ResIntWall:AirNetReliefIZXFER:izWEx_x"     ResIntWall:AirNetReliefIZXFER:izWEx_x  = {  Format( "@zone[%c%s%c].wzls", 34, CSE_ZONE:Name, 34 )  }
+
+   ; added new IZXFERs to interior floors & ceilings to serve as relief when no other IZXFERs present (for the surface) - SAC 10/02/23
+   ; revised -relief vent IZXFER logic to ensure creation if new SimWithReliefVent flag is set (and other IZXFERs not present) - SAC 02/02/24
+   "Create relief vent when needed: ResIntFlr:AirNetReliefIZXFER"    ResIntFlr:AirNetReliefIZXFER =
+      {  if (IfValidAnd( SimWithReliefVent > 0 )==0 .AND. IsPartySurface < 0.5 .AND. Parent( Name ) == ValidOr( Outside:Name, "zznullzz" )) then  UNDEFINED
+         else if (IfValidAnd( SimWithReliefVent > 0 )==0 .AND. IsPartySurface > 0.5 .AND. OtherSideModeled > 0.5 .AND. Parent( Name ) == ValidOr( Outside:Name, "zznullzz" )) then  UNDEFINED
+         else if (Area < 0.1 .OR. LocalCompAssigned( AirNetGarIZXFER ) > 0 .OR. LocalCompAssigned( AirNetPrtySrfIZXFER ) > 0 .OR.
+                  LocalCompAssigned( AirNetStairIZXFER[1] ) > 0 .OR. LocalCompAssigned( AirNetStairIZXFER[2] ) > 0) then  UNDEFINED
+         else  CreateComp( cseIZXFER, substr( Name, 0, 45 ) + "-relief" )
+         endif endif endif  }
+      ; population of IZXFER details based on rules for ResIntFlr:AirNetPrtySrfIZXFER
+   "Set ResIntFlr:AirNetReliefIZXFER:izNVType"     ResIntFlr:AirNetReliefIZXFER:izNVType = {   4  }     ; "AIRNETEXT" - Single opening to ambient
+   "Set ResIntFlr:AirNetReliefIZXFER:izZn1"        ResIntFlr:AirNetReliefIZXFER:izZn1    = {   Parent( CSE_ZONE )  }
+   "Set ResIntFlr:AirNetReliefIZXFER:izALo"        ResIntFlr:AirNetReliefIZXFER:izALo    =  
+      {  if (ResProj:CSEVentAvailZonal)
+         then  Area * ValidOr( ResProj:IntSurfHoleSzRatio[2], 0.000026  )
+         else  Area * 0.000026     endif  }
+   "Set ResIntFlr:AirNetReliefIZXFER:izHD"         ResIntFlr:AirNetReliefIZXFER:izHD     = {   Parent( Bottom )  }
+   "Set ResIntFlr:AirNetReliefIZXFER:izNVEff"      ResIntFlr:AirNetReliefIZXFER:izNVEff  = {    1.0   }
+   "Set ResIntFlr:AirNetReliefIZXFER:izExp"        ResIntFlr:AirNetReliefIZXFER:izExp    = {    0.65  }
+   "Set ResIntFlr:AirNetReliefIZXFER:izTEx_x"      ResIntFlr:AirNetReliefIZXFER:izTEx_x  = {  Format( "@zone[%c%s%c].tzls", 34, CSE_ZONE:Name, 34 )  }
+   "Set ResIntFlr:AirNetReliefIZXFER:izWEx_x"      ResIntFlr:AirNetReliefIZXFER:izWEx_x  = {  Format( "@zone[%c%s%c].wzls", 34, CSE_ZONE:Name, 34 )  }
+
+   "Create relief vent when needed: ResIntCeiling:AirNetReliefIZXFER"   ResIntCeiling:AirNetReliefIZXFER =
+      {  if (IfValidAnd( SimWithReliefVent > 0 )==0 .AND. IsPartySurface < 0.5 .AND. Parent( Name ) == ValidOr( Outside:Name, "zznullzz" )) then  UNDEFINED
+         else if (IfValidAnd( SimWithReliefVent > 0 )==0 .AND. IsPartySurface > 0.5 .AND. OtherSideModeled > 0.5 .AND. Parent( Name ) == ValidOr( Outside:Name, "zznullzz" )) then  UNDEFINED
+         else if (Area < 0.1 .OR. LocalCompAssigned( AirNetGarIZXFER ) > 0 .OR. LocalCompAssigned( AirNetPrtySrfIZXFER ) > 0 .OR.
+                  LocalCompAssigned( AirNetStairIZXFER[1] ) > 0 .OR. LocalCompAssigned( AirNetStairIZXFER[2] ) > 0) then  UNDEFINED
+         else  CreateComp( cseIZXFER, substr( Name, 0, 45 ) + "-relief" )
+         endif endif endif  }
+      ; population of IZXFER details based on rules for ResIntCeiling:AirNetPrtySrfIZXFER
+   "Set ResIntCeiling:AirNetReliefIZXFER:izNVType"    ResIntCeiling:AirNetReliefIZXFER:izNVType = {   4  }     ; "AIRNETEXT" - Single opening to ambient
+   "Set ResIntCeiling:AirNetReliefIZXFER:izZn1"       ResIntCeiling:AirNetReliefIZXFER:izZn1    = {   Parent( CSE_ZONE )  }
+   "Set ResIntCeiling:AirNetReliefIZXFER:izALo"       ResIntCeiling:AirNetReliefIZXFER:izALo    =  
+      {  if (ResProj:CSEVentAvailZonal)
+         then  Area * ValidOr( ResProj:IntSurfHoleSzRatio[2], 0.000026  )
+         else  Area * 0.000026     endif  }
+   "Set ResIntCeiling:AirNetReliefIZXFER:izHD"        ResIntCeiling:AirNetReliefIZXFER:izHD     = {   Parent( Bottom ) + Parent( CeilingHeight )  }
+   "Set ResIntCeiling:AirNetReliefIZXFER:izNVEff"     ResIntCeiling:AirNetReliefIZXFER:izNVEff  = {    1.0   }
+   "Set ResIntCeiling:AirNetReliefIZXFER:izExp"       ResIntCeiling:AirNetReliefIZXFER:izExp    = {    0.65  }
+   "Set ResIntCeiling:AirNetReliefIZXFER:izTEx_x"     ResIntCeiling:AirNetReliefIZXFER:izTEx_x  = {  Format( "@zone[%c%s%c].tzls", 34, CSE_ZONE:Name, 34 )  }
+   "Set ResIntCeiling:AirNetReliefIZXFER:izWEx_x"     ResIntCeiling:AirNetReliefIZXFER:izWEx_x  = {  Format( "@zone[%c%s%c].wzls", 34, CSE_ZONE:Name, 34 )  }
 
 END
 
@@ -3512,9 +4238,9 @@ RULELIST "SimPrep_CSE_AirNet_Attic_Conditioned" 1 0 0 0
 	"Set ResAttic:AirNetIZXFERs[2]:izZn1 - S"			ResAttic:AirNetIZXFERs[2]:izZn1	= {	Local( CSE_ZONE )  }
 	"Set ResAttic:AirNetIZXFERs[3]:izZn1 - D"			ResAttic:AirNetIZXFERs[3]:izZn1	= {	Local( CSE_ZONE )  }
 
-	"Set ResAttic:AirNetIZXFERs[1]:izALo - U"			ResAttic:AirNetIZXFERs[1]:izALo	= {	ResProj:BldgELA_CeilSF * FloorArea * 1.45 * 0.25  }
-	"Set ResAttic:AirNetIZXFERs[2]:izALo - S"			ResAttic:AirNetIZXFERs[2]:izALo	= {	ResProj:BldgELA_CeilSF * FloorArea * 1.45 * 0.5   }
-	"Set ResAttic:AirNetIZXFERs[3]:izALo - D"			ResAttic:AirNetIZXFERs[3]:izALo	= {	ResProj:BldgELA_CeilSF * FloorArea * 1.45 * 0.25  }
+	"Set ResAttic:AirNetIZXFERs[1]:izALo - U"			ResAttic:AirNetIZXFERs[1]:izALo	= {	ResProj:BldgELA_CeilSF * FloorArea * 0.25  }       ; removed 1.45 multiplier for AirNet Algorithm v14->15 update - SAC 10/09/23 (Res tic #1252)
+	"Set ResAttic:AirNetIZXFERs[2]:izALo - S"			ResAttic:AirNetIZXFERs[2]:izALo	= {	ResProj:BldgELA_CeilSF * FloorArea * 0.5   }
+	"Set ResAttic:AirNetIZXFERs[3]:izALo - D"			ResAttic:AirNetIZXFERs[3]:izALo	= {	ResProj:BldgELA_CeilSF * FloorArea * 0.25  }
 
 	"Set ResAttic:AirNetIZXFERs[1]:izHD - U"			ResAttic:AirNetIZXFERs[1]:izHD	= {	max( 0.1, Local( Bottom ) )  }
 	"Set ResAttic:AirNetIZXFERs[2]:izHD - S"			ResAttic:AirNetIZXFERs[2]:izHD	= {	max( 0.1, Local( Bottom ) )  }
@@ -4398,7 +5124,7 @@ RULELIST "Setup_HRVIAQ_IZXFERs_MFamDwellUnit" 1 0 0 0
           {  HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[1]:AdjSensRecovEff *
              HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[1]:FanHeatRecovMult / 100  }
    "Set ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[1]:HRV_IZXFERRef:izFanMtr"
-        ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[1]:HRV_IZXFERRef:izFanMtr     = {  Proj:CSE_ElecMETER  }
+        ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[1]:HRV_IZXFERRef:izFanMtr     = {  HRVIAQ_IZXFER_ZoneRef:CSE_ElecMETER  }   ; was: Proj:CSE_ElecMETER / fixes bug where HRV energy not tracked by CUAC unit type meters - SAC 12/06/22
    "Set ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[1]:HRV_IZXFERRef:izFanEndUse"
         ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[1]:HRV_IZXFERRef:izFanEndUse  = {  "FANV"  }
 
@@ -4436,7 +5162,7 @@ RULELIST "Setup_HRVIAQ_IZXFERs_MFamDwellUnit" 1 0 0 0
           {  HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[2]:AdjSensRecovEff *
              HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[2]:FanHeatRecovMult / 100  }
    "Set ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[2]:HRV_IZXFERRef:izFanMtr"
-        ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[2]:HRV_IZXFERRef:izFanMtr     = {  Proj:CSE_ElecMETER  }
+        ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[2]:HRV_IZXFERRef:izFanMtr     = {  HRVIAQ_IZXFER_ZoneRef:CSE_ElecMETER  }   ; was: Proj:CSE_ElecMETER / fixes bug where HRV energy not tracked by CUAC unit type meters - SAC 12/06/22
    "Set ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[2]:HRV_IZXFERRef:izFanEndUse"
         ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[2]:HRV_IZXFERRef:izFanEndUse  = {  "FANV"  }
 
@@ -4474,7 +5200,7 @@ RULELIST "Setup_HRVIAQ_IZXFERs_MFamDwellUnit" 1 0 0 0
           {  HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[3]:AdjSensRecovEff *
              HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[3]:FanHeatRecovMult / 100  }
    "Set ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[3]:HRV_IZXFERRef:izFanMtr"
-        ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[3]:HRV_IZXFERRef:izFanMtr     = {  Proj:CSE_ElecMETER  }
+        ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[3]:HRV_IZXFERRef:izFanMtr     = {  HRVIAQ_IZXFER_ZoneRef:CSE_ElecMETER  }   ; was: Proj:CSE_ElecMETER / fixes bug where HRV energy not tracked by CUAC unit type meters - SAC 12/06/22
    "Set ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[3]:HRV_IZXFERRef:izFanEndUse"
         ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[3]:HRV_IZXFERRef:izFanEndUse  = {  "FANV"  }
 
@@ -4512,7 +5238,7 @@ RULELIST "Setup_HRVIAQ_IZXFERs_MFamDwellUnit" 1 0 0 0
           {  HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[4]:AdjSensRecovEff *
              HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[4]:FanHeatRecovMult / 100  }
    "Set ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[4]:HRV_IZXFERRef:izFanMtr"
-        ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[4]:HRV_IZXFERRef:izFanMtr     = {  Proj:CSE_ElecMETER  }
+        ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[4]:HRV_IZXFERRef:izFanMtr     = {  HRVIAQ_IZXFER_ZoneRef:CSE_ElecMETER  }   ; was: Proj:CSE_ElecMETER / fixes bug where HRV energy not tracked by CUAC unit type meters - SAC 12/06/22
    "Set ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[4]:HRV_IZXFERRef:izFanEndUse"
         ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[4]:HRV_IZXFERRef:izFanEndUse  = {  "FANV"  }
 
@@ -4556,7 +5282,7 @@ RULELIST "Setup_nonHRVIAQ_IZXFERs_MFamDwellUnit" 1 0 0 0
              HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[1]:FanPowerMult  }
                      ; exclude specification of izSRE & izASRE
    "Set ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[1]:HRV_IZXFERRef:izFanMtr"
-        ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[1]:HRV_IZXFERRef:izFanMtr     = {  Proj:CSE_ElecMETER  }
+        ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[1]:HRV_IZXFERRef:izFanMtr     = {  HRVIAQ_IZXFER_ZoneRef:CSE_ElecMETER  }   ; was: Proj:CSE_ElecMETER / fixes bug where HRV energy not tracked by CUAC unit type meters - SAC 12/06/22
    "Set ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[1]:HRV_IZXFERRef:izFanEndUse"
         ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[1]:HRV_IZXFERRef:izFanEndUse  = {  "FANV"  }
 
@@ -4587,7 +5313,7 @@ RULELIST "Setup_nonHRVIAQ_IZXFERs_MFamDwellUnit" 1 0 0 0
              HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[2]:FanPowerMult  }
                      ; exclude specification of izSRE & izASRE
    "Set ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[2]:HRV_IZXFERRef:izFanMtr"
-        ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[2]:HRV_IZXFERRef:izFanMtr     = {  Proj:CSE_ElecMETER  }
+        ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[2]:HRV_IZXFERRef:izFanMtr     = {  HRVIAQ_IZXFER_ZoneRef:CSE_ElecMETER  }   ; was: Proj:CSE_ElecMETER / fixes bug where HRV energy not tracked by CUAC unit type meters - SAC 12/06/22
    "Set ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[2]:HRV_IZXFERRef:izFanEndUse"
         ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[2]:HRV_IZXFERRef:izFanEndUse  = {  "FANV"  }
 
@@ -4618,7 +5344,7 @@ RULELIST "Setup_nonHRVIAQ_IZXFERs_MFamDwellUnit" 1 0 0 0
              HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[3]:FanPowerMult  }
                      ; exclude specification of izSRE & izASRE
    "Set ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[3]:HRV_IZXFERRef:izFanMtr"
-        ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[3]:HRV_IZXFERRef:izFanMtr     = {  Proj:CSE_ElecMETER  }
+        ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[3]:HRV_IZXFERRef:izFanMtr     = {  HRVIAQ_IZXFER_ZoneRef:CSE_ElecMETER  }   ; was: Proj:CSE_ElecMETER / fixes bug where HRV energy not tracked by CUAC unit type meters - SAC 12/06/22
    "Set ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[3]:HRV_IZXFERRef:izFanEndUse"
         ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[3]:HRV_IZXFERRef:izFanEndUse  = {  "FANV"  }
 
@@ -4649,7 +5375,7 @@ RULELIST "Setup_nonHRVIAQ_IZXFERs_MFamDwellUnit" 1 0 0 0
              HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[4]:FanPowerMult  }
                      ; exclude specification of izSRE & izASRE
    "Set ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[4]:HRV_IZXFERRef:izFanMtr"
-        ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[4]:HRV_IZXFERRef:izFanMtr     = {  Proj:CSE_ElecMETER  }
+        ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[4]:HRV_IZXFERRef:izFanMtr     = {  HRVIAQ_IZXFER_ZoneRef:CSE_ElecMETER  }   ; was: Proj:CSE_ElecMETER / fixes bug where HRV energy not tracked by CUAC unit type meters - SAC 12/06/22
    "Set ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[4]:HRV_IZXFERRef:izFanEndUse"
         ResProj:HRVIAQ_IZXFER_DwellUnitRef:DwellUnitTypeRef:IAQFanRef[4]:HRV_IZXFERRef:izFanEndUse  = {  "FANV"  }
 END

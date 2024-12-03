@@ -249,7 +249,35 @@ RULE NEW CoilHtg:SysType
     else "NA"
     endif endif endif
 ENDRULE
-
+RULE NEW CoilHtg:SysUnitaryCat
+  DATATYPE
+    String
+  LONGFORM
+    SystemUnitaryCategory
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( ParentComp = "AirSys" )
+    then AirSys:UnitaryCat
+    else if( ParentComp = "ZnSys" )
+    then ZnSys:UnitaryCat
+    else "NA"
+    endif endif
+  SIZING
+    if( ParentComp = "AirSys" )
+    then AirSys:UnitaryCat
+    else if( ParentComp = "ZnSys" )
+    then ZnSys:UnitaryCat
+    else "NA"
+    endif endif
+  ANNUAL
+    if( ParentComp = "AirSys" )
+    then AirSys:UnitaryCat
+    else if( ParentComp = "ZnSys" )
+    then ZnSys:UnitaryCat
+    else "NA"
+    endif endif
+ENDRULE
 // -----------------------------------------------------------------------------
 // FluidSysRef set to property of local component, for coils connected to FluidSys
 RULE NEW CoilHtg:FluidSysRef
@@ -301,7 +329,7 @@ RULE CoilHtg:SysCnt
       ZnSys:Cnt
     else if( ParentComp = "TrmlUnit" )
     then // TerminalUnit
-      TrmlUnit:Cnt
+      TrmlUnit:SysCnt
     else 0
     endif endif endif
   SIZING
@@ -329,7 +357,36 @@ RULE CoilHtg:SysCnt
     else 0
     endif endif endif
 ENDRULE
-
+RULE NEW CoilHtg:SysCntSim
+  DESCRIPTION
+    "Echo of Air/System:CntSim, or if the Coil parent is a TerminalUnit, the 
+     SystemCount is TerminalUnit:SystemCount * TerminalUnit:Count."
+  INPUTCLASS 
+    NotInput 
+  DATATYPE
+    Integer
+  DEFAULT
+    if( ParentComp = "AirSys" )
+    then AirSys:CntSim
+    else if( ParentComp = "TrmlUnit" )
+    then TrmlUnit:SysCntSim
+    else SysCnt
+    endif endif
+  SIZING
+    if( ParentComp = "AirSys" )
+    then Parent2( CntSim )
+    else if( ParentComp = "TrmlUnit" )
+    then TrmlUnit:SysCntSim
+    else SysCnt
+    endif endif
+  ANNUAL
+    if( ParentComp = "AirSys" )
+    then Parent2( CntSim )
+    else if( ParentComp = "TrmlUnit" )
+    then TrmlUnit:SysCntSim
+    else SysCnt
+    endif endif
+ENDRULE
 // -----------------------------------------------------------------------------
 // Set IsDummy flag for all components
 RULE CoilHtg:IsDummy
@@ -514,6 +571,13 @@ ENDRULE
 RULE CoilHtg:Status
   DESCRIPTION
     "The status of the system or component, used for additions and alterations."
+  HELP
+    "The status of this component is inherited from the status of its parent
+     AirSystem or ZoneSystem, and therefore cannot be changed. In the case of
+     HotWater or other coil types connected to a central plant, the status of the coil 
+     reflects whether the status of the primary equipment; i.e. a HotWater
+     coil connected to an existing plant with new boilers is reflected as
+     having a 'New' status."
   INPUTCLASS 
     NotInput
 ; OPTION
@@ -575,7 +639,31 @@ RULE NEW CoilHtg:IsHlthCare
     else 0
     endif endif
 ENDRULE
-
+RULE NEW CoilHtg:IsBaseHlthCare
+  DATATYPE
+    Integer
+  LONGFORM
+    IsBaselineHealthCare
+  DESCRIPTION
+    "Whether the coil is a baseline heating coil that is part of
+     that serves a healthcare facility."
+  INPUTCLASS
+    NotInput
+  SIZING
+    if( ParentComp = "AirSys" )
+    then AirSys:IsBaseHlthCareSys
+    else if( ParentComp = "ZnSys" ) 
+    then ZnSys:IsBaseHlthCareSys
+    else 0
+    endif endif
+  ANNUAL
+    if( ParentComp = "AirSys" )
+    then AirSys:IsBaseHlthCareSys
+    else if( ParentComp = "ZnSys" ) 
+    then ZnSys:IsBaseHlthCareSys
+    else 0
+    endif endif
+ENDRULE 
 
 // ---------- Section 5.7.6.1 - General ----------------------------------------
 // ********** Heating Source ***************************************************
@@ -626,15 +714,15 @@ RULE CoilHtg:Type
                    for ZoneSystems of Type = SZHP, SZDFHP, PTHP, WSHP, SPVHP, VRF, 
                    or MiniSplitHP.", Name)
       else
-      if ( Type = "VRF" .AND. ZnSys:Type != "VRF" ) 
+      if( Type = "VRF" .AND. ZnSys:Type != "VRF" ) 
       then
         PostError("Coil object '%s' is Type = 'VRF', which is only
                    supported for ZoneSystems of Type = VRF", Name)   
       else
-      if ( ZnSys:Type = "Radiant" .AND. ( Type = "Resistance" .OR. Type = "HotWater" ) = 0 )
+      if( ZnSys:Type = "Radiant" .AND. ( Type = "Resistance" .OR. Type = "HotWater" ) = 0 )
       then
         PostError(" ZoneSystem '%s' is Type = 'Radiant', which is only
-                   supported for Coil of Type = Resistanc or HotWater", ZnSys:Name)  
+                   supported for Coil of Type = Resistance or HotWater", ZnSys:Name)  
       else UNCHANGED
       endif endif endif
     else UNCHANGED
@@ -1048,6 +1136,17 @@ RULE NEW CoilHtg:PumpPwrRtd
     then ValidOr( ZnSys:PumpPwrRtd, 0 )
     else 0
     endif endif endif endif
+  ANNUAL
+    if( BaseSysNum > 0 )
+    then 0
+    else if( Type != "HeatPump" .OR. CndsrType = "Air" )
+    then 0 // Pump heat not accounted for with non-HP/air-source coils
+    else if( ParentComp = "AirSys" )
+    then ValidOr( AirSys:PumpPwrRtd, 0 )
+    else if( ParentComp = "ZnSys" )
+    then ValidOr( ZnSys:PumpPwrRtd, 0 )
+    else 0
+    endif endif endif endif
 ENDRULE
 
 
@@ -1188,7 +1287,23 @@ RULE CoilHtg:CapTotGrossRtd
       then z:CapTotGrossRtdSim / SysCnt * SizingRat   
       else 0
       endif endif endif
+    else if( IsBaseHlthCare > 0 .AND. ParentComp != "TrmlUnit" )
+    then z:CapTotGrossRtd - BaseSupFanHtDsgnChange
     else z:CapTotGrossRtd
+    endif endif
+ENDRULE
+RULE NEW CoilHtg:BaseCapTotGrossRtdRatio
+  DESCRIPTION
+    "The ratio of baseline gross total (both sensible and latent) cooling capacity
+     to the proposed gross cooling capacity at AHRI rating conditions."
+  DATATYPE
+    Float
+  INPUTCLASS 
+    NotInput
+  ANNUAL
+    if( IsBaseHlthCare > 0 .AND. ParentComp != "TrmlUnit" )
+    then CapTotGrossRtd / z:CapTotGrossRtd
+    else UNDEFINED
     endif
 ENDRULE
 // Re-evaluate for baseline HeatPump supplemental coils
@@ -1222,7 +1337,7 @@ ENDRULE
 // -----------------------------------------------------------------------------
 RULE CoilHtg:CapTotNetRtd
   ANNUAL 
-    if( BaseSysNum > 0 )
+    if( BaseSysNum > 0 .OR. IsBaseHlthCare > 0 )
       // Make adjustment for fan heat for baseline systems with HP coils
       // Q_gross = Q_net - Q_fan 
       // Q_net = Q_gross + Q_fan
@@ -1543,8 +1658,11 @@ RULE CoilHtg:FluidFlowRtDsgn
       then CapTotGrossRtd /( 500.19 * FluidSegInRef:ParentFluidSysRef:DsgnSupWtrDelT)
       else 0
       endif
+    else if( IsBaseHlthCare > 0 .AND. ParentComp != "TrmlUnit" .AND. IfValidAnd( z:FluidFlowRtDsgn > 0 ) )
+    then // Adjust flow rate based on capacity change
+         z:FluidFlowRtDsgn * BaseCapTotGrossRtdRatio
     else UNCHANGED
-    endif
+    endif endif
 ENDRULE   
 
 
@@ -1658,7 +1776,7 @@ RULE CoilHtg:CapTotGrossRtdSim
     0
   DEFAULT
     if( IfValidAnd( CapTotGrossRtd > 1 ) )
-    then CapTotGrossRtd * SysCnt
+    then CapTotGrossRtd * SysCntSim
     else 1
     endif
   SIZING
@@ -1667,7 +1785,7 @@ RULE CoilHtg:CapTotGrossRtdSim
     // This value reflects multipliers of zone loads
   ANNUAL
     if( IfValidAnd( CapTotGrossRtd > 1 ) )
-    then CapTotGrossRtd * SysCnt
+    then CapTotGrossRtd * SysCntSim
     else 1
     endif
 ENDRULE
@@ -1688,16 +1806,108 @@ RULE NEW CoilHtg:CapTotNetRtdSim
     Btu/h
   DEFAULT
     if( IfValidAnd( CapTotNetRtd > 0 ) )
-    then CapTotNetRtd * SysCnt
+    then CapTotNetRtd * SysCntSim
     else 0
     endif
   SIZING
     UNDEFINED
   ANNUAL
     if( IfValidAnd( CapTotNetRtd > 0 ) )
-    then CapTotNetRtd * SysCnt
+    then CapTotNetRtd * SysCntSim
     else 0
     endif
+ENDRULE
+
+RULE NEW CoilHtg:PriElecResisHtCapWithMult
+  DATATYPE
+    Float
+  LONGFORM
+    PrimaryElectricResistantHeatCapacityWithMultiplier
+  DESCRIPTION
+    "Electric resistant heat capacity (not including supplemental heat for heat pump)
+     for determine Exception conditions to Section 140.4(g)."
+  INPUTCLASS
+    NotInput
+  UNITS
+    Btu/h
+  DEFAULT
+    if( IfValidAnd( CapTotNetRtdSim > 0 ) .AND. 
+        Type = "Resistance" .AND. 
+        CountRefs( CoilHtg:HtPumpSuppCoilHtgRef ) = 0 )
+    then CapTotNetRtdSim
+    else 0
+    endif
+  CHECKCODE
+    if( PriElecResisHtCapWithMult > 0 .AND. IsHlthCare > 0 )
+    then
+      if( Proj:TotPriElecResisHtCap / Proj:TotPriCoilHtgCap < 0.1 )
+      then UNCHANGED // Exception 3 to Section 140.4(g)
+      else if( Proj:TotPriElecResisHtCap / 3.412 <= 3000 )
+      then UNCHANGED // Exception 4 to Section 140.4(g)
+      else if( Proj:GasType = "None" .AND. Bldg:ResFlrArea = 0 .AND. Bldg:TotCondFlrArea <= 5000 .AND. SysClgCap = 0 )
+      then UNCHANGED // Exception 5 to Section 140.4(g)
+      else PostError("Heating Coil '%s' is an electric resistance heating coil
+                      which shall not be used for space heating.", Name )
+      endif endif endif
+    else UNCHANGED
+    endif
+  SIZING
+    UNDEFINED
+ENDRULE
+RULE NEW CoilHtg:PriCapTotNetRtdWithMult
+  DATATYPE
+    Float
+  LONGFORM
+    PrimaryCapacityTotalNetRatedWithMultiplier
+  DESCRIPTION
+    "The net heating capacity at design conditions (not including supplemental heat for heat pump)
+     for determine Exception conditions to Section 140.4(g)."
+  INPUTCLASS
+    NotInput
+  UNITS
+    Btu/h
+  DEFAULT
+    if( IfValidAnd( CapTotNetRtdSim > 0 ) .AND. 
+        CountRefs( CoilHtg:HtPumpSuppCoilHtgRef ) = 0 )
+    then CapTotNetRtdSim
+    else 0
+    endif
+  SIZING
+    UNDEFINED
+ENDRULE
+RULE NEW Proj:TotPriElecResisHtCap
+  DATATYPE
+    Float
+  LONGFORM
+    TotalPrimaryElectricResistantHeatCapacity
+  DESCRIPTION
+    "Total electric resistant heat capacity (not including supplemental heat for heat pump)
+     for determine Exception conditions to Section 140.4(g)."
+  INPUTCLASS
+    NotInput
+  UNITS
+    Btu/h
+  DEFAULT
+    SumChildren( CoilHtg:PriElecResisHtCapWithMult )
+  SIZING
+    UNDEFINED
+ENDRULE
+RULE NEW Proj:TotPriCoilHtgCap
+  DATATYPE
+    Float
+  LONGFORM
+    TotaPrimarylCoilHeatingCapacity
+  DESCRIPTION
+    "Total heating coil capacity (not including supplemental heat for heat pump)
+     for determine Exception conditions to Section 140.4(g)."
+  INPUTCLASS
+    NotInput
+  UNITS
+    Btu/h
+  DEFAULT
+    SumChildren( CoilHtg:PriCapTotNetRtdWithMult )
+  SIZING
+    UNDEFINED
 ENDRULE
 
 RULE NEW CoilHtg:CapTotGrossRtd17Sim
@@ -1713,7 +1923,7 @@ RULE NEW CoilHtg:CapTotGrossRtd17Sim
     Btu/h
   ANNUAL
     if( IfValidAnd( CapTotGrossRtd17 > 0 ) )
-    then CapTotGrossRtd17 * SysCnt
+    then CapTotGrossRtd17 * SysCntSim
     else 0
     endif
 ENDRULE
@@ -1863,6 +2073,39 @@ RULE NEW CoilHtg:CapHydronic
     endif
 ENDRULE
 
+RULE NEW CoilHtg:PlantIsNew
+  DATATYPE
+    Integer
+  LONGFORM
+    PlantIsNew
+  DESCRIPTION
+    "A flag that indicates if the plant that is connected to is considered 'New'."
+  HELP
+    "If the hot water plant that serves the coil has any new capacity, this flag is 1"
+  INPUTCLASS
+    NotInput  
+  DEFAULT
+    if( Type = "HotWater" .AND. 
+        IfValidAnd( CapTotGrossRtdSim >= 0 ) )
+    then
+      if( IfValidAnd( FluidSysRef:HtgCapNew > 0 ) )
+      then 1
+      else 0
+      endif
+    else 0
+    endif
+  ANNUAL
+    if( Type = "HotWater" .AND. 
+        IfValidAnd( CapTotGrossRtdSim >= 0 ) )
+    then
+      if( IfValidAnd( FluidSysRef:HtgCapNew > 0 ) )
+      then 1
+      else 0
+      endif
+    else 0
+    endif
+ENDRULE
+
 RULE NEW CoilHtg:CapWSHP
   DATATYPE
     Float
@@ -1881,7 +2124,11 @@ RULE NEW CoilHtg:CapWSHP
     endif
   ANNUAL
     if( IfValidAnd( HtExtractionLdSim >= 0 ) )
-    then HtExtractionLdSim
+    then 
+      if( IsBaseHlthCare > 0 )
+      then HtExtractionLdSim * BaseCapTotGrossRtdRatio
+      else HtExtractionLdSim
+      endif
     else 0
     endif
 ENDRULE

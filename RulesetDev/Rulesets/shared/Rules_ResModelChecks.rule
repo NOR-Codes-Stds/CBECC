@@ -85,23 +85,29 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 ;									else	PostError( "The sum of each dwelling unit count * area (%.1f) must be equal to the sum of the areas of each conditioned zone in the model (%.1f)",
 ;															UnitTotCondFlrArea, CondFloorArea )  endif  }
 
-	; SAC 4/21/15 - added check to ensure at least one zone where Status = 'Existing' for EAA projects
+	; SAC 4/21/15 - added check to ensure at least one zone where Status = 'Existing' for EAA projects  ; SumChildrenIf -> SumAcrossIf - SAC 05/19/23 (tic #3479)
 	"Check to ensure at least one zone of Status = 'Existing' present when Run Scope = 'Addition and/or Alteration'"
-		ResProj:Action		= {	if (RunScope != 2 .OR. SumChildrenIf( ResZn:FloorArea, ResZn:Status = 1 ) > 0.1) then  UNCHANGED
+		ResProj:Action		= {	if (RunScope != 2 .OR. SumAcrossIf( ResZn:FloorArea, ResZn:Status = 1 ) > 0.1) then  UNCHANGED
 									else	PostError( "At least one 'Existing' zone must be specified when Run Scope = 'Addition and/or Alteration'.  If this model is of an addition alone, then change Run Scope to 'New Construction' and select 'Addition Alone project'." )  endif  }
 
 	; SAC 6/6/13 - added check for conditioned/living/sleeping zones present in model
+   ; revised logic to allow run where no res zones present as long as ResOtherZn(s) are - SAC 10/08/24 (tic #3630)
 	"Check for at least one conditioned zone plus one zone of each (conditioned) type (living & sleeping) when control credits selected"
 		ResProj:Action		= {	if (IfValidAnd( IsComRuleset > 0 ) .AND. IfValidAnd( Proj:ResDwellUnits > 0 )==0) then  UNCHANGED
-                              else if ( ResProj:ZonalControl < 0.5 .AND. SumAll( ResZn:CondFloorArea ) < 0.1)
-									then  PostError( "At least one conditioned zone must be specified in the model prior to performing analysis" )
-									else if ( ResProj:ZonalControl > 0.5 .AND. SumAll( ResZn:LvgCondFloorArea ) < 0.1 .AND. SumAll( ResZn:SlpCondFloorArea ) < 0.1)
-									then	PostError( "At least one Living and one Sleeping zone must exist in the model when Zonal Control Credit is selected" )
-									else if ( ResProj:ZonalControl > 0.5 .AND. SumAll( ResZn:LvgCondFloorArea ) < 0.1)
-									then	PostError( "No zones classified as 'Living' are present in the model.  At least one Living and one Sleeping zone must exist in the model when Zonal Control Credit is selected" )
-									else if ( ResProj:ZonalControl > 0.5 .AND. SumAll( ResZn:SlpCondFloorArea ) < 0.1)
-									then	PostError( "No zones classified as 'Sleeping' are present in the model.  At least one Living and one Sleeping zone must exist in the model when Zonal Control Credit is selected" )
-									else	UNCHANGED  endif endif endif endif endif  }
+                           else if (IfValidAnd( IsComRuleset > 0 ) .AND. SumAll( ResZn:CondFloorArea ) < 0.1 .AND.
+                                    SumAll( ResOtherZn:Area ) < 0.1)
+                           then  PostError( "At least one residential or res common zone must be specified in the model prior to performing analysis" )
+                           else if (IfValidAnd( IsComRuleset > 0 )==0)
+                           then  if ( ResProj:ZonalControl < 0.5 .AND. SumAll( ResZn:CondFloorArea ) < 0.1)
+									      then  PostError( "At least one conditioned zone must be specified in the model prior to performing analysis" )
+									      else if ( ResProj:ZonalControl > 0.5 .AND. SumAll( ResZn:LvgCondFloorArea ) < 0.1 .AND. SumAll( ResZn:SlpCondFloorArea ) < 0.1)
+									      then	PostError( "At least one Living and one Sleeping zone must exist in the model when Zonal Control Credit is selected" )
+									      else if ( ResProj:ZonalControl > 0.5 .AND. SumAll( ResZn:LvgCondFloorArea ) < 0.1)
+									      then	PostError( "No zones classified as 'Living' are present in the model.  At least one Living and one Sleeping zone must exist in the model when Zonal Control Credit is selected" )
+									      else if ( ResProj:ZonalControl > 0.5 .AND. SumAll( ResZn:SlpCondFloorArea ) < 0.1)
+									      then	PostError( "No zones classified as 'Sleeping' are present in the model.  At least one Living and one Sleeping zone must exist in the model when Zonal Control Credit is selected" )
+									      else	UNCHANGED  endif endif endif endif
+                           else  UNCHANGED  endif endif endif  }
 
 	; SAC 10/26/15 - check to confirm DwellUnit:CondFlrArea is equal to DwellUnitType:CondFlrArea
    ; relaxed area check to allow for slightly smaller DwellUnits (vs. DUT) - SAC 10/10/22
@@ -119,6 +125,26 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
                                        (CondFlrArea >= (DwellUnitTypeRef:CondFlrArea + 0.1) .OR. CondFlrArea <= (DwellUnitTypeRef:CondFlrArea - 0.1)))
                               then  PostError( "DwellUnit '%s' conditioned floor area (%g) must be equal to that of its referenced DwellUnitType '%s' (%g).", Name, CondFlrArea, DwellUnitTypeRef:Name, DwellUnitTypeRef:CondFlrArea )
                               else  UNCHANGED  endif endif endif endif endif endif  }
+
+   ;  ;         then  if (EnableResearchMode > 0) 
+   ;  ;               then  PostWarning( "ResZns with 4 window orientations cannot have more than 1 dwelling, '%s' has %g dwellings (and 4 window orientations). This zone must be split up before performing compliance analysis.", Name, NumDwellingUnits )
+   ;  ;               else  PostError(   "ResZn '%s' has %g dwellings and 4 window orientations, which is not allowed in compliance analysis. 4 window orientation zones can have no more than 1 dwelling each.", Name, NumDwellingUnits )  endif
+   ;  ;         else if (IfValidAnd( NumDwellingUnits > 2 ) .AND. NumWinOrientations > 2)
+   ;  ;         then  if (EnableResearchMode > 0) 
+   ;  ;               then  PostWarning( "ResZns with 3 window orientations cannot have more than 2 dwellings, '%s' has %g dwellings (and 3 window orientations). This zone must be split up before performing compliance analysis.", Name, NumDwellingUnits )
+   ;  ;               else  PostError(   "ResZn '%s' has %g dwellings and 3 window orientations, which is not allowed in compliance analysis. 3 window orientation zones can have no more than 2 dwellings each.", Name, NumDwellingUnits )  endif
+   ;  "check to ensure # zone dwellings inline w/ # of window orientations"   ResZn:Action =    ; SAC 04/18/24 (tic #3554)
+   ;     {  if (IfValidAnd( NumDwellingUnits > 1 ) .AND. NumWinOrientations > 3)
+   ;        then
+   ;              PostWarning( "ResZns with 4 window orientations cannot have more than 1 dwelling, '%s' has %g dwellings (and 4 window orientations). This zone must be split up before performing compliance analysis.", Name, NumDwellingUnits )
+   ;        else if (IfValidAnd( NumDwellingUnits > 2 ) .AND. NumWinOrientations > 2)
+   ;        then
+   ;              PostWarning( "ResZns with 3 window orientations cannot have more than 2 dwellings, '%s' has %g dwellings (and 3 window orientations). This zone must be split up before performing compliance analysis.", Name, NumDwellingUnits )
+   ;        else if (IfValidAnd( NumDwellingUnits > 1 ) .AND. NumWinOrientations > 2)
+   ;        then  PostWarning( "ResZns with 3 window orientations are best modeled as separate zones. ResZn '%s' has %g dwellings (and 3 window orientations). Consider splitting this zone up to ensure consistent window orientations for all dwellings before performing compliance analysis.", Name, NumDwellingUnits )
+   ;        else if (IfValidAnd( NumDwellingUnits > 6 ) .AND. NumWinOrientations > 1)
+   ;        then  PostWarning( "Dwellings in a single zone should all have the same window orientations. ResZn '%s' has %g dwellings and 2 window orientations. Consider splitting this zone up to ensure consistent window orientations for all dwellings before performing compliance analysis.", Name, NumDwellingUnits )
+   ;        else  UNCHANGED  endif endif endif endif  }
 
    "Ensure user has confirmed home in service territory of selected Community Solar project"    Proj:Action =        ; SAC 7/3/20 (CommunitySolar)
       {  if (CommunitySolarProjID > 0 .AND. IfValidAnd( CmntySlrProjCZCompat > 0 )==0)
@@ -183,11 +209,13 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 		DwellUnit:Action	= {	if (Proj:IsSFamResRuleset .OR. LocalCompAssigned( DwellUnitTypeRef ) == 0 .OR. IfValidAnd( MinIAQCFM > 0.05 )==0 .OR. IfValidAnd( DwellUnitTypeRef:IAQDisabled > 0 )) then  UNCHANGED
 										else if (DwellUnitTypeRef:IAQOption == 3)
 										then	PostError( "Model IAQ option 'CFI (Central Fan Integrated) IAQ' is not yet implemented.  Another IAQ selection needs to be made for DwellUnit '%s' (DwellUnitType '%s').", Name, DwellUnitTypeRef:Name )
+										else if (TotalIAQCFM > MinIAQCFM * 5)
+										     then PostWarning( "The ventilation rate is more than 5 times of required. This might cause a simulation error. Review inputs for DwellUnit '%s' (DwellUnitType '%s').", Name, DwellUnitTypeRef:Name )
 										else if (TotalIAQCFM < (MinIAQCFM - 0.05) .AND. ResProj:RunScope == 1)
 										then	if ( ResProj:BypassRuleLimits > 0.5)
 									         then  PostWarning( "Minimum IAQ Ventilation NOT MET:  %s required, %s entered (CFM).  Review inputs for DwellUnit '%s' (DwellUnitType '%s').", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ), Name, DwellUnitTypeRef:Name )
 									         else  PostError(   "Minimum IAQ Ventilation NOT MET:  %s required, %s entered (CFM).  Review inputs for DwellUnit '%s' (DwellUnitType '%s').", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ), Name, DwellUnitTypeRef:Name )  endif
-										else	UNCHANGED  endif endif endif  }
+										else	UNCHANGED  endif endif endif endif }
 
    "Check for inconsistencies in IAQ fan types in MFam models"    DwellUnitType:Action =        ; SAC 7/26/20 (tic #1174)
       {  if ( Proj:IsSFamResRuleset .OR. IfValidAnd( NumAssigningDUs > 0 )==0) then  UNCHANGED
@@ -208,18 +236,32 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
          then  PostError( "DwellUnitType '%s' IAQ HRV fan efficacy (%.2f W/CFM) exceeds limit of 1.0 W/CFM (per Std section 160.2(b)2.A.iv.b.1)", Name, (IAQHRVPwr/IAQHRVCFM) )
          else  UNCHANGED  endif endif  }
 
-   "Check for residential other zone ventilation sufficient" ResOtherZn:Action = ; JP 5/31/22
-      {  if( Proj:IsSFamResRuleset .OR. ( IfValidAnd( MinIAQCFM > 0.05 )==0 .AND. IfValidAnd( MinExhCFM > 0.05 )==0 ) .OR. IAQDisabled > 0)
-         then  UNCHANGED
-         else if(TotalExhCFM < (MinExhCFM - 0.05) .AND. ResProj:RunScope == 1)
-              then if( ResProj:BypassRuleLimits > 0.5 )
-                   then  PostWarning( "Minimum Exhaust NOT MET:  %s required, %s entered (CFM).  Review inputs for ReOtherZn '%s'.", FltToStr( MinExhCFM, 1 ), FltToStr( TotalExhCFM, 1 ), Name )
-                   else  PostError(   "Minimum Exhaust NOT MET:  %s required, %s entered (CFM).  Review inputs for ReOtherZn '%s'.", FltToStr( MinExhCFM, 1 ), FltToStr( TotalExhCFM, 1 ), Name )  endif
-         else if(TotalIAQCFM < (MinIAQCFM - 0.05) .AND. ResProj:RunScope == 1)
-              then if( ResProj:BypassRuleLimits > 0.5 )
-                   then  PostWarning( "Minimum Ventilation NOT MET:  %s required, %s entered (CFM).  Review inputs for ReOtherZn '%s'.", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ), Name )
-                   else  PostError(   "Minimum Ventilation NOT MET:  %s required, %s entered (CFM).  Review inputs for ReOtherZn '%s'.", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ), Name )  endif
-         else UNCHANGED  endif endif endif  }
+; JP 11/20/23 - Move ventilation warings to ResOtherZn-Ventilation/Exhaust.rule
+; JP 3/2/23 - Move ventilation check to ResZnGrp level so the zones can be ventilated indirectly - (tic #3487)
+;             Keep exhaust check at zone level that local exhaust requirements need to be met at zone level
+;   "Check for residential other zone ventilation sufficient" ResOtherZn:Action = ; JP 5/31/22
+;      {  if( Proj:IsSFamResRuleset .OR. IAQDisabled > 0)
+;         then  UNCHANGED
+;         else if(IfValidAnd(MinExhCFM > 0) .AND. IfValidAnd(TotalExhCFM < (MinExhCFM - 0.05)) .AND. ResProj:RunScope == 1)
+;              then if( ResProj:BypassRuleLimits > 0.5 )
+;                   then  PostWarning( "Minimum Exhaust NOT MET:  %s required, %s entered (CFM).  Review inputs for ReOtherZn '%s'.", FltToStr( MinExhCFM, 1 ), FltToStr( TotalExhCFM, 1 ), Name )
+;                   else  PostError(   "Minimum Exhaust NOT MET:  %s required, %s entered (CFM).  Review inputs for ReOtherZn '%s'.", FltToStr( MinExhCFM, 1 ), FltToStr( TotalExhCFM, 1 ), Name )  endif
+;         else if(IfValidAnd(MinIAQCFM > 0) .AND. IfValidAnd(TotalIAQCFM < (MinIAQCFM - 0.05)) .AND. ResProj:RunScope == 1)
+;              then if( ResProj:BypassRuleLimits > 0.5 )
+;                   then  PostWarning( "Min IAQ Ventilation NOT MET at zone:  %s required, %s entered (CFM).  Review inputs for ReOtherZn '%s'.", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ), Name )
+;                   else  PostWarning( "Min IAQ Ventilation NOT MET at zone:  %s required, %s entered (CFM).  Review inputs for ReOtherZn '%s'.", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ), Name ) endif
+;         else if(IfValidAnd(MinIAQCFM > 0) = 0 .AND. IfValidAnd(MinExhCFM > 0) = 0 .AND. (IfValidAnd(TotalIAQCFM > 0) .OR. IfValidAnd(TotalExhCFM > 0))) 
+;              then PostWarning( "ResOtherZn '%s' has no ventilation or exhaust requirement but has ventilation/exhaust system specified. Review inputs for the zone.", Name )
+;         else if(IfValidAnd(MinIAQCFM > 0) .AND. IfValidAnd(TotalIAQCFM > MinIAQCFM * 5))
+;              then PostWarning( "The ventilation rate is more than 5 times of required. This might cause a simulation error. Review inputs for ReOtherZn '%s'.", Name )
+;         else if(IfValidAnd(MinExhCFM > 0) .AND. IfValidAnd(TotalExhCFM > MinExhCFM * 5))
+;              then PostWarning( "The exhaust rate is more than 5 times of required. This might cause a simulation error. Review inputs for ReOtherZn '%s'.", Name )
+;         else UNCHANGED endif endif endif endif endif endif }         
+;         else if(TotalIAQCFM < (MinIAQCFM - 0.05) .AND. ResProj:RunScope == 1)
+;              then if( ResProj:BypassRuleLimits > 0.5 )
+;                   then  PostWarning( "Minimum Ventilation NOT MET:  %s required, %s entered (CFM).  Review inputs for ReOtherZn '%s'.", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ), Name )
+;                   else  PostError(   "Minimum Ventilation NOT MET:  %s required, %s entered (CFM).  Review inputs for ReOtherZn '%s'.", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ), Name )  endif
+;         else UNCHANGED  endif endif endif  }
 
   ; SAC 3/4/16 - Check to confirm validity between PV compliance credit & detailed (EDR) PV system size (tic #609)
   ; SAC 3/25/16 - Revised rule to throw similar error when PVCompCredit and DesignRatingCalcs are selected but No EDR PV
@@ -245,6 +287,32 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 		ResZn:Action	= {	if ( ResProj:ZonalControl < 0.5 .OR. CondFloorArea < 0.1 .OR. LocalCompAssigned( ActiveHVACSystem ) < 0.5) then  UNCHANGED
 								else if (ActiveHVACSystem:Type == 2) then  PostError( "Zonal control credit (Building tab of Project dialog) is not compatible with zones, such as '%s', conditioned by a heat pump system.", Name )
 								else  UNCHANGED  endif endif  }
+
+   "Check for HPDHWCombo systems assigned for zone DHW + HVAC"    ResOtherZn:Action =     ; SAC 03/31/23 (tic #1349)   ; fix typo - SAC 04/06/23 (tic #1349)  ; SAC 09/26/24 (tic #3629)
+      {  if (CondFloorArea < 0.1 .OR. LocalCompAssigned( ActiveHVACSystem ) < 0.5 .OR. Proj:StandardsVersion < 2022) then  UNCHANGED
+         else if (IfValidAnd( ActiveHVACSystem:Type = 2 ) .AND. IfValidAnd( ActiveHVACSystem:HtPumpSysType = 35 ))
+         then  if ( (DHWSysStatus = 3 .AND. LocalCompAssigned(  ozDHWSys:DHWHeater[1] ) != ComponentType( "ResHVACSys" )) .OR.
+                    (DHWSysStatus = 2 .AND. LocalCompAssigned( AltDHWSys:DHWHeater[1] ) != ComponentType( "ResHVACSys" )) .OR.
+                    (DHWSysStatus = 1 .AND. LocalCompAssigned(  exDHWSys:DHWHeater[1] ) != ComponentType( "ResHVACSys" )) )
+               then  PostError( "Inconsistent HVAC and DHW system assignments in Zone '%s': when HeatPumpDHWCombo is selected for HVAC, a DHW system that references that same HVAC system as the DHW heater must be selected for DHW.", Name )
+               else if ( (DHWSysStatus = 3 .AND. IfValidAnd(  ozDHWSys:DHWHeater[1] = ActiveHVACSystem )==0) .OR.
+                         (DHWSysStatus = 2 .AND. IfValidAnd( AltDHWSys:DHWHeater[1] = ActiveHVACSystem )==0) .OR.
+                         (DHWSysStatus = 1 .AND. IfValidAnd(  exDHWSys:DHWHeater[1] = ActiveHVACSystem )==0) )
+               then  PostError( "Inconsistent HVAC and DHW system assignments in Zone '%s': when HeatPumpDHWCombo is selected for HVAC, a DHW system that references that same HVAC system as the DHW heater must be selected for DHW.", Name )
+               else  UNCHANGED  endif endif
+         else if ( (DHWSysStatus = 3 .AND. LocalCompAssigned(  ozDHWSys:DHWHeater[1] ) == ComponentType( "ResHVACSys" )) .OR.
+                   (DHWSysStatus = 2 .AND. LocalCompAssigned( AltDHWSys:DHWHeater[1] ) == ComponentType( "ResHVACSys" )) .OR.
+                   (DHWSysStatus = 1 .AND. LocalCompAssigned(  exDHWSys:DHWHeater[1] ) == ComponentType( "ResHVACSys" )) )
+         then  if ( (DHWSysStatus = 3 .AND. IfValidAnd(  ozDHWSys:DHWHeater[1]:Type = 2 ) .AND. IfValidAnd(  ozDHWSys:DHWHeater[1]:HtPumpSysType = 35 )) .OR.
+                    (DHWSysStatus = 2 .AND. IfValidAnd( AltDHWSys:DHWHeater[1]:Type = 2 ) .AND. IfValidAnd( AltDHWSys:DHWHeater[1]:HtPumpSysType = 35 )) .OR.
+                    (DHWSysStatus = 1 .AND. IfValidAnd(  exDHWSys:DHWHeater[1]:Type = 2 ) .AND. IfValidAnd(  exDHWSys:DHWHeater[1]:HtPumpSysType = 35 )) )
+               then  if ( (DHWSysStatus = 3 .AND. IfValidAnd(  ozDHWSys:DHWHeater[1] = ActiveHVACSystem )==0) .OR.
+                          (DHWSysStatus = 2 .AND. IfValidAnd( AltDHWSys:DHWHeater[1] = ActiveHVACSystem )==0) .OR.
+                          (DHWSysStatus = 1 .AND. IfValidAnd(  exDHWSys:DHWHeater[1] = ActiveHVACSystem )==0) )
+                     then  PostError( "Inconsistent DHW and HVAC system assignments in Zone '%s': when a HeatPumpDHWCombo system is selected for DHW, the same system must be selected for HVAC.", Name )
+                     else  UNCHANGED  endif
+               else  UNCHANGED  endif
+         else  UNCHANGED  endif endif endif  }
 
 ; SAC 1/15/14 - removed check - testing analysis for validity... (GC issue #258)
 ;  ; mjb 1/8/14 - check for combination of zonal control credit & combined hydronic systems
@@ -368,33 +436,329 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 											else  PostError( "DwellUnitType '%s' is lacking an equipment assignment for heating #5.", Name )  endif  }
 
    ; SAC 9/18/19 - handle OtherZone same as Zone (MFamProto)   ; moved up to Code check from Simulation check to perform earlier in CBECC analysis - SAC 10/13/22
-	"Check for valid ResIntWall:Outside assignment"          ; added error when Outside not specified (unless other side not modeled) - SAC 10/13/22
+	"Check for valid ResIntWall:Outside assignment"          ; added error when Outside not specified (unless other side not modeled) - SAC 10/13/22  ; ignore check for multiplied ResZnGrp surfaces - SAC 04/26/23 (tic #3392)  ; fix logic for consistency w/ when we collect Outside - SAC 10/18/23
 		ResIntWall:Action	=     {	if ((ParentComponentType() == "ResZn" .OR. ParentComponentType() == "ResOtherZn") .AND.
-                                     LocalCompAssigned( Outside ) < 1 .AND. (IfValidAnd( IsPartySurface > 0 )==0 .OR. IfValidAnd( OtherSideModeled > 0 )==0))
-                                 then  PostError( "Interior wall '%s' is missing the required assignment of Zone on Other Side (needed for surface and air flow simulation)", Name )
+                                     LocalCompAssigned( Outside ) < 1 .AND. (IfValidAnd( IsPartySurface > 0 )==0 .OR. IfValidAnd( OtherSideModeled > 0 )) .AND.
+                                     Parent( Mult ) < 1.1)
+                                 then  if (IfValidAnd( Proj:EnableResearchMode > 0 ))
+                                       then  PostWarning( "Interior wall '%s' is missing the required assignment of Zone on Other Side (needed for surface and air flow simulation)", Name )
+                                       else  PostError(   "Interior wall '%s' is missing the required assignment of Zone on Other Side (needed for surface and air flow simulation)", Name )  endif
                                  else if ((ParentComponentType() == "ResZn" .OR. ParentComponentType() == "ResOtherZn") .AND.
 		                                    LocalCompAssigned( Outside ) == ComponentType( "Garage" ) .AND. ResProj:HasGarage < 0.1)
-								      	then	PostError( "Interior wall '%s' assigns garage '%s' as being on the outside, but garage modeling is disabled in the Project dialog",
-								      								Name, Outside:Name )
+								      	then	if (IfValidAnd( Proj:EnableResearchMode > 0 ))
+                                       then  PostWarning( "Interior wall '%s' assigns garage '%s' as being on the outside, but garage modeling is disabled in the Project dialog", Name, Outside:Name )
+                                       else  PostError(   "Interior wall '%s' assigns garage '%s' as being on the outside, but garage modeling is disabled in the Project dialog", Name, Outside:Name )  endif
 								      	else  UNCHANGED  endif endif  }
-	"Check for valid ResIntFlr:Outside assignment"           ; added error when Outside not specified (unless other side not modeled) - SAC 10/13/22
+	"Check for valid ResIntFlr:Outside assignment"           ; added error when Outside not specified (unless other side not modeled) - SAC 10/13/22  ; ignore check for multiplied ResZnGrp surfaces - SAC 04/26/23 (tic #3392)  ; fix logic for consistency w/ when we collect Outside - SAC 10/18/23
 		ResIntFlr:Action	=     {	if ((ParentComponentType() == "ResZn" .OR. ParentComponentType() == "ResOtherZn") .AND.
-                                     LocalCompAssigned( Outside ) < 1 .AND. (IfValidAnd( IsPartySurface > 0 )==0 .OR. IfValidAnd( OtherSideModeled > 0 )==0))
-                                 then  PostError( "Interior floor '%s' is missing the required assignment of Zone on Other Side (needed for surface and air flow simulation)", Name )
+                                     LocalCompAssigned( Outside ) < 1 .AND. (IfValidAnd( IsPartySurface > 0 )==0 .OR. IfValidAnd( OtherSideModeled > 0 )) .AND.
+                                     Parent( Mult ) < 1.1 .AND. Parent( AboveMultipliedFlr ) < 1)
+                                 then  if (IfValidAnd( Proj:EnableResearchMode > 0 ))
+                                       then  PostWarning( "Interior floor '%s' is missing the required assignment of Zone on Other Side (needed for surface and air flow simulation)", Name )
+                                       else  PostError(   "Interior floor '%s' is missing the required assignment of Zone on Other Side (needed for surface and air flow simulation)", Name )  endif
                                  else if ((ParentComponentType() == "ResZn" .OR. ParentComponentType() == "ResOtherZn") .AND.
 		                                    LocalCompAssigned( Outside ) == ComponentType( "Garage" ) .AND. ResProj:HasGarage < 0.1)
-											then	PostError( "Interior floor '%s' assigns garage '%s' as being on the outside, but garage modeling is disabled in the Project dialog",
-																		Name, Outside:Name )
+											then	if (IfValidAnd( Proj:EnableResearchMode > 0 ))
+                                       then  PostWarning( "Interior floor '%s' assigns garage '%s' as being on the outside, but garage modeling is disabled in the Project dialog", Name, Outside:Name )
+                                       else  PostError(   "Interior floor '%s' assigns garage '%s' as being on the outside, but garage modeling is disabled in the Project dialog", Name, Outside:Name )  endif
 											else  UNCHANGED  endif endif  }
-	"Check for valid ResIntCeiling:Outside assignment"       ; added error when Outside not specified (unless other side not modeled) - SAC 10/13/22
+	"Check for valid ResIntCeiling:Outside assignment"       ; added error when Outside not specified (unless other side not modeled) - SAC 10/13/22  ; ignore check for multiplied ResZnGrp surfaces - SAC 04/26/23 (tic #3392)  ; fix logic for consistency w/ when we collect Outside - SAC 10/18/23
 		ResIntCeiling:Action	=    {	if ((ParentComponentType() == "ResZn" .OR. ParentComponentType() == "ResOtherZn") .AND.
-                                        LocalCompAssigned( Outside ) < 1 .AND. (IfValidAnd( IsPartySurface > 0 )==0 .OR. IfValidAnd( OtherSideModeled > 0 )==0))
-                                    then  PostError( "Interior ceiling '%s' is missing the required assignment of Zone on Other Side (needed for surface and air flow simulation)", Name )
+                                        LocalCompAssigned( Outside ) < 1 .AND. (IfValidAnd( IsPartySurface > 0 )==0 .OR. IfValidAnd( OtherSideModeled > 0 )) .AND.
+                                        Parent( Mult ) < 1.1 .AND. Parent( BelowMultipliedFlr ) < 1)
+                                    then  if (IfValidAnd( Proj:EnableResearchMode > 0 ))
+                                          then  PostWarning( "Interior ceiling '%s' is missing the required assignment of Zone on Other Side (needed for surface and air flow simulation)", Name )
+                                          else  PostError(   "Interior ceiling '%s' is missing the required assignment of Zone on Other Side (needed for surface and air flow simulation)", Name )  endif
                                     else if ((ParentComponentType() == "ResZn" .OR. ParentComponentType() == "ResOtherZn") .AND.
 		                                       LocalCompAssigned( Outside ) == ComponentType( "Garage" ) .AND. ResProj:HasGarage < 0.1)
-											   then	PostError( "Interior ceiling '%s' assigns garage '%s' as being on the outside, but garage modeling is disabled in the Project dialog",
-											   							Name, Outside:Name )
+											   then	if (IfValidAnd( Proj:EnableResearchMode > 0 ))
+                                          then  PostWarning( "Interior ceiling '%s' assigns garage '%s' as being on the outside, but garage modeling is disabled in the Project dialog", Name, Outside:Name )
+                                          else  PostError(   "Interior ceiling '%s' assigns garage '%s' as being on the outside, but garage modeling is disabled in the Project dialog", Name, Outside:Name )  endif
 											   else  UNCHANGED  endif endif  }
+
+
+   ; moved the following envelope checks UP from below (in sim check) to ensure triggered BEFORE analysis - SAC 04/19/23 (tic #3497)
+   ; SAC 10/20/14 - check for valid Attic assigned to every CeilingBelowAttic
+	"Check for valid Attic assigned to every ResCeilingBelowAttic:AtticZone"
+		ResCeilingBelowAttic:Action	= {	if (IfValidAnd( Area > 0.1 ) .AND. LocalCompAssigned( AtticZone ) < 0.1)
+													then	if (IfValidAnd( Proj:EnableResearchMode > 0 ))
+                                             then  PostWarning( "Ceiling below attic '%s' lacks the required assignment of AtticZone", Name )
+                                             else  PostError(   "Ceiling below attic '%s' lacks the required assignment of AtticZone", Name )  endif
+													else  UNCHANGED  endif  }
+
+  ; SAC 1/28/13 - added checks to ensure that each Zone & Garage has at least 6 adjacent surfaces
+  ; added logic to count adjacent surfaces of Com Spc objects - SAC 04/19/23 (tic #4397)
+	"Set ResIntWall:SurfaceCount to 1"     ResIntWall:SurfaceCount    = {	1  }
+	"Set ResIntCeiling:SurfaceCount to 1"  ResIntCeiling:SurfaceCount = {	1  }
+	"Set ResIntFlr:SurfaceCount to 1"      ResIntFlr:SurfaceCount     = {	1  }
+	"Set ResZn:SurfaceCount to # of child surfaces"		ResZn:SurfaceCount	= {
+						ChildCount( ResCathedralCeiling  ) + ChildCount( ResExtWall   ) + ChildCount( ResSlabFlr ) + 
+						ChildCount( ResCeilingBelowAttic ) + ChildCount( ResIntWall   ) + ChildCount( ResIntFlr  ) + ChildCount( ResFlrOverCrawlSpc ) + 
+						ChildCount( ResIntCeiling        ) + ChildCount( ResUndgrWall ) + ChildCount( ResExtFlr  ) + ChildCount( ResUndgrFlr ) +
+						SumRevRef( ResIntWall:Outside,     ResIntWall:SurfaceCount    ) +
+						SumRevRef( ResIntCeiling:Outside,  ResIntCeiling:SurfaceCount ) +
+						SumRevRef( ResIntFlr:Outside,      ResIntFlr:SurfaceCount     ) +
+						SumRevRef( Ceiling:AdjacentSpcRef, Ceiling:SurfaceCount  ) +
+						SumRevRef( IntFlr:AdjacentSpcRef,  IntFlr:SurfaceCount   ) +
+						SumRevRef( IntWall:AdjacentSpcRef, IntWall:SurfaceCount  )  }
+	"Set ResOtherZn:SurfaceCount to # of child surfaces"		ResOtherZn:SurfaceCount	=     ; SAC 9/18/19 - (MFamProto)
+					{	ChildCount( ResCathedralCeiling  ) + ChildCount( ResExtWall   ) + ChildCount( ResSlabFlr ) + 
+						ChildCount( ResCeilingBelowAttic ) + ChildCount( ResIntWall   ) + ChildCount( ResIntFlr  ) + ChildCount( ResFlrOverCrawlSpc ) + 
+						ChildCount( ResIntCeiling        ) + ChildCount( ResUndgrWall ) + ChildCount( ResExtFlr  ) + ChildCount( ResUndgrFlr ) +
+						SumRevRef( ResIntWall:Outside,     ResIntWall:SurfaceCount    ) +
+						SumRevRef( ResIntCeiling:Outside,  ResIntCeiling:SurfaceCount ) +
+						SumRevRef( ResIntFlr:Outside,      ResIntFlr:SurfaceCount     ) +
+						SumRevRef( Ceiling:AdjacentSpcRef, Ceiling:SurfaceCount  ) +
+						SumRevRef( IntFlr:AdjacentSpcRef,  IntFlr:SurfaceCount   ) +
+						SumRevRef( IntWall:AdjacentSpcRef, IntWall:SurfaceCount  )  }
+	"Set ResGarage:SurfaceCount to # of child surfaces"		ResGarage:SurfaceCount	= {
+						ChildCount( ResCathedralCeiling  ) + ChildCount( ResExtWall ) + ChildCount( ResSlabFlr ) +
+						ChildCount( ResCeilingBelowAttic ) + ChildCount( ResIntWall ) + ChildCount( ResExtFlr  ) + ChildCount( ResFlrOverCrawlSpc ) +
+						ChildCount( ResIntCeiling        ) +
+						SumRevRef( ResIntWall:Outside,    ResIntWall:SurfaceCount    ) +
+						SumRevRef( ResIntCeiling:Outside, ResIntCeiling:SurfaceCount ) +
+						SumRevRef( ResIntFlr:Outside,     ResIntFlr:SurfaceCount     )  }
+
+  ; secondary check to ensure max individual child/adjacent surface area < sum of all surface areas
+	"Set ResZn:SurfaceAreaSum to sum of child/adjacent surface areas"		ResZn:SurfaceAreaSum	= {
+						SumChildren( ResCathedralCeiling:Area  ) + SumChildren( ResExtWall:Area ) + SumChildren( ResSlabFlr:Area     ) + 
+						SumChildren( ResCeilingBelowAttic:Area ) + SumChildren( ResIntWall:Area ) + SumChildren( ResIntFlr:Area ) + SumChildren( ResFlrOverCrawlSpc:Area ) + 
+						SumChildren( ResIntCeiling:Area        ) + SumChildren( ResUndgrWall:Area ) + SumChildren( ResExtFlr:Area ) + SumChildren( ResUndgrFlr:Area ) +
+						SumRevRef( ResIntWall:Outside,    ResIntWall:Area         ) +
+						SumRevRef( ResIntCeiling:Outside, ResIntCeiling:Area ) +
+						SumRevRef( ResIntFlr:Outside,     ResIntFlr:Area   ) +
+						SumRevRef( Ceiling:AdjacentSpcRef, Ceiling:Area  ) +
+						SumRevRef( IntFlr:AdjacentSpcRef,  IntFlr:Area   ) +
+						SumRevRef( IntWall:AdjacentSpcRef, IntWall:Area  )  }
+	"Set ResOtherZn:SurfaceAreaSum to sum of child/adjacent surface areas"		ResOtherZn:SurfaceAreaSum	=     ; SAC 9/18/19 - (MFamProto)
+					{	SumChildren( ResCathedralCeiling:Area  ) + SumChildren( ResExtWall:Area ) + SumChildren( ResSlabFlr:Area     ) + 
+						SumChildren( ResCeilingBelowAttic:Area ) + SumChildren( ResIntWall:Area ) + SumChildren( ResIntFlr:Area ) + SumChildren( ResFlrOverCrawlSpc:Area ) + 
+						SumChildren( ResIntCeiling:Area        ) + SumChildren( ResUndgrWall:Area ) + SumChildren( ResExtFlr:Area ) + SumChildren( ResUndgrFlr:Area ) +
+						SumRevRef( ResIntWall:Outside,    ResIntWall:Area         ) +
+						SumRevRef( ResIntCeiling:Outside, ResIntCeiling:Area ) +
+						SumRevRef( ResIntFlr:Outside,     ResIntFlr:Area   ) +
+						SumRevRef( Ceiling:AdjacentSpcRef, Ceiling:Area  ) +
+						SumRevRef( IntFlr:AdjacentSpcRef,  IntFlr:Area   ) +
+						SumRevRef( IntWall:AdjacentSpcRef, IntWall:Area  )  }
+	"Set ResZn:SurfaceAreaSum to sum of child/adjacent surface areas"		ResGarage:SurfaceAreaSum	= {
+						SumChildren( ResCathedralCeiling:Area  ) + SumChildren( ResExtWall:Area ) + SumChildren( ResSlabFlr:Area     ) +
+						SumChildren( ResCeilingBelowAttic:Area ) + SumChildren( ResIntWall:Area ) + SumChildren( ResExtFlr:Area ) +
+						SumChildren( ResIntCeiling:Area        ) + SumChildren( ResFlrOverCrawlSpc:Area ) +
+						SumRevRef( ResIntWall:Outside,    ResIntWall:Area         ) +
+						SumRevRef( ResIntCeiling:Outside, ResIntCeiling:Area ) +
+						SumRevRef( ResIntFlr:Outside,     ResIntFlr:Area   )  }
+
+	"Set ResZn:SurfaceAreaTop to sum of child/adjacent top surface areas"         ResZn:SurfaceAreaTop	=        ; SAC 04/19/23 (tic #3497)
+					{  SumChildren( ResCathedralCeiling:Area  ) + SumChildren( ResCeilingBelowAttic:Area ) + SumChildren( ResIntCeiling:Area ) + 
+						SumRevRef( ResIntFlr:Outside, ResIntFlr:Area ) + SumRevRef( IntFlr:AdjacentSpcRef, IntFlr:Area )  }
+	"Set ResOtherZn:SurfaceAreaTop to sum of child/adjacent top surface areas"    ResOtherZn:SurfaceAreaTop	= 
+					{	SumChildren( ResCathedralCeiling:Area  ) + SumChildren( ResCeilingBelowAttic:Area ) + SumChildren( ResIntCeiling:Area ) + 
+						SumRevRef( ResIntFlr:Outside, ResIntFlr:Area ) + SumRevRef( IntFlr:AdjacentSpcRef, IntFlr:Area )  }
+
+	"Set ResZn:SurfaceAreaBot to sum of child/adjacent bottom surface areas"      ResZn:SurfaceAreaBot	=        ; SAC 04/19/23 (tic #3497)
+					{  SumChildren( ResSlabFlr:Area ) + SumChildren( ResIntFlr:Area   ) + SumChildren( ResFlrOverCrawlSpc:Area ) + 
+						SumChildren( ResExtFlr:Area  ) + SumChildren( ResUndgrFlr:Area ) +
+						SumRevRef( ResIntCeiling:Outside, ResIntCeiling:Area ) + SumRevRef( Ceiling:AdjacentSpcRef, Ceiling:Area  )  }
+	"Set ResOtherZn:SurfaceAreaBot to sum of child/adjacent bottomsurface areas"     ResOtherZn:SurfaceAreaBot	= 
+					{	SumChildren( ResSlabFlr:Area ) + SumChildren( ResIntFlr:Area   ) + SumChildren( ResFlrOverCrawlSpc:Area ) + 
+						SumChildren( ResExtFlr:Area  ) + SumChildren( ResUndgrFlr:Area ) +
+						SumRevRef( ResIntCeiling:Outside, ResIntCeiling:Area ) + SumRevRef( Ceiling:AdjacentSpcRef, Ceiling:Area  )  }
+
+   ; switched SumRevRef() calls to MaxRevRef() when setting *:SurfaceAreaMax from surfaces of other zones that are adjacent to this zone (BL/AB) - SAC 7/9/20
+	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 1 RCathClgs"		   ResZn:SurfaceAreaMax	= {	if (ChildCount( ResCathedralCeiling  ) > 0) then                       MaxChild( ResCathedralCeiling:Area  )    else  0  endif  }
+	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 2 RClgBlwAs"		   ResZn:SurfaceAreaMax	= {	if (ChildCount( ResCeilingBelowAttic ) > 0) then  max( SurfaceAreaMax, MaxChild( ResCeilingBelowAttic:Area ) )  else  UNCHANGED  endif  }
+	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 3 RIntClgs"		   ResZn:SurfaceAreaMax	= {	if (ChildCount( ResIntCeiling        ) > 0) then  max( SurfaceAreaMax, MaxChild( ResIntCeiling:Area        ) )  else  UNCHANGED  endif  }
+	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 4 RExtWalls"		   ResZn:SurfaceAreaMax	= {	if (ChildCount( ResExtWall           ) > 0) then  max( SurfaceAreaMax, MaxChild( ResExtWall:Area           ) )  else  UNCHANGED  endif  }
+	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 5 RIntWalls"		   ResZn:SurfaceAreaMax	= {	if (ChildCount( ResIntWall           ) > 0) then  max( SurfaceAreaMax, MaxChild( ResIntWall:Area           ) )  else  UNCHANGED  endif  }
+	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 6 RUndWalls"		   ResZn:SurfaceAreaMax	= {	if (ChildCount( ResUndgrWall         ) > 0) then  max( SurfaceAreaMax, MaxChild( ResUndgrWall:Area         ) )  else  UNCHANGED  endif  }
+	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 7 RSlabFlrs"		   ResZn:SurfaceAreaMax	= {	if (ChildCount( ResSlabFlr           ) > 0) then  max( SurfaceAreaMax, MaxChild( ResSlabFlr:Area           ) )  else  UNCHANGED  endif  }
+	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 8 RIntFlrs"		   ResZn:SurfaceAreaMax	= {	if (ChildCount( ResIntFlr            ) > 0) then  max( SurfaceAreaMax, MaxChild( ResIntFlr:Area            ) )  else  UNCHANGED  endif  }
+	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 9 RExtFlrs"		   ResZn:SurfaceAreaMax	= {	if (ChildCount( ResExtFlr            ) > 0) then  max( SurfaceAreaMax, MaxChild( ResExtFlr:Area            ) )  else  UNCHANGED  endif  }
+	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 10 RUndFlrs"		   ResZn:SurfaceAreaMax	= {	if (ChildCount( ResUndgrFlr          ) > 0) then  max( SurfaceAreaMax, MaxChild( ResUndgrFlr:Area          ) )  else  UNCHANGED  endif  }
+	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 11 RFlrsOvrCrwl"	ResZn:SurfaceAreaMax	= {	if (ChildCount( ResFlrOverCrawlSpc   ) > 0) then  max( SurfaceAreaMax, MaxChild( ResFlrOverCrawlSpc:Area   ) )  else  UNCHANGED  endif  }
+	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 12 adj RIntWalls"  ResZn:SurfaceAreaMax	= {	if (SumRevRef( ResIntWall:Outside,    ResIntWall:Area    ) > 0) then  max( SurfaceAreaMax, MaxRevRef( ResIntWall:Outside,    ResIntWall:Area    ) )  else  UNCHANGED  endif  }
+	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 13 adj RIntClgs"	ResZn:SurfaceAreaMax	= {	if (SumRevRef( ResIntCeiling:Outside, ResIntCeiling:Area ) > 0) then  max( SurfaceAreaMax, MaxRevRef( ResIntCeiling:Outside, ResIntCeiling:Area ) )  else  UNCHANGED  endif  }
+	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 14 adj RIntFlrs"	ResZn:SurfaceAreaMax	= {	if (SumRevRef( ResIntFlr:Outside,     ResIntFlr:Area     ) > 0) then  max( SurfaceAreaMax, MaxRevRef( ResIntFlr:Outside,     ResIntFlr:Area     ) )  else  UNCHANGED  endif  }
+	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 15 adj Ceiling"    ResZn:SurfaceAreaMax	= {	if (SumRevRef( Ceiling:AdjacentSpcRef, Ceiling:Area ) > 0) then  max( SurfaceAreaMax, MaxRevRef( Ceiling:AdjacentSpcRef, Ceiling:Area ) )  else  UNCHANGED  endif  }    ; SAC 04/19/23 (tic #3497)
+	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 16 adj IntFlr"	   ResZn:SurfaceAreaMax	= {	if (SumRevRef( IntFlr:AdjacentSpcRef,  IntFlr:Area  ) > 0) then  max( SurfaceAreaMax, MaxRevRef( IntFlr:AdjacentSpcRef,  IntFlr:Area  ) )  else  UNCHANGED  endif  }
+	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 17 adj IntWall"	   ResZn:SurfaceAreaMax	= {	if (SumRevRef( IntWall:AdjacentSpcRef, IntWall:Area ) > 0) then  max( SurfaceAreaMax, MaxRevRef( IntWall:AdjacentSpcRef, IntWall:Area ) )  else  UNCHANGED  endif  }
+
+   ; SAC 9/18/19 - OtherZone (MFamProto)
+	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 1 CathClgs"		ResOtherZn:SurfaceAreaMax	= {	if (ChildCount( ResCathedralCeiling  ) > 0) then                       MaxChild( ResCathedralCeiling:Area  )    else  0  endif  }
+	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 2 ClgBlwAs"		ResOtherZn:SurfaceAreaMax	= {	if (ChildCount( ResCeilingBelowAttic ) > 0) then  max( SurfaceAreaMax, MaxChild( ResCeilingBelowAttic:Area ) )  else  UNCHANGED  endif  }
+	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 3 IntClgs"			ResOtherZn:SurfaceAreaMax	= {	if (ChildCount( ResIntCeiling        ) > 0) then  max( SurfaceAreaMax, MaxChild( ResIntCeiling:Area        ) )  else  UNCHANGED  endif  }
+	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 4 ExtWalls"		ResOtherZn:SurfaceAreaMax	= {	if (ChildCount( ResExtWall           ) > 0) then  max( SurfaceAreaMax, MaxChild( ResExtWall:Area           ) )  else  UNCHANGED  endif  }
+	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 5 IntWalls"		ResOtherZn:SurfaceAreaMax	= {	if (ChildCount( ResIntWall           ) > 0) then  max( SurfaceAreaMax, MaxChild( ResIntWall:Area           ) )  else  UNCHANGED  endif  }
+	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 6 UndWalls"		ResOtherZn:SurfaceAreaMax	= {	if (ChildCount( ResUndgrWall         ) > 0) then  max( SurfaceAreaMax, MaxChild( ResUndgrWall:Area         ) )  else  UNCHANGED  endif  }
+	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 7 SlabFlrs"		ResOtherZn:SurfaceAreaMax	= {	if (ChildCount( ResSlabFlr           ) > 0) then  max( SurfaceAreaMax, MaxChild( ResSlabFlr:Area           ) )  else  UNCHANGED  endif  }
+	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 8 IntFlrs"			ResOtherZn:SurfaceAreaMax	= {	if (ChildCount( ResIntFlr            ) > 0) then  max( SurfaceAreaMax, MaxChild( ResIntFlr:Area            ) )  else  UNCHANGED  endif  }
+	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 9 ExtFlrs"			ResOtherZn:SurfaceAreaMax	= {	if (ChildCount( ResExtFlr            ) > 0) then  max( SurfaceAreaMax, MaxChild( ResExtFlr:Area            ) )  else  UNCHANGED  endif  }
+	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 10 UndFlrs"		ResOtherZn:SurfaceAreaMax	= {	if (ChildCount( ResUndgrFlr          ) > 0) then  max( SurfaceAreaMax, MaxChild( ResUndgrFlr:Area          ) )  else  UNCHANGED  endif  }
+	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 11 adj IntWalls"	ResOtherZn:SurfaceAreaMax	= {	if (SumRevRef( ResIntWall:Outside,    ResIntWall:Area         ) > 0) then  max( SurfaceAreaMax, MaxRevRef( ResIntWall:Outside,         ResIntWall:Area         ) )  else  UNCHANGED  endif  }
+	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 12 adj IntClgs"	ResOtherZn:SurfaceAreaMax	= {	if (SumRevRef( ResIntCeiling:Outside, ResIntCeiling:Area ) > 0) then  max( SurfaceAreaMax, MaxRevRef( ResIntCeiling:Outside, ResIntCeiling:Area ) )  else  UNCHANGED  endif  }
+	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 13 adj IntFlrs"	ResOtherZn:SurfaceAreaMax	= {	if (SumRevRef( ResIntFlr:Outside,     ResIntFlr:Area   ) > 0) then  max( SurfaceAreaMax, MaxRevRef( ResIntFlr:Outside,   ResIntFlr:Area   ) )  else  UNCHANGED  endif  }
+	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 14 FlrsOvrCrwl"	ResOtherZn:SurfaceAreaMax	= {	if (ChildCount( ResFlrOverCrawlSpc    ) > 0) then  max( SurfaceAreaMax, MaxChild( ResFlrOverCrawlSpc:Area    ) )  else  UNCHANGED  endif  }
+	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 15 adj Ceiling"  ResOtherZn:SurfaceAreaMax	= {	if (SumRevRef( Ceiling:AdjacentSpcRef, Ceiling:Area ) > 0) then  max( SurfaceAreaMax, MaxRevRef( Ceiling:AdjacentSpcRef, Ceiling:Area ) )  else  UNCHANGED  endif  }    ; SAC 04/19/23 (tic #3497)
+	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 16 adj IntFlr"   ResOtherZn:SurfaceAreaMax	= {	if (SumRevRef( IntFlr:AdjacentSpcRef,  IntFlr:Area  ) > 0) then  max( SurfaceAreaMax, MaxRevRef( IntFlr:AdjacentSpcRef,  IntFlr:Area  ) )  else  UNCHANGED  endif  }
+	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 17 adj IntWall"	ResOtherZn:SurfaceAreaMax	= {	if (SumRevRef( IntWall:AdjacentSpcRef, IntWall:Area ) > 0) then  max( SurfaceAreaMax, MaxRevRef( IntWall:AdjacentSpcRef, IntWall:Area ) )  else  UNCHANGED  endif  }
+
+	"Set ResGarage:SurfaceAreaMax to MAX of child/adj surface areas - 1 CathClgs"			ResGarage:SurfaceAreaMax	= {	if (ChildCount( CathedralCeiling  ) > 0) then                       MaxChild( ResCathedralCeiling:Area  )    else  0  endif  }
+	"Set ResGarage:SurfaceAreaMax to MAX of child/adj surface areas - 2 ClgBlwAs"			ResGarage:SurfaceAreaMax	= {	if (ChildCount( CeilingBelowAttic ) > 0) then  max( SurfaceAreaMax, MaxChild( ResCeilingBelowAttic:Area ) )  else  UNCHANGED  endif  }
+	"Set ResGarage:SurfaceAreaMax to MAX of child/adj surface areas - 3 IntClgs"			ResGarage:SurfaceAreaMax	= {	if (ChildCount( InteriorCeiling   ) > 0) then  max( SurfaceAreaMax, MaxChild( ResIntCeiling:Area   ) )  else  UNCHANGED  endif  }
+	"Set ResGarage:SurfaceAreaMax to MAX of child/adj surface areas - 4 ExtWalls"			ResGarage:SurfaceAreaMax	= {	if (ChildCount( ExtWall           ) > 0) then  max( SurfaceAreaMax, MaxChild( ResExtWall:Area           ) )  else  UNCHANGED  endif  }
+	"Set ResGarage:SurfaceAreaMax to MAX of child/adj surface areas - 5 IntWalls"			ResGarage:SurfaceAreaMax	= {	if (ChildCount( IntWall           ) > 0) then  max( SurfaceAreaMax, MaxChild( ResIntWall:Area           ) )  else  UNCHANGED  endif  }
+;	"Set ResGarage:SurfaceAreaMax to MAX of child/adj surface areas - 6 UndWalls"			ResGarage:SurfaceAreaMax	= {	if (ChildCount( UndWall           ) > 0) then  max( SurfaceAreaMax, MaxChild( ResUndgrWall:Area           ) )  else  UNCHANGED  endif  }
+	"Set ResGarage:SurfaceAreaMax to MAX of child/adj surface areas - 7 SlabFlrs"			ResGarage:SurfaceAreaMax	= {	if (ChildCount( SlabFloor         ) > 0) then  max( SurfaceAreaMax, MaxChild( ResSlabFlr:Area         ) )  else  UNCHANGED  endif  }
+;	"Set ResGarage:SurfaceAreaMax to MAX of child/adj surface areas - 8 IntFlrs"			ResGarage:SurfaceAreaMax	= {	if (ChildCount( InteriorFloor     ) > 0) then  max( SurfaceAreaMax, MaxChild( ResIntFlr:Area     ) )  else  UNCHANGED  endif  }
+	"Set ResGarage:SurfaceAreaMax to MAX of child/adj surface areas - 9 ExtFlrs"			ResGarage:SurfaceAreaMax	= {	if (ChildCount( ExteriorFloor     ) > 0) then  max( SurfaceAreaMax, MaxChild( ResExtFlr:Area     ) )  else  UNCHANGED  endif  }
+;	"Set ResGarage:SurfaceAreaMax to MAX of child/adj surface areas - 10 UndFlrs"			ResGarage:SurfaceAreaMax	= {	if (ChildCount( UndFloor          ) > 0) then  max( SurfaceAreaMax, MaxChild( ResUndgrFlr:Area          ) )  else  UNCHANGED  endif  }
+	"Set ResGarage:SurfaceAreaMax to MAX of child/adj surface areas - 11 adj IntWalls"	ResGarage:SurfaceAreaMax	= {	if (SumRevRef( ResIntWall:Outside,         ResIntWall:Area         ) > 0) then  max( SurfaceAreaMax, MaxRevRef( ResIntWall:Outside,         ResIntWall:Area         ) )  else  UNCHANGED  endif  }
+	"Set ResGarage:SurfaceAreaMax to MAX of child/adj surface areas - 12 adj IntClgs"	ResGarage:SurfaceAreaMax	= {	if (SumRevRef( ResIntCeiling:Outside, ResIntCeiling:Area ) > 0) then  max( SurfaceAreaMax, MaxRevRef( ResIntCeiling:Outside, ResIntCeiling:Area ) )  else  UNCHANGED  endif  }
+	"Set ResGarage:SurfaceAreaMax to MAX of child/adj surface areas - 13 adj IntFlrs"	ResGarage:SurfaceAreaMax	= {	if (SumRevRef( ResIntFlr:Outside,   ResIntFlr:Area   ) > 0) then  max( SurfaceAreaMax, MaxRevRef( ResIntFlr:Outside,   ResIntFlr:Area   ) )  else  UNCHANGED  endif  }
+	"Set ResGarage:SurfaceAreaMax to MAX of child/adj surface areas - 14 FlrsOvrCrwl"	ResGarage:SurfaceAreaMax	= {	if (ChildCount( FloorOverCrawl    ) > 0) then  max( SurfaceAreaMax, MaxChild( ResFlrOverCrawlSpc:Area    ) )  else  UNCHANGED  endif  }
+
+   ; added to enhance reporting of objects that exceed limits on surface area - SAC 04/20/23 (tic #3497)
+   "Set ResZn:SurfaceAreaMaxComp - 1 RCathClgs"		   ResZn:SurfaceAreaMaxComp = {  if (                                            SurfaceAreaMax > 0 .AND. ChildCount( ResCathedralCeiling  ) > 0) then  if (SurfaceAreaMax == MaxChild( ResCathedralCeiling:Area  )) then  Format(  "child ResCathedralCeiling '%s' of", MaxChildComp( ResCathedralCeiling:Area  ) )  else UNDEFINED endif  else UNDEFINED endif  }
+   "Set ResZn:SurfaceAreaMaxComp - 2 RClgBlwAs"		   ResZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. ChildCount( ResCeilingBelowAttic ) > 0) then  if (SurfaceAreaMax == MaxChild( ResCeilingBelowAttic:Area )) then  Format( "child ResCeilingBelowAttic '%s' of", MaxChildComp( ResCeilingBelowAttic:Area ) )  else UNCHANGED endif  else UNCHANGED endif  }
+   "Set ResZn:SurfaceAreaMaxComp - 3 RIntClgs"		   ResZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. ChildCount( ResIntCeiling        ) > 0) then  if (SurfaceAreaMax == MaxChild( ResIntCeiling:Area        )) then  Format(        "child ResIntCeiling '%s' of", MaxChildComp( ResIntCeiling:Area        ) )  else UNCHANGED endif  else UNCHANGED endif  }
+   "Set ResZn:SurfaceAreaMaxComp - 4 RExtWalls"		   ResZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. ChildCount( ResExtWall           ) > 0) then  if (SurfaceAreaMax == MaxChild( ResExtWall:Area           )) then  Format(           "child ResExtWall '%s' of", MaxChildComp( ResExtWall:Area           ) )  else UNCHANGED endif  else UNCHANGED endif  }
+   "Set ResZn:SurfaceAreaMaxComp - 5 RIntWalls"		   ResZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. ChildCount( ResIntWall           ) > 0) then  if (SurfaceAreaMax == MaxChild( ResIntWall:Area           )) then  Format(           "child ResIntWall '%s' of", MaxChildComp( ResIntWall:Area           ) )  else UNCHANGED endif  else UNCHANGED endif  }
+   "Set ResZn:SurfaceAreaMaxComp - 6 RUndWalls"		   ResZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. ChildCount( ResUndgrWall         ) > 0) then  if (SurfaceAreaMax == MaxChild( ResUndgrWall:Area         )) then  Format(         "child ResUndgrWall '%s' of", MaxChildComp( ResUndgrWall:Area         ) )  else UNCHANGED endif  else UNCHANGED endif  }
+   "Set ResZn:SurfaceAreaMaxComp - 7 RSlabFlrs"		   ResZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. ChildCount( ResSlabFlr           ) > 0) then  if (SurfaceAreaMax == MaxChild( ResSlabFlr:Area           )) then  Format(           "child ResSlabFlr '%s' of", MaxChildComp( ResSlabFlr:Area           ) )  else UNCHANGED endif  else UNCHANGED endif  }
+   "Set ResZn:SurfaceAreaMaxComp - 8 RIntFlrs"		   ResZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. ChildCount( ResIntFlr            ) > 0) then  if (SurfaceAreaMax == MaxChild( ResIntFlr:Area            )) then  Format(            "child ResIntFlr '%s' of", MaxChildComp( ResIntFlr:Area            ) )  else UNCHANGED endif  else UNCHANGED endif  }
+   "Set ResZn:SurfaceAreaMaxComp - 9 RExtFlrs"		   ResZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. ChildCount( ResExtFlr            ) > 0) then  if (SurfaceAreaMax == MaxChild( ResExtFlr:Area            )) then  Format(            "child ResExtFlr '%s' of", MaxChildComp( ResExtFlr:Area            ) )  else UNCHANGED endif  else UNCHANGED endif  }
+   "Set ResZn:SurfaceAreaMaxComp - 10 RUndFlrs"		   ResZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. ChildCount( ResUndgrFlr          ) > 0) then  if (SurfaceAreaMax == MaxChild( ResUndgrFlr:Area          )) then  Format(          "child ResUndgrFlr '%s' of", MaxChildComp( ResUndgrFlr:Area          ) )  else UNCHANGED endif  else UNCHANGED endif  }
+   "Set ResZn:SurfaceAreaMaxComp - 11 RFlrsOvrCrwl"	ResZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. ChildCount( ResFlrOverCrawlSpc   ) > 0) then  if (SurfaceAreaMax == MaxChild( ResFlrOverCrawlSpc:Area   )) then  Format(   "child ResFlrOverCrawlSpc '%s' of", MaxChildComp( ResFlrOverCrawlSpc:Area   ) )  else UNCHANGED endif  else UNCHANGED endif  }
+   "Set ResZn:SurfaceAreaMaxComp - 12 adj RIntWalls"  ResZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. SumRevRef( ResIntWall:Outside,    ResIntWall:Area    ) > 0) then  if (SurfaceAreaMax == MaxRevRef( ResIntWall:Outside,    ResIntWall:Area    )) then  Format(    "adjacent ResIntWall '%s' to", MaxRevRefComp( ResIntWall:Outside,    ResIntWall:Area    ) )  else UNCHANGED endif  else UNCHANGED endif  }
+   "Set ResZn:SurfaceAreaMaxComp - 13 adj RIntClgs"	ResZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. SumRevRef( ResIntCeiling:Outside, ResIntCeiling:Area ) > 0) then  if (SurfaceAreaMax == MaxRevRef( ResIntCeiling:Outside, ResIntCeiling:Area )) then  Format( "adjacent ResIntCeiling '%s' to", MaxRevRefComp( ResIntCeiling:Outside, ResIntCeiling:Area ) )  else UNCHANGED endif  else UNCHANGED endif  }
+   "Set ResZn:SurfaceAreaMaxComp - 14 adj RIntFlrs"	ResZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. SumRevRef( ResIntFlr:Outside,     ResIntFlr:Area     ) > 0) then  if (SurfaceAreaMax == MaxRevRef( ResIntFlr:Outside,     ResIntFlr:Area     )) then  Format(     "adjacent ResIntFlr '%s' to", MaxRevRefComp( ResIntFlr:Outside,     ResIntFlr:Area     ) )  else UNCHANGED endif  else UNCHANGED endif  }
+   "Set ResZn:SurfaceAreaMaxComp - 15 adj Ceiling"    ResZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. SumRevRef( Ceiling:AdjacentSpcRef, Ceiling:Area      ) > 0) then  if (SurfaceAreaMax == MaxRevRef( Ceiling:AdjacentSpcRef, Ceiling:Area      )) then  Format(       "adjacent Ceiling '%s' to", MaxRevRefComp( Ceiling:AdjacentSpcRef, Ceiling:Area      ) )  else UNCHANGED endif  else UNCHANGED endif  }
+   "Set ResZn:SurfaceAreaMaxComp - 16 adj IntFlr"	   ResZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. SumRevRef( IntFlr:AdjacentSpcRef,  IntFlr:Area       ) > 0) then  if (SurfaceAreaMax == MaxRevRef( IntFlr:AdjacentSpcRef,  IntFlr:Area       )) then  Format(        "adjacent IntFlr '%s' to", MaxRevRefComp( IntFlr:AdjacentSpcRef,  IntFlr:Area       ) )  else UNCHANGED endif  else UNCHANGED endif  }
+   "Set ResZn:SurfaceAreaMaxComp - 17 adj IntWall"	   ResZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. SumRevRef( IntWall:AdjacentSpcRef, IntWall:Area      ) > 0) then  if (SurfaceAreaMax == MaxRevRef( IntWall:AdjacentSpcRef, IntWall:Area      )) then  Format(       "adjacent IntWall '%s' to", MaxRevRefComp( IntWall:AdjacentSpcRef, IntWall:Area      ) )  else UNCHANGED endif  else UNCHANGED endif  }
+
+   "Set ResOtherZn:SurfaceAreaMaxComp - 1 RCathClgs"		   ResOtherZn:SurfaceAreaMaxComp = {  if (                                            SurfaceAreaMax > 0 .AND. ChildCount( ResCathedralCeiling  ) > 0) then  if (SurfaceAreaMax == MaxChild( ResCathedralCeiling:Area  )) then  Format(  "child ResCathedralCeiling '%s' of", MaxChildComp( ResCathedralCeiling:Area  ) )  else UNDEFINED endif  else UNDEFINED endif  }
+   "Set ResOtherZn:SurfaceAreaMaxComp - 2 RClgBlwAs"		   ResOtherZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. ChildCount( ResCeilingBelowAttic ) > 0) then  if (SurfaceAreaMax == MaxChild( ResCeilingBelowAttic:Area )) then  Format( "child ResCeilingBelowAttic '%s' of", MaxChildComp( ResCeilingBelowAttic:Area ) )  else UNCHANGED endif  else UNCHANGED endif  }
+   "Set ResOtherZn:SurfaceAreaMaxComp - 3 RIntClgs"		   ResOtherZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. ChildCount( ResIntCeiling        ) > 0) then  if (SurfaceAreaMax == MaxChild( ResIntCeiling:Area        )) then  Format(        "child ResIntCeiling '%s' of", MaxChildComp( ResIntCeiling:Area        ) )  else UNCHANGED endif  else UNCHANGED endif  }
+   "Set ResOtherZn:SurfaceAreaMaxComp - 4 RExtWalls"		   ResOtherZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. ChildCount( ResExtWall           ) > 0) then  if (SurfaceAreaMax == MaxChild( ResExtWall:Area           )) then  Format(           "child ResExtWall '%s' of", MaxChildComp( ResExtWall:Area           ) )  else UNCHANGED endif  else UNCHANGED endif  }
+   "Set ResOtherZn:SurfaceAreaMaxComp - 5 RIntWalls"		   ResOtherZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. ChildCount( ResIntWall           ) > 0) then  if (SurfaceAreaMax == MaxChild( ResIntWall:Area           )) then  Format(           "child ResIntWall '%s' of", MaxChildComp( ResIntWall:Area           ) )  else UNCHANGED endif  else UNCHANGED endif  }
+   "Set ResOtherZn:SurfaceAreaMaxComp - 6 RUndWalls"		   ResOtherZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. ChildCount( ResUndgrWall         ) > 0) then  if (SurfaceAreaMax == MaxChild( ResUndgrWall:Area         )) then  Format(         "child ResUndgrWall '%s' of", MaxChildComp( ResUndgrWall:Area         ) )  else UNCHANGED endif  else UNCHANGED endif  }
+   "Set ResOtherZn:SurfaceAreaMaxComp - 7 RSlabFlrs"		   ResOtherZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. ChildCount( ResSlabFlr           ) > 0) then  if (SurfaceAreaMax == MaxChild( ResSlabFlr:Area           )) then  Format(           "child ResSlabFlr '%s' of", MaxChildComp( ResSlabFlr:Area           ) )  else UNCHANGED endif  else UNCHANGED endif  }
+   "Set ResOtherZn:SurfaceAreaMaxComp - 8 RIntFlrs"		   ResOtherZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. ChildCount( ResIntFlr            ) > 0) then  if (SurfaceAreaMax == MaxChild( ResIntFlr:Area            )) then  Format(            "child ResIntFlr '%s' of", MaxChildComp( ResIntFlr:Area            ) )  else UNCHANGED endif  else UNCHANGED endif  }
+   "Set ResOtherZn:SurfaceAreaMaxComp - 9 RExtFlrs"		   ResOtherZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. ChildCount( ResExtFlr            ) > 0) then  if (SurfaceAreaMax == MaxChild( ResExtFlr:Area            )) then  Format(            "child ResExtFlr '%s' of", MaxChildComp( ResExtFlr:Area            ) )  else UNCHANGED endif  else UNCHANGED endif  }
+   "Set ResOtherZn:SurfaceAreaMaxComp - 10 RUndFlrs"		   ResOtherZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. ChildCount( ResUndgrFlr          ) > 0) then  if (SurfaceAreaMax == MaxChild( ResUndgrFlr:Area          )) then  Format(          "child ResUndgrFlr '%s' of", MaxChildComp( ResUndgrFlr:Area          ) )  else UNCHANGED endif  else UNCHANGED endif  }
+   "Set ResOtherZn:SurfaceAreaMaxComp - 11 RFlrsOvrCrwl"	   ResOtherZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. ChildCount( ResFlrOverCrawlSpc   ) > 0) then  if (SurfaceAreaMax == MaxChild( ResFlrOverCrawlSpc:Area   )) then  Format(   "child ResFlrOverCrawlSpc '%s' of", MaxChildComp( ResFlrOverCrawlSpc:Area   ) )  else UNCHANGED endif  else UNCHANGED endif  }
+   "Set ResOtherZn:SurfaceAreaMaxComp - 12 adj RIntWalls"   ResOtherZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. SumRevRef( ResIntWall:Outside,    ResIntWall:Area    ) > 0) then  if (SurfaceAreaMax == MaxRevRef( ResIntWall:Outside,    ResIntWall:Area    )) then  Format(    "adjacent ResIntWall '%s' to", MaxRevRefComp( ResIntWall:Outside,    ResIntWall:Area    ) )  else UNCHANGED endif  else UNCHANGED endif  }
+   "Set ResOtherZn:SurfaceAreaMaxComp - 13 adj RIntClgs"	   ResOtherZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. SumRevRef( ResIntCeiling:Outside, ResIntCeiling:Area ) > 0) then  if (SurfaceAreaMax == MaxRevRef( ResIntCeiling:Outside, ResIntCeiling:Area )) then  Format( "adjacent ResIntCeiling '%s' to", MaxRevRefComp( ResIntCeiling:Outside, ResIntCeiling:Area ) )  else UNCHANGED endif  else UNCHANGED endif  }
+   "Set ResOtherZn:SurfaceAreaMaxComp - 14 adj RIntFlrs"	   ResOtherZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. SumRevRef( ResIntFlr:Outside,     ResIntFlr:Area     ) > 0) then  if (SurfaceAreaMax == MaxRevRef( ResIntFlr:Outside,     ResIntFlr:Area     )) then  Format(     "adjacent ResIntFlr '%s' to", MaxRevRefComp( ResIntFlr:Outside,     ResIntFlr:Area     ) )  else UNCHANGED endif  else UNCHANGED endif  }
+   "Set ResOtherZn:SurfaceAreaMaxComp - 15 adj Ceiling"     ResOtherZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. SumRevRef( Ceiling:AdjacentSpcRef, Ceiling:Area      ) > 0) then  if (SurfaceAreaMax == MaxRevRef( Ceiling:AdjacentSpcRef, Ceiling:Area      )) then  Format(       "adjacent Ceiling '%s' to", MaxRevRefComp( Ceiling:AdjacentSpcRef, Ceiling:Area      ) )  else UNCHANGED endif  else UNCHANGED endif  }
+   "Set ResOtherZn:SurfaceAreaMaxComp - 16 adj IntFlr"	   ResOtherZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. SumRevRef( IntFlr:AdjacentSpcRef,  IntFlr:Area       ) > 0) then  if (SurfaceAreaMax == MaxRevRef( IntFlr:AdjacentSpcRef,  IntFlr:Area       )) then  Format(        "adjacent IntFlr '%s' to", MaxRevRefComp( IntFlr:AdjacentSpcRef,  IntFlr:Area       ) )  else UNCHANGED endif  else UNCHANGED endif  }
+   "Set ResOtherZn:SurfaceAreaMaxComp - 17 adj IntWall"	   ResOtherZn:SurfaceAreaMaxComp = {  if (LocalStatus( SurfaceAreaMaxComp ) < 1 .AND. SurfaceAreaMax > 0 .AND. SumRevRef( IntWall:AdjacentSpcRef, IntWall:Area      ) > 0) then  if (SurfaceAreaMax == MaxRevRef( IntWall:AdjacentSpcRef, IntWall:Area      )) then  Format(       "adjacent IntWall '%s' to", MaxRevRefComp( IntWall:AdjacentSpcRef, IntWall:Area      ) )  else UNCHANGED endif  else UNCHANGED endif  }
+
+; MFAM TO DO - need to revise settings in Com rules to include (and simulate) adjacent Com surfaces - SAC 10/27/21
+
+   ; restored and enhanced surface count & area checks - SAC 04/19/23 (tic #3497)  ; added logic to bypass these check when EnableResearchMode is activated - SAC 01/05/24
+   ; bypass these checks when automatically generating ZB (zn boundry) int surfaces - SAC 02/01/24
+	"Check for sufficient ResZn:SurfaceCount"		ResZn:Action	=
+      {  if (IfValidAnd( Proj:EnableResearchMode > 0 ) .OR. ResProj:IntSurfModelMthd > 0) then  UNCHANGED
+         else if (SurfaceCount < 3)
+         then	PostError( "Residential Zone (ResZn) '%s' has too few child and/or adjacent surfaces (%g, minimum is 3) to be simulated.", Name, SurfaceCount )
+         else if (SurfaceAreaMax > (SurfaceAreaSum * 0.4))
+         then	if (LocalStatus( SurfaceAreaMaxComp ) > 0)
+               then  PostError( "The largest %s residential zone (ResZn) '%s' is too large in relation to the sum of all child/adjacent surface areas (%g > %g (40%% of %g)).", SurfaceAreaMaxComp, Name, SurfaceAreaMax, (SurfaceAreaSum * 0.4), SurfaceAreaSum )
+               else  PostError( "The largest child/adjacent surface of residential zone (ResZn) '%s' is too large in relation to the sum of all child/adjacent surface areas (%g > %g (40%% of %g)).", Name, SurfaceAreaMax, (SurfaceAreaSum * 0.4), SurfaceAreaSum )  endif
+         else if (BelowMultipliedFlr < 1 .AND. Mult < 1.1 .AND. IfValidAnd( SurfaceAreaTop >= (FloorArea * 0.4) )==0)
+         then	PostError( "Residential zone (ResZn) '%s' has too little top/ceiling surface area (%g) - must be at least 40%% of overall zone area (%g).", Name, SurfaceAreaTop, FloorArea )
+         else if (AboveMultipliedFlr < 1 .AND. Mult < 1.1 .AND. IfValidAnd( SurfaceAreaTop <= (FloorArea * 2.5) )==0)
+         then	PostError( "Residential zone (ResZn) '%s' has too much top/ceiling surface area (%g) - can't be more than 250%% of overall zone area (%g).", Name, SurfaceAreaTop, FloorArea )
+         else if (AboveMultipliedFlr < 1 .AND. Mult < 1.1 .AND. IfValidAnd( SurfaceAreaBot >= (FloorArea * 0.4) )==0)
+         then	PostError( "Residential zone (ResZn) '%s' has too little bottom/floor surface area (%g) - must be at least 40%% of overall zone area (%g).", Name, SurfaceAreaBot, FloorArea )
+         else if (BelowMultipliedFlr < 1 .AND. Mult < 1.1 .AND. IfValidAnd( SurfaceAreaBot <= (FloorArea * 2.5) )==0)
+         then	PostError( "Residential zone (ResZn) '%s' has too much bottom/floor surface area (%g) - can't be more than 250%% of overall zone area (%g).", Name, SurfaceAreaBot, FloorArea )
+         else	UNCHANGED  endif endif endif endif endif endif endif  }
+	"Check for sufficient ResOtherZn:SurfaceCount"	ResOtherZn:Action	=     ; SAC 9/18/19 - (MFamProto)
+      {  if (IfValidAnd( Proj:EnableResearchMode > 0 ) .OR. ResProj:IntSurfModelMthd > 0) then  UNCHANGED
+         else if (SurfaceCount < 3)
+         then	PostError( "Residential OtherZone (ResOtherZn) '%s' has too few child and/or adjacent surfaces (%g, minimum is 3) to be simulated.", Name, SurfaceCount )
+         else if (SurfaceAreaMax > (SurfaceAreaSum * 0.4))
+         then	if (LocalStatus( SurfaceAreaMaxComp ) > 0)
+               then  PostError( "The largest %s residential OtherZone (ResOtherZn) '%s' is too large in relation to the sum of all child/adjacent surface areas (%g > %g (40%% of %g)).", SurfaceAreaMaxComp, Name, SurfaceAreaMax, (SurfaceAreaSum * 0.4), SurfaceAreaSum )
+               else  PostError( "The largest child/adjacent surface of residential OtherZone (ResOtherZn) '%s' is too large in relation to the sum of all child/adjacent surface areas (%g > %g (40%% of %g)).", Name, SurfaceAreaMax, (SurfaceAreaSum * 0.4), SurfaceAreaSum )  endif
+         else if (BelowMultipliedFlr < 1 .AND. Mult < 1.1 .AND. IfValidAnd( SurfaceAreaTop >= (Area * 0.4) )==0)
+         then	PostError( "Residential zone (ResZn) '%s' has too little top/ceiling surface area (%g) - must be at least 40%% of overall zone area (%g).", Name, SurfaceAreaTop, Area )
+         else if (AboveMultipliedFlr < 1 .AND. Mult < 1.1 .AND. IfValidAnd( SurfaceAreaTop <= (Area * 2.5) )==0)
+         then	PostError( "Residential zone (ResZn) '%s' has too much top/ceiling surface area (%g) - can't be more than 250%% of overall zone area (%g).", Name, SurfaceAreaTop, Area )
+         else if (AboveMultipliedFlr < 1 .AND. Mult < 1.1 .AND. IfValidAnd( SurfaceAreaBot >= (Area * 0.4) )==0)
+         then	PostError( "Residential zone (ResZn) '%s' has too little bottom/floor surface area (%g) - must be at least 40%% of overall zone area (%g).", Name, SurfaceAreaBot, Area )
+         else if (BelowMultipliedFlr < 1 .AND. Mult < 1.1 .AND. IfValidAnd( SurfaceAreaBot <= (Area * 2.5) )==0)
+         then	PostError( "Residential zone (ResZn) '%s' has too much bottom/floor surface area (%g) - can't be more than 250%% of overall zone area (%g).", Name, SurfaceAreaBot, Area )
+         else	UNCHANGED  endif endif endif endif endif endif endif  }
+;	"Check for sufficient ResGarage:SurfaceCount"	ResGarage:Action	= {	if ( ResProj:HasGarage < 0.5) then  UNCHANGED
+;																							else if (SurfaceCount < 6)
+;																							then	PostError( "Garage '%s' has too few child and/or adjacent surfaces (%g, minimum is 6) to be simulated.", Name, SurfaceCount )
+;																							else if (SurfaceAreaMax > (SurfaceAreaSum / 2))
+;																							then	PostError( "The largest child/adjacent surface of garage '%s' is too large in relation to the sum of all child/adjacent surface areas (%g > %g).", Name, SurfaceAreaMax, (SurfaceAreaSum / 2) )
+;																							else	UNCHANGED  endif endif endif  }
+;"store BEMProc details" Proj:Action = {  StoreBEMProc( Format( "%s midModelChks", ResProj:RunAbbrev ), 0 )  }
+
+   "Initialize ResZn:OutsideConnection"         ResZn:OutsideConnection	=           ; SAC 04/19/23 (tic #3497)
+      {  if ( (ChildCount( ResCathedralCeiling ) + ChildCount( ResExtWall ) + ChildCount( ResCeilingBelowAttic ) +
+               ChildCount( ResFlrOverCrawlSpc  ) + ChildCount( ResExtFlr  )) > 0 ) then  1  else  0  endif  }
+   "Initialize ResOtherZn:OutsideConnection"    ResOtherZn:OutsideConnection	=
+      {  if ( (ChildCount( ResCathedralCeiling ) + ChildCount( ResExtWall ) + ChildCount( ResCeilingBelowAttic ) +
+               ChildCount( ResFlrOverCrawlSpc  ) + ChildCount( ResExtFlr  )) > 0 ) then  1  else  0  endif  }
+   "Indirect OutsideConnection #1"     Proj:Action =
+      {  if ( (ComponentCount( ResZn      ) > 0 .AND. MinAll( ResZn:OutsideConnection      ) < 1) .OR.
+              (ComponentCount( ResOtherZn ) > 0 .AND. MinAll( ResOtherZn:OutsideConnection ) < 1) )
+         then  EvalRulelist( "SetIndirectOutsideConnection_First" )  else  UNCHANGED  endif  }
+   "Indirect OutsideConnection #2"     Proj:Action =
+      {  if ( (ComponentCount( ResZn      ) > 0 .AND. MinAll( ResZn:OutsideConnection      ) < 1) .OR.
+              (ComponentCount( ResOtherZn ) > 0 .AND. MinAll( ResOtherZn:OutsideConnection ) < 1) )
+         then  EvalRulelist( "SetIndirectOutsideConnection" )  else  UNCHANGED  endif  }
+   "Indirect OutsideConnection #3"     Proj:Action =
+      {  if ( (ComponentCount( ResZn      ) > 0 .AND. MinAll( ResZn:OutsideConnection      ) < 1) .OR.
+              (ComponentCount( ResOtherZn ) > 0 .AND. MinAll( ResOtherZn:OutsideConnection ) < 1) )
+         then  EvalRulelist( "SetIndirectOutsideConnection" )  else  UNCHANGED  endif  }
+   "Indirect OutsideConnection #4"     Proj:Action =
+      {  if ( (ComponentCount( ResZn      ) > 0 .AND. MinAll( ResZn:OutsideConnection      ) < 1) .OR.
+              (ComponentCount( ResOtherZn ) > 0 .AND. MinAll( ResOtherZn:OutsideConnection ) < 1) )
+         then  EvalRulelist( "SetIndirectOutsideConnection" )  else  UNCHANGED  endif  }
+   "Indirect OutsideConnection #5"     Proj:Action =
+      {  if ( (ComponentCount( ResZn      ) > 0 .AND. MinAll( ResZn:OutsideConnection      ) < 1) .OR.
+              (ComponentCount( ResOtherZn ) > 0 .AND. MinAll( ResOtherZn:OutsideConnection ) < 1) )
+         then  EvalRulelist( "SetIndirectOutsideConnection" )  else  UNCHANGED  endif  }
+	"Report insufficient ResZn connection to outside"		   ResZn:Action	   =     ; SAC 04/20/23 (tic #3497)   ; allow when generating ZB surfaces (w/ relief vents) - SAC 02/01/24
+      {  if (OutsideConnection > 0 .OR. ResProj:IntSurfModelMthd > 0) then  UNCHANGED
+         else  PostError( "ResZn '%s' has no connection to the outside (direct through exterior surfaces or indirect through adjacent zones w/ ext surfaces), which is required", Name )  endif  }
+	"Report insufficient ResOtherZn connection to outside"   ResOtherZn:Action	=
+      {  if (OutsideConnection > 0 .OR. ResProj:IntSurfModelMthd > 0) then  UNCHANGED
+         else  PostError( "ResOtherZn '%s' has no connection to the outside (via exterior surfaces of this or adjacent zones), which is required", Name )  endif  }
+
+	"Check consistency between Zone area & the sum of the child DwellUnit areas"		; SAC 6/25/14
+		ResZn:Action = {	if ( Proj:IsSFamResRuleset .OR. IfValidAnd( ResProj:ZonalControl > 0.5 ))	then  UNCHANGED
+								else if (Type == 10 .AND.  DwellingUnitArea_Cond > 1) then  PostError( "Zone '%s' in Unconditioned but has conditioned dwelling unit assigned area of %s SqFt.", Name, FltToStr( DwellingUnitArea_Cond ) )
+								else if (Type  < 10 .AND. (DwellingUnitArea_Cond <= (FloorArea-1) .OR. DwellingUnitArea_Cond >= (FloorArea+1)))
+								then	PostError( "There is a mismatch between conditioned area (%s SqFt) and assigned dwelling unit area (%s SqFt) for zone '%s'", FltToStr( FloorArea ), FltToStr( DwellingUnitArea_Cond ), Name )
+								else  UNCHANGED  endif endif endif  }
+;		"Check for mismatch between zone area & dwelling unit zone assignment & area inputs (no zonal controls)"  ; SAC 7/29/13 - GC issue #137
+;				ResZn:Action		= {	if ( Proj:IsSFamResRuleset .OR. IfValidAnd( ResProj:ZonalControl > 0.5 ))	then  UNCHANGED
+;											else if (Type == 10 .AND. DwellingUnitArea_Cond > 1) then  PostError( "Zone '%s' in Unconditioned but has conditioned dwelling unit assigned area of %s SqFt.", Name, FltToStr( DwellingUnitArea_Cond ) )
+;											else if (Type == 1  .AND. DwellingUnitArea_Cond != FloorArea) then  PostError( "There is a mismatch between conditioned area (%s SqFt) and assigned dwelling unit area (%s SqFt) for zone '%s'", FltToStr( FloorArea ), FltToStr( DwellingUnitArea_Cond ), Name )
+;											else  UNCHANGED  endif endif endif  }
+;		"Check for mismatch between zone area & dwelling unit zone assignment & area inputs (with zonal controls)"  ; SAC 7/29/13 - GC issue #137
+;				ResZn:Action		= {	if ( Proj:IsSFamResRuleset .OR. IfValidAnd( ResProj:ZonalControl < 0.5 ))	then  UNCHANGED
+;											else if (Type == 10 .AND. (DwellingUnitArea_Liv > 1 .OR. DwellingUnitArea_Slp > 1)) then  PostError( "Zone '%s' in Unconditioned but has conditioned (living and/or sleeping) dwelling unit assigned area of %s SqFt.", Name, FltToStr( (DwellingUnitArea_Liv + DwellingUnitArea_Slp) ) )
+;											else if (Type == 2  .AND.  DwellingUnitArea_Slp > 1) then  PostError( "Living zone '%s' is assigned in dwelling unit screen(s) as a sleeping zone (total of %s SqFt).", Name, FltToStr( DwellingUnitArea_Slp ) )
+;											else if (Type == 3  .AND.  DwellingUnitArea_Liv > 1) then  PostError( "Sleeping zone '%s' is assigned in dwelling unit screen(s) as a living zone (total of %s SqFt).", Name, FltToStr( DwellingUnitArea_Liv ) )
+;											else if (Type == 2  .AND.  DwellingUnitArea_Liv != FloorArea) then  PostError( "There is a mismatch between living area (%s SqFt) and assigned dwelling unit area (%s SqFt) for zone '%s'", FltToStr( FloorArea ), FltToStr( DwellingUnitArea_Liv ), Name )
+;											else if (Type == 3  .AND.  DwellingUnitArea_Slp != FloorArea) then  PostError( "There is a mismatch between sleeping area (%s SqFt) and assigned dwelling unit area (%s SqFt) for zone '%s'", FltToStr( FloorArea ), FltToStr( DwellingUnitArea_Slp ), Name )
+;											else  UNCHANGED  endif endif endif endif endif endif  }
+
+	"Check for CrawlSpace objects w/ Type settings that are not yet implemented"  ; SAC 10/17/13 - GC issue #213
+			ResCrawlSpc:Action		= {	if (Area < 0.1) then  UNCHANGED
+												else if (Type != 0)	; "Normal (vented)"
+												then	PostError( "Crawl space type '%s' selected for '%s' is not currently implemented.  This must be changed to 'Normal (vented)' in order to perform the analysis.", EnumString( Type ), Name )
+												else  UNCHANGED  endif endif  }
+
 
    ; same checks for SFam HVACSys objects
 	"Check for valid ResHVACSys:Num*EquipTypes"
@@ -597,19 +961,58 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 									else	PostError( "Centrally ducted HVAC system '%s' must have consistent counts of heating and cooling unit type #10 (%.0f <> %.0f).", Name, HeatSystemCount[10], CoolSystemCount[10] )  endif  }
 
 
+   "Check for HVACHtPump missing EER/EER2"      ResHtPumpSys:Action	=        ; SAC 08/02/23 (2025)  ; SAC 09/26/24 (tic #3629)
+      {  if ( FloorAreaServed < 0.1 .OR. IfValidAnd( IsAvailable > 0 )==0 .OR. IfValidAnd( IncludesCooling > 0 )==0 .OR.
+              IfValidAnd( ShowCEER > 0 ) .OR. IfValidAnd( Type = 34 ) ) then  UNCHANGED
+         else if (EffMetric = 1 .AND. IfValidAnd( EER  > 0 )==0)
+         then  PostError( "EER must be specified for Heat Pump '%s' before analysis can be performed.", Name )
+         else if (EffMetric = 2 .AND. IfValidAnd( EER2 > 0 )==0)
+         then  PostError( "EER2 must be specified for Heat Pump '%s' before analysis can be performed.", Name )
+         else  UNCHANGED  endif endif endif  }
+
+	"Check for HVACHtPump perf metrics via HSPF2/SEER2/EER2 for 2025+ analysis"	ResHtPumpSys:Action	=     ; SAC 07/20/23
+      {  if (IfValidAnd( FloorAreaServed > 0 )==0 .OR. IfValidAnd( ShowEffMetric > 0 )==0 .OR.
+             EffMetric > 1 .OR. IfValidAnd( Proj:AnalysisVersion < 250002 ) .OR. 
+             (IfValidAnd( Status < 2 ) .AND. (ResProj:RunScope > 1 .OR. ResProj:IsAddAlone > 0))) then  UNCHANGED
+         else if (IfValidAnd( Proj:EnableResearchMode > 0 ))
+         then  if (Type == 26 .OR. Type == 24 .OR. Type == 11 .OR. Type == 12 .OR. Type == 6)
+               then  PostWarning( "Heat pump '%s' efficiency metric must be switched to 'EER2' for analysis in this code vintage.", Name )
+               else  PostWarning( "Heat pump '%s' efficiency metric must be switched to 'HSPF2/SEER2/EER2' for analysis in this code vintage.", Name )  endif
+         else  if (Type == 26 .OR. Type == 24 .OR. Type == 11 .OR. Type == 12 .OR. Type == 6)
+               then  PostError( "Heat pump '%s' efficiency metric must be switched to 'EER2' for analysis in this code vintage.", Name )
+               else  PostError( "Heat pump '%s' efficiency metric must be switched to 'HSPF2/SEER2/EER2' for analysis in this code vintage.", Name )  endif
+         endif endif  }
+
 	; SAC 11/14/13 - added check for heat pumps including valid capacities     ; SAC 9/22/17 - enable HP autosizing    ; VCHP2 - SAC 11/01/20
 ;	"debug HP CAP check"									ResHtPumpSys:Action	= {	PostWarning( "HVACHtPump '%s' Type = %g  Cap47 = %g  Cap47 = %g", Name, Type, Cap47, Cap17 )	}
-	"Check for valid HVACHtPump capacities"		ResHtPumpSys:Action	= {	if (FloorAreaServed < 0.1 .OR. IfValidAnd( AutoSize > 0 )) then  UNCHANGED
-																								else if (Type == 22 .OR. IsPackaged > 0 .OR. Type == 7)              ; SAC 11/2/18 - VCHP    ; SAC 6/24/20 - PTHP systems    ; RoomHP - SAC 09/01/20
-																								then  if (IfValidAnd(Cap47 > 0.1)==0)   ; SAC 11/13/18 - removed check on Cap17
-																								      then	PostError( "Heat pump '%s' must have valid Cap47 input in order to be simulated.", Name )
-																								      else  UNCHANGED  endif
-																								else  if (LocalStatus( Cap47 ) < 1 .OR. (LocalStatus( Cap17 ) < 1 .AND. (Type < 12 .OR. Type == 33)))
-																								      then	PostError( "Heat pump '%s' must have valid Cap47 & Cap17 inputs in order to be simulated.", Name )
-																								      else if (IfValidAnd(Cap47 > 0.1) .AND. (IfValidAnd(Cap17 > 0.1) .OR. Type == 12)) then  UNCHANGED
-																								      else	PostError( "Heat pump '%s' must have valid Cap47 & Cap17 inputs in order to be simulated.", Name )
-																								      endif endif
-																								endif endif  }
+	"Check for valid HVACHtPump capacities"		ResHtPumpSys:Action	=               ; no cap checks for HeatPumpDHWCombo - SAC 04/02/23 (tic #1349)
+      {  if (FloorAreaServed < 0.1 .OR. IfValidAnd( AutoSize > 0 ) .OR. Type == 35) then  UNCHANGED
+			else if (Type == 22 .OR. IsPackaged > 0 .OR. Type == 7 .OR. Type == 34)              ; SAC 11/2/18 - VCHP    ; SAC 6/24/20 - PTHP systems    ; RoomHP - SAC 09/01/20   ; AWHP - SAC 12/13/22
+			then  if (IfValidAnd(Cap47 > 0.1)==0)   ; SAC 11/13/18 - removed check on Cap17
+			      then	PostError( "Heat pump '%s' must have valid Cap47 input in order to be simulated.", Name )
+			      else  UNCHANGED  endif
+			else if (Type == 36)                ; VCHP3 - SAC 05/18/24 (tic #1379)
+			then  if (IfValidAnd(Cap47 > 0.1)==0 .OR. IfValidAnd(Cap17 > 0.1)==0 .OR. IfValidAnd(Cap95 > 0.1)==0)
+			      then	PostError( "Heat pump '%s' must have valid Cap47, Cap17 and Cap95 inputs in order to be simulated.", Name )
+			      else  UNCHANGED  endif
+			else  if (LocalStatus( Cap47 ) < 1 .OR. (LocalStatus( Cap17 ) < 1 .AND. (Type < 12 .OR. Type == 33)))
+			      then	PostError( "Heat pump '%s' must have valid Cap47 & Cap17 inputs in order to be simulated.", Name )
+			      else if (IfValidAnd(Cap47 > 0.1) .AND. (IfValidAnd(Cap17 > 0.1) .OR. Type == 12)) then  UNCHANGED
+			      else	PostError( "Heat pump '%s' must have valid Cap47 & Cap17 inputs in order to be simulated.", Name )
+			      endif endif
+			endif endif endif  }
+; WAS:
+;      {	if (FloorAreaServed < 0.1 .OR. IfValidAnd( AutoSize > 0 )) then  UNCHANGED
+;																								else if (Type == 22 .OR. IsPackaged > 0 .OR. Type == 7)              ; SAC 11/2/18 - VCHP    ; SAC 6/24/20 - PTHP systems    ; RoomHP - SAC 09/01/20
+;																								then  if (IfValidAnd(Cap47 > 0.1)==0)   ; SAC 11/13/18 - removed check on Cap17
+;																								      then	PostError( "Heat pump '%s' must have valid Cap47 input in order to be simulated.", Name )
+;																								      else  UNCHANGED  endif
+;																								else  if (LocalStatus( Cap47 ) < 1 .OR. (LocalStatus( Cap17 ) < 1 .AND. (Type < 12 .OR. Type == 33)))
+;																								      then	PostError( "Heat pump '%s' must have valid Cap47 & Cap17 inputs in order to be simulated.", Name )
+;																								      else if (IfValidAnd(Cap47 > 0.1) .AND. (IfValidAnd(Cap17 > 0.1) .OR. Type == 12)) then  UNCHANGED
+;																								      else	PostError( "Heat pump '%s' must have valid Cap47 & Cap17 inputs in order to be simulated.", Name )
+;																								      endif endif
+;																								endif endif  }
 
    "Check for all required Capacity & COP inputs for VCHP2 systems"     ResHtPumpSys:Action =        ; VCHP2 - SAC 07/26/21   ; SAC 09/23/21
       {  if (FloorAreaServed < 0.1 .OR. Type != 33 .OR.
@@ -662,8 +1065,10 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
                else  T24RClimateZoneCodeBase:WperCFM( "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )
                endif
          else  UNDEFINED  endif endif endif endif  }
+   ; revised to prevent throwing DU fan power too high error when served HVAC all Existing - SAC 06/29/23 (tic #3479)
 	"Check for mandatory minimum fan system efficacy (ACM 2.2.12) - MFam models"     DwellUnitType:Action	= 
-		{	if (IfValidAnd( MaxFanPower > 0 )==0 .OR. IfValidAnd( HVACFanRef:WperCFMCool <= MaxFanPower )) then  UNCHANGED
+		{	if (IfValidAnd( MaxFanPower > 0 )==0 .OR. IfValidAnd( HVACFanRef:WperCFMCool <= MaxFanPower ) .OR.
+             IfValidAnd( DUNewOrAltHVACFlrAreaServed > 0.5 )==0 ) then  UNCHANGED
 			else if (DUSDHVFlrAreaServed == DUFloorAreaServed)
          then	PostError( "Fan '%s' assigned to DwellUnitType '%s' has fan efficacy of %g W/CFM which is higher than the mandatory maximum of %g for SDHV system (run %s).", HVACFanRef:name, Name, HVACFanRef:WperCFMCool, MaxFanPower, ResProj:RunAbbrev )
 			else if (DUSDHVFlrAreaServed != DUFloorAreaServed .AND. DUGasFurnAreaServed == DUFloorAreaServed)
@@ -768,7 +1173,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 											then	PostError( "Zone '%s' has incompatible altered and existing heating systems.  Altered system uses AFUE and existing does not.  To get compliance credit, altered and verified heating system types must be consistent.", Name )
 											else if (T24RCoolingEquipment:SEERValid( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", AltHVACSystem:CoolSysTypeAbbrev ) > 0 .AND. 
 														T24RCoolingEquipment:SEERValid( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType",  exHVACSystem:CoolSysTypeAbbrev ) < 1)
-											then	PostError( "Zone '%s' has incompatible altered and existing cooling systems.  Altered system uses SEE/SEER2 and existing does not.  To get compliance credit, altered and verified cooling system types must be consistent.", Name )
+											then	PostError( "Zone '%s' has incompatible altered and existing cooling systems.  Altered system uses SEER/SEER2 and existing does not.  To get compliance credit, altered and verified cooling system types must be consistent.", Name )
 											else if (T24RCoolingEquipment:EERValid(  "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", AltHVACSystem:CoolSysTypeAbbrev ) > 0 .AND. 
 														T24RCoolingEquipment:EERValid(  "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType",  exHVACSystem:CoolSysTypeAbbrev ) < 1)
 											then	PostError( "Zone '%s' has incompatible altered and existing cooling systems.  Altered system uses EER/EER2 and existing does not.  To get compliance credit, altered and verified cooling system types must be consistent.", Name )
@@ -801,10 +1206,12 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 									then	PostError( "The model includes one or more Zones with a DHW status of 'Existing' but no Existing DHWSys object to assign to the Zone(s)." )
 									else	UNCHANGED  endif endif endif  }
 
-	; SAC 8/17/16 - added check to ensure that all pertinent DHW assignments are present in each DwellUnitType
-   "Check for all pertinent DHW system assignments in each (modeled) DwellUnitType"
-      DwellUnitType:Action	= {
-         if ( Proj:IsSFamResRuleset .OR. AssignedDUFlrArea < 1) then  UNCHANGED
+	; SAC 8/17/16 - added check to ensure that all pertinent DHW assignments are present in each DwellUnitType   ; expand error checks for NumDHWSysTypes undefined or < 1 - SAC 03/01/23
+   "Check for all pertinent DHW system assignments in each (modeled) DwellUnitType"    ; prevent error if HtEqpUsedAsDHWHtr - SAC 10/14/24 (tic #3629)
+      DwellUnitType:Action	= 
+      {  if ( Proj:IsSFamResRuleset .OR. AssignedDUFlrArea < 1 .OR. HtEqpUsedAsDHWHtr > 0.1) then  UNCHANGED
+         else if (IfValidAnd( NumDHWSysTypes >= 1 )==0)
+         then  PostError( "Number of DHW system assignment in dwelling unit type '%s' must be >= 1", Name )
          else if (IfValidAnd( NumDHWSysTypes >= 1 ) .AND. LocalCompAssigned( DHWSysRef[1] )==0)
          then  PostError( "DHW system assignment #1 missing in dwelling unit type '%s'", Name )
          else if (IfValidAnd( NumDHWSysTypes >= 2 ) .AND. LocalCompAssigned( DHWSysRef[2] )==0)
@@ -815,7 +1222,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
          then  PostError( "DHW system assignment #4 missing in dwelling unit type '%s'", Name )
          else if (IfValidAnd( NumDHWSysTypes >= 5 ) .AND. LocalCompAssigned( DHWSysRef[5] )==0)
          then  PostError( "DHW system assignment #5 missing in dwelling unit type '%s'", Name )
-         else  UNCHANGED  endif endif endif endif endif endif  }
+         else  UNCHANGED  endif endif endif endif endif endif endif  }
 
 	; SAC 10/24/15 - added check to ensure only one DHWSys assignment to DwellUnitTypes when a central DHWSys is assigned
 	"Check for no more than 1 DwellUnitType DHW system when a central system is assigned"
@@ -858,13 +1265,46 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
   	"Ensure DHWSys objects not assigned to serve BOTH new/altered & existing areas"
 		ResDHWSys:Action		= {	if ( IfValidAnd( ResProj:RunScope == 2 ) .AND. ExFlrAreaServed >= 1 .AND. (AltFlrAreaServed + NewFlrAreaServed) >= 1)
 										then	if ( Proj:IsComRuleset)
-												then	PostError( "DHW System '%s' is assigned to a combination of existing and new/altered dwelling unit types.  No one system can be referenced as an existing system and a new/altered system by different dwelling unit types.", Name )
+												then	PostError( "DHW System '%s' is assigned to a combination of existing and new/altered common areas and/or dwelling unit types.  No one system can be referenced as an existing system and a new/altered system by different zones.", Name )
 												else	PostError( "DHW System '%s' is assigned to a combination of existing and new/altered zones.  No one system can be referenced as an existing system and a new/altered system by different zones.", Name )
 												endif
 										else if (IfValidAnd( FloorAreaServed >= 1 ) .AND. IfValidAnd( FirstDHWHtrIndex > 0 )==0 .AND.
 										         ( Proj:IsSFamResRuleset .OR. CentralDHW < 1 .OR. CentralDHWTypeVal != 2))
 										then	PostError( "DHW System '%s' is assigned to one or more dwelling units/zones but no valid DHW heaters (w/ counts > 0) are assigned.", Name )
 										else	UNCHANGED  endif endif  }
+
+; SAC 5/12/15 - added checks for valid ResDHWSys:SystemType & ResDHWSys:MFamDistType specified (issue 537)
+; SAC 5/13/15 - revisions to this check to ensure proper SystemType for central systems (issue 537)
+; SAC 3/8/18 - extended list of allowed SystemTypes to include new 2019 Compact... (tic #983)
+; SAC 1/1/20 - added new error check to prevent Central (MFam model) DHW system w/ assigned area (OtherZone) but no DwellUnit/Zone DHW assignment (tic #862)
+; SAC 2/4/20 - added check for CHPWHNumComp > 0 (tic #1197)
+; added check preventing a central DHW system from being assigned to both dwelling units AND ResOtherZns (due to std design solar system requirement issue) - SAC 05/08/23
+; MOVED this check up from SimCheck into CodeCheck to ensure it is processed prior to any simulation - SAC 05/17/23
+   ; "dbg" ResDHWSys:Action = { MessageBox( "ResDHWSys '%s':  Proj:IsComRuleset %g / CentralDHW %g / SimDHWSys %g / NumDUsServed %g / NumResOtherZnsServed %g", Name, Proj:IsComRuleset, CentralDHW, SimDHWSys, NumDUsServed, NumResOtherZnsServed ) }
+   "Check ResDHWSys:SystemType selection"    ResDHWSys:Action  =
+      {  if (IfValidAnd( SystemType > 0 )==0)
+         then	PostError( "DHWSys '%s' must have a valid Distribution (SystemType) option selected.", Name )
+         else if ( Proj:IsComRuleset .AND. IfValidAnd( CentralDHW > 0 ) .AND.
+                  SystemType != 3840 .AND. SystemType != 4096 .AND. SystemType != 4352 .AND.
+                  SystemType != 8392704 .AND. SystemType != 8392960 .AND. SystemType != 100 )
+         then	PostError( "DHWSys '%s' Dwelling Unit Distribution (SystemType) is not compatible with multifamily, central systems.", Name )
+         else if ( Proj:IsComRuleset .AND. IfValidAnd( CentralDHW > 0 ) .AND.
+                  CentralDHWType == 2 .AND. IfValidAnd( CHPWHNumCompFlt > 0 )==0)
+         then  PostError( "Central HPWH DHWSys '%s' missing compressor count input.", Name )
+         else	UNCHANGED  endif endif endif  }
+      ; remove check preventing central DHW systems w/ no dwellings assigned - SAC 04/21/23 (tic #3418)
+      ;   else if ( (Proj:IsComRuleset .OR. Proj:IsComRuleset) .AND. IfValidAnd( CentralDHW > 0 ) .AND.
+      ;            IfValidAnd( SimDHWSys > 0 ) .AND. IfValidAnd( NumDUsServed > 0 )==0)
+      ;   then  PostError( "Central DHWSys '%s' must be assigned to serve at least one dwelling unit.", Name )
+      ; removed combined res + nonres central DHW assignment error - SAC 01/12/24
+      ;   else if ( Proj:IsComRuleset .AND. IfValidAnd( CentralDHW > 0 ) .AND.
+      ;             IfValidAnd( NumDUsServed > 0 ) .AND. IfValidAnd( NumResOtherZnsServed > 0.1 ) .AND.
+      ;             IfValidAnd( Proj:EnableResearchMode > 0 )==0 )
+      ;   then  PostError( "Central DHWSys '%s' must be assigned to serve either dwelling units or common areas (ResOtherZn), but not both.", Name )
+
+; SAC 5/13/15 - REMOVED this check preventing MFamDistType = '- none -', as this turns out to be a valid selection, even when CentralDHW is checked. (issue 537)
+;	"Check ResDHWSys:MFamDistType selection"	ResDHWSys:Action	= {	if ( Proj:IsSFamResRuleset .OR. CentralDHW < 0.5 .OR. MFamDistType > 0.5) then  UNCHANGED
+;																					else	PostError( "DHWSys '%s' must have a valid Central System Distribution (MFamDistType) option selected.", Name )  endif  }
 
    ; SAC 12/6/18 - added checks for 2019 Compact Distrib credit (tic #975)
    ; SAC 1/12/19 - added logic to prevent error if user has selected to manually enter CompactFactor
@@ -1032,6 +1472,14 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
                else  UNCHANGED  endif endif endif
          else  UNCHANGED  endif endif  }
 
+   "Prevent simulation of New/Alt DHWHeaters in 2022+ analysis of type non-UEF HPWH"   ResWtrHtr:Action  =        ; SAC 02/16/23 (tic #1347)  ; ported - SAC 09/26/24
+      {  if (IfValidAnd( ResProj:EnergyCodeYearNum >= 2022 ) .AND. (IfValidAnd( Proj:RunAbbrev = "pp" ) .OR. IfValidAnd( Proj:RunAbbrev = "p" ) .OR. IfValidAnd( Proj:RunAbbrev = "u" )))
+         then  if (IfValidAnd( HeaterElementType = 5 ) .AND. IfValidAnd( HPWHCategory = 4 ) .AND. IfValidAnd( IsExisting = 0 ) .AND. IfValidAnd( FloorAreaServed > 0 ))
+               then  PostError( "%s ResWtrHtr '%s' is specified as a non-UEF rated HPWH which is only valid for Existing equipment.", EnumString( Status ), Name )
+               else  UNCHANGED  endif
+         else  UNCHANGED  endif  }
+;      {  PostMessageToLog( "EnergyCodeYearNum %g / RunAbbrev %s / DHWHeater %s / HeaterElementType %g / HPWHCategory %g / IsExisting %g / FloorAreaServed %g", Proj:EnergyCodeYearNum, Proj:RunAbbrev, Name, HeaterElementType, HPWHCategory, IsExisting, FloorAreaServed )  }
+
 	; SAC 3/18/16 - check for valid inputs for new HPWH model
 	; SAC 7/19/17 - removed check preventing analysis using Sanden models
 	; SAC 1/6/20 - removed check preventing location of "- none -", which now simulates DHWHeater in Unconditioned zone (avg of DBT & 70) (tic #862)
@@ -1079,8 +1527,8 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
       ResProj:Action  = {  if (SumAll( DHWSolSys:DHWSysAssigned ) < 2 .OR. IfValidAnd( Proj:EnableResearchMode > 0 )) then  UNCHANGED
                         else  PostError( "Only one DHWSolarSys can be assigned to serve DHWSystem(s) per building when performing compliance analysis." )  endif  }
 
-   "Prevent code-related DHWSolarSys issues"    DHWSolSys:Action  =      ; SAC 6/29/20 (tic #1210)
-      {  if (IfValidAnd( DHWSysAssigned < 1 ) .OR. IfValidAnd( Proj:EnableResearchMode > 0 ) .OR.
+   "Prevent code-related DHWSolarSys issues"    DHWSolSys:Action  =      ; SAC 6/29/20 (tic #1210)   ; move this check for Com to data model RULE - SAC 05/01/23 (tic #3489)
+      {  if (IfValidAnd( Proj:IsComRuleset > 0 ) .OR. IfValidAnd( DHWSysAssigned < 1 ) .OR. IfValidAnd( Proj:EnableResearchMode > 0 ) .OR.
              IfValidAnd( ErrID > 0 )==0 .OR. IfValidAnd( ErrID < 100 )) then  UNCHANGED
          else  PostError( "DHW solar system '%s' error: %s.", Name, ErrMsg )  endif  }
 
@@ -1132,14 +1580,35 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 																						else UNCHANGED endif
 																					else UNCHANGED endif endif	}
 
+   ; SAC 7/20/17 - added check to prevent Cons objects from being assigned to both new and non-new zone surfaces (when QII being modeled) (tic #775)
+   ; SAC 5/18/18 - revised logic to accommodate QII mods caused by ResExtWall:Exception (tic #798)
+   ; SAC 4/21/19 - added logic to prevent this error for Std or DRtg runs
+   ; moved this rule posting error related to Cons assigned to surfaces of New and non-New zones up here from CheckSim rulelist so that it is triggered before sizing run(s) - SAC 06/29/23 (tic #3479)
+   "Check for constructions assigned to both new and non-new zone surfaces (when QII being modeled)"   ResConsAssm:Action  = {
+      if ( ResProj:ICQEnclCavInsMult <= ResProj:StdICQEnclCavInsMult) then  UNCHANGED  ; no QII selected
+      else if ( ResProj:RunAbbrev == "s" .OR. ResProj:RunAbbrev == "zb" .OR. ResProj:RunAbbrev == "smf" .OR. ResProj:RunAbbrev == "dr") then  UNCHANGED  ; no error for Std or DRtg runs
+      else if (IfValidAnd( SurfacesQIIDegraded > 0 )==0 .OR. IfValidAnd( SurfacesQIINotDegraded > 0 )==0) then  UNCHANGED
+      else if (CanAssignTo == 7 .OR. CanAssignTo == 8) then  UNCHANGED  ; n/a to Attic Roofs, Slab or Und Flrs  ; now applicable to attic roofs (tic #775) - SAC 5/18/18
+      else  switch (Type)
+               case  2 :  UNCHANGED  ; "Concrete / ICF / Brick"  - walls
+               case  3 :  UNCHANGED  ; "Hollow Unit Masonry"     - walls 
+               case  4 :  UNCHANGED  ; "Adobe / Strawbale / Log" - walls
+               case  9 :  UNCHANGED  ; "No Frame (concrete/CMU)" - walls/floors
+               case 25 :  UNCHANGED  ; "Concrete / ICF / Brick"  - floors
+               default :  PostError( "Construction '%s' is referenced by surfaces of both New Zones (w/ no exception) and other Zones/Garages (or w/ exceptions) which is not allowed when modeling Improved Construction Quality", Name )
+            endswitch  endif endif endif endif  }
+
    ; SAC 5/14/18 - add check to ensure that if QII = Improved then at least one surface in the model will benefit in the simulation (tic #775)
    ; SAC 5/18/18 - revised logic slightly to accommodate wall exception input (tic #798)
+   ; switch error to warning for QII set but not applicable for 2022.3.1 and future releases - SAC 04/15/24 (tic #1360)
    "Check for presence of at least one surface benefitting by QII = Improved"    ResProj:Action  = {  
          if (InsulConsQuality < 1.5 .OR.
              SumAll( ResCeilingBelowAttic:ICQAtticBypassApplies ) > 0) then UNCHANGED
          else if (SumAcrossIf( ResConsAssm:SurfacesQIINotDegraded, ResConsAssm:AssignedSurfaceArea > 0 ) > 0) then UNCHANGED
          else if (IfValidAnd( EnergyCodeYearNum >= 2019 ))
-         then  PostError( "Quality Insulation Installation (QII) is set to 'Yes' but no surfaces in the model can benefit from this setting. QII applies only to surfaces of New Zones/Attics." )
+         then  if (IfValidAnd( Proj:AnalysisVersion >= 220301 )) 
+               then  PostWarning( "Quality Insulation Installation (QII) is set to 'Yes' but no surfaces in the model can benefit from this setting. QII applies only to surfaces of New Zones/Attics." )
+               else  PostError(   "Quality Insulation Installation (QII) is set to 'Yes' but no surfaces in the model can benefit from this setting. QII applies only to surfaces of New Zones/Attics." )  endif
          else  PostError( "Insulation Construction Quality is set to 'Improved' but no surfaces in the model can benefit from this setting. Improved InsulConsQuality applies only to surfaces of New Zones/Attics." )  endif endif endif  }
 
 ; SAC 1/3/16 - check for ResDistSys:DuctInsRvalOpt too high in certain cases (tic 597)
@@ -1446,9 +1915,11 @@ RULELIST "ProposedModelSimulationCheck" 1 0 0 0
 
 ; revised several rules to be ignored for Com models where ResDwellUnits toggled OFF - SAC 05/18/22
 
-	"Check for existence of at least one zone object - and prevent OtherZones in SFam models"    ; SAC 9/10/19 - added OtherZone check (MFamProto)
+   ; SAC 9/10/19 - added OtherZone check (MFamProto)
+	"Check for existence of at least one zone object - and prevent OtherZones in SFam models"       ; added count check for ResOtherZn - SAC 10/08/24 (tic #3630)
 		ResProj:Action	= {	if (IfValidAnd( IsComRuleset > 0 ) .AND. IfValidAnd( Proj:ResDwellUnits > 0 )==0) then  UNCHANGED
-                        else if (AnalysisType > 0 .AND. ComponentCount( Zone ) < 1)		; SAC 2/4/16 - disable check for 'Research' mode
+                        else if (AnalysisType > 0 .AND. ComponentCount( Zone ) < 1 .AND.
+                                 ComponentCount( ResOtherZn ) < 1)		; SAC 2/4/16 - disable check for 'Research' mode
 								then  PostError( "At least one Zone object must be present in the model prior to simulation" )
 								else if (AnalysisType > 0 .AND. IsMultiFamily == 0 .AND. SumAll( ResOtherZn:Area ) > 0.1 .AND.
                                  IfValidAnd( Proj:EnableResearchMode > 0 )==0 .AND. IfValidAnd( BypassRuleLimits > 0 )==0)
@@ -1461,21 +1932,25 @@ RULELIST "ProposedModelSimulationCheck" 1 0 0 0
 		ResProj:Action	= {	if (ZonalControl > 0.5 .AND. IsMultiFamily > 0.5)
 								then  PostError( "Zonal Control Credit is not an available analysis option for multifamily buildings." )  else  UNCHANGED  endif  }
 
-   "global check for sufficient Window area - ResProj:CondWinAreaCFARat > 0.05"     ResProj:Action =     ; SAC 09/30/21
+;"debug" ResProj:Action = { PostMessageToLog( "Max Res flr mult: %g / CondWinAreaCFARat: %g", MaxAll( ResZnGrp:Mult ), CondWinAreaCFARat ) }
+   "global check for sufficient Window area - ResProj:CondWinAreaCFARat > 0.05"     ResProj:Action =     ; SAC 09/30/21  ; revise to throw only warning for add/alter - SAC 05/10/23
       {  if (IfValidAnd( IsComRuleset > 0 ) .AND. IfValidAnd( Proj:ResDwellUnits > 0 )==0) then  UNCHANGED
          else if (RunScope = 1 .AND. IfValidAnd( IsAddAlone > 0 )) then  UNCHANGED
          else if (IfValidAnd( CondWinAreaCFARat >= 0 )==0)
          then  PostError( "Error calculating building-wide ratio of conditioned zone window area & floor area ( ResProj:CondWinAreaCFARat)" )
          else if (IfValidAnd( CondWinAreaCFARat < 0.05 ))
-         then  PostError( "Ratio of conditioned zone window area / floor area (%0.3f) deemed too small, must be >= 0.05", CondWinAreaCFARat )
+         then  if (RunScope == 2 .OR. IsAddAlone > 0)
+               then  PostWarning( "Ratio of conditioned zone window area / floor area (%0.3f) is unusually small, typically >= 0.05", CondWinAreaCFARat )
+               else  PostError(   "Ratio of conditioned zone window area / floor area (%0.3f) deemed too small, must be >= 0.05", CondWinAreaCFARat )
+               endif
          else  UNCHANGED  endif endif endif endif  }
 
    "global check for conditioned area and sufficient ratio of conditioned volume / floor area"     ResProj:Action =     ; SAC 09/30/21
       {  if (IfValidAnd( IsComRuleset > 0 ) .AND. IfValidAnd( Proj:ResDwellUnits > 0 )==0) then  UNCHANGED
          else if (IfValidAnd( CondFloorArea > 0 )==0)
          then  PostError( "No conditioned zone floor area found in model, must be > 0" )
-         else if (ValidOr( CondVolume, 0 ) / CondFloorArea < 7)
-         then  PostError( "Ratio of conditioned zone volume / floor area (%0.1f) deemed too small, must be >= 7", ValidOr( CondVolume, 0 ) / CondFloorArea )
+         else if (ValidOr( CondVolume, 0 ) / CondFloorAreaWithMult < 7)
+         then  PostError( "Ratio of conditioned zone volume / floor area (%0.1f) deemed too small, must be >= 7", ValidOr( CondVolume, 0 ) / CondFloorAreaWithMult )
          else  UNCHANGED  endif endif endif  }
 
 ; SAC 8/1/14 - removed check to prevent compliance analysis on Conditioned attics
@@ -1659,170 +2134,7 @@ RULELIST "ProposedModelSimulationCheck" 1 0 0 0
 ;	1,           "Construction assignments",      BEMP_Obj,  1,  0,  0, "",                 0,  1, "Cons",  8, "CanAssignTo",  6012, "Construction assembly" 
 ;	1,           "exConstruction assignments",    BEMP_Obj,  1,  0,  0, "",                 0,  1, "Cons",  8, "CanAssignTo",  3208, "existing construction for this (altered) floor object" 
 
-   ; SAC 7/20/17 - added check to prevent Cons objects from being assigned to both new and non-new zone surfaces (when QII being modeled) (tic #775)
-   ; SAC 5/18/18 - revised logic to accommodate QII mods caused by ResExtWall:Exception (tic #798)
-   ; SAC 4/21/19 - added logic to prevent this error for Std or DRtg runs
-   "Check for constructions assigned to both new and non-new zone surfaces (when QII being modeled)"   ResConsAssm:Action  = {
-      if ( ResProj:ICQEnclCavInsMult <= ResProj:StdICQEnclCavInsMult) then  UNCHANGED  ; no QII selected
-      else if ( ResProj:RunAbbrev == "s" .OR. ResProj:RunAbbrev == "zb" .OR. ResProj:RunAbbrev == "smf" .OR. ResProj:RunAbbrev == "dr") then  UNCHANGED  ; no error for Std or DRtg runs
-      else if (IfValidAnd( SurfacesQIIDegraded > 0 )==0 .OR. IfValidAnd( SurfacesQIINotDegraded > 0 )==0) then  UNCHANGED
-      else if (CanAssignTo == 7 .OR. CanAssignTo == 8) then  UNCHANGED  ; n/a to Attic Roofs, Slab or Und Flrs  ; now applicable to attic roofs (tic #775) - SAC 5/18/18
-      else  switch (Type)
-               case  2 :  UNCHANGED  ; "Concrete / ICF / Brick"  - walls
-               case  3 :  UNCHANGED  ; "Hollow Unit Masonry"     - walls 
-               case  4 :  UNCHANGED  ; "Adobe / Strawbale / Log" - walls
-               case  9 :  UNCHANGED  ; "No Frame (concrete/CMU)" - walls/floors
-               case 25 :  UNCHANGED  ; "Concrete / ICF / Brick"  - floors
-               default :  PostError( "Construction '%s' is referenced by surfaces of both New Zones (w/ no exception) and other Zones/Garages (or w/ exceptions) which is not allowed when modeling Improved Construction Quality", Name )
-            endswitch  endif endif endif endif  }
-
-  ; SAC 10/20/14 - check for valid Attic assigned to every CeilingBelowAttic
-	"Check for valid Attic assigned to every ResCeilingBelowAttic:AtticZone"
-		ResCeilingBelowAttic:Action	= {	if (IfValidAnd( Area > 0.1 ) .AND. LocalCompAssigned( AtticZone ) < 0.1)
-													then	PostError( "Ceiling below attic '%s' lacks the required assignment of AtticZone", Name )
-													else  UNCHANGED  endif  }
-
-  ; SAC 1/28/13 - added checks to ensure that each Zone & Garage has at least 6 adjacent surfaces
-	"Set ResIntWall:SurfaceCount to 1"				ResIntWall:SurfaceCount				= {	1  }
-	"Set ResIntCeiling:SurfaceCount to 1"	ResIntCeiling:SurfaceCount	= {	1  }
-	"Set ResIntFlr:SurfaceCount to 1"		ResIntFlr:SurfaceCount		= {	1  }
-	"Set ResZn:SurfaceCount to # of child surfaces"		ResZn:SurfaceCount	= {
-						ChildCount( CathedralCeiling  ) + ChildCount( ExtWall ) + ChildCount( SlabFloor     ) + 
-						ChildCount( CeilingBelowAttic ) + ChildCount( IntWall ) + ChildCount( InteriorFloor ) + ChildCount( FloorOverCrawl ) + 
-						ChildCount( InteriorCeiling   ) + ChildCount( UndWall ) + ChildCount( ExteriorFloor ) + ChildCount( UndFloor ) +
-						SumRevRef( ResIntWall:Outside,         ResIntWall:SurfaceCount         ) +
-						SumRevRef( ResIntCeiling:Outside, ResIntCeiling:SurfaceCount ) +
-						SumRevRef( ResIntFlr:Outside,   ResIntFlr:SurfaceCount   )  }
-	"Set ResOtherZn:SurfaceCount to # of child surfaces"		ResOtherZn:SurfaceCount	=     ; SAC 9/18/19 - (MFamProto)
-					{	ChildCount( CathedralCeiling  ) + ChildCount( ExtWall ) + ChildCount( SlabFloor     ) + 
-						ChildCount( CeilingBelowAttic ) + ChildCount( IntWall ) + ChildCount( InteriorFloor ) + ChildCount( FloorOverCrawl ) + 
-						ChildCount( InteriorCeiling   ) + ChildCount( UndWall ) + ChildCount( ExteriorFloor ) + ChildCount( UndFloor ) +
-						SumRevRef( ResIntWall:Outside,         ResIntWall:SurfaceCount         ) +
-						SumRevRef( ResIntCeiling:Outside, ResIntCeiling:SurfaceCount ) +
-						SumRevRef( ResIntFlr:Outside,   ResIntFlr:SurfaceCount   )  }
-	"Set ResGarage:SurfaceCount to # of child surfaces"		ResGarage:SurfaceCount	= {
-						ChildCount( CathedralCeiling  ) + ChildCount( ExtWall ) + ChildCount( SlabFloor     ) +
-						ChildCount( CeilingBelowAttic ) + ChildCount( IntWall ) + ChildCount( ExteriorFloor ) + ChildCount( FloorOverCrawl ) +
-						ChildCount( InteriorCeiling   ) +
-						SumRevRef( ResIntWall:Outside,         ResIntWall:SurfaceCount         ) +
-						SumRevRef( ResIntCeiling:Outside, ResIntCeiling:SurfaceCount ) +
-						SumRevRef( ResIntFlr:Outside,   ResIntFlr:SurfaceCount   )  }
-
-  ; secondary check to ensure max individual child/adjacent surface area < sum of all surface areas
-	"Set ResZn:SurfaceAreaSum to sum of child/adjacent surface areas"		ResZn:SurfaceAreaSum	= {
-						SumChildren( ResCathedralCeiling:Area  ) + SumChildren( ResExtWall:Area ) + SumChildren( ResSlabFlr:Area     ) + 
-						SumChildren( ResCeilingBelowAttic:Area ) + SumChildren( ResIntWall:Area ) + SumChildren( ResIntFlr:Area ) + SumChildren( ResFlrOverCrawlSpc:Area ) + 
-						SumChildren( ResIntCeiling:Area   ) + SumChildren( ResUndgrWall:Area ) + SumChildren( ResExtFlr:Area ) + SumChildren( ResUndgrFlr:Area ) +
-						SumRevRef( ResIntWall:Outside,         ResIntWall:Area         ) +
-						SumRevRef( ResIntCeiling:Outside, ResIntCeiling:Area ) +
-						SumRevRef( ResIntFlr:Outside,   ResIntFlr:Area   )  }
-	"Set ResOtherZn:SurfaceAreaSum to sum of child/adjacent surface areas"		ResOtherZn:SurfaceAreaSum	=     ; SAC 9/18/19 - (MFamProto)
-					{	SumChildren( ResCathedralCeiling:Area  ) + SumChildren( ResExtWall:Area ) + SumChildren( ResSlabFlr:Area     ) + 
-						SumChildren( ResCeilingBelowAttic:Area ) + SumChildren( ResIntWall:Area ) + SumChildren( ResIntFlr:Area ) + SumChildren( ResFlrOverCrawlSpc:Area ) + 
-						SumChildren( ResIntCeiling:Area   ) + SumChildren( ResUndgrWall:Area ) + SumChildren( ResExtFlr:Area ) + SumChildren( ResUndgrFlr:Area ) +
-						SumRevRef( ResIntWall:Outside,         ResIntWall:Area         ) +
-						SumRevRef( ResIntCeiling:Outside, ResIntCeiling:Area ) +
-						SumRevRef( ResIntFlr:Outside,   ResIntFlr:Area   )  }
-	"Set ResZn:SurfaceAreaSum to sum of child/adjacent surface areas"		ResGarage:SurfaceAreaSum	= {
-						SumChildren( ResCathedralCeiling:Area  ) + SumChildren( ResExtWall:Area ) + SumChildren( ResSlabFlr:Area     ) +
-						SumChildren( ResCeilingBelowAttic:Area ) + SumChildren( ResIntWall:Area ) + SumChildren( ResExtFlr:Area ) +
-						SumChildren( ResIntCeiling:Area   ) + SumChildren( ResFlrOverCrawlSpc:Area ) +
-						SumRevRef( ResIntWall:Outside,         ResIntWall:Area         ) +
-						SumRevRef( ResIntCeiling:Outside, ResIntCeiling:Area ) +
-						SumRevRef( ResIntFlr:Outside,   ResIntFlr:Area   )  }
-
-   ; switched SumRevRef() calls to MaxRevRef() when setting *:SurfaceAreaMax from surfaces of other zones that are adjacent to this zone (BL/AB) - SAC 7/9/20
-	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 1 CathClgs"		ResZn:SurfaceAreaMax	= {	if (ChildCount( CathedralCeiling  ) > 0) then                       MaxChild( ResCathedralCeiling:Area  )    else  0  endif  }
-	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 2 ClgBlwAs"		ResZn:SurfaceAreaMax	= {	if (ChildCount( CeilingBelowAttic ) > 0) then  max( SurfaceAreaMax, MaxChild( ResCeilingBelowAttic:Area ) )  else  UNCHANGED  endif  }
-	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 3 IntClgs"			ResZn:SurfaceAreaMax	= {	if (ChildCount( InteriorCeiling   ) > 0) then  max( SurfaceAreaMax, MaxChild( ResIntCeiling:Area   ) )  else  UNCHANGED  endif  }
-	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 4 ExtWalls"		ResZn:SurfaceAreaMax	= {	if (ChildCount( ExtWall           ) > 0) then  max( SurfaceAreaMax, MaxChild( ResExtWall:Area           ) )  else  UNCHANGED  endif  }
-	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 5 IntWalls"		ResZn:SurfaceAreaMax	= {	if (ChildCount( IntWall           ) > 0) then  max( SurfaceAreaMax, MaxChild( ResIntWall:Area           ) )  else  UNCHANGED  endif  }
-	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 6 UndWalls"		ResZn:SurfaceAreaMax	= {	if (ChildCount( UndWall           ) > 0) then  max( SurfaceAreaMax, MaxChild( ResUndgrWall:Area           ) )  else  UNCHANGED  endif  }
-	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 7 SlabFlrs"		ResZn:SurfaceAreaMax	= {	if (ChildCount( SlabFloor         ) > 0) then  max( SurfaceAreaMax, MaxChild( ResSlabFlr:Area         ) )  else  UNCHANGED  endif  }
-	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 8 IntFlrs"			ResZn:SurfaceAreaMax	= {	if (ChildCount( InteriorFloor     ) > 0) then  max( SurfaceAreaMax, MaxChild( ResIntFlr:Area     ) )  else  UNCHANGED  endif  }
-	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 9 ExtFlrs"			ResZn:SurfaceAreaMax	= {	if (ChildCount( ExteriorFloor     ) > 0) then  max( SurfaceAreaMax, MaxChild( ResExtFlr:Area     ) )  else  UNCHANGED  endif  }
-	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 10 UndFlrs"		ResZn:SurfaceAreaMax	= {	if (ChildCount( UndFloor          ) > 0) then  max( SurfaceAreaMax, MaxChild( ResUndgrFlr:Area          ) )  else  UNCHANGED  endif  }
-	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 11 adj IntWalls"	ResZn:SurfaceAreaMax	= {	if (SumRevRef( ResIntWall:Outside,         ResIntWall:Area         ) > 0) then  max( SurfaceAreaMax, MaxRevRef( ResIntWall:Outside,         ResIntWall:Area         ) )  else  UNCHANGED  endif  }
-	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 12 adj IntClgs"	ResZn:SurfaceAreaMax	= {	if (SumRevRef( ResIntCeiling:Outside, ResIntCeiling:Area ) > 0) then  max( SurfaceAreaMax, MaxRevRef( ResIntCeiling:Outside, ResIntCeiling:Area ) )  else  UNCHANGED  endif  }
-	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 13 adj IntFlrs"	ResZn:SurfaceAreaMax	= {	if (SumRevRef( ResIntFlr:Outside,   ResIntFlr:Area   ) > 0) then  max( SurfaceAreaMax, MaxRevRef( ResIntFlr:Outside,   ResIntFlr:Area   ) )  else  UNCHANGED  endif  }
-	"Set ResZn:SurfaceAreaMax to MAX of child/adj surface areas - 14 FlrsOvrCrwl"	ResZn:SurfaceAreaMax	= {	if (ChildCount( FloorOverCrawl    ) > 0) then  max( SurfaceAreaMax, MaxChild( ResFlrOverCrawlSpc:Area    ) )  else  UNCHANGED  endif  }
-
-   ; SAC 9/18/19 - OtherZone (MFamProto)
-	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 1 CathClgs"			ResOtherZn:SurfaceAreaMax	= {	if (ChildCount( CathedralCeiling  ) > 0) then                       MaxChild( ResCathedralCeiling:Area  )    else  0  endif  }
-	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 2 ClgBlwAs"			ResOtherZn:SurfaceAreaMax	= {	if (ChildCount( CeilingBelowAttic ) > 0) then  max( SurfaceAreaMax, MaxChild( ResCeilingBelowAttic:Area ) )  else  UNCHANGED  endif  }
-	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 3 IntClgs"			ResOtherZn:SurfaceAreaMax	= {	if (ChildCount( InteriorCeiling   ) > 0) then  max( SurfaceAreaMax, MaxChild( ResIntCeiling:Area   ) )  else  UNCHANGED  endif  }
-	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 4 ExtWalls"			ResOtherZn:SurfaceAreaMax	= {	if (ChildCount( ExtWall           ) > 0) then  max( SurfaceAreaMax, MaxChild( ResExtWall:Area           ) )  else  UNCHANGED  endif  }
-	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 5 IntWalls"			ResOtherZn:SurfaceAreaMax	= {	if (ChildCount( IntWall           ) > 0) then  max( SurfaceAreaMax, MaxChild( ResIntWall:Area           ) )  else  UNCHANGED  endif  }
-	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 6 UndWalls"			ResOtherZn:SurfaceAreaMax	= {	if (ChildCount( UndWall           ) > 0) then  max( SurfaceAreaMax, MaxChild( ResUndgrWall:Area           ) )  else  UNCHANGED  endif  }
-	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 7 SlabFlrs"			ResOtherZn:SurfaceAreaMax	= {	if (ChildCount( SlabFloor         ) > 0) then  max( SurfaceAreaMax, MaxChild( ResSlabFlr:Area         ) )  else  UNCHANGED  endif  }
-	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 8 IntFlrs"			ResOtherZn:SurfaceAreaMax	= {	if (ChildCount( InteriorFloor     ) > 0) then  max( SurfaceAreaMax, MaxChild( ResIntFlr:Area     ) )  else  UNCHANGED  endif  }
-	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 9 ExtFlrs"			ResOtherZn:SurfaceAreaMax	= {	if (ChildCount( ExteriorFloor     ) > 0) then  max( SurfaceAreaMax, MaxChild( ResExtFlr:Area     ) )  else  UNCHANGED  endif  }
-	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 10 UndFlrs"			ResOtherZn:SurfaceAreaMax	= {	if (ChildCount( UndFloor          ) > 0) then  max( SurfaceAreaMax, MaxChild( ResUndgrFlr:Area          ) )  else  UNCHANGED  endif  }
-	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 11 adj IntWalls"	ResOtherZn:SurfaceAreaMax	= {	if (SumRevRef( ResIntWall:Outside,         ResIntWall:Area         ) > 0) then  max( SurfaceAreaMax, MaxRevRef( ResIntWall:Outside,         ResIntWall:Area         ) )  else  UNCHANGED  endif  }
-	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 12 adj IntClgs"	ResOtherZn:SurfaceAreaMax	= {	if (SumRevRef( ResIntCeiling:Outside, ResIntCeiling:Area ) > 0) then  max( SurfaceAreaMax, MaxRevRef( ResIntCeiling:Outside, ResIntCeiling:Area ) )  else  UNCHANGED  endif  }
-	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 13 adj IntFlrs"	ResOtherZn:SurfaceAreaMax	= {	if (SumRevRef( ResIntFlr:Outside,   ResIntFlr:Area   ) > 0) then  max( SurfaceAreaMax, MaxRevRef( ResIntFlr:Outside,   ResIntFlr:Area   ) )  else  UNCHANGED  endif  }
-	"Set ResOtherZn:SurfaceAreaMax to MAX of child/adj surface areas - 14 FlrsOvrCrwl"	ResOtherZn:SurfaceAreaMax	= {	if (ChildCount( FloorOverCrawl    ) > 0) then  max( SurfaceAreaMax, MaxChild( ResFlrOverCrawlSpc:Area    ) )  else  UNCHANGED  endif  }
-
-	"Set ResGarage:SurfaceAreaMax to MAX of child/adj surface areas - 1 CathClgs"			ResGarage:SurfaceAreaMax	= {	if (ChildCount( CathedralCeiling  ) > 0) then                       MaxChild( ResCathedralCeiling:Area  )    else  0  endif  }
-	"Set ResGarage:SurfaceAreaMax to MAX of child/adj surface areas - 2 ClgBlwAs"			ResGarage:SurfaceAreaMax	= {	if (ChildCount( CeilingBelowAttic ) > 0) then  max( SurfaceAreaMax, MaxChild( ResCeilingBelowAttic:Area ) )  else  UNCHANGED  endif  }
-	"Set ResGarage:SurfaceAreaMax to MAX of child/adj surface areas - 3 IntClgs"			ResGarage:SurfaceAreaMax	= {	if (ChildCount( InteriorCeiling   ) > 0) then  max( SurfaceAreaMax, MaxChild( ResIntCeiling:Area   ) )  else  UNCHANGED  endif  }
-	"Set ResGarage:SurfaceAreaMax to MAX of child/adj surface areas - 4 ExtWalls"			ResGarage:SurfaceAreaMax	= {	if (ChildCount( ExtWall           ) > 0) then  max( SurfaceAreaMax, MaxChild( ResExtWall:Area           ) )  else  UNCHANGED  endif  }
-	"Set ResGarage:SurfaceAreaMax to MAX of child/adj surface areas - 5 IntWalls"			ResGarage:SurfaceAreaMax	= {	if (ChildCount( IntWall           ) > 0) then  max( SurfaceAreaMax, MaxChild( ResIntWall:Area           ) )  else  UNCHANGED  endif  }
-;	"Set ResGarage:SurfaceAreaMax to MAX of child/adj surface areas - 6 UndWalls"			ResGarage:SurfaceAreaMax	= {	if (ChildCount( UndWall           ) > 0) then  max( SurfaceAreaMax, MaxChild( ResUndgrWall:Area           ) )  else  UNCHANGED  endif  }
-	"Set ResGarage:SurfaceAreaMax to MAX of child/adj surface areas - 7 SlabFlrs"			ResGarage:SurfaceAreaMax	= {	if (ChildCount( SlabFloor         ) > 0) then  max( SurfaceAreaMax, MaxChild( ResSlabFlr:Area         ) )  else  UNCHANGED  endif  }
-;	"Set ResGarage:SurfaceAreaMax to MAX of child/adj surface areas - 8 IntFlrs"			ResGarage:SurfaceAreaMax	= {	if (ChildCount( InteriorFloor     ) > 0) then  max( SurfaceAreaMax, MaxChild( ResIntFlr:Area     ) )  else  UNCHANGED  endif  }
-	"Set ResGarage:SurfaceAreaMax to MAX of child/adj surface areas - 9 ExtFlrs"			ResGarage:SurfaceAreaMax	= {	if (ChildCount( ExteriorFloor     ) > 0) then  max( SurfaceAreaMax, MaxChild( ResExtFlr:Area     ) )  else  UNCHANGED  endif  }
-;	"Set ResGarage:SurfaceAreaMax to MAX of child/adj surface areas - 10 UndFlrs"			ResGarage:SurfaceAreaMax	= {	if (ChildCount( UndFloor          ) > 0) then  max( SurfaceAreaMax, MaxChild( ResUndgrFlr:Area          ) )  else  UNCHANGED  endif  }
-	"Set ResGarage:SurfaceAreaMax to MAX of child/adj surface areas - 11 adj IntWalls"	ResGarage:SurfaceAreaMax	= {	if (SumRevRef( ResIntWall:Outside,         ResIntWall:Area         ) > 0) then  max( SurfaceAreaMax, MaxRevRef( ResIntWall:Outside,         ResIntWall:Area         ) )  else  UNCHANGED  endif  }
-	"Set ResGarage:SurfaceAreaMax to MAX of child/adj surface areas - 12 adj IntClgs"	ResGarage:SurfaceAreaMax	= {	if (SumRevRef( ResIntCeiling:Outside, ResIntCeiling:Area ) > 0) then  max( SurfaceAreaMax, MaxRevRef( ResIntCeiling:Outside, ResIntCeiling:Area ) )  else  UNCHANGED  endif  }
-	"Set ResGarage:SurfaceAreaMax to MAX of child/adj surface areas - 13 adj IntFlrs"	ResGarage:SurfaceAreaMax	= {	if (SumRevRef( ResIntFlr:Outside,   ResIntFlr:Area   ) > 0) then  max( SurfaceAreaMax, MaxRevRef( ResIntFlr:Outside,   ResIntFlr:Area   ) )  else  UNCHANGED  endif  }
-	"Set ResGarage:SurfaceAreaMax to MAX of child/adj surface areas - 14 FlrsOvrCrwl"	ResGarage:SurfaceAreaMax	= {	if (ChildCount( FloorOverCrawl    ) > 0) then  max( SurfaceAreaMax, MaxChild( ResFlrOverCrawlSpc:Area    ) )  else  UNCHANGED  endif  }
-
-; MFAM TO DO - need to revise settings in Com rules to include (and simulate) adjacent Com surfaces - SAC 10/27/21
-;	"Check for sufficient ResZn:SurfaceCount"		ResZn:Action	= {	if (SurfaceCount < 6)
-;																							then	PostError( "Residential Zone (ResZn) '%s' has too few child and/or adjacent surfaces (%g, minimum is 6) to be simulated.", Name, SurfaceCount )
-;																							else if (SurfaceAreaMax > (SurfaceAreaSum / 2))
-;																							then	PostError( "The largest child/adjacent surface of residential zone (ResZn) '%s' is too large in relation to the sum of all child/adjacent surface areas (%g > %g).", Name, SurfaceAreaMax, (SurfaceAreaSum / 2) )
-;																							else	UNCHANGED  endif endif  }
-;	"Check for sufficient ResOtherZn:SurfaceCount"	ResOtherZn:Action	=     ; SAC 9/18/19 - (MFamProto)
-;      {  if (SurfaceCount < 6)
-;         then	PostError( "Residential OtherZone (ResOtherZn) '%s' has too few child and/or adjacent surfaces (%g, minimum is 6) to be simulated.", Name, SurfaceCount )
-;         else if (SurfaceAreaMax > (SurfaceAreaSum / 2))
-;         then	PostError( "The largest child/adjacent surface of residential OtherZone (ResOtherZn) '%s' is too large in relation to the sum of all child/adjacent surface areas (%g > %g).", Name, SurfaceAreaMax, (SurfaceAreaSum / 2) )
-;         else	UNCHANGED  endif endif  }
-;	"Check for sufficient ResGarage:SurfaceCount"	ResGarage:Action	= {	if ( ResProj:HasGarage < 0.5) then  UNCHANGED
-;																							else if (SurfaceCount < 6)
-;																							then	PostError( "Garage '%s' has too few child and/or adjacent surfaces (%g, minimum is 6) to be simulated.", Name, SurfaceCount )
-;																							else if (SurfaceAreaMax > (SurfaceAreaSum / 2))
-;																							then	PostError( "The largest child/adjacent surface of garage '%s' is too large in relation to the sum of all child/adjacent surface areas (%g > %g).", Name, SurfaceAreaMax, (SurfaceAreaSum / 2) )
-;																							else	UNCHANGED  endif endif endif  }
-
-
-	"Check consistency between Zone area & the sum of the child DwellUnit areas"		; SAC 6/25/14
-		ResZn:Action = {	if ( Proj:IsSFamResRuleset .OR. IfValidAnd( ResProj:ZonalControl > 0.5 ))	then  UNCHANGED
-								else if (Type == 10 .AND.  DwellingUnitArea_Cond > 1) then  PostError( "Zone '%s' in Unconditioned but has conditioned dwelling unit assigned area of %s SqFt.", Name, FltToStr( DwellingUnitArea_Cond ) )
-								else if (Type  < 10 .AND. (DwellingUnitArea_Cond <= (FloorArea-1) .OR. DwellingUnitArea_Cond >= (FloorArea+1)))
-								then	PostError( "There is a mismatch between conditioned area (%s SqFt) and assigned dwelling unit area (%s SqFt) for zone '%s'", FltToStr( FloorArea ), FltToStr( DwellingUnitArea_Cond ), Name )
-								else  UNCHANGED  endif endif endif  }
-;		"Check for mismatch between zone area & dwelling unit zone assignment & area inputs (no zonal controls)"  ; SAC 7/29/13 - GC issue #137
-;				ResZn:Action		= {	if ( Proj:IsSFamResRuleset .OR. IfValidAnd( ResProj:ZonalControl > 0.5 ))	then  UNCHANGED
-;											else if (Type == 10 .AND. DwellingUnitArea_Cond > 1) then  PostError( "Zone '%s' in Unconditioned but has conditioned dwelling unit assigned area of %s SqFt.", Name, FltToStr( DwellingUnitArea_Cond ) )
-;											else if (Type == 1  .AND. DwellingUnitArea_Cond != FloorArea) then  PostError( "There is a mismatch between conditioned area (%s SqFt) and assigned dwelling unit area (%s SqFt) for zone '%s'", FltToStr( FloorArea ), FltToStr( DwellingUnitArea_Cond ), Name )
-;											else  UNCHANGED  endif endif endif  }
-;		"Check for mismatch between zone area & dwelling unit zone assignment & area inputs (with zonal controls)"  ; SAC 7/29/13 - GC issue #137
-;				ResZn:Action		= {	if ( Proj:IsSFamResRuleset .OR. IfValidAnd( ResProj:ZonalControl < 0.5 ))	then  UNCHANGED
-;											else if (Type == 10 .AND. (DwellingUnitArea_Liv > 1 .OR. DwellingUnitArea_Slp > 1)) then  PostError( "Zone '%s' in Unconditioned but has conditioned (living and/or sleeping) dwelling unit assigned area of %s SqFt.", Name, FltToStr( (DwellingUnitArea_Liv + DwellingUnitArea_Slp) ) )
-;											else if (Type == 2  .AND.  DwellingUnitArea_Slp > 1) then  PostError( "Living zone '%s' is assigned in dwelling unit screen(s) as a sleeping zone (total of %s SqFt).", Name, FltToStr( DwellingUnitArea_Slp ) )
-;											else if (Type == 3  .AND.  DwellingUnitArea_Liv > 1) then  PostError( "Sleeping zone '%s' is assigned in dwelling unit screen(s) as a living zone (total of %s SqFt).", Name, FltToStr( DwellingUnitArea_Liv ) )
-;											else if (Type == 2  .AND.  DwellingUnitArea_Liv != FloorArea) then  PostError( "There is a mismatch between living area (%s SqFt) and assigned dwelling unit area (%s SqFt) for zone '%s'", FltToStr( FloorArea ), FltToStr( DwellingUnitArea_Liv ), Name )
-;											else if (Type == 3  .AND.  DwellingUnitArea_Slp != FloorArea) then  PostError( "There is a mismatch between sleeping area (%s SqFt) and assigned dwelling unit area (%s SqFt) for zone '%s'", FltToStr( FloorArea ), FltToStr( DwellingUnitArea_Slp ), Name )
-;											else  UNCHANGED  endif endif endif endif endif endif  }
-
-	"Check for CrawlSpace objects w/ Type settings that are not yet implemented"  ; SAC 10/17/13 - GC issue #213
-			ResCrawlSpc:Action		= {	if (Area < 0.1) then  UNCHANGED
-												else if (Type != 0)	; "Normal (vented)"
-												then	PostError( "Crawl space type '%s' selected for '%s' is not currently implemented.  This must be changed to 'Normal (vented)' in order to perform the analysis.", EnumString( Type ), Name )
-												else  UNCHANGED  endif endif  }
+   ; moved rule posting error related to Cons assigned to surfaces of New and non-New zones up into CODECHECK rulelist so that it is triggered before sizing run(s) - SAC 06/29/23 (tic #3479)
 
 ; SAC 10/31/17 - added  (tic #917)
    "check to ensure all Cons cavity path material layers that should be assigned are"  ResConsAssm:Action = {
@@ -2325,8 +2637,8 @@ RULELIST "ProposedModelSimulationCheck" 1 0 0 0
             else if (IfValidAnd( DwellUnitTypeRef:WasherOption = 2 ))
             then  if (LocalCompAssigned( WasherZoneRef ) == ComponentType( "ResZn" )) then  UNDEFINED
                   else if (LocalCompAssigned( WasherZoneRef ) == ComponentType( "ResOtherZn" ))
-                  then  if (IfValidAnd( DwellUnitTypeRef:DHWSysRef[1] = WasherZoneRef:ozDHWSys )) then  UNDEFINED
-                        else if (LocalCompAssigned( WasherZoneRef:ozDHWSys ) < 1) then  1
+                  then  if (IfValidAnd( DwellUnitTypeRef:DHWSysRef[1] = WasherZoneRef:ActiveDHWSystem )) then  UNDEFINED
+                        else if (LocalCompAssigned( WasherZoneRef:ActiveDHWSystem ) < 1) then  1
                         else  2  endif endif
                   else  3  endif endif
             else  UNDEFINED  endif endif endif  }
@@ -2340,8 +2652,8 @@ RULELIST "ProposedModelSimulationCheck" 1 0 0 0
             else if (IfValidAnd( DwellUnitTypeRef:DryerOption = 2 ))
             then  if (LocalCompAssigned( DryerZoneRef ) == ComponentType( "ResZn" )) then  UNCHANGED
                   else if (LocalCompAssigned( DryerZoneRef ) == ComponentType( "ResOtherZn" ))
-                  then  if (IfValidAnd( DwellUnitTypeRef:DHWSysRef[1] = DryerZoneRef:ozDHWSys )) then  UNCHANGED
-                        else if (LocalCompAssigned( DryerZoneRef:ozDHWSys ) < 1) then  1
+                  then  if (IfValidAnd( DwellUnitTypeRef:DHWSysRef[1] = DryerZoneRef:ActiveDHWSystem )) then  UNCHANGED
+                        else if (LocalCompAssigned( DryerZoneRef:ActiveDHWSystem ) < 1) then  1
                         else  2  endif endif
                   else  3  endif endif
             else  UNCHANGED  endif endif endif endif  }
@@ -2354,29 +2666,6 @@ RULELIST "ProposedModelSimulationCheck" 1 0 0 0
          else if (IfValidAnd( DwellUnit:BadDHWAssigns = 3 ))
          then  PostError( "DwellUnit '%s' missing a central laundry washer and/or dryer Zone/OtherZone assigment", Name, DwellUnitTypeRef:DHWSysRef[1] )
          else  UNCHANGED  endif endif endif  }
-
-; SAC 5/12/15 - added checks for valid ResDHWSys:SystemType & ResDHWSys:MFamDistType specified (issue 537)
-; SAC 5/13/15 - revisions to this check to ensure proper SystemType for central systems (issue 537)
-; SAC 3/8/18 - extended list of allowed SystemTypes to include new 2019 Compact... (tic #983)
-; SAC 1/1/20 - added new error check to prevent Central (MFam model) DHW system w/ assigned area (OtherZone) but no DwellUnit/Zone DHW assignment (tic #862)
-; SAC 2/4/20 - added check for CHPWHNumComp > 0 (tic #1197)
-   "Check ResDHWSys:SystemType selection"    ResDHWSys:Action  =
-      {  if (IfValidAnd( SystemType > 0 )==0)
-         then	PostError( "DHWSys '%s' must have a valid Distribution (SystemType) option selected.", Name )
-         else if ( (Proj:IsComRuleset .OR. Proj:IsComRuleset) .AND. IfValidAnd( CentralDHW > 0 ) .AND.
-                  SystemType != 3840 .AND. SystemType != 4096 .AND. SystemType != 4352 .AND.
-                  SystemType != 8392704 .AND. SystemType != 8392960 .AND. SystemType != 100 )
-         then	PostError( "DHWSys '%s' Dwelling Unit Distribution (SystemType) is not compatible with multifamily, central systems.", Name )
-         else if ( (Proj:IsComRuleset .OR. Proj:IsComRuleset) .AND. IfValidAnd( CentralDHW > 0 ) .AND.
-                  IfValidAnd( SimDHWSys > 0 ) .AND. IfValidAnd( NumDUsServed > 0 )==0)
-         then  PostError( "Central DHWSys '%s' must be assigned to serve at least one dwelling unit.", Name )
-         else if ( (Proj:IsComRuleset .OR. Proj:IsComRuleset) .AND. IfValidAnd( CentralDHW > 0 ) .AND.
-                  CentralDHWType == 2 .AND. IfValidAnd( CHPWHNumCompFlt > 0 )==0)
-         then  PostError( "Central HPWH DHWSys '%s' missing compressor count input.", Name )
-         else	UNCHANGED  endif endif endif endif  }
-; SAC 5/13/15 - REMOVED this check preventing MFamDistType = '- none -', as this turns out to be a valid selection, even when CentralDHW is checked. (issue 537)
-;	"Check ResDHWSys:MFamDistType selection"	ResDHWSys:Action	= {	if ( Proj:IsSFamResRuleset .OR. CentralDHW < 0.5 .OR. MFamDistType > 0.5) then  UNCHANGED
-;																					else	PostError( "DHWSys '%s' must have a valid Central System Distribution (MFamDistType) option selected.", Name )  endif  }
 
   ; SAC 4/20/14 - checks for HVACSys assiged as DHW heaters being configured to do so
 	"Check for HVACSys assignment #1 able to serve as a DHWHeater"
@@ -2439,12 +2728,12 @@ RULELIST "ProposedModelSimulationCheck" 1 0 0 0
 
   ; SAC 10/7/13 - added check to ensure that ALL REQUIRED recirculation pipe inputs are specified (iff they are to be simulated)
 	"Check multifamily recirculation DHW pump HP"
-		ResDHWSys:Action	= {	if ( Proj:IsSFamResRuleset .OR. MFamDistType < 0.5) then  UNCHANGED
+		ResDHWSys:Action	= {	if ( Proj:IsSFamResRuleset .OR. MFamDistType < 0.5 .OR. FloorAreaServed[1] < 1) then  UNCHANGED
 									else if (LocalStatus( RecircPumpHP  ) < 1) then  PostError( "DHW system '%s' recirculation pump horsepower must be specified.", Name )
 									else if (RecircPumpHP <= 0) then  PostError( "DHW system '%s' recirculation pump horsepower (%g) must be > 0.", Name, RecircPumpHP )
 									else  UNCHANGED  endif endif endif  }
 	"Check multifamily recirculation DHW pump efficiency"
-		ResDHWSys:Action	= {	if ( Proj:IsSFamResRuleset .OR. MFamDistType < 0.5) then  UNCHANGED
+		ResDHWSys:Action	= {	if ( Proj:IsSFamResRuleset .OR. MFamDistType < 0.5 .OR. FloorAreaServed[1] < 1) then  UNCHANGED
 									else if (LocalStatus( RecircPumpEff ) < 1) then  PostError( "DHW system '%s' recirculation pump efficiency must be specified.", Name )
 									else if (RecircPumpEff <= 0) then  PostError( "DHW system '%s' recirculation pump efficiency (%g) must be > 0.", Name, RecircPumpEff )
 									else  UNCHANGED  endif endif endif  }
@@ -2783,6 +3072,101 @@ RULELIST "FIX_2019FanEfficacy_MFam_Other" 1 0 1 0
 						                  T24RClimateZoneCodeBase:WperCFM( "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr ), HVACFanRef:WperCFMCool)  }
 	"Force update of DwellUnitType:HVACFanRef:WperCFMCool max"    DwellUnitType:HVACFanRef:WperCFMCool  =
 	   {  T24RClimateZoneCodeBase:WperCFM( "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )  }
+END
+;*************************************************************************
+
+
+;************************************************************************* SAC 04/19/23 (tic #3497)
+RULELIST "SetIndirectOutsideConnection_First"  1 0 0 0
+;"test log" Proj:Action = {  PostMessageToLog( "    evaluating 'SetIndirectOutsideConnection_First' rules on '%s' model...", RunAbbrev )  }
+   "Set ResIntWall:OutsideConnection"     ResIntWall:OutsideConnection =
+      {  if (ParentComponentType() != "ResZn" .AND. ParentComponentType() != "ResOtherZn") then  1
+         else if (LocalCompAssigned( Outside ) == ComponentType( "ResGarage" ) .OR.
+                  LocalCompAssigned( Outside ) == ComponentType( "ResAttic"  )) then  1
+         else  if (Parent( OutsideConnection ) > 0) then  1
+               else if (ParentComponentType() == "ResOtherZn")
+               then  if (Parent( SpcFunc ) == 355 .OR. Parent( SpcFunc ) == 356) then  1
+                     else  0  endif    else  0  endif endif    endif endif  }
+   "Set ResUndgrWall:OutsideConnection"   ResUndgrWall:OutsideConnection =
+      {  if (ParentComponentType() != "ResZn" .AND. ParentComponentType() != "ResOtherZn") then  1
+         else  if (Parent( OutsideConnection ) > 0) then  1
+               else if (ParentComponentType() == "ResOtherZn")
+               then  if (Parent( SpcFunc ) == 355 .OR. Parent( SpcFunc ) == 356) then  1
+                     else  0  endif    else  0  endif endif    endif  }
+   "Set ResIntCeiling:OutsideConnection"  ResIntCeiling:OutsideConnection =
+      {  if (ParentComponentType() != "ResZn" .AND. ParentComponentType() != "ResOtherZn") then  1
+         else if (LocalCompAssigned( Outside ) == ComponentType( "ResGarage" ) .OR.
+                  LocalCompAssigned( Outside ) == ComponentType( "ResAttic"  )) then  1
+         else  if (Parent( OutsideConnection ) > 0) then  1
+               else if (ParentComponentType() == "ResOtherZn")
+               then  if (Parent( SpcFunc ) == 355 .OR. Parent( SpcFunc ) == 356) then  1
+                     else  0  endif    else  0  endif endif    endif endif  }
+   "Set ResIntFlr:OutsideConnection"      ResIntFlr:OutsideConnection =
+      {  if (ParentComponentType() != "ResZn" .AND. ParentComponentType() != "ResOtherZn") then  1
+         else if (LocalCompAssigned( Outside ) == ComponentType( "ResGarage" ) .OR.
+                  LocalCompAssigned( Outside ) == ComponentType( "ResAttic"  )) then  1
+         else  if (Parent( OutsideConnection ) > 0) then  1
+               else if (ParentComponentType() == "ResOtherZn")
+               then  if (Parent( SpcFunc ) == 355 .OR. Parent( SpcFunc ) == 356) then  1
+                     else  0  endif    else  0  endif endif    endif endif  }
+   "Set ResUndgrFlr:OutsideConnection"    ResUndgrFlr:OutsideConnection =
+      {  if (ParentComponentType() != "ResZn" .AND. ParentComponentType() != "ResOtherZn") then  1
+         else  if (Parent( OutsideConnection ) > 0) then  1
+               else if (ParentComponentType() == "ResOtherZn")
+               then  if (Parent( SpcFunc ) == 355 .OR. Parent( SpcFunc ) == 356) then  1
+                     else  0  endif    else  0  endif endif    endif  }
+
+   "Eval SetIndirectOutsideConnection rules"    Proj:Action = {  EvalRulelist( "SetIndirectOutsideConnection" )  }
+END
+;*************************************************************************
+RULELIST "SetIndirectOutsideConnection"  1 0 0 0
+;"test log" Proj:Action = {  PostMessageToLog( "    evaluating 'SetIndirectOutsideConnection' rules on '%s' model...", RunAbbrev )  }
+   "Set ResIntWall:OutsideConnection"     ResIntWall:OutsideConnection =
+      {  if (IfValidAnd( OutsideConnection > 0 )) then  UNCHANGED
+         else  if (Parent( OutsideConnection ) > 0) then  1
+               else if (LocalCompAssigned( Outside ) == ComponentType( "ResZn"      ) .OR.
+                        LocalCompAssigned( Outside ) == ComponentType( "ResOtherZn" ))
+               then  if (IfValidAnd( Outside:OutsideConnection > 0 )) then  1
+                     else  0  endif    else  0  endif endif    endif  }
+   "Set ResUndgrWall:OutsideConnection"   ResUndgrWall:OutsideConnection =
+      {  if (IfValidAnd( OutsideConnection > 0 )) then  UNCHANGED
+         else  if (Parent( OutsideConnection ) > 0) then  1
+         else  0  endif endif  }
+   "Set ResIntCeiling:OutsideConnection"  ResIntCeiling:OutsideConnection =
+      {  if (IfValidAnd( OutsideConnection > 0 )) then  UNCHANGED
+         else  if (Parent( OutsideConnection ) > 0) then  1
+               else if (LocalCompAssigned( Outside ) == ComponentType( "ResZn"      ) .OR.
+                        LocalCompAssigned( Outside ) == ComponentType( "ResOtherZn" ))
+               then  if (IfValidAnd( Outside:OutsideConnection > 0 )) then  1
+                     else  0  endif    else  0  endif endif    endif  }
+   "Set ResIntFlr:OutsideConnection"      ResIntFlr:OutsideConnection =
+      {  if (IfValidAnd( OutsideConnection > 0 )) then  UNCHANGED
+         else  if (Parent( OutsideConnection ) > 0) then  1
+               else if (LocalCompAssigned( Outside ) == ComponentType( "ResZn"      ) .OR.
+                        LocalCompAssigned( Outside ) == ComponentType( "ResOtherZn" ))
+               then  if (IfValidAnd( Outside:OutsideConnection > 0 )) then  1
+                     else  0  endif    else  0  endif endif    endif  }
+   "Set ResUndgrFlr:OutsideConnection"    ResUndgrFlr:OutsideConnection =
+      {  if (IfValidAnd( OutsideConnection > 0 )) then  UNCHANGED
+         else  if (Parent( OutsideConnection ) > 0) then  1
+         else  0  endif endif  }
+
+   "Set ResZn:OutsideConnection via indirect"         ResZn:OutsideConnection	=
+      {  if (IfValidAnd( OutsideConnection > 0 )) then  UNCHANGED
+         else if ( ( SumChildren( ResIntWall:OutsideConnection   ) + SumChildren( ResIntFlr:OutsideConnection   ) + SumChildren( ResIntCeiling:OutsideConnection ) +
+                     SumChildren( ResUndgrWall:OutsideConnection ) + SumChildren( ResUndgrFlr:OutsideConnection ) +
+                     SumRevRef( ResIntWall:Outside,    ResIntWall:OutsideConnection    ) +
+                     SumRevRef( ResIntCeiling:Outside, ResIntCeiling:OutsideConnection ) +
+                     SumRevRef( ResIntFlr:Outside,     ResIntFlr:OutsideConnection     ) ) > 0 ) then  1
+         else  UNCHANGED  endif endif  }
+   "Set ResOtherZn:OutsideConnection via indirect"    ResOtherZn:OutsideConnection	=
+      {  if (IfValidAnd( OutsideConnection > 0 )) then  UNCHANGED
+         else if ( ( SumChildren( ResIntWall:OutsideConnection   ) + SumChildren( ResIntFlr:OutsideConnection   ) + SumChildren( ResIntCeiling:OutsideConnection ) +
+                     SumChildren( ResUndgrWall:OutsideConnection ) + SumChildren( ResUndgrFlr:OutsideConnection ) +
+                     SumRevRef( ResIntWall:Outside,    ResIntWall:OutsideConnection    ) +
+                     SumRevRef( ResIntCeiling:Outside, ResIntCeiling:OutsideConnection ) +
+                     SumRevRef( ResIntFlr:Outside,     ResIntFlr:OutsideConnection     ) ) > 0 ) then  1
+         else  UNCHANGED  endif endif  }
 END
 ;*************************************************************************
 
