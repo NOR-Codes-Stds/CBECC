@@ -1,0 +1,405 @@
+; -------------------------------------------------------------------------
+; Rules pertaining to:   Setup of MFam interior surfaces prior to analysis
+; CEC Title-24 Residential Energy Code
+; -------------------------------------------------------------------------
+; Copyright (c) 2012-2024, California Energy Commission
+; All rights reserved.
+; Redistribution and use in source and binary forms, with or without modification,
+; are permitted provided that the following conditions are met:
+; - Redistributions of source code must retain the above copyright notice, this
+;   list of conditions and the following disclaimer.
+; - Redistributions in binary form must reproduce the above copyright notice, this
+;   list of conditions, the following disclaimer in the documentation and/or other
+;   materials provided with the distribution.
+; - Neither the name of the California Energy Commission nor the names of its
+;   contributors may be used to endorse or promote products derived from this
+;   software without specific prior written permission.
+; DISCLAIMER: THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+; "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+; THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+; NON-INFRINGEMENT ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION,
+; WRIGHTSOFT CORPORATION, ITRON, INC. OR ANY OTHER AUTHOR OR COPYRIGHT HOLDER OF
+; THIS SOFTWARE (COLLECTIVELY, THE "AUTHORS") BE LIABLE FOR ANY DIRECT, INDIRECT,
+; INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+; LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA,
+; OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+; LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
+; OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+; ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.  EACH LICENSEE AND SUBLICENSEE OF THE
+; SOFTWARE AGREES NOT TO ASSERT ANY CLAIM AGAINST ANY OF THE AUTHORS RELATING TO
+; THIS SOFTWARE, WHETHER DUE TO PERFORMANCE ISSUES, TITLE OR INFRINGEMENT ISSUES,
+; STRICT LIABILITY OR OTHERWISE.
+; -------------------------------------------------------------------------
+
+ENUM_PROPERTIES_VALUE   ; ensures retrieval/logic/us of enum properties assume numeric value (alternative is ENUM_PROPERTIES_STRING)
+
+;************************************************************************* SAC 01/31/24
+RULELIST "SetupMFamInteriorSurfaces" 1 0 0 0
+;*************************************************************************
+
+         ;  ResProj:IntSurfModelMthd
+         ;      0,    "before v2022.3.1"  
+         ;      1,    "latest (surfaces not req'd)"  
+         ;     11,    "latest (remove user surfaces)"  
+   "Remove user-defined interior surfaces of or between similarly conditioned MFam zones"    ResProj:Action = 
+      {  if (IfValidAnd( IntSurfModelMthd > 10 ))
+         then  EvalRulelist( "SetupMFamIntSurfs_RemoveIntSurfs" )
+         else  UNCHANGED  endif  }
+
+   ; set other side surface zone references iff NOT parent zone
+   ; revised logic to set OutsideZB even when Outside=Parent (since those areas should be doubled) - SAC 02/02/24
+   "Set ResIntWall:OutsideZB - name of the zone on the other side iff NOT parent zone"       ResIntWall:OutsideZB =     ; SAC 02/01/24
+      {  if (IfValidAnd( OtherSideModeled > 0 )==0 .OR. LocalCompAssigned( Outside ) < 1) then  UNDEFINED
+         else  Outside  endif  }
+      ;   else if (Parent( Name ) == Outside) then  UNDEFINED
+      ;   else  Outside  endif endif  }
+;   "Set ResIntCeiling:OutsideZB - name of the zone on the other side iff NOT parent zone"    ResIntCeiling:OutsideZB = 
+;      {  if (IfValidAnd( OtherSideModeled > 0 )==0 .OR. LocalCompAssigned( Outside ) < 1) then  UNDEFINED
+;         else  Outside  endif  }
+;      ;   else if (Parent( Name ) == Outside) then  UNDEFINED
+;      ;   else  Outside  endif endif  }
+;   "Set ResIntFlr:OutsideZB - name of the zone on the other side iff NOT parent zone"        ResIntFlr:OutsideZB = 
+;      {  if (IfValidAnd( OtherSideModeled > 0 )==0 .OR. LocalCompAssigned( Outside ) < 1) then  UNDEFINED
+;         else  Outside  endif  }
+;      ;   else if (Parent( Name ) == Outside) then  UNDEFINED
+;      ;   else  Outside  endif endif  }
+   ; separate properties for OutsideZB = parent vs. not parent - SAC 02/02/24
+   "Set ResIntCeiling:OutsideZBPar - name of the zone on the other side iff parent zone"    ResIntCeiling:OutsideZBPar =      ; SAC 02/02/24
+      {  if (IfValidAnd( OtherSideModeled > 0 )==0 .OR. LocalCompAssigned( Outside ) < 1) then  UNDEFINED
+         else if (Parent( Name ) == Outside) then  Outside
+         else  UNDEFINED  endif endif  }
+   "Set ResIntFlr:OutsideZBPar - name of the zone on the other side iff parent zone"        ResIntFlr:OutsideZBPar = 
+      {  if (IfValidAnd( OtherSideModeled > 0 )==0 .OR. LocalCompAssigned( Outside ) < 1) then  UNDEFINED
+         else if (Parent( Name ) == Outside) then  Outside
+         else  UNDEFINED  endif endif  }
+
+   "Set ResIntCeiling:OutsideZBNotPar - name of the zone on the other side iff NOT parent zone"    ResIntCeiling:OutsideZBNotPar =     ; SAC 02/02/24
+      {  if (IfValidAnd( OtherSideModeled > 0 )==0 .OR. LocalCompAssigned( Outside ) < 1) then  UNDEFINED
+         else if (Parent( Name ) == Outside) then  UNDEFINED
+         else  Outside  endif endif  }
+   "Set ResIntFlr:OutsideZBNotPar - name of the zone on the other side iff NOT parent zone"        ResIntFlr:OutsideZBNotPar = 
+      {  if (IfValidAnd( OtherSideModeled > 0 )==0 .OR. LocalCompAssigned( Outside ) < 1) then  UNDEFINED
+         else if (Parent( Name ) == Outside) then  UNDEFINED
+         else  Outside  endif endif  }
+
+
+   ; WALLS
+   "Set ResZn:TargetIntZBSurfArea_WallMult"        ResZn:TargetIntZBSurfArea_WallMult      =   ; {  4  }          ; SAC 02/04/24
+      {   ZoneBoundaryWallFactorTable:Fctr(    "SpcFunc", "Dwelling" ) +
+         (ZoneBoundaryWallFactorTable:DwlFctr( "SpcFunc", "Dwelling" ) * ValidOr( NumDwellingUnits, 1 ))  }
+   "Set ResOtherZn:TargetIntZBSurfArea_WallMult"   ResOtherZn:TargetIntZBSurfArea_WallMult =   ; {  4  }
+      {  if (ZoneBoundaryWallFactorTable:CorrFctr( "SpcFunc", EnumString( SpcFunc ) ) < 1)
+         then    ZoneBoundaryWallFactorTable:Fctr( "SpcFunc", EnumString( SpcFunc ) )
+         else    ZoneBoundaryWallFactorTable:Fctr( "SpcFunc", EnumString( SpcFunc ) ) +
+               ( 0.8 * (( Area - ZoneBoundaryWallFactorTable:CorrFctr( "SpcFunc", EnumString( SpcFunc ) )) / 
+                                 ZoneBoundaryWallFactorTable:CorrFctr( "SpcFunc", EnumString( SpcFunc ) )) )
+         endif  }
+
+   "Set ResZn:TargetIntZBSurfArea_WallTot"         ResZn:TargetIntZBSurfArea_WallTot      =           ; SAC 02/04/24
+      {  TargetIntZBSurfArea_WallMult * FloorHeight * sqrt( FloorArea )  }
+   "Set ResOtherZn:TargetIntZBSurfArea_WallTot"    ResOtherZn:TargetIntZBSurfArea_WallTot =
+      {  TargetIntZBSurfArea_WallMult * FloorHeight * sqrt(      Area )  }
+
+   "Set ResZn:TargetIntZBSurfArea_Wall"         ResZn:TargetIntZBSurfArea_Wall =    ; SAC 02/01/24
+      {  if (  (TargetIntZBSurfArea_WallTot - SumChildren( ResExtWall:Area ) - SumChildren( ResUndgrWall:Area ) - SumChildrenIf( ResIntWall:Area, ResIntWall:IsPartySurface > 0 ) - SumRevRef( ResIntWall:OutsideZB, ResIntWall:Area )) / 2 < (FloorArea * 0.01)) then  0
+         else  (TargetIntZBSurfArea_WallTot - SumChildren( ResExtWall:Area ) - SumChildren( ResUndgrWall:Area ) - SumChildrenIf( ResIntWall:Area, ResIntWall:IsPartySurface > 0 ) - SumRevRef( ResIntWall:OutsideZB, ResIntWall:Area )) / 2   endif  }
+   "Set ResOtherZn:TargetIntZBSurfArea_Wall"    ResOtherZn:TargetIntZBSurfArea_Wall =
+      {  if (  (TargetIntZBSurfArea_WallTot - SumChildren( ResExtWall:Area ) - SumChildren( ResUndgrWall:Area ) - SumChildrenIf( ResIntWall:Area, ResIntWall:IsPartySurface > 0 ) - SumRevRef( ResIntWall:OutsideZB, ResIntWall:Area )) / 2 < (     Area * 0.01)) then  0
+         else  (TargetIntZBSurfArea_WallTot - SumChildren( ResExtWall:Area ) - SumChildren( ResUndgrWall:Area ) - SumChildrenIf( ResIntWall:Area, ResIntWall:IsPartySurface > 0 ) - SumRevRef( ResIntWall:OutsideZB, ResIntWall:Area )) / 2   endif  }
+   "Add ResZn ZB (zone boundary) wall"          ResZn:Action =
+      {  if (TargetIntZBSurfArea_Wall > 0.1)
+         then  CreateChildren( ResIntWall, 1, Name + "-ZBWall", "SetupMFamIntSurfs_NewZBWall" )
+         else  UNCHANGED  endif  }
+   "Add ResOtherZn ZB (zone boundary) wall"     ResOtherZn:Action =
+      {  if (TargetIntZBSurfArea_Wall > 0.1)
+         then  CreateChildren( ResIntWall, 1, Name + "-ZBWall", "SetupMFamIntSurfs_NewZBWall" )
+         else  UNCHANGED  endif  }
+
+   ; CEILINGS
+   "Set ResZn:TargetIntZBSurfArea_Clg"          ResZn:TargetIntZBSurfArea_Clg =     ; SAC 02/01/24
+      {  if (  (FloorArea - SumChildren( ResCathedralCeiling:Area ) - SumChildren( ResCeilingBelowAttic:Area ) - SumChildrenIf( ResIntCeiling:Area, ResIntCeiling:IsPartySurface > 0 ) - SumRevRef( ResIntCeiling:OutsideZBPar, ResIntCeiling:Area ) - SumRevRef( ResIntFlr:OutsideZBNotPar, ResIntFlr:Area )) / 2 < (FloorArea * 0.01)) then  0
+         else  (FloorArea - SumChildren( ResCathedralCeiling:Area ) - SumChildren( ResCeilingBelowAttic:Area ) - SumChildrenIf( ResIntCeiling:Area, ResIntCeiling:IsPartySurface > 0 ) - SumRevRef( ResIntCeiling:OutsideZBPar, ResIntCeiling:Area ) - SumRevRef( ResIntFlr:OutsideZBNotPar, ResIntFlr:Area )) / 2   endif  }
+   "Set ResOtherZn:TargetIntZBSurfArea_Clg"     ResOtherZn:TargetIntZBSurfArea_Clg =
+      {  if (  (     Area - SumChildren( ResCathedralCeiling:Area ) - SumChildren( ResCeilingBelowAttic:Area ) - SumChildrenIf( ResIntCeiling:Area, ResIntCeiling:IsPartySurface > 0 ) - SumRevRef( ResIntCeiling:OutsideZBPar, ResIntCeiling:Area ) - SumRevRef( ResIntFlr:OutsideZBNotPar, ResIntFlr:Area )) / 2 < (     Area * 0.01)) then  0
+         else  (     Area - SumChildren( ResCathedralCeiling:Area ) - SumChildren( ResCeilingBelowAttic:Area ) - SumChildrenIf( ResIntCeiling:Area, ResIntCeiling:IsPartySurface > 0 ) - SumRevRef( ResIntCeiling:OutsideZBPar, ResIntCeiling:Area ) - SumRevRef( ResIntFlr:OutsideZBNotPar, ResIntFlr:Area )) / 2   endif  }
+   "Add ResZn ZB (zone boundary) ceiling"       ResZn:Action =
+      {  if (TargetIntZBSurfArea_Clg > 0.1)
+         then  CreateChildren( ResIntCeiling, 1, Name + "-ZBClg", "SetupMFamIntSurfs_NewZBClg" )
+         else  UNCHANGED  endif  }
+   "Add ResOtherZn ZB (zone boundary) ceiling"  ResOtherZn:Action =
+      {  if (TargetIntZBSurfArea_Clg > 0.1)
+         then  CreateChildren( ResIntCeiling, 1, Name + "-ZBClg", "SetupMFamIntSurfs_NewZBClg" )
+         else  UNCHANGED  endif  }
+
+   ; FLOORS
+   "Set ResZn:TargetIntZBSurfArea_Flr"          ResZn:TargetIntZBSurfArea_Flr =     ; SAC 02/01/24
+      {  if (  (FloorArea - SumChildren( ResExtFlr:Area ) - SumChildren( ResFlrOverCrawlSpc:Area ) - SumChildren( ResSlabFlr:Area ) - SumChildren( ResUndgrFlr:Area ) - SumChildrenIf( ResIntFlr:Area, ResIntFlr:IsPartySurface > 0 ) - SumRevRef( ResIntFlr:OutsideZBPar, ResIntFlr:Area ) - SumRevRef( ResIntCeiling:OutsideZBNotPar, ResIntCeiling:Area )) / 2 < (FloorArea * 0.01)) then  0
+         else  (FloorArea - SumChildren( ResExtFlr:Area ) - SumChildren( ResFlrOverCrawlSpc:Area ) - SumChildren( ResSlabFlr:Area ) - SumChildren( ResUndgrFlr:Area ) - SumChildrenIf( ResIntFlr:Area, ResIntFlr:IsPartySurface > 0 ) - SumRevRef( ResIntFlr:OutsideZBPar, ResIntFlr:Area ) - SumRevRef( ResIntCeiling:OutsideZBNotPar, ResIntCeiling:Area )) / 2   endif  }
+   "Set ResOtherZn:TargetIntZBSurfArea_Flr"     ResOtherZn:TargetIntZBSurfArea_Flr =
+      {  if (  (     Area - SumChildren( ResExtFlr:Area ) - SumChildren( ResFlrOverCrawlSpc:Area ) - SumChildren( ResSlabFlr:Area ) - SumChildren( ResUndgrFlr:Area ) - SumChildrenIf( ResIntFlr:Area, ResIntFlr:IsPartySurface > 0 ) - SumRevRef( ResIntFlr:OutsideZBPar, ResIntFlr:Area ) - SumRevRef( ResIntCeiling:OutsideZBNotPar, ResIntCeiling:Area )) / 2 < (     Area * 0.01)) then  0
+         else  (     Area - SumChildren( ResExtFlr:Area ) - SumChildren( ResFlrOverCrawlSpc:Area ) - SumChildren( ResSlabFlr:Area ) - SumChildren( ResUndgrFlr:Area ) - SumChildrenIf( ResIntFlr:Area, ResIntFlr:IsPartySurface > 0 ) - SumRevRef( ResIntFlr:OutsideZBPar, ResIntFlr:Area ) - SumRevRef( ResIntCeiling:OutsideZBNotPar, ResIntCeiling:Area )) / 2   endif  }
+   "Add ResZn ZB (zone boundary) floor"         ResZn:Action =
+      {  if (TargetIntZBSurfArea_Flr > 0.1)
+         then  CreateChildren( ResIntFlr, 1, Name + "-ZBFlr", "SetupMFamIntSurfs_NewZBFlr" )
+         else  UNCHANGED  endif  }
+   "Add ResOtherZn ZB (zone boundary) floor"    ResOtherZn:Action =
+      {  if (TargetIntZBSurfArea_Flr > 0.1)
+         then  CreateChildren( ResIntFlr, 1, Name + "-ZBFlr", "SetupMFamIntSurfs_NewZBFlr" )
+         else  UNCHANGED  endif  }
+END
+;*************************************************************************
+
+;************************************************************************* SAC 01/31/24
+RULELIST "SetupMFamIntSurfs_RemoveIntSurfs" 1 0 0 0
+   ; delete certain ResIntWalls
+      ; revised rules to extend deletions to surfaces between same-conditioned res & nonres zones - SAC 02/06/24
+   "Delete ResIntWalls not between two separate zones"      ResIntWall:Action =
+      {  if (IfValidAnd( OtherSideModeled > 0 )==0 .OR. LocalCompAssigned( Outside ) < 1)
+         then  DeleteComp()
+         else if (Parent( Name ) == Outside)
+         then  DeleteComp()
+         else  UNCHANGED  endif endif  }
+   "Delete ResIntWalls between zones of same conditioning"  ResIntWall:Action =
+      {  if (     ParentComponentType() == "ResZn" .AND. LocalCompAssigned( Outside ) == ComponentType( "ResZn" ))
+         then  DeleteComp()   ; all ResZns are same Conditioned
+         else if (ParentComponentType() == "ResZn" .AND. LocalCompAssigned( Outside ) == ComponentType( "ResOtherZn" ))
+         then  if (Outside:Type == 1 .AND. Outside:CondType == 1)
+               then  DeleteComp()   ; parent & other side directly cond
+               else  UNCHANGED  endif
+         else if (ParentComponentType() == "ResZn" .AND. LocalCompAssigned( Outside ) == ComponentType( "Spc" ))
+         then  if (EnumString( Outside:CondgType ) == "DirectlyConditioned")
+               then  DeleteComp()   ; parent & other side directly cond
+               else  UNCHANGED  endif
+         else if (ParentComponentType() == "ResOtherZn" .AND. LocalCompAssigned( Outside ) == ComponentType( "ResZn" ))
+         then  if (Parent( Type ) == 1 .AND. Parent( CondType ) == 1)
+               then  DeleteComp()   ; parent & other side directly cond
+               else  UNCHANGED  endif
+         else if (ParentComponentType() == "ResOtherZn" .AND. LocalCompAssigned( Outside ) == ComponentType( "ResOtherZn" ))
+         then  if (Parent( Type ) == Outside:Type .AND. Parent( CondType ) == Outside:CondType)
+               then  DeleteComp()   ; parent & other side same cond
+               else  UNCHANGED  endif
+         else if (ParentComponentType() == "ResOtherZn" .AND. LocalCompAssigned( Outside ) == ComponentType( "Spc" ))
+         then  if ( ( EnumString( ResOtherZn:Type ) == "Conditioned" .AND. EnumString( ResOtherZn:CondType ) == "Directly" .AND.
+                      EnumString( Outside:CondgType ) == "DirectlyConditioned" ) .OR.
+                    ( EnumString( ResOtherZn:Type ) == "Unconditioned" .AND. EnumString( Outside:CondgType ) == "Unconditioned" ) )
+               then  DeleteComp()   ; parent & other side same cond
+               else  UNCHANGED  endif
+         else  UNCHANGED  endif endif endif endif endif endif  }
+
+   ; delete certain ResIntCeilings
+   "Delete ResIntCeilings not between two separate zones"      ResIntCeiling:Action =
+      {  if (IfValidAnd( OtherSideModeled > 0 )==0 .OR. LocalCompAssigned( Outside ) < 1)
+         then  DeleteComp()
+         else if (Parent( Name ) == Outside)
+         then  DeleteComp()
+         else  UNCHANGED  endif endif  }
+   "Delete ResIntCeilings between zones of same conditioning"  ResIntCeiling:Action =
+      {  if (     ParentComponentType() == "ResZn" .AND. LocalCompAssigned( Outside ) == ComponentType( "ResZn" ))
+         then  DeleteComp()   ; all ResZns are same Conditioned
+         else if (ParentComponentType() == "ResZn" .AND. LocalCompAssigned( Outside ) == ComponentType( "ResOtherZn" ))
+         then  if (Outside:Type == 1 .AND. Outside:CondType == 1)
+               then  DeleteComp()   ; parent & other side directly cond
+               else  UNCHANGED  endif
+         else if (ParentComponentType() == "ResZn" .AND. LocalCompAssigned( Outside ) == ComponentType( "Spc" ))
+         then  if (EnumString( Outside:CondgType ) == "DirectlyConditioned")
+               then  DeleteComp()   ; parent & other side directly cond
+               else  UNCHANGED  endif
+         else if (ParentComponentType() == "ResOtherZn" .AND. LocalCompAssigned( Outside ) == ComponentType( "ResZn" ))
+         then  if (Parent( Type ) == 1 .AND. Parent( CondType ) == 1)
+               then  DeleteComp()   ; parent & other side directly cond
+               else  UNCHANGED  endif
+         else if (ParentComponentType() == "ResOtherZn" .AND. LocalCompAssigned( Outside ) == ComponentType( "ResOtherZn" ))
+         then  if (Parent( Type ) == Outside:Type .AND. Parent( CondType ) == Outside:CondType)
+               then  DeleteComp()   ; parent & other side same cond
+               else  UNCHANGED  endif
+         else if (ParentComponentType() == "ResOtherZn" .AND. LocalCompAssigned( Outside ) == ComponentType( "Spc" ))
+         then  if ( ( EnumString( ResOtherZn:Type ) == "Conditioned" .AND. EnumString( ResOtherZn:CondType ) == "Directly" .AND.
+                      EnumString( Outside:CondgType ) == "DirectlyConditioned" ) .OR.
+                    ( EnumString( ResOtherZn:Type ) == "Unconditioned" .AND. EnumString( Outside:CondgType ) == "Unconditioned" ) )
+               then  DeleteComp()   ; parent & other side same cond
+               else  UNCHANGED  endif
+         else  UNCHANGED  endif endif endif endif endif endif  }
+
+   ; delete certain ResIntFlrs
+   "Delete ResIntFlrs not between two separate zones"       ResIntFlr:Action =
+      {  if (IfValidAnd( OtherSideModeled > 0 )==0 .OR. LocalCompAssigned( Outside ) < 1)
+         then  DeleteComp()
+         else if (Parent( Name ) == Outside)
+         then  DeleteComp()
+         else  UNCHANGED  endif endif  }
+   "Delete ResIntFlrs between zones of same conditioning"   ResIntFlr:Action =
+      {  if (     ParentComponentType() == "ResZn" .AND. LocalCompAssigned( Outside ) == ComponentType( "ResZn" ))
+         then  DeleteComp()   ; all ResZns are same Conditioned
+         else if (ParentComponentType() == "ResZn" .AND. LocalCompAssigned( Outside ) == ComponentType( "ResOtherZn" ))
+         then  if (Outside:Type == 1 .AND. Outside:CondType == 1)
+               then  DeleteComp()   ; parent & other side directly cond
+               else  UNCHANGED  endif
+         else if (ParentComponentType() == "ResZn" .AND. LocalCompAssigned( Outside ) == ComponentType( "Spc" ))
+         then  if (EnumString( Outside:CondgType ) == "DirectlyConditioned")
+               then  DeleteComp()   ; parent & other side directly cond
+               else  UNCHANGED  endif
+         else if (ParentComponentType() == "ResOtherZn" .AND. LocalCompAssigned( Outside ) == ComponentType( "ResZn" ))
+         then  if (Parent( Type ) == 1 .AND. Parent( CondType ) == 1)
+               then  DeleteComp()   ; parent & other side directly cond
+               else  UNCHANGED  endif
+         else if (ParentComponentType() == "ResOtherZn" .AND. LocalCompAssigned( Outside ) == ComponentType( "ResOtherZn" ))
+         then  if (Parent( Type ) == Outside:Type .AND. Parent( CondType ) == Outside:CondType)
+               then  DeleteComp()   ; parent & other side same cond
+               else  UNCHANGED  endif
+         else if (ParentComponentType() == "ResOtherZn" .AND. LocalCompAssigned( Outside ) == ComponentType( "Spc" ))
+         then  if ( ( EnumString( ResOtherZn:Type ) == "Conditioned" .AND. EnumString( ResOtherZn:CondType ) == "Directly" .AND.
+                      EnumString( Outside:CondgType ) == "DirectlyConditioned" ) .OR.
+                    ( EnumString( ResOtherZn:Type ) == "Unconditioned" .AND. EnumString( Outside:CondgType ) == "Unconditioned" ) )
+               then  DeleteComp()   ; parent & other side same cond
+               else  UNCHANGED  endif
+         else  UNCHANGED  endif endif endif endif endif endif  }
+END
+;*************************************************************************
+
+;************************************************************************* SAC 02/01/24
+RULELIST "SetupMFamIntSurfs_NewZBWall" 1 0 1 0
+   "Set ZB ResIntWall:Area"                  ResIntWall:Area                = {  Parent( TargetIntZBSurfArea_Wall )  }
+   "Set ZB ResIntWall:IsPartySurface"        ResIntWall:IsPartySurface      = {  1  }
+   "Set ZB ResIntWall:OtherSideModeled"      ResIntWall:OtherSideModeled    = {  1  }
+   "Set ZB ResIntWall:SimWithReliefVent"     ResIntWall:SimWithReliefVent   = {  1  }     ; added to force generation of -relief IZXFERs - SAC 02/02/24
+   "Set ZB ResIntWall:Outside"               ResIntWall:Outside             = {  Parent( Name )  }
+   "Set ZB ResIntWall:Construction"          ResIntWall:Construction        = {  RuleLibrary( ResConsAssm, "T24-IntZB-Wall Cons" )  }
+END
+;*************************************************************************
+RULELIST "SetupMFamIntSurfs_NewZBClg" 1 0 1 0
+   "Set ZB ResIntCeiling:Area"               ResIntCeiling:Area             = {  Parent( TargetIntZBSurfArea_Clg )  }
+   "Set ZB ResIntCeiling:IsPartySurface"     ResIntCeiling:IsPartySurface   = {  1  }
+   "Set ZB ResIntCeiling:OtherSideModeled"   ResIntCeiling:OtherSideModeled = {  1  }
+   "Set ZB ResIntCeiling:SimWithReliefVent"  ResIntCeiling:SimWithReliefVent ={  1  }     ; added to force generation of -relief IZXFERs - SAC 02/02/24
+   "Set ZB ResIntCeiling:Outside"            ResIntCeiling:Outside          = {  Parent( Name )  }
+   "Set ZB ResIntCeiling:Construction"       ResIntCeiling:Construction     = {  RuleLibrary( ResConsAssm, "T24-IntZB-Clg Cons" )  }
+END
+;*************************************************************************
+RULELIST "SetupMFamIntSurfs_NewZBFlr" 1 0 1 0
+   "Set ZB ResIntFlr:Area"                   ResIntFlr:Area                 = {  Parent( TargetIntZBSurfArea_Flr )  }
+   "Set ZB ResIntFlr:IsPartySurface"         ResIntFlr:IsPartySurface       = {  1  }
+   "Set ZB ResIntFlr:OtherSideModeled"       ResIntFlr:OtherSideModeled     = {  1  }
+   "Set ZB ResIntFlr:SimWithReliefVent"      ResIntFlr:SimWithReliefVent    = {  1  }     ; added to force generation of -relief IZXFERs - SAC 02/02/24
+   "Set ZB ResIntFlr:Outside"                ResIntFlr:Outside              = {  Parent( Name )  }
+   "Set ZB ResIntFlr:Construction"           ResIntFlr:Construction         = {  RuleLibrary( ResConsAssm, "T24-IntZB-Flr Cons" )  }
+   "Set ZB ResIntFlr:FloorZ"                 ResIntFlr:FloorZ               = {  Parent( Bottom )  }
+END
+;*************************************************************************
+
+
+;*************************************************************************
+RULELIST "CSE_SimulationPrep_ZoneSurfaceAreas" 1 0 0 0
+
+   "Set cseZONE:SurfaceAreaExpStr"     cseZONE:SurfaceAreaExpStr =
+      {  if (LocalCompAssigned( SourceZone ) > 0)
+         then  EnumString( SourceZone:Type )
+         else if (LocalCompAssigned( SourceOtherZone ) > 0)
+         then  if (IfValidAnd( SourceOtherZone:Type < 10 ))
+               then  EnumString( SourceOtherZone:CondType ) + " Conditioned"
+               else  EnumString( SourceOtherZone:Type )  endif
+         else  "Unconditioned"  endif endif  }
+
+   "Set cseZONE:SurfaceAreaExport[1] - NumWinOrientations"     cseZONE:SurfaceAreaExport[1] =
+      {  if (LocalCompAssigned( SourceZone ) > 0)
+         then  ValidOr( SourceZone:NumWinOrientations, 0 )
+         else if (LocalCompAssigned( SourceOtherZone ) > 0)
+         then  ValidOr( SourceOtherZone:NumWinOrientations, 0 )
+         else  0  endif endif  }
+
+   "Set cseSURFACE:SurfaceAreaExport[2] - Ext/Undgr Wall"         cseSURFACE:SurfaceAreaExport[2]  =
+      {  if (LocalCompAssigned( SourceExtWall ) > 0 .OR. LocalCompAssigned( SourceUndWall ) > 0) then  sfArea  else  UNDEFINED  endif  }
+   "Set cseSURFACE:SurfaceAreaExport[3] - Window"                 cseSURFACE:SurfaceAreaExport[3]  = 
+      {  if (LocalCompAssigned( SourceExtWall ) > 0) then  SumChildren( cseWINDOW:wnArea )  else  UNDEFINED  endif  }
+   "Set cseSURFACE:SurfaceAreaExport[4] - Ext/Undgr/Crawl Flr"    cseSURFACE:SurfaceAreaExport[4]  =
+      {  if (LocalCompAssigned( SourceSlabFlr ) > 0 .OR. LocalCompAssigned( SourceExtFlr ) > 0 .OR. LocalCompAssigned( SourceUndFlr ) > 0 .OR. LocalCompAssigned( SourceFlrOverCrawl ) > 0) then  sfArea  else  UNDEFINED  endif  }
+   "Set cseSURFACE:SurfaceAreaExport[5] - Ext/Attic Ceiling"      cseSURFACE:SurfaceAreaExport[5]  =
+      {  if (LocalCompAssigned( SourceCathClg ) > 0 .OR. LocalCompAssigned( SourceClgBlwAtc ) > 0) then  sfArea  else  UNDEFINED  endif  }
+   "Set cseSURFACE:SurfaceAreaExport[6] - Skylt"                  cseSURFACE:SurfaceAreaExport[6]  = 
+      {  if (LocalCompAssigned( SourceCathClg ) > 0) then  SumChildren( cseWINDOW:wnArea )  else  UNDEFINED  endif  }
+
+   "Set cseSURFACE:SurfaceAreaExport[7] - ZB Int Wall"            cseSURFACE:SurfaceAreaExport[7]  = {  if (find( Name, "-ZBWall" )) then  if (Parent( Name ) == ValidOr( sfAdjZn, "zznullzz" )) then  sfArea * 2.0  else  sfArea  endif  else  UNDEFINED  endif  }
+   "Set cseSURFACE:SurfaceAreaExport[8] - ZB Int Floor"           cseSURFACE:SurfaceAreaExport[8]  = {  if (find( Name, "-ZBFlr"  )) then  if (Parent( Name ) == ValidOr( sfAdjZn, "zznullzz" )) then  sfArea * 2.0  else  sfArea  endif  else  UNDEFINED  endif  }
+   "Set cseSURFACE:SurfaceAreaExport[9] - ZB Int Ceiling"         cseSURFACE:SurfaceAreaExport[9]  = {  if (find( Name, "-ZBClg"  )) then  if (Parent( Name ) == ValidOr( sfAdjZn, "zznullzz" )) then  sfArea * 2.0  else  sfArea  endif  else  UNDEFINED  endif  }
+
+   "Set cseSURFACE:SurfaceAreaExport[10] - IntMass Wall"          cseSURFACE:SurfaceAreaExport[10] = {  if (find( Name, "-imass" ) .AND. find( Name, "Wall" )==1) then  if (Parent( Name ) == ValidOr( sfAdjZn, "zznullzz" )) then  sfArea * 2.0  else  sfArea  endif  else  UNDEFINED  endif  }
+   "Set cseSURFACE:SurfaceAreaExport[11] - Furniture Wall"        cseSURFACE:SurfaceAreaExport[11] = {  if (find( Name, "Furniture-imass" )                     ) then  if (Parent( Name ) == ValidOr( sfAdjZn, "zznullzz" )) then  sfArea * 2.0  else  sfArea  endif  else  UNDEFINED  endif  }
+
+   "Set cseSURFACE:SurfaceAreaExport[12] - Othr Int Wall"         cseSURFACE:SurfaceAreaExport[12] =
+      {  if (IfValidAnd( SurfaceAreaExport[2]  > 0 )==0 .AND. IfValidAnd( SurfaceAreaExport[3] > 0 )==0 .AND. IfValidAnd( SurfaceAreaExport[4]  > 0 )==0 .AND.
+             IfValidAnd( SurfaceAreaExport[5]  > 0 )==0 .AND. IfValidAnd( SurfaceAreaExport[6] > 0 )==0 .AND. IfValidAnd( SurfaceAreaExport[7]  > 0 )==0 .AND.
+             IfValidAnd( SurfaceAreaExport[8]  > 0 )==0 .AND. IfValidAnd( SurfaceAreaExport[9] > 0 )==0 .AND. IfValidAnd( SurfaceAreaExport[10] > 0 )==0 .AND.
+             IfValidAnd( SurfaceAreaExport[11] > 0 )==0 .AND.
+             (LocalStatus( sfTilt ) < 1 .OR. (IfValidAnd( sfTilt > 60) .AND. IfValidAnd( sfTilt < 120 ))) ) then  sfArea  else  UNDEFINED  endif  }
+   "Set cseSURFACE:SurfaceAreaExport[13] - Othr Int Floor"        cseSURFACE:SurfaceAreaExport[13] =
+      {  if (IfValidAnd( SurfaceAreaExport[2]  > 0 )==0 .AND. IfValidAnd( SurfaceAreaExport[3] > 0 )==0 .AND. IfValidAnd( SurfaceAreaExport[4]  > 0 )==0 .AND.
+             IfValidAnd( SurfaceAreaExport[5]  > 0 )==0 .AND. IfValidAnd( SurfaceAreaExport[6] > 0 )==0 .AND. IfValidAnd( SurfaceAreaExport[7]  > 0 )==0 .AND.
+             IfValidAnd( SurfaceAreaExport[8]  > 0 )==0 .AND. IfValidAnd( SurfaceAreaExport[9] > 0 )==0 .AND. IfValidAnd( SurfaceAreaExport[10] > 0 )==0 .AND.
+             IfValidAnd( SurfaceAreaExport[11] > 0 )==0 .AND.
+             IfValidAnd( sfTilt >= 175) .AND. IfValidAnd( sfTilt <= 185 ) ) then  sfArea  else  UNDEFINED  endif  }
+   "Set cseSURFACE:SurfaceAreaExport[14] - Othr Int Ceiling"      cseSURFACE:SurfaceAreaExport[14] =
+      {  if (IfValidAnd( SurfaceAreaExport[2]  > 0 )==0 .AND. IfValidAnd( SurfaceAreaExport[3] > 0 )==0 .AND. IfValidAnd( SurfaceAreaExport[4]  > 0 )==0 .AND.
+             IfValidAnd( SurfaceAreaExport[5]  > 0 )==0 .AND. IfValidAnd( SurfaceAreaExport[6] > 0 )==0 .AND. IfValidAnd( SurfaceAreaExport[7]  > 0 )==0 .AND.
+             IfValidAnd( SurfaceAreaExport[8]  > 0 )==0 .AND. IfValidAnd( SurfaceAreaExport[9] > 0 )==0 .AND. IfValidAnd( SurfaceAreaExport[10] > 0 )==0 .AND.
+             IfValidAnd( SurfaceAreaExport[11] > 0 )==0 .AND.
+             ((IfValidAnd( sfTilt > -60) .AND. IfValidAnd( sfTilt < 60 )) .OR. (IfValidAnd( sfTilt > 300) .AND. IfValidAnd( sfTilt < 420 ))) )
+         then  sfArea  else  UNDEFINED  endif  }
+
+   "Set cseSURFACE:SurfaceAreaExport[19] - Othr Int - add as FLOOR area of adjacent zn"         cseSURFACE:SurfaceAreaExport[19] =     ; SAC 02/02/24
+      {  if (LocalCompAssigned( sfAdjZn ) < 1) then  UNDEFINED
+         else if (Parent( Name ) == sfAdjZn .AND. IfValidAnd( SurfaceAreaExport[13] > 0 )) then  SurfaceAreaExport[13]
+         else if (Parent( Name ) != sfAdjZn .AND. IfValidAnd( SurfaceAreaExport[14] > 0 )) then  SurfaceAreaExport[14]
+         else  UNDEFINED  endif endif endif  }
+   "Set cseSURFACE:SurfaceAreaExport[20] - Othr Int - add as CEILING area of adjacent zn"       cseSURFACE:SurfaceAreaExport[20] =
+      {  if (LocalCompAssigned( sfAdjZn ) < 1) then  UNDEFINED
+         else if (Parent( Name ) == sfAdjZn .AND. IfValidAnd( SurfaceAreaExport[14] > 0 )) then  SurfaceAreaExport[14]
+         else if (Parent( Name ) != sfAdjZn .AND. IfValidAnd( SurfaceAreaExport[13] > 0 )) then  SurfaceAreaExport[13]
+         else  UNDEFINED  endif endif endif  }
+
+   "Set cseZONE:SurfaceAreaExport[2]  - Ext/Undgr Wall"        cseZONE:SurfaceAreaExport[2]  = {  SumChildren( cseSURFACE:SurfaceAreaExport[2]  )  }
+   "Set cseZONE:SurfaceAreaExport[3]  - Window"                cseZONE:SurfaceAreaExport[3]  = {  SumChildren( cseSURFACE:SurfaceAreaExport[3]  )  }
+   "Set cseZONE:SurfaceAreaExport[4]  - Ext/Undgr/Crawl Flr"   cseZONE:SurfaceAreaExport[4]  = {  SumChildren( cseSURFACE:SurfaceAreaExport[4]  )  }
+   "Set cseZONE:SurfaceAreaExport[5]  - Ext/Attic Ceiling"     cseZONE:SurfaceAreaExport[5]  = {  SumChildren( cseSURFACE:SurfaceAreaExport[5]  )  }
+   "Set cseZONE:SurfaceAreaExport[6]  - Skylt"                 cseZONE:SurfaceAreaExport[6]  = {  SumChildren( cseSURFACE:SurfaceAreaExport[6]  )  }
+   "Set cseZONE:SurfaceAreaExport[7]  - ZB Int Wall"           cseZONE:SurfaceAreaExport[7]  = {  SumChildren( cseSURFACE:SurfaceAreaExport[7]  )  }
+   "Set cseZONE:SurfaceAreaExport[8]  - ZB Int Floor"          cseZONE:SurfaceAreaExport[8]  = {  SumChildren( cseSURFACE:SurfaceAreaExport[8]  )  }
+   "Set cseZONE:SurfaceAreaExport[9]  - ZB Int Ceiling"        cseZONE:SurfaceAreaExport[9]  = {  SumChildren( cseSURFACE:SurfaceAreaExport[9]  )  }
+   "Set cseZONE:SurfaceAreaExport[10] - IntMass Wall"          cseZONE:SurfaceAreaExport[10] = {  SumChildren( cseSURFACE:SurfaceAreaExport[10] )  }
+   "Set cseZONE:SurfaceAreaExport[11] - Furniture Wall"        cseZONE:SurfaceAreaExport[11] = {  SumChildren( cseSURFACE:SurfaceAreaExport[11] )  }
+   "Set cseZONE:SurfaceAreaExport[12] - Othr Int Wall"         cseZONE:SurfaceAreaExport[12] = {  SumChildren( cseSURFACE:SurfaceAreaExport[12] ) + SumRevRef( cseSURFACE:sfAdjZn, cseSURFACE:SurfaceAreaExport[12] )  }
+   "Set cseZONE:SurfaceAreaExport[13] - Othr Int Floor"        cseZONE:SurfaceAreaExport[13] = {  SumChildren( cseSURFACE:SurfaceAreaExport[13] ) + SumRevRef( cseSURFACE:sfAdjZn, cseSURFACE:SurfaceAreaExport[19] )  }
+   "Set cseZONE:SurfaceAreaExport[14] - Othr Int Ceiling"      cseZONE:SurfaceAreaExport[14] = {  SumChildren( cseSURFACE:SurfaceAreaExport[14] ) + SumRevRef( cseSURFACE:sfAdjZn, cseSURFACE:SurfaceAreaExport[20] )  }
+
+   ; ---------- Report CSV export ----------
+   ;"Open CSV file"      Proj:ExportFileIdx[2] = {  OpenExportFile( ModelPath + ModelFile + " - CSE Zone Areas.csv", "wt" )  }
+   "Open CSV file"      Proj:ExportFileIdx[2] = {  OpenExportFile( ValidOr( ProcessingPath, "" ) + ModelFile + " - " + ValidOr( RunAbbrev, "" ) + " - CSE Zone Areas.csv", "wt" )  }
+
+   "Write CSV rec  1"   Proj:Action  = {  WriteToExportFile( ExportFileIdx[2], "1,CSE Zone Surface Areas file format version number,\n" )  }
+   "Write CSV rec  2"   Proj:Action  = {  WriteToExportFile( ExportFileIdx[2], "CompMgr:,,%c%s%c,\n", 34, CompManagerVersion, 34 )  }
+   "Write CSV rec  3"   Proj:Action  = {  WriteToExportFile( ExportFileIdx[2], "Ruleset:,,%c%s%c,\n", 34, EnumString( Ruleset ), 34 )  }
+   "Write CSV rec  4"   Proj:Action  = {  if (LocalStatus( CSEVersion ) > 0)
+                                          then  WriteToExportFile( ExportFileIdx[2], "CSE:,,%c%s%c,\n", 34, CSEVersion, 34 )
+                                          else  WriteToExportFile( ExportFileIdx[2], "CSE:,,-,\n" )  endif  }
+   "Write CSV rec  5"   Proj:Action  = {  WriteToExportFile( ExportFileIdx[2], "Calculation Date/Time:,,,%c%s%c,\n", 34, ValidOr( Proj:RunDateISO, "unknown" ), 34 )  }
+   "Write CSV rec  6"   Proj:Action  = {  WriteToExportFile( ExportFileIdx[2], "Input File Name:,,,%c%s%c,,,,,Areas include all sides exposed to the zone\n", 34, ValidOr( ModelFile, "unknown" ), 34 )  }
+
+   "Write CSV rec  7"   Proj:Action  = {  WriteToExportFile( ExportFileIdx[2], ",\n" )  }
+   "Write CSV rec  8"   Proj:Action  = {  WriteToExportFile( ExportFileIdx[2], "Zone,,Zone,Num of,Exterior/Underground Surface Areas,,,,,Zone Boundary Areas Added,,,Interior Mass,,Other Interior Surface Areas,\n" )  }
+   "Write CSV rec  9"   Proj:Action  = {  WriteToExportFile( ExportFileIdx[2], "Name,Conditioning,Area ft2,Exposures,Gr Wall ft2,Win Ft2,Floor ft2,Gr Ceiling ft2,Skylt ft2,Wall ft2,Floor ft2,Ceiling ft2,Wall ft2,Furn ft2,Wall ft2,Floor ft2,Ceiling ft2,\n" )  }
+
+   "Write CSV rec N"    cseZONE:Action  = {  WriteToExportFile( ExportFileIdx[2], "%c%s%c,%s,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,%g,\n", 
+                                                   34, Name, 34, SurfaceAreaExpStr, znArea, SurfaceAreaExport[1], SurfaceAreaExport[2], SurfaceAreaExport[3], SurfaceAreaExport[4], SurfaceAreaExport[5], SurfaceAreaExport[6],
+                                                   SurfaceAreaExport[7], SurfaceAreaExport[8], SurfaceAreaExport[9], SurfaceAreaExport[10], SurfaceAreaExport[11], SurfaceAreaExport[12], SurfaceAreaExport[13], SurfaceAreaExport[14] )  }
+
+   "Close CSV file"  Proj:Action = {  CloseExportFile( ExportFileIdx[2] )  }
+
+END
+;*************************************************************************
+
+
+
+
+;*************************************************************************
+;*************************************************************************
+
+ENDFILE
+

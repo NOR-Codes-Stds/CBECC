@@ -1,0 +1,3336 @@
+// Project - Multifamily  (added to facilitate 2022 MFam restructuring - SAC 08/10/21)
+//
+// -------------------------------------------------------------------------
+//  Copyright (c) 2014-2017, California Energy Commission
+//  All rights reserved.
+//  Redistribution and use in source and binary forms, with or without
+//  modification, are permitted provided that the following conditions are
+//  met:
+// 
+//    * Redistributions of source code must retain the above copyright
+//  notice, this list of conditions and the following disclaimer.
+//    * Redistributions in binary form must reproduce the above copyright
+//  notice, this list of conditions and the following disclaimer in
+//  the documentation and/or other materials provided with the
+//  distribution.
+//    * Neither the name of the California Energy Commission nor the names of its
+//  contributors may be used to endorse or promote products
+//  derived from this software without specific prior written
+//  permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+//  IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+//  TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION
+//  BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+//  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+//  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+//  BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+//  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+//  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// -------------------------------------------------------------------------
+
+
+// SAC 10/19/21 (MFam)
+RULE Proj:IsComRuleset
+  DEFAULT
+    1
+ENDRULE
+RULE Proj:IsSFamResRuleset
+  DEFAULT
+    0
+ENDRULE
+
+// SAC 10/19/21 (MFam)
+RULE Proj:ResDwellUnits
+  DESCRIPTION
+    "whether this project includes residential dwelling units (other than hotel/motel guest rooms)"
+  DEFAULT
+    if (ComponentCount( ResProj  ) > 0)
+    then  1
+    else  0  endif
+ENDRULE
+
+// SAC 10/18/21 (MFam)
+RULE Proj:Action
+  DEFAULT
+    if ((ComponentCount( ResZnGrp ) > 0 .OR. ResDwellUnits > 0) .AND.
+        ComponentCount( ResProj  ) < 1)
+    then  CreateChildren( ResProj, 1, Name + " (res)" )
+    else  UNCHANGED  endif
+ENDRULE
+
+// removal (as input) of Proj:AffordableHousing - SAC 08/19/22 (CUAC)
+RULE Proj:AffordableHousing
+  INPUTCLASS 
+    NotInput  IgnoreUserInput  "no longer user input"
+  DEFAULT
+    if (IfValidAnd( CUACReport > 0 ))
+    then  1
+    else  UNDEFINED  endif
+ENDRULE
+
+// SAC 07/26/22 (CUAC)
+RULE Proj:Action
+  DEFAULT
+    if (ComponentCount( ResProj ) > 0 .AND.
+        IfValidAnd( CUACReport > 0 ) .AND.
+        ComponentCount( CUAC ) < 1)
+    then  CreateChildren( CUAC, 1, "CUAC Inputs" )
+    else  UNCHANGED  endif
+ENDRULE
+
+// reference to global CUAC object to facilitate CUAC error messages - SAC 12/20/22 (CUAC)
+RULE NEW ResZn:CUACRef
+  DATATYPE
+    CUAC
+  LONGFORM
+    CUACReference
+  DESCRIPTION
+    "reference to global CUAC object (to aid in error reporting)."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (ComponentCount( ResProj ) > 0 .AND.
+        IfValidAnd( Proj:CUACReport > 0 ) .AND.
+        ComponentCount( CUAC ) > 0 .AND.
+        IfValidAnd( AffordableHousing > 0 ))
+    then  CUAC:Name
+    else  UNDEFINED  endif
+ENDRULE
+
+// flags indicating assignment of central laundry zone - SAC 12/20/22 (CUAC)   - revise to prevent counting units where assigned DUT:WasherOption != Central - SAC 02/28/23 (tic #3418)
+RULE NEW DwellingUnit:CentralLaundryAssigned
+  DATATYPE
+    Integer
+  DESCRIPTION
+    "flag indicating central laundry zone(s) assigned."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if ( IfValidAnd( DwellUnitTypeRef:WasherOption = "Central" ) .AND.
+         ( (IfValidAnd( HaveWasher > 0 ) .AND. LocalCompAssigned( WasherZoneRef ) > 0 .AND. IfValidAnd( WasherZoneRef:Name != ResZn:Name )) .OR.
+           (IfValidAnd( HaveWasher > 0 ) .AND. LocalCompAssigned( DryerZoneRef  ) > 0 .AND. IfValidAnd(  DryerZoneRef:Name != ResZn:Name )) ) )
+    then  1
+    else  UNDEFINED  endif
+ENDRULE
+
+RULE NEW ResZn:NumAffordableCentralLaundryAssignments
+  DATATYPE
+    Integer
+  DESCRIPTION
+    "number of AffordableHousing child dwelling units (excluding count) w/ central laundry zone(s) assigned."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (IfValidAnd( AffordableHousing > 0 ))
+    then  SumChildren( DwellingUnit:CentralLaundryAssigned )
+    else  0  endif
+ENDRULE
+
+
+// to facilitate CUAC error reporting - SAC 03/08/24
+RULE NEW DwellingUnit:AffordableHousing
+  DATATYPE
+    Integer
+  DESCRIPTION
+    "flag indicating parent ResZn flagged as AffordableHousing."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    Parent( AffordableHousing )
+ENDRULE
+
+RULE NEW DwellingUnitType:AffordableHousing
+  DATATYPE
+    Integer
+  DESCRIPTION
+    "flag indicating referencing DwellingUnit(s) flagged as AffordableHousing."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (SumRevRef( DwellingUnit:DwellUnitTypeRef, DwellingUnit:AffordableHousing ) > 0)
+    then  1  else  UNDEFINED  endif
+ENDRULE
+
+RULE NEW DwellingUnitType:CUACRef
+  DATATYPE
+    CUAC
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (IfValidAnd( AffordableHousing > 0 )) then  Global( CUAC:Name )
+    else  UNDEFINED  endif
+ENDRULE
+
+
+RULE CUAC:AffordablePVDCSysSize
+  MINIMUM
+    0 
+  DEFAULT
+    0
+ENDRULE
+; removed from CUAC battery from calcs - SAC 12/07/22
+; restored CUAC Battery stuff - SAC 11/12/24 (tic #3641)
+RULE CUAC:AffordableBattMaxCap
+  MINIMUM
+    0 
+  DEFAULT
+    0
+ENDRULE
+
+RULE CUAC:TariffDate
+  DEFAULT
+    "12/18/2023"
+ENDRULE
+
+RULE CUAC:ElecUtility
+  RESETS
+    ResetTheFollowingWhenThisIsModified
+      CUAC:G2ElecTerritory
+      CUAC:ElecTerritory
+ENDRULE
+RULE CUAC:G2ElecTerritory
+  RESETS
+    ResetTheFollowingWhenThisIsModified
+      CUAC:G2ElecTariff
+ENDRULE
+RULE CUAC:ElecTerritory
+  RESETS
+    ResetTheFollowingWhenThisIsModified
+      CUAC:ElecTariff
+  DEFAULT
+    "- select territory -"
+ENDRULE
+RULE CUAC:ElecTariff
+  DEFAULT
+    "- select tariff -"
+ENDRULE
+
+RULE CUAC:GasUtility
+  RESETS
+    ResetTheFollowingWhenThisIsModified
+      CUAC:G2GasTerritory
+      CUAC:GasTerritory
+ENDRULE
+RULE CUAC:G2GasTerritory
+  RESETS
+    ResetTheFollowingWhenThisIsModified
+      CUAC:G2GasTariff
+ENDRULE
+RULE CUAC:GasTerritory
+  RESETS
+    ResetTheFollowingWhenThisIsModified
+      CUAC:GasTariff
+  DEFAULT
+    "- select territory -"
+ENDRULE
+RULE CUAC:GasTariff
+  DEFAULT
+    "- select tariff -"
+ENDRULE
+
+; SAC 09/05/23
+RULE CUAC:ElecTariffGen
+  DEFAULT
+    if (EnumValue( ElecUtility ) < 1 .OR. EnumValue( G2ElecTerritory ) < 1 .OR. EnumValue( G2ElecTariff ) < 1) then  0
+    else if (CUAC_UtilityRateGen2Data:WhichGen( "Fuel", "Electric", "Utility", ElecUtility, "Territory", G2ElecTerritory, "Rate", G2ElecTariff ) > 0)
+    then     CUAC_UtilityRateGen2Data:WhichGen( "Fuel", "Electric", "Utility", ElecUtility, "Territory", G2ElecTerritory, "Rate", G2ElecTariff )
+    else if (CUAC_UtilityRates:IsValid( "RateID", EnumValue( G2ElecTariff ) ))
+    then  1  else  0  endif endif endif
+ENDRULE
+RULE CUAC:GasTariffGen
+  DEFAULT
+    if (EnumValue( GasUtility ) < 1 .OR. EnumValue( G2GasTerritory ) < 1 .OR. EnumValue( G2GasTariff ) < 1) then  0
+    else if (CUAC_UtilityRateGen2Data:WhichGen( "Fuel", "Gas", "Utility", GasUtility, "Territory", G2GasTerritory, "Rate", G2GasTariff ) > 0)
+    then     CUAC_UtilityRateGen2Data:WhichGen( "Fuel", "Gas", "Utility", GasUtility, "Territory", G2GasTerritory, "Rate", G2GasTariff )
+    else if (CUAC_UtilityRates:IsValid( "RateID", EnumValue( G2GasTariff ) ))
+    then  1  else  0  endif endif endif
+ENDRULE
+
+RULE CUAC:ElecTariffIsTOU
+  DEFAULT
+    if (ElecTariffGen < 2) then  0
+    else  CUAC_UtilityRateGen2Data:IsTOURate( "Fuel", "Electric", "Utility", ElecUtility, "Territory", G2ElecTerritory, "Rate", G2ElecTariff )
+    endif
+ENDRULE
+      ; added 'source' CPR text to *TariffDescrip fields - SAC 01/24/24
+RULE CUAC:ElecTariffDescrip
+  DEFAULT
+    if (ElecTariffGen < 2) then  UNDEFINED
+    else  CUAC_UtilityRateGen2Data:RateDescription( "Fuel", "Electric", "Utility", ElecUtility, "Territory", G2ElecTerritory, "Rate", G2ElecTariff )
+          + "  [Source: Clean Power Research, L.L.C. 12/18/2023]"
+    endif
+ENDRULE
+RULE CUAC:G2ElecTariffERN
+  DEFAULT
+    if (ElecTariffGen < 2) then  UNDEFINED
+    else  CUAC_UtilityRateGen2Data:Gen2EncodedRateName( "Fuel", "Electric", "Utility", ElecUtility, "Territory", G2ElecTerritory, "Rate", G2ElecTariff )
+    endif
+ENDRULE
+
+      ; added new property to report 'Standard' vs. 'CARE' rates - SAC 01/24/24
+RULE CUAC:ElecTariffType
+  RESETS
+    ResetThisWhenTheFollowingIsModified
+      CUAC:G2ElecTariff
+  DEFAULT
+    if (ElecTariffGen < 2) then  UNCHANGED
+    else  if (strlen( EnumString( G2ElecTariff ) ) > 3 .AND. strlen( ValidOr( ElecTariffDescrip, "no" ) ) > 3)
+          then  if (find( G2ElecTariff, "CARE" ) > 0 .OR. find( ElecTariffDescrip, "CARE" ) > 0)
+                then  2  else  1
+                endif
+          else if (strlen( EnumString( G2ElecTariff ) ) > 3)
+          then  if (find( G2ElecTariff, "CARE" ) > 0)
+                then  2  else  1
+                endif
+          else  1
+          endif endif
+    endif
+ENDRULE
+
+RULE CUAC:GasTariffIsTOU
+  DEFAULT
+    if (GasTariffGen < 2) then  0
+    else  CUAC_UtilityRateGen2Data:IsTOURate( "Fuel", "Gas", "Utility", GasUtility, "Territory", G2GasTerritory, "Rate", G2GasTariff )
+    endif
+ENDRULE
+RULE CUAC:GasTariffDescrip
+  DEFAULT
+    if (GasTariffGen < 2) then  UNDEFINED
+    else  CUAC_UtilityRateGen2Data:RateDescription( "Fuel", "Gas", "Utility", GasUtility, "Territory", G2GasTerritory, "Rate", G2GasTariff )
+          + "  [Source: Clean Power Research, L.L.C. 12/18/2023]"
+    endif
+ENDRULE
+RULE CUAC:G2GasTariffERN
+  DEFAULT
+    if (GasTariffGen < 2) then  UNDEFINED
+    else  CUAC_UtilityRateGen2Data:Gen2EncodedRateName( "Fuel", "Gas", "Utility", GasUtility, "Territory", G2GasTerritory, "Rate", G2GasTariff )
+    endif
+ENDRULE
+
+      ; added new property to report 'Standard' vs. 'CARE' rates - SAC 01/25/24
+RULE CUAC:GasTariffType
+  RESETS
+    ResetThisWhenTheFollowingIsModified
+      CUAC:G2GasTariff
+  DEFAULT
+    if (GasTariffGen < 2) then  0
+    else  if (EnumValue( G2GasTerritory ) < 1 .OR. EnumValue( G2GasTariff ) < 1) then  0
+          else if (strlen( EnumString( G2GasTariff ) ) > 3 .AND. strlen( ValidOr( GasTariffDescrip, "no" ) ) > 3)
+          then  if (find( G2GasTariff, "CARE" ) > 0 .OR. find( GasTariffDescrip, "CARE" ) > 0)
+                then  2  else  1
+                endif
+          else if (strlen( EnumString( G2GasTariff ) ) > 3)
+          then  if (find( G2GasTariff, "CARE" ) > 0)
+                then  2  else  1
+                endif
+          else  1
+          endif endif endif
+    endif
+ENDRULE
+
+
+RULE UtilityRate:Company
+  RESETS
+    ResetTheFollowingWhenThisIsModified
+      UtilityRate:Territory
+ENDRULE
+RULE UtilityRate:Territory
+  RESETS
+    ResetTheFollowingWhenThisIsModified
+      UtilityRate:Rate
+  DEFAULT
+    "- select territory -"
+ENDRULE
+RULE UtilityRate:Rate
+  DEFAULT
+    "- select tariff -"
+ENDRULE
+
+
+; SAC 09/25/23
+;RULE CUAC:IncludeDHWInUtilityBills
+;  DEFAULT
+;    1
+;ENDRULE
+
+
+RULE CUAC:WaterMonthlyCost
+  MINIMUM
+    0
+  DEFAULT
+    0
+ENDRULE
+RULE CUAC:WaterVolumeCost
+  MINIMUM
+    0
+  DEFAULT
+    0
+ENDRULE
+
+RULE CUAC:TrashMonthlyCost
+  MINIMUM
+    0
+  DEFAULT
+    0
+ENDRULE
+
+
+; removed CUAC-specific site address stuff - SAC 12/07/22
+;RULE CUAC:SiteAddress
+;  DEFAULT
+;    Proj:StAddress
+;ENDRULE
+;
+;RULE CUAC:SiteCity
+;  DEFAULT
+;    Proj:City
+;ENDRULE
+;
+;RULE CUAC:SiteZIPCode
+;  DEFAULT
+;    if (IfValidAnd( Proj:ZipCode > 0 ))
+;    then  Format( "%g", Proj:ZipCode )
+;    else  UNDEFINED  endif
+;ENDRULE
+
+RULE CUAC:Locality
+  DEFAULT
+    Proj:City
+ENDRULE
+
+RULE CUAC:UnitType
+  DEFAULT
+    "Affordable Housing"
+ENDRULE
+
+
+; remove totally empty rules - SAC 04/24/23
+; RULE CUAC:OwnerName
+; ENDRULE
+; 
+; RULE CUAC:OwnerAddress
+; ENDRULE
+; 
+; RULE CUAC:OwnerCity
+; ENDRULE
+; 
+; RULE CUAC:OwnerZIPCode
+; ENDRULE
+; 
+; 
+; RULE CUAC:ContactName
+; ENDRULE
+; 
+; RULE CUAC:ContactPhone
+; ENDRULE
+; 
+; RULE CUAC:ContactEMail
+; ENDRULE
+
+
+; removed CUAC-specific site address stuff - SAC 12/07/22
+;RULE CUAC:SiteDetailsLbl
+;  DEFAULT
+;    if (LocalStatus( SiteAddress ) > 0)
+;    then  "Site Details:  " + substr( SiteAddress, 0, 20 ) + "..."
+;    else  "Site Details..."  endif
+;ENDRULE
+
+RULE CUAC:OwnerDetailsLbl
+  DEFAULT
+    if (LocalStatus( OwnerName ) > 0)
+    then  "Owner Details:  " + substr( OwnerName, 0, 20 ) + "..." 
+    else  "Owner Details..."  endif
+ENDRULE
+
+RULE CUAC:ContactDetailsLbl
+  DEFAULT
+    if (LocalStatus( ContactName ) > 0)
+    then  "Contact Details:  " + substr( ContactName, 0, 20 ) + "..." 
+    else  "Contact Details..."  endif
+ENDRULE
+
+
+; moved to end of Battery.rule to ensure PV & Batt data refreshed BEFORE error checks which also setup PV/Batt messages - SAC 11/21/22
+;; moved CUAC error checks to here to ensure above defaulting done BEFORE error checks - SAC 10/25/22
+;RULE Proj:Action
+; DEFAULT
+;   if (IfValidAnd( ResDwellUnits > 0 )==0) then  UNCHANGED
+;   else  EvalRulelist( "CUAC_InputErrorCheck" )  endif
+;ENDRULE
+
+
+RULE ResProj:NumBedrooms
+  DESCRIPTION
+    "Total number of bedrooms across all dwelling units."
+  INPUTCLASS 
+    NotInput  IgnoreUserInput  "Removed as input for CBECC 2022"
+ENDRULE
+
+RULE ResProj:EnergyCodeYearNum 
+  DESCRIPTION
+    "Year of energy code this ruleset analyzes (integer)"
+  DEFAULT : T24N_2019
+    2019
+  DEFAULT : T24N_2022
+    2022
+  DEFAULT : T24N_2025
+    2025
+  DEFAULT
+    2028
+ENDRULE
+
+RULE NEW ResProj:StdsVersionYr
+  DATATYPE
+    Integer
+  LONGFORM
+    StandardsVersionYear
+  DESCRIPTION
+    "The year corresponding to the StdsVersion. Used for rule criteria. (differs from Com val in Proj)"
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    switch( Proj:StdsVersion )
+      case "Compliance2014" : 2015
+      case "Compliance2015" : 2016
+      case "Compliance2016" : 2017
+      case "Compliance2019" : 2020
+      case "Compliance2022" : 2023
+      case "Compliance2025" : 2026
+      default : 2014
+    endswitch
+ENDRULE
+
+// SAC 10/18/21 (MFam)
+RULE ResProj:ResAnalysisType
+  DEFAULT
+    switch (Proj:AnalysisType)
+      case "Title24ProposedOnly"  :  "Proposed Only"
+      default                     :  "Proposed and Standard"
+    endswitch
+ENDRULE
+
+// facilitate revisions in how MFam int surfaces are described and simulated - SAC 01/31/24
+RULE ResProj:IntSurfModelMthd
+  DEFAULT
+    "before v2022.3.1"
+ENDRULE
+
+RULE ResProj:IntSurfModelMthdMsg
+  DEFAULT
+    switch (IntSurfModelMthd)
+      case  "latest (surfaces not req'd)"   : "residential interior surfaces are defaulted (in addition to user inputs)"
+      case  "latest (remove user surfaces)" : "residential interior surfaces are defaulted (in place of user inputs)"
+      default                               : "user input res interior surfaces required (method used prior to ver 2022.3.1)"
+    endswitch
+ENDRULE
+
+; added ZoneBoundaryWallFactorTable - SAC 02/04/24
+TABLE ZoneBoundaryWallFactorTable
+   SpcFunc                                 Fctr   DwlFctr   CorrFctr
+   "Dwelling"                              8      1.7       0   
+   "Aging Eye/Low-vision (Corridor Area)"  5      0         144 
+   "Corridor Area"                         5      0         144 
+   "Concourse and Atria Area"              5      0         625 
+   "Aging Eye/Low-vision (Stairwell)"      6      0         0   
+   "Stairwell"                             6      0         0   
+   *                                       5      0         0   
+ENDTABLE 
+
+
+// -----------------------------------------------------------------------------
+; TO DO ?? logic to set via existing Com ruleset properties ??
+RULE ResProj:BypassRuleLimits
+  DESCRIPTION
+    "Boolean (0/1), when =1 causes certain rule-based compliance checks/limits to be bypassed"
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    0  
+ENDRULE
+
+; moved EnableResearchMode to Proj object so that Htl/Mtl DHW has access - SAC 02/26/22
+;RULE ResProj:EnableResearchMode
+;  DESCRIPTION
+;    "Boolean (0/1), when =1 indicates 'research mode'"
+;  INPUTCLASS 
+;    NotInput
+;  DEFAULT
+;    0  
+;ENDRULE
+
+RULE ResProj:ZonalControl
+  DESCRIPTION
+    "On/1 if differentiating living vs. sleeping areas (N/A in Multifamily analysis)"
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    0  
+ENDRULE
+
+RULE ResProj:Appl_DishUsageUnits
+  DESCRIPTION
+    "kWh/yr for T24-2013 & EDR/RESNET, kWh/gal for T24-2016+"
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    "kWh/gal"
+ENDRULE
+
+
+RULE ResProj:WinOvrhngGraphic
+  DESCRIPTION
+    "Name of Window Overhang graphic (file)"
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    "WinOvrhng.jpg"
+ENDRULE
+
+RULE ResProj:WinFinGraphic
+  DESCRIPTION
+    "Name of Window Fin graphic (file)"
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    "WinFin.jpg"
+ENDRULE
+
+
+RULE ResProj:AllowStdDesignFuel
+  DEFAULT
+    if (LocalStatus( AllowStdDesignFuel ) < 1)
+    then  if (IfValidAnd( Proj:AnalysisVersion >= 220000 )) 
+          then  1
+          else  0  endif
+    else  UNCHANGED  endif
+ENDRULE
+RULE ResProj:ApplyStdDesignIAQFromTable
+  DEFAULT
+    if (LocalStatus( ApplyStdDesignIAQFromTable ) < 1) then  0  else  UNCHANGED  endif
+ENDRULE
+
+; Set to 1 so no adjustment at project level for MFam - JP 11/23/22 (tic #3425)
+RULE ResProj:IAQSupInletsAccessible
+  DESCRIPTION
+    "supply air filters, outside air inlets, and H/ERV recovery cores are readily accessible"
+  INPUTCLASS 
+    Default
+  DEFAULT
+    1
+ENDRULE
+
+RULE ResProj:IAQSupInletsAccessMsg
+  DESCRIPTION
+    "user message"
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    UNDEFINED
+ENDRULE
+
+RULE ResProj:IAQHasFID
+  DESCRIPTION
+    "whether IAQ system has fault indication display (FID) in compliance with RACM Reference Manual"
+  INPUTCLASS 
+    Default
+  DEFAULT
+    1
+ENDRULE
+
+RULE Proj:StdDesignBase
+  DESCRIPTION
+    "determines which Std Design parameters and Constructions will be used in design rating calcs"
+  INPUTCLASS 
+    Prescribed
+  DEFAULT
+    switch (Proj:StdsVersion)
+       case  "Compliance2014" :   "CA2013"
+       case  "Compliance2015" :   "CA2013"
+       case  "Compliance2016" :   "CA2016"
+       case  "Compliance2019" :   "CA2019"
+       case  "Compliance2022" :   "CA2022"
+       default                :   "CA2025"
+    endswitch
+ENDRULE
+
+RULE Proj:CompCodeBase
+  DESCRIPTION
+    "keeps track of the initial StdDesignBase - not changed to design rating base during analysis"
+  INPUTCLASS 
+    Prescribed
+  DEFAULT
+    switch (Proj:StdsVersion)
+       case  "Compliance2014" :   "CA2013"
+       case  "Compliance2015" :   "CA2013"
+       case  "Compliance2016" :   "CA2016"
+       case  "Compliance2019" :   "CA2019"
+       case  "Compliance2022" :   "CA2022"
+       default                :   "CA2025"
+    endswitch
+ENDRULE
+
+RULE NEW Proj:BldgTypeTblStr
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (IfValidAnd( Bldg:AboveGrdStoryCnt > 3 ))
+    then   "HiRiseRes"
+    else  "LowRiseRes"  endif
+ENDRULE
+
+RULE ResProj:BldgTypeTblStr
+  DESCRIPTION
+    "Building type string used in code look-up tables (T24RClimateZoneCodeBase:*)"
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    Proj:BldgTypeTblStr
+ENDRULE
+
+
+RULE ResProj:ExEDR_Defaults
+  DESCRIPTION
+    "Whether or not Existing EDR defaulting is active for this model"
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    0
+ENDRULE
+
+RULE ResProj:InsulConsQuality
+  DESCRIPTION
+    "Insulation construction quality"
+  INPUTCLASS 
+    Default
+  DEFAULT
+    "No"
+ENDRULE
+
+; mods to hardwire HiRiseRes StdICQEnclCavInsMult to 1 - SAC 01/18/23 (tic #3470)
+RULE ResProj:StdICQEnclCavInsMult
+  DESCRIPTION
+    "Multiplier of standard (non-QII) cavity insulation layer conduction"
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if (IfValidAnd( Bldg:AboveGrdStoryCnt > 3 ))
+    then  1
+    else if (EnumValue( ClimateZone ) > 0)
+    then  T24RClimateZoneCodeBase:StdICQEnclCavInsMult( "ClimateZone", EnumValue( ClimateZone ), "CodeBase", EnumValue( StdDesignBase ), "BldgType", BldgTypeTblStr )
+    else  UNCHANGED  endif endif
+ENDRULE
+
+; mods to hardwire HiRiseRes ICQEnclCavInsMult to 1 - SAC 01/18/23 (tic #3470)
+RULE ResProj:ICQEnclCavInsMult
+  DESCRIPTION
+    "Multiplier used to adjust conduction of cavity insulation layer"
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if (IfValidAnd( Bldg:AboveGrdStoryCnt > 3 ))
+    then  1
+    else  switch ( InsulConsQuality )		; Mulitplier used to adjust conduction of cavity insulation layer
+             case "Yes" :  1.0	                  ; Yes/Improved
+             default    :  StdICQEnclCavInsMult    ; No/Standard (or other)
+          endswitch
+    endif
+  SIZING
+    if (IfValidAnd( Bldg:AboveGrdStoryCnt > 3 ))
+    then  1
+    else  switch ( InsulConsQuality )		; Mulitplier used to adjust conduction of cavity insulation layer
+             case "Yes" :  1.0	                  ; Yes/Improved
+             default    :  StdICQEnclCavInsMult    ; No/Standard (or other)
+          endswitch
+    endif
+  ANNUAL
+    if (IfValidAnd( Bldg:AboveGrdStoryCnt > 3 ))
+    then  1
+    else  switch ( InsulConsQuality )		; Mulitplier used to adjust conduction of cavity insulation layer
+             case "Yes" :  1.0	                  ; Yes/Improved
+             default    :  StdICQEnclCavInsMult    ; No/Standard (or other)
+          endswitch
+    endif
+ENDRULE
+
+RULE ResProj:InsulRValPerInch[1]
+  DESCRIPTION
+    "Insulation R-value per inch, used to calculate insulation thickness
+     within, above & below joists (1-blown / 2-roof)"
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    2.6    ; blown ceiling insulation thickness within & above joists
+ENDRULE
+RULE ResProj:InsulRValPerInch[2]
+  DEFAULT
+    3.714  ; roof insulation thickness within & below joists
+ENDRULE
+
+RULE ResProj:MaxDuctFracArea
+  DESCRIPTION
+    "Max duct surface area as a fraction of the sum of all zone surface + duct areas"
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+     0.45
+ENDRULE
+
+RULE ResProj:DuctInsRValPerInch
+  DESCRIPTION
+    "Estimate of duct insulation R-value per inch, used to calculate duct surface areas"
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+     3
+ENDRULE
+
+RULE ResProj:SeasonChangeSetpt
+  DESCRIPTION
+    "Temperature used to differentiate seasons (CSE simulation)"
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+     60
+ENDRULE
+
+RULE ResProj:FanVentLockoutTemp
+  DESCRIPTION
+    "Fan vent lockout temperature (CSE simulation)"
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+     68
+ENDRULE
+
+
+RULE ResProj:CSEVentAvailZonal
+  DESCRIPTION
+    "whether to model zone-level vent control (residential only)"
+  DEFAULT
+     1
+ENDRULE
+RULE ResProj:NResLeakageRatio
+  DESCRIPTION
+    "ratio of NRes surface leakage (per ft2) / Res surface leakage (residential only)"
+  DEFAULT
+     1.8
+ENDRULE
+
+; updated default interior surface hole size ratios from 0.0005 to 0.0000036 & 0.000026, consistent w/ original MFam proto development - SAC 10/09/23
+RULE ResProj:Action
+  DEFAULT
+    if (Proj:DefaultingRounds = 1 .AND. IfValidAnd( EnableResearchMode > 0.5 )==0 .AND.
+        (LocalStatus( IntSurfHoleSzRatio[1] ) > 3 .OR. LocalStatus( IntSurfHoleSzRatio[2] ) > 3))
+    then  EvalRulelist( "RemoveInput_ResProj_IntSurfHoleSzRatio", 1 )
+    else  UNCHANGED  endif
+ENDRULE
+RULE ResProj:IntSurfHoleSzRatio[1]
+  DESCRIPTION
+    "ratio of hole size / wall size for int surfaces (1-between Res units) (residential only)"
+  DEFAULT
+     0.0000036
+ENDRULE
+RULE ResProj:IntSurfHoleSzRatio[2]
+  DESCRIPTION
+    "ratio of hole size / wall size for int surfaces (2-other than between Res units) (residential only)"
+  DEFAULT
+     0.000026
+ENDRULE
+
+; updated default natural ventilation wind pressure coeff.s from 1s to 0.25 & 0.5 for single and 2-window orientation MFam zones, consistent w/ original MFam proto development - SAC 10/09/23
+RULE ResProj:Action
+  DEFAULT
+    if (Proj:DefaultingRounds = 1 .AND. IfValidAnd( EnableResearchMode > 0.5 )==0 .AND.
+        (LocalStatus( NatVentWindPresCoefMult[1] ) > 3 .OR. LocalStatus( NatVentWindPresCoefMult[2] ) > 3 .OR.
+         LocalStatus( NatVentWindPresCoefMult[3] ) > 3 .OR. LocalStatus( NatVentWindPresCoefMult[4] ) > 3))
+    then  EvalRulelist( "RemoveInput_ResProj_NatVentWindPresCoefMult", 1 )
+    else  UNCHANGED  endif
+ENDRULE
+RULE ResProj:NatVentWindPresCoefMult[1]
+  DESCRIPTION
+    "multiplier on natural ventilation wind pressure coefficient by number of window orientations (1-4) (residential only)"
+  DEFAULT
+     0.25
+ENDRULE
+RULE ResProj:NatVentWindPresCoefMult[2]
+  DESCRIPTION
+    "multiplier on natural ventilation wind pressure coefficient by number of window orientations (1-4) (residential only)"
+  DEFAULT
+     0.5
+ENDRULE
+RULE ResProj:NatVentWindPresCoefMult[3]
+  DESCRIPTION
+    "multiplier on natural ventilation wind pressure coefficient by number of window orientations (1-4) (residential only)"
+  DEFAULT
+     1
+ENDRULE
+RULE ResProj:NatVentWindPresCoefMult[4]
+  DESCRIPTION
+    "multiplier on natural ventilation wind pressure coefficient by number of window orientations (1-4) (residential only)"
+  DEFAULT
+     1
+ENDRULE
+
+
+RULE ResProj:IsMFamDupOrTownhm
+  DESCRIPTION
+    "Whether or not this model is a multi-family duplex or townhome"
+  DEFAULT
+     0
+ENDRULE
+
+RULE ResProj:IntGainsMethod
+  DESCRIPTION
+    "used to differentiate between 2013 & 2016 CA-24 internal gains"
+  DEFAULT
+     2016
+ENDRULE
+
+; MAY REQUIRE UPDATE DUE TO Res vs. Com REPORTING/STORAGE UNITS DIFFERENCES
+RULE Proj:TDVMult_Elec
+  DESCRIPTION
+    "Multiplier used in application of TDV data table to Electric use"
+  DEFAULT
+     1/3.413
+ENDRULE
+RULE Proj:TDVMult_Fuel
+  DESCRIPTION
+    "Multiplier used in application of TDV data table to NatGas & Propane use"
+  DEFAULT
+     0.01
+ENDRULE
+RULE Proj:SrcMult_Elec
+  DESCRIPTION
+    "Multiplier used in application of Src Energy CZ/Fuel table to Electric use"
+  DEFAULT
+     1/3.413
+ENDRULE
+RULE Proj:SrcMult_Fuel
+  DESCRIPTION
+    "Multiplier used in application of Src Energy CZ/Fuel table to NatGas & Propane use"
+  DEFAULT
+     0.01
+ENDRULE
+
+RULE ResProj:UseSFamADUArea
+  DEFAULT
+     0
+ENDRULE
+
+RULE ResProj:AllOrientations
+  DESCRIPTION
+    "Whether or not analysis is to be performed for all (4 cardinal) orientations"
+  DEFAULT
+     0
+ENDRULE
+
+; revised INPUTCLASS to ensure use of Bldg:BldgAz in analysis - SAC 10/06/22
+RULE ResProj:FrontOrientation
+  DESCRIPTION
+    "Orientation of bldg front (0 = North, 90 = East, etc.)"
+  INPUTCLASS 
+    NotInput  IgnoreUserInput  "Removed as input for CBECC 2022"
+  DEFAULT
+     ValidOr( Bldg:BldgAz, 0 )
+ENDRULE
+
+
+RULE ResProj:Fuel_HaveElec
+  DESCRIPTION
+    "flag indicating use of electricity"
+  DEFAULT
+     1
+ENDRULE
+RULE ResProj:Fuel_HaveNatGas
+  DESCRIPTION
+    "flag indicating use of natural gas"
+  DEFAULT
+     if (IfValidAnd( GasType = "NaturalGas" ))
+     then  1
+     else  0  endif
+ENDRULE
+RULE ResProj:Fuel_HaveOther
+  DESCRIPTION
+    "flag indicating use of a fuel other than natural gas"
+  DEFAULT
+     if (IfValidAnd( GasType = "Propane" ))
+     then  1
+     else  0  endif
+ENDRULE
+; added COPIES of above Fuel_* flags to enable CSE DHW sim for both MFam & Htl/Mtl models - SAC 11/04/21
+RULE NEW Proj:Fuel_HaveNatGas
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  DESCRIPTION
+    "flag indicating use of natural gas"
+  DEFAULT
+     if (IfValidAnd( GasType = "NaturalGas" ))
+     then  1
+     else  0  endif
+ENDRULE
+RULE NEW Proj:Fuel_HaveOther
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  DESCRIPTION
+    "flag indicating use of a fuel other than natural gas"
+  DEFAULT
+     if (IfValidAnd( GasType = "Propane" ))
+     then  1
+     else  0  endif
+ENDRULE
+
+
+
+;   "StdICQAtticBypassUAMult",    BEMP_Flt,  1,  NInp,  "",       "StdICQAtticBypassUAMult",  ""  ; "Multiplier of standard (non-QII) bypass UA (attic bypass diode)",  ""    
+;   "ICQAtticBypassUAMult",       BEMP_Flt,  1,  NInp,  "",       "ICQAtticBypassUAMult",     ""  ; "ICQ-dependent multiplier for bypass UA (attic bypass diode)",  ""    
+
+
+; ; for MFam Res compatibility - SAC 03/02/22
+; RULE Proj:RunScope
+;   DESCRIPTION
+;     "scope of compliance analysis"
+;   OPTION
+;     Newly Constructed
+;     Addition and/or Alteration
+;   DEFAULT
+;      "Newly Constructed"
+; ENDRULE
+; ; above was:         - modified Proj:RunScope to hardwire to New Cons until MFam EAA is implemented in CBECC - SAC 02/14/23
+; ;     if (IfValidAnd( CompOptExist > 0 ))
+; ;     then  "Addition and/or Alteration"
+; ;     else  "Newly Constructed"  endif
+; removed above & revised below - SAC 05/19/23 (tic #3479)
+RULE ResProj:RunScope
+  DESCRIPTION
+    "scope of compliance analysis"
+  INPUTCLASS 
+    NotInput IgnoreUserInput "Removed during implementation of MFam EAA work"
+  DEFAULT
+    if (Proj:ResCompOpt == "Addition and/or Alteration")
+    then  "Addition and/or Alteration"
+    else  "Newly Constructed"
+    endif
+ENDRULE
+
+RULE ResProj:IsAddAlone
+  DESCRIPTION
+    "flag set if this project is New Construction, Addition Alone"
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if (Proj:ResCompOpt == "New - Addition Alone")
+    then  1
+    else  0
+    endif
+ENDRULE
+
+RULE ResProj:IsMultiFamily
+  DESCRIPTION
+    "flag denoting MFam vs. SFam residential models"
+  DEFAULT
+     1
+ENDRULE
+
+RULE ResProj:CSERpt_Infiltration
+  DESCRIPTION
+    "whether or not to output detailed infiltration reporting from CSE"
+  DEFAULT
+     0
+ENDRULE
+
+; switched default here to 0 for all CBECC models - SAC 12/21/22
+RULE ResProj:HasGarage
+  DESCRIPTION
+    "Whether or not the home has an attached garage"
+  DEFAULT
+     if (IfValidAnd( Proj:IsComRuleset > 0 )) then  0
+     else if (SumAcrossIf( ResOtherZn:Area,
+                           ResOtherZn:SpcFunc = "Parking Garage Area (Parking Zone and Ramps)" ) > 1)
+     then  1
+     else  0  endif endif
+ENDRULE
+     ; SAC 02/04/22 - was:  if (ComponentCount( ResGarage ) > 0)
+
+RULE ResProj:NatGasAvailable
+  DEFAULT
+    Proj:NatGasAvail
+ENDRULE
+
+RULE ResProj:HaveShadeObjects
+  DEFAULT
+     0
+ENDRULE
+
+
+// ********** MFam Defaulting ************************************************* - SAC 09/17/21 (MFam)
+; duplicates of Res rules evaluated after first referenced in Com rules - SAC 03/13/22
+; moved from Building-General to this module so evaluated before PV rules - SAC 06/04/22
+RULE DwellUnit:Count
+  DEFAULT
+    1
+ENDRULE
+RULE DwellUnit:CondFlrArea
+  DEFAULT
+    ValidOr( DwellUnitTypeRef:CondFlrArea, 0 )
+ENDRULE
+RULE DwellUnit:TotalCondFlrArea
+  DEFAULT
+    if (ParentComponentType() == "ResZn")
+    then  CondFlrArea * Count
+    else  0  endif
+ENDRULE
+RULE ResZn:DwellingUnitArea_Cond
+  DEFAULT
+    SumChildren( DwellUnit:TotalCondFlrArea )
+ENDRULE
+RULE ResZn:FloorArea
+  DEFAULT
+    DwellingUnitArea_Cond
+ENDRULE
+RULE ResZn:Area
+  DEFAULT
+    FloorArea
+ENDRULE
+
+RULE NEW ResZn:CondFlrAreaWithMult
+  DATATYPE
+    Float
+  LONGFORM
+    ConditionedFloorAreaWithMultiplier
+  INPUTCLASS
+    NotInput
+  UNITS
+    ft2
+  DEFAULT
+    if (EnumValue( Type ) >= 10) then  0
+    else  ValidOr( FloorArea, 0 ) * ValidOr( ResZnGrp:Mult, 1 )
+    endif
+ENDRULE
+RULE NEW ResZn:CondVolWithMult
+  DATATYPE
+    Float
+  LONGFORM
+    ConditionedVolumeWithMultiplier
+  INPUTCLASS
+    NotInput
+  UNITS
+    ft3
+  DEFAULT
+    if (EnumValue( Type ) >= 10) then  0
+    else  ValidOr( Volume, 0 ) * ValidOr( ResZnGrp:Mult, 1 )
+    endif
+ENDRULE
+RULE NEW ResZn:FlrAreaWithMult
+  DATATYPE
+    Float
+  LONGFORM
+    FloorAreaWithMultiplier
+  INPUTCLASS
+    NotInput
+  UNITS
+    ft2
+  DEFAULT
+    ValidOr( FloorArea, 0 ) * ValidOr( ResZnGrp:Mult, 1 )
+ENDRULE
+
+RULE ResZn:NumDwellingUnits
+  DEFAULT
+    if (IfValidAnd( ResDwellUnits > 0 )==0)
+    then  0
+    else  SumChildren( DwellUnit:Count )
+    endif
+ENDRULE
+
+// SAC 12/08/21
+RULE NEW ResZn:NumDwellingUnitsWithMult
+  DATATYPE
+    Float
+  LONGFORM
+    NumberDwellingUnitsWithMultiplier
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    ValidOr( NumDwellingUnits, 0 ) * ValidOr( ResZnGrp:Mult, 1 )
+ENDRULE
+
+RULE ResProj:NumDwellingUnits
+  DEFAULT
+    if (IfValidAnd( ResDwellUnits > 0 )==0)
+    then  1
+    else  SumAll( ResZn:NumDwellingUnitsWithMult )
+    endif
+ENDRULE
+
+// for toggling on/off rules checking for missing floor or ceiling surfaces - SAC 04/26/23 (tic #3392)
+RULE NEW ResZn:BelowMultipliedFlr
+  DATATYPE
+    Integer
+  LONGFORM
+    BelowMultipliedFloor
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (max( MaxAcrossIf( ResZn:Bottom,      ResZn:Mult      > 1.1 ),
+             MaxAcrossIf( ResOtherZn:Bottom, ResOtherZn:Mult > 1.1 ) ) > (ValidOr( Bottom, 0 ) + 5))
+    then  1  else  0  endif
+ENDRULE
+RULE NEW ResZn:AboveMultipliedFlr
+  DATATYPE
+    Integer
+  LONGFORM
+    AboveMultipliedFloor
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (min( MinAcrossIf( ResZn:Bottom,      ResZn:Mult      > 1.1 ),
+             MinAcrossIf( ResOtherZn:Bottom, ResOtherZn:Mult > 1.1 ) ) < (ValidOr( Bottom, 0 ) - 5))
+    then  1  else  0  endif
+ENDRULE
+
+; added to take into account when inserting stairwell AirNet IZXFERs into CSE inputs - SAC 12/22/23
+RULE NEW ResIntCeiling:ParentCompType
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  DESCRIPTION
+    "ComponentType of Parent"
+  DEFAULT
+    ParentComponentType()
+ENDRULE
+
+RULE NEW ResIntFlr:ParentCompType
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  DESCRIPTION
+    "ComponentType of Parent"
+  DEFAULT
+    ParentComponentType()
+ENDRULE
+
+RULE NEW ResOtherZn:CommonlyMultiLevel
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if ( SpcFunc == "Concourse and Atria Area" .OR.
+         SpcFunc == "Parking Garage Area (Parking Zone and Ramps)" .OR.
+         SpcFunc == "Parking Garage Area (Daylight Adaptation Zones)" .OR.
+         SpcFunc == "Stairwell" )
+    then  1  else  UNDEFINED  endif
+ENDRULE
+
+; properties added to ResOtherZn for consistency w/ ThrmlZn for HVAC sizing purposes
+RULE NEW ResOtherZn:IsCond
+  DATATYPE
+    Integer
+  LONGFORM
+    IsConditioned
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (EnumValue( Type ) >= 10)
+    then  0  else  1  endif
+ENDRULE
+
+RULE NEW ResOtherZn:AddClgToProp
+  DATATYPE
+    Integer
+  LONGFORM
+    AddCoolingToProposed
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    0
+ENDRULE
+
+RULE NEW ResOtherZn:BaseSysNum
+  DATATYPE
+    Integer
+  LONGFORM
+    BaselineSystemNumber
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    ValidOr( ActiveHVACSystem:BaseSysNum, 0 )
+  SIZING
+    ValidOr( ActiveHVACSystem:BaseSysNum, 0 )
+  ANNUAL
+    ValidOr( ActiveHVACSystem:BaseSysNum, 0 )
+ENDRULE
+
+; revised to zero out regardless of SpcFunc, since all CSE sim assumed Res area - SAC 11/01/21
+;    if (EnumValue( Type ) >= 10) then  0
+;    else  ValidOr( Area, 0 ) * ValidOr( Mult, 1 )
+;    endif
+RULE NEW ResOtherZn:NonResCondFlrAreaWithMult
+  DATATYPE
+    Float
+  LONGFORM
+    NonResidentialConditionedFloorAreaWithMultiplier
+  INPUTCLASS
+    NotInput
+  UNITS
+    ft2
+  DEFAULT
+    0
+ENDRULE
+
+RULE NEW ResOtherZn:ResCondFlrAreaWithMult
+  DATATYPE
+    Float
+  LONGFORM
+    ResidentialConditionedFloorAreaWithMultiplier
+  INPUTCLASS
+    NotInput
+  UNITS
+    ft2
+  DEFAULT
+    if (EnumValue( Type ) >= 10) then  0
+    else  ValidOr( Area, 0 ) * ValidOr( Mult, 1 )
+    endif
+ENDRULE
+
+; added parking area property - SAC 02/06/22 (MFam)
+RULE ResOtherZn:AreaParking
+  INPUTCLASS
+    NotInput
+  UNITS
+    ft2
+  DEFAULT
+    if (IfValidAnd( IsGarage > 0 ))   ; was: ResOtherZn:SpcFunc = "Parking Garage Area (Parking Zone and Ramps)" )) 
+    then  Area
+    else  UNDEFINED
+    endif
+ENDRULE
+
+; to facilitate assignment of ResOtherZn to TrmlUnit - SAC 04/24/22
+RULE NEW ResOtherZn:FlrAreaWithMult
+  DATATYPE
+    Float
+  LONGFORM
+    FloorAreaWithMultiplier
+  INPUTCLASS
+    NotInput
+  UNITS
+    ft2
+  DEFAULT
+    ValidOr( Area, 0 ) * ValidOr( Mult, 1 )
+ENDRULE
+
+RULE NEW ResOtherZn:VolWithMult
+  DATATYPE
+    Float
+  LONGFORM
+    VolumeWithMultiplier
+  INPUTCLASS
+    NotInput
+  UNITS
+    ft3
+  DEFAULT
+    ValidOr( Volume, 0 ) * ValidOr( Mult, 1 )
+ENDRULE
+
+RULE NEW ResOtherZn:MFamAreaForMeter
+  DATATYPE
+    Float
+  LONGFORM
+    MultifamilyAreaForMeter
+  INPUTCLASS
+    NotInput
+  UNITS
+    ft2
+  DEFAULT
+    FlrAreaWithMult
+ENDRULE
+
+RULE NEW ResOtherZn:CondFlrAreaWithMult
+  DATATYPE
+    Float
+  LONGFORM
+    ConditionedFloorAreaWithMultiplier
+  INPUTCLASS
+    NotInput
+  UNITS
+    ft2
+  DEFAULT
+    if (EnumValue( Type ) >= 10) then  0
+    else  ValidOr( Area, 0 ) * ValidOr( Mult, 1 )
+    endif
+ENDRULE
+RULE NEW ResOtherZn:CondVolWithMult
+  DATATYPE
+    Float
+  LONGFORM
+    ConditionedVolumeWithMultiplier
+  INPUTCLASS
+    NotInput
+  UNITS
+    ft3
+  DEFAULT
+    if (EnumValue( Type ) >= 10) then  0
+    else  ValidOr( Volume, 0 ) * ValidOr( Mult, 1 )
+    endif
+ENDRULE
+
+// for toggling on/off rules checking for missing floor or ceiling surfaces - SAC 04/26/23 (tic #3392)
+RULE NEW ResOtherZn:BelowMultipliedFlr
+  DATATYPE
+    Integer
+  LONGFORM
+    BelowMultipliedFloor
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (max( MaxAcrossIf( ResZn:Bottom,      ResZn:Mult      > 1.1 ),
+             MaxAcrossIf( ResOtherZn:Bottom, ResOtherZn:Mult > 1.1 ) ) > (ValidOr( Bottom, 0 ) + 5))
+    then  1  else  0  endif
+ENDRULE
+RULE NEW ResOtherZn:AboveMultipliedFlr
+  DATATYPE
+    Integer
+  LONGFORM
+    AboveMultipliedFloor
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (min( MinAcrossIf( ResZn:Bottom,      ResZn:Mult      > 1.1 ),
+             MinAcrossIf( ResOtherZn:Bottom, ResOtherZn:Mult > 1.1 ) ) < (ValidOr( Bottom, 0 ) - 5))
+    then  1  else  0  endif
+ENDRULE
+
+
+// ********** Community Solar settings  ****************************
+// APB 05/12/2022 - community solar inputs (tic #3352)
+// added logic to restrict input to LowRiseRes only - SAC 05/26/22
+RULE Proj:AllowCommunitySolar
+  DESCRIPTION
+    "Whether or not the Community Solar feature is available for this project."  
+  INPUTCLASS
+    NotInput 
+  DEFAULT 
+    if ( IfValidAnd( AnalysisVersion >= 190103 )  .AND.
+         IfValidAnd( ResProj:RunScope = "Newly Constructed") )
+    then 1
+    else 0
+    endif
+  ANNUAL
+    if (LocalStatus( AllowCommunitySolar ) > 0) then  UNCHANGED
+    else  1
+    endif
+ENDRULE
+
+RULE Proj:NumAvailCmntySlrProjs
+  DESCRIPTION
+    "# of Community Solar projects available for the selected ClimateZone."  
+  INPUTCLASS
+    NotInput 
+  DEFAULT 
+    if (AllowCommunitySolar < 1) then  UNDEFINED
+    else if (IfValidAnd( ResDwellUnits > 0 )==0 .OR.
+             IfValidAnd( Bldg:AboveGrdStoryCnt > 3 ))
+    then  -1
+    else  switch (CliZnNum)
+        case 11 :  1
+        case 12 :  1
+        default :  0
+      endswitch
+    endif endif
+  ANNUAL
+    if (LocalStatus( NumAvailCmntySlrProjs ) > 0) then  UNCHANGED
+    else  0
+    endif
+ENDRULE
+
+RULE Proj:CmntySlrProjsAvailMsg
+  DESCRIPTION
+    "UI message related to # of Community Solar projects available for the selected ClimateZone."  
+  INPUTCLASS
+    NotInput 
+  DEFAULT 
+    if (AllowCommunitySolar < 1 .OR. IfValidAnd( NumAvailCmntySlrProjs > 0 )) then  UNDEFINED
+    else if (IfValidAnd( NumAvailCmntySlrProjs = -1 ))
+    then  "(Community Solar only available for LowRise residential projects)"
+    else  Format( "(no Community Solar projects available in climate zone %g)", CliZnNum )
+    endif endif
+  ANNUAL
+    if (LocalStatus( CmntySlrProjsAvailMsg ) > 0) then  UNCHANGED
+    else  UNDEFINED
+    endif
+ENDRULE
+
+RULE Proj:CmntySlrProjCZCompat
+  DESCRIPTION
+    "Flag indicating compatibility between Climate Zone & Community Solar project selections."  
+  INPUTCLASS
+    NotInput 
+  DEFAULT 
+    if (AllowCommunitySolar < 1 .OR. IfValidAnd( UseCommunitySolar > 0 )==0) then  UNDEFINED
+    else  switch (CommunitySolarProject)
+        case  "SMUD Neighborhood SolarShares - Wildflower" :
+                    if (CliZnNum == 11 .OR. CliZnNum == 12) then  1  else  0  endif
+        default :  0
+      endswitch
+    endif
+  ANNUAL
+    if (LocalStatus( CmntySlrProjCZCompat ) > 0) then  UNCHANGED
+    else  0
+    endif
+ENDRULE
+
+RULE Proj:UseCommunitySolar
+  DESCRIPTION
+    "Whether or not this project uses a Community Solar system."  
+  INPUTCLASS
+    Optional 
+  RESETS
+    ResetTheFollowingWhenThisIsModified
+      Proj:InCmntySlrProjTerritory
+  DEFAULT
+    0
+  ANNUAL
+    if (LocalStatus( UseCommunitySolar ) > 0) then  UNCHANGED
+    else  0
+    endif
+ENDRULE
+; removed reset due to compile error - SAC 06/01/22
+;      ResProj:PVSizeOption
+
+RULE Proj:CommunitySolarProject
+  DESCRIPTION
+    "The Community Solar project this home subscribes to."  
+  INPUTCLASS
+    Optional 
+  RESETS
+    ResetTheFollowingWhenThisIsModified
+      Proj:InCmntySlrProjTerritory
+  DEFAULT 
+    "- select CS project -"
+  ANNUAL
+    if (LocalStatus( CommunitySolarProject ) > 0) then  UNCHANGED
+    else  "- select CS project -"
+    endif
+ENDRULE
+
+RULE Proj:InCmntySlrProjTerritory
+  DESCRIPTION
+    "Whether this home is within the Community Solar project service territory."  
+  INPUTCLASS
+    Optional 
+  DEFAULT
+    0
+  ANNUAL
+    if (LocalStatus( InCmntySlrProjTerritory ) > 0) then  UNCHANGED
+    else  0
+    endif
+ENDRULE
+
+RULE Proj:CommunitySolarProjID
+  DESCRIPTION
+    "The ID of the Community Solar project (or 0 if not allowed or specified)."  
+  INPUTCLASS
+    NotInput 
+  DEFAULT
+    if (AllowCommunitySolar > 0 .AND. IfValidAnd( UseCommunitySolar > 0 ) .AND.
+        IfValidAnd( CommunitySolarProject != "- select CS project -" ))
+    then  1
+    else  0
+    endif
+  ANNUAL
+    if (LocalStatus( CommunitySolarProjID ) > 0) then  UNCHANGED
+    else  0
+    endif
+ENDRULE
+; removed check for InCmntySlrProjTerritory due to circularity (not available in UI unless CommunitySolarProjID is set here first) - SAC 06/05/22
+;        InCmntySlrProjTerritory > 0 )
+
+RULE Proj:CommunitySolarSim
+  DESCRIPTION
+    "Flag indicating whether Community Solar is to be simulated (1) or not (0-default)."  
+  INPUTCLASS
+    NotInput 
+  DEFAULT
+    0
+  ANNUAL
+    if (LocalStatus( CommunitySolarSim ) > 0) then  UNCHANGED
+    else  0
+    endif
+ENDRULE
+
+RULE Proj:CmntySlrProjInfo
+  DESCRIPTION
+    "Community Solar project info - flag to display dialog."  
+  INPUTCLASS
+    NotInput 
+  DEFAULT
+    switch (CommunitySolarProjID)
+      case  1 :  1          ; "SMUD Neighborhood SolarShares - Wildflower"
+      default :  UNDEFINED
+    endswitch
+  ANNUAL
+    if (LocalStatus( CommunitySolarProjID ) > 0) then  UNCHANGED
+    else  UNDEFINED
+    endif
+ENDRULE
+
+RULE Proj:CmntySlrProjInfoCap
+  DESCRIPTION
+    "Community Solar project info dialog - caption."  
+  INPUTCLASS
+    NotInput 
+  DEFAULT
+    switch (CommunitySolarProjID)
+      case  1 :  "SMUD Neighborhood SolarShares information"      ; "SMUD Neighborhood SolarShares - Wildflower"
+      default :  UNDEFINED
+    endswitch
+  ANNUAL
+    if (LocalStatus( CmntySlrProjInfoCap ) > 0) then  UNCHANGED
+    else  UNDEFINED
+    endif
+ENDRULE
+
+RULE Proj:CmntySlrProjInfoMsg
+  DESCRIPTION
+    "Community Solar project info dialog - message."  
+  INPUTCLASS
+    NotInput 
+  DEFAULT
+    switch (CommunitySolarProjID)
+      case  1 :                     ; "SMUD Neighborhood SolarShares - Wildflower"
+               "<a><br></a><a href=https://www.smud.org/NSSbuilders>Click here for information about SMUD's Neighborhood SolarShares program.</a>"
+      default :  UNDEFINED
+    endswitch
+  ; prior link replaced SAC 08/28/20:  "<a><br></a><a href=https://www.smud.org/en/Business-Solutions-and-Rebates/Design-and-Construction-Services/Neighborhood-SolarShares-for-developers>Click here for information about SMUD's Neighborhood SolarShares program.</a>"
+  ANNUAL
+    if (LocalStatus( CmntySlrProjInfoMsg ) > 0) then  UNCHANGED
+    else  UNDEFINED
+    endif
+ENDRULE
+
+RULE Proj:CmntySlrProjInfoDtl
+  DESCRIPTION
+    "Community Solar project info dialog - details."  
+  INPUTCLASS
+    NotInput 
+  DEFAULT
+    switch (CommunitySolarProjID)
+      case  1 :  UNDEFINED          ; "SMUD Neighborhood SolarShares - Wildflower"
+      default :  UNDEFINED
+    endswitch
+  ANNUAL
+    if (LocalStatus( CmntySlrProjInfoDtl ) > 0) then  UNCHANGED
+    else  UNDEFINED
+    endif
+ENDRULE
+
+RULE Proj:CmntySlrProjInfoIcn
+  DESCRIPTION
+    "Community Solar project info dialog - icon."  
+  INPUTCLASS
+    NotInput 
+  DEFAULT
+    switch (CommunitySolarProjID)
+      case  1 :  1                  ; "SMUD Neighborhood SolarShares - Wildflower"
+      default :  UNDEFINED
+    endswitch
+  ANNUAL
+    if (LocalStatus( CmntySlrProjInfoIcn ) > 0) then  UNCHANGED
+    else  UNDEFINED
+    endif
+ENDRULE
+
+RULE Proj:CmntySlr_ElecEnergy
+  DESCRIPTION
+    "Electric energy generated by 1 kW of CS project PV."  
+  INPUTCLASS
+    NotInput 
+ENDRULE
+
+RULE Proj:CmntySlr_ElecDemand
+  DESCRIPTION
+    "Electric demand impact of 1 kW of CS project PV."  
+  INPUTCLASS
+    NotInput 
+ENDRULE
+
+RULE Proj:CmntySlr_TDV
+  DESCRIPTION
+    "kTDV corresponding to 1 kW of CS project PV."  
+  INPUTCLASS
+    NotInput 
+ENDRULE
+
+RULE Proj:CmntySlr_CO2
+  DESCRIPTION
+    "CO2 emissions impact of 1 kW of CS project PV."  
+  INPUTCLASS
+    NotInput 
+ENDRULE
+
+RULE Proj:CmntySlr_Src
+  DESCRIPTION
+    "Source energy impact of 1 kW of CS project PV."  
+  INPUTCLASS
+    NotInput 
+ENDRULE
+
+;--- CUAC Community Solar --- SAC 10/01/23
+
+RULE CUAC:NumAvailCmntySlrProjs
+  DESCRIPTION
+    "# of Community Solar projects available for the selected ClimateZone."  
+  INPUTCLASS
+    NotInput 
+  DEFAULT 
+    if (IfValidAnd( Proj:ResDwellUnits > 0 )==0 .OR.
+        IfValidAnd( Proj:CUACReport > 0 )==0 .OR.
+        IfValidAnd( Proj:CUAC_OldAccessDB > 0 ))
+    then  -1
+    else  switch (Proj:CliZnNum)
+             case 11 :  1
+             case 12 :  1
+             default :  0
+          endswitch
+    endif
+ENDRULE
+
+RULE CUAC:CmntySlrProjsAvailMsg
+  DESCRIPTION
+    "UI message related to # of Community Solar projects available for the selected ClimateZone."  
+  INPUTCLASS
+    NotInput 
+  DEFAULT 
+    if (IfValidAnd( NumAvailCmntySlrProjs > 0 )) then  UNDEFINED
+    ; else if (IfValidAnd( NumAvailCmntySlrProjs = -1 ))
+    ; then  "(Community Solar only available for LowRise residential projects)"
+    else  Format( "(no Community Solar projects available in climate zone %g)", Proj:CliZnNum )
+    endif 
+ENDRULE
+
+RULE CUAC:CmntySlrProjCZCompat
+  DESCRIPTION
+    "Flag indicating compatibility between Climate Zone & Community Solar project selections."  
+  INPUTCLASS
+    NotInput 
+  DEFAULT 
+    if (IfValidAnd( UseCommunitySolar > 0 )==0) then  UNDEFINED
+    else  switch (CommunitySolarProject)
+        case  "SMUD Neighborhood SolarShares - Wildflower" :
+                    if (CliZnNum == 11 .OR. CliZnNum == 12) then  1  else  0  endif
+        default :  0
+      endswitch
+    endif
+  ANNUAL
+    if (LocalStatus( CmntySlrProjCZCompat ) > 0) then  UNCHANGED
+    else  0
+    endif
+ENDRULE
+
+   ; SAC 10/02/23
+RULE CUAC:Action
+  DEFAULT
+    if ( IfValidAnd( UseCommunitySolar > 0 ) .AND. 
+         NumAvailCmntySlrProjs < 1 )
+    then  EvalRulelist( "ForceReset_CUAC_UseCommunitySolar" )
+    else  UNCHANGED  endif
+ENDRULE
+
+RULE CUAC:UseCommunitySolar
+  DESCRIPTION
+    "Whether or not this project uses a Community Solar system."  
+  INPUTCLASS
+    Optional 
+  RESETS
+    ResetTheFollowingWhenThisIsModified
+      CUAC:InCmntySlrProjTerritory
+  DEFAULT
+    0
+  ANNUAL
+    if (LocalStatus( UseCommunitySolar ) > 0) then  UNCHANGED
+    else  0
+    endif
+ENDRULE
+
+RULE CUAC:CommunitySolarProject
+  DESCRIPTION
+    "The Community Solar project this home subscribes to."  
+  INPUTCLASS
+    Optional 
+  RESETS
+    ResetTheFollowingWhenThisIsModified
+      CUAC:InCmntySlrProjTerritory
+  DEFAULT 
+    "- select CS project -"
+  ANNUAL
+    if (LocalStatus( CommunitySolarProject ) > 0) then  UNCHANGED
+    else  "- select CS project -"
+    endif
+ENDRULE
+
+RULE CUAC:InCmntySlrProjTerritory
+  DESCRIPTION
+    "Whether this home is within the Community Solar project service territory."  
+  INPUTCLASS
+    Optional 
+  DEFAULT
+    0
+  ANNUAL
+    if (LocalStatus( InCmntySlrProjTerritory ) > 0) then  UNCHANGED
+    else  0
+    endif
+ENDRULE
+
+RULE CUAC:CommunitySolarProjID
+  DESCRIPTION
+    "The ID of the Community Solar project (or 0 if not allowed or specified)."  
+  INPUTCLASS
+    NotInput 
+  DEFAULT
+    if (IfValidAnd( UseCommunitySolar > 0 ) .AND.
+        IfValidAnd( CommunitySolarProject != "- select CS project -" ))
+    then  1
+    else  0
+    endif
+  ANNUAL
+    if (LocalStatus( CommunitySolarProjID ) > 0) then  UNCHANGED
+    else  0
+    endif
+ENDRULE
+
+RULE CUAC:CommunitySolarValid
+  DESCRIPTION
+    "Flag indicating whether Community Solar is selected and all inputs specified & valid"  
+  INPUTCLASS
+    NotInput 
+  DEFAULT
+    if (IfValidAnd( UseCommunitySolar > 0 ) .AND.
+        IfValidAnd( CommunitySolarProject != "- select CS project -" ) .AND.
+        IfValidAnd( InCmntySlrProjTerritory > 0 ))
+    then  1
+    else  0
+    endif
+ENDRULE
+
+RULE CUAC:CmntySlrProjInfo
+  DESCRIPTION
+    "Community Solar project info - flag to display dialog."  
+  INPUTCLASS
+    NotInput 
+  DEFAULT
+    switch (CommunitySolarProjID)
+      case  1 :  1          ; "SMUD Neighborhood SolarShares - Wildflower"
+      default :  UNDEFINED
+    endswitch
+  ANNUAL
+    if (LocalStatus( CommunitySolarProjID ) > 0) then  UNCHANGED
+    else  UNDEFINED
+    endif
+ENDRULE
+
+RULE CUAC:CmntySlrProjInfoCap
+  DESCRIPTION
+    "Community Solar project info dialog - caption."  
+  INPUTCLASS
+    NotInput 
+  DEFAULT
+    switch (CommunitySolarProjID)
+      case  1 :  "SMUD Neighborhood SolarShares information"      ; "SMUD Neighborhood SolarShares - Wildflower"
+      default :  UNDEFINED
+    endswitch
+  ANNUAL
+    if (LocalStatus( CmntySlrProjInfoCap ) > 0) then  UNCHANGED
+    else  UNDEFINED
+    endif
+ENDRULE
+
+RULE CUAC:CmntySlrProjInfoMsg
+  DESCRIPTION
+    "Community Solar project info dialog - message."  
+  INPUTCLASS
+    NotInput 
+  DEFAULT
+    switch (CommunitySolarProjID)
+      case  1 :                     ; "SMUD Neighborhood SolarShares - Wildflower"
+               "<a><br></a><a href=https://www.smud.org/NSSbuilders>Click here for information about SMUD's Neighborhood SolarShares program.</a>"
+      default :  UNDEFINED
+    endswitch
+  ; prior link replaced SAC 08/28/20:  "<a><br></a><a href=https://www.smud.org/en/Business-Solutions-and-Rebates/Design-and-Construction-Services/Neighborhood-SolarShares-for-developers>Click here for information about SMUD's Neighborhood SolarShares program.</a>"
+  ANNUAL
+    if (LocalStatus( CmntySlrProjInfoMsg ) > 0) then  UNCHANGED
+    else  UNDEFINED
+    endif
+ENDRULE
+
+RULE CUAC:CmntySlrProjInfoDtl
+  DESCRIPTION
+    "Community Solar project info dialog - details."  
+  INPUTCLASS
+    NotInput 
+  DEFAULT
+    switch (CommunitySolarProjID)
+      case  1 :  UNDEFINED          ; "SMUD Neighborhood SolarShares - Wildflower"
+      default :  UNDEFINED
+    endswitch
+  ANNUAL
+    if (LocalStatus( CmntySlrProjInfoDtl ) > 0) then  UNCHANGED
+    else  UNDEFINED
+    endif
+ENDRULE
+
+RULE CUAC:CmntySlrProjInfoIcn
+  DESCRIPTION
+    "Community Solar project info dialog - icon."  
+  INPUTCLASS
+    NotInput 
+  DEFAULT
+    switch (CommunitySolarProjID)
+      case  1 :  1                  ; "SMUD Neighborhood SolarShares - Wildflower"
+      default :  UNDEFINED
+    endswitch
+  ANNUAL
+    if (LocalStatus( CmntySlrProjInfoIcn ) > 0) then  UNCHANGED
+    else  UNDEFINED
+    endif
+ENDRULE
+
+
+
+
+
+
+
+;--- end of CUAC Community Solar ---
+
+RULE ResProj:EnableHPAutosize
+  DESCRIPTION
+    "Whether or not to allow autosizing of residential heat pump equipment"
+  DEFAULT
+     1
+ENDRULE
+
+RULE ResProj:BldgUnitVectorNi
+  DESCRIPTION
+    "X coordinate of unit vector defining true north"
+  DEFAULT
+     ValidOr( Bldg:UnitVectorNi, 0 )
+ENDRULE
+RULE ResProj:BldgUnitVectorNi
+  DESCRIPTION
+    "Y coordinate of unit vector defining true north"
+  DEFAULT
+     ValidOr( Bldg:UnitVectorNj, 0 )
+ENDRULE
+
+RULE ResProj:SFamCompactDistrib
+  DESCRIPTION
+    "Compact distribution option (enum in Res rules, integer in Com"
+ENDRULE
+RULE ResProj:SFamUserSpecCmpctDist
+  DESCRIPTION
+    "whether or not user is specifying a custom Compactness Factor"
+ENDRULE
+
+RULE Proj:HaveShwrDrnHtRecov
+  DESCRIPTION
+    "whether or not dwelling unit includes shower drain heat recovery (CBECC-Res)"
+ENDRULE
+RULE Proj:ShwrDRAINHREFF
+  DESCRIPTION
+    "ShwrDRAINHREFF"
+ENDRULE
+
+; use ResProj version of property?? - if added back in, need to determine whether to use these or Proj versions (AllowCentralElecDHWSolPVCred & TakeCentralElecDHWSolPVCred) - SAC 06/05/22
+RULE ResProj:AllowCntrlElecDHWSlrPVCred
+  DESCRIPTION
+    "CBECC-Res flag value indicating model includes all-electric
+     central DHW & PV and excludes solar thermal (DHW)"
+  DEFAULT
+    Proj:AllowCentralElecDHWSolPVCred
+ENDRULE
+RULE ResProj:TakeCntrlElecDHWSlrPVCred
+  DESCRIPTION
+    "CBECC-Res flag whether or not to apply flexibility credit for all-electric
+     central DHW & PV models to offset standard design solar thermal (DHW)"
+  DEFAULT
+    Proj:TakeCentralElecDHWSolPVCred
+ENDRULE
+
+; TO DO MFam delete this once the Res Default_Load rule is ported
+RULE ResProj:EnableClVent 
+  DESCRIPTION
+    "CBECC-Res flag indicating availability of cooling ventilation options"
+  DEFAULT
+    0 ; is always 0 for MultiFamily
+ENDRULE
+RULE ResProj:LimitedClVent
+  DESCRIPTION
+    "CBECC-Res flag indicating availability of LIMITED cooling ventilation options, namely fans to outside as opposed to vented attics"
+  DEFAULT
+    0 ; is always 0 for MultiFamily
+ENDRULE
+RULE ResProj:ClVentFanUI
+  DESCRIPTION
+    "CBECC-Res flag indicating when to display cooling vent Fan assignment UI"
+  DEFAULT
+    0 ; is always 0 for MultiFamily
+ENDRULE
+
+
+RULE ResProj:RunAbbrev
+  DESCRIPTION
+    "Residential run name abbreviation."
+  INPUTCLASS
+    NotInput
+  DEFAULT 
+    "u"
+  SIZING_PROPOSED
+    "zp"
+  SIZING_BASELINE
+    "zb"
+  ANNUAL_PROPOSED 
+    "p"
+  ANNUAL_BASELINE
+    "s"
+ENDRULE
+
+
+RULE ResProj:ProjInclKitchen
+  DEFAULT 
+    if (EnumValue( RunScope ) == 1 .AND. IsAddAlone == 0) then  1  else  0  endif
+ENDRULE
+
+
+RULE ResProj:Address
+  DEFAULT 
+    Proj:StAddress
+ENDRULE
+
+
+RULE ResProj:BuildingTypeRpt
+  DEFAULT 
+    "Multifamily"
+ENDRULE
+
+
+RULE ResProj:CompMgrVersion
+  DEFAULT 
+    Proj:CompManagerVersion
+ENDRULE
+
+
+; use RULE blocks to classify ResGarage inputs as Prescribed for CBECC-22 - SAC 02/05/22
+RULE ResGarage:Area
+  INPUTCLASS 
+    Prescribed
+ENDRULE
+RULE ResGarage:Volume
+  INPUTCLASS 
+    Prescribed
+ENDRULE
+RULE ResGarage:Bottom
+  INPUTCLASS 
+    Prescribed
+ENDRULE
+
+RULE ResProj:Action
+  CHECKCODE
+    if (ComponentCount( ResGarage ) > 0)
+    then
+      PostError("ResGarage objects are not compatible with Nonres and Multifamily analysis")
+    else
+      UNCHANGED
+    endif
+ENDRULE
+
+
+; SAC 09/16/21 (MFam)   ; added Max of 20 to establish limit related to submetering of loads - SAC 05/26/23 (tic #3392)   ; increased max to 120 - SAC 10/09/23
+; moved here from Space-Function.rule to avoid rule eval order issue - SAC 05/27/23 (tic #3392)
+RULE ResZnGrp:Mult
+  DESCRIPTION
+    "ResZnGrp multiplier"  
+  INPUTCLASS
+    Default
+  MINIMUM 
+    1
+  MAXIMUM
+    120
+  REPORTPRECISION
+    0
+  CHECKCODE
+    if ( IfValidAnd( Proj:EnableResearchMode > 0 )==0 .AND.
+         IfValidAnd( Proj:AnalysisVersion >= 220300 )==0 .AND. Mult > 1 )
+    then  PostError( "ResZnGrp '%s' Multiplier (%g) must be set to 1 (or toggle on the EnableResearchMode option to enable this feature)", Name, Mult )
+    else  UNCHANGED  endif
+  DEFAULT 
+    1
+ENDRULE
+RULE ResZnGrp:NumStories
+  DESCRIPTION
+    "ResZnGrp number of stories"  
+  INPUTCLASS
+    Default
+  MINIMUM 
+    1
+  REPORTPRECISION
+    0
+  DEFAULT 
+    1
+ENDRULE
+
+; added rules to ensure defined before referenced - SAC 05/27/23 (tic #3392)
+RULE ResZn:Mult
+  DESCRIPTION
+    "ResZn multiplier"  
+  INPUTCLASS
+    NotInput
+  REPORTPRECISION
+    0
+  DEFAULT 
+    if (IfValidAnd( ResZnGrp:Mult > 0 ))
+    then  ResZnGrp:Mult
+    else  1  endif
+ENDRULE
+; added CHECKCODE to prevent multiplied parking garage ResOtherZns - SAC 06/23/23 (tic #3392)
+RULE ResOtherZn:Mult
+  DESCRIPTION
+    "ResOtherZn multiplier"  
+  INPUTCLASS
+    NotInput
+  REPORTPRECISION
+    0
+  CHECKCODE
+    if ( Mult > 1 .AND.
+         ( SpcFunc == "Parking Garage Area (Parking Zone and Ramps)"    .OR.
+           SpcFunc == "Parking Garage Area (Daylight Adaptation Zones)" ) )
+    then  PostError( "Residential zone group multipliers are not compatible with Parking Garage zones (ResZnGrp '%s' Mult %g > 1 with ResOtherZn '%s' SpcFunc '%s')", Parent( Name ), Mult, Name, SpcFunc )
+    else  UNCHANGED  endif
+  DEFAULT 
+    if (IfValidAnd( ResZnGrp:Mult > 0 ))
+    then  ResZnGrp:Mult
+    else  1  endif
+ENDRULE
+
+   ; to facilitate reporting of ConsAssms assigned to Res surfaces - SAC 03/10/23
+   ; added  * Parent( Mult ) to support res floor mults - SAC 05/27/23 (tic #3392)
+RULE NEW ResExtWall:AreaNew
+  DATATYPE  Float
+  UNITS     ft2
+  DEFAULT   ValidOr( IsNew, 0 ) * Area * Parent( Mult )
+ENDRULE
+RULE NEW ResExtWall:AreaAltered
+  DATATYPE  Float
+  UNITS     ft2
+  DEFAULT   ValidOr( IsAltered, 0 ) * Area * Parent( Mult )
+ENDRULE
+RULE NEW ResExtWall:AreaExisting
+  DATATYPE  Float
+  UNITS     ft2
+  DEFAULT   ValidOr( IsExisting, 0 ) * Area * Parent( Mult )
+ENDRULE
+
+RULE NEW ResCathedralCeiling:AreaNew
+  DATATYPE  Float
+  UNITS     ft2
+  DEFAULT   ValidOr( IsNew, 0 ) * Area * Parent( Mult )
+ENDRULE
+RULE NEW ResCathedralCeiling:AreaAltered
+  DATATYPE  Float
+  UNITS     ft2
+  DEFAULT   ValidOr( IsAltered, 0 ) * Area * Parent( Mult )
+ENDRULE
+RULE NEW ResCathedralCeiling:AreaExisting
+  DATATYPE  Float
+  UNITS     ft2
+  DEFAULT   ValidOr( IsExisting, 0 ) * Area * Parent( Mult )
+ENDRULE
+
+RULE NEW ResExtFlr:AreaNew
+  DATATYPE  Float
+  UNITS     ft2
+  DEFAULT   ValidOr( IsNew, 0 ) * Area * Parent( Mult )
+ENDRULE
+RULE NEW ResExtFlr:AreaAltered
+  DATATYPE  Float
+  UNITS     ft2
+  DEFAULT   ValidOr( IsAltered, 0 ) * Area * Parent( Mult )
+ENDRULE
+RULE NEW ResExtFlr:AreaExisting
+  DATATYPE  Float
+  UNITS     ft2
+  DEFAULT   ValidOr( IsExisting, 0 ) * Area * Parent( Mult )
+ENDRULE
+
+   ; added  RULE NEWs to support reporting of res floor mult constructions - SAC 05/27/23 (tic #3392)
+RULE NEW ResExtWall:AreaWithMult
+  DATATYPE  Float
+  UNITS     ft2
+  DEFAULT   Area * Parent( Mult )
+ENDRULE
+RULE NEW ResIntWall:AreaWithMult
+  DATATYPE  Float
+  UNITS     ft2
+  DEFAULT   Area * Parent( Mult )
+ENDRULE
+RULE NEW UndWall:AreaWithMult
+  DATATYPE  Float
+  UNITS     ft2
+  DEFAULT   Area * Parent( Mult )
+ENDRULE
+RULE NEW Attic:FloorAreaWithMult
+  DATATYPE  Float
+  UNITS     ft2
+  DEFAULT   ValidOr( FloorArea, 0 ) * Parent( Mult )
+ENDRULE
+RULE NEW CathedralCeiling:AreaWithMult
+  DATATYPE  Float
+  UNITS     ft2
+  DEFAULT   Area * Parent( Mult )
+ENDRULE
+RULE NEW CeilingBelowAttic:AreaWithMult
+  DATATYPE  Float
+  UNITS     ft2
+  DEFAULT   Area * Parent( Mult )
+ENDRULE
+RULE NEW InteriorCeiling:AreaWithMult
+  DATATYPE  Float
+  UNITS     ft2
+  DEFAULT   Area * Parent( Mult )
+ENDRULE
+RULE NEW ResIntFlr:AreaWithMult
+  DATATYPE  Float
+  UNITS     ft2
+  DEFAULT   Area * Parent( Mult )
+ENDRULE
+RULE NEW ResExtFlr:AreaWithMult
+  DATATYPE  Float
+  UNITS     ft2
+  DEFAULT   Area * Parent( Mult )
+ENDRULE
+RULE NEW FloorOverCrawl:AreaWithMult
+  DATATYPE  Float
+  UNITS     ft2
+  DEFAULT   Area * Parent( Mult )
+ENDRULE
+
+
+RULE NEW ResProj:SumResIAQOptions_Before
+  DATATYPE
+    Integer
+  DESCRIPTION
+    "used to track changes to res (ResOtherZn & DwellUnitType) IAQ options prior to BudgetConversion"
+  INPUTCLASS 
+    NotInput
+ENDRULE
+RULE NEW ResProj:SumResIAQOptions_After
+  DATATYPE
+    Integer
+  DESCRIPTION
+    "used to track changes to res (ResOtherZn & DwellUnitType) IAQ options prior to BudgetConversion"
+  INPUTCLASS 
+    NotInput
+ENDRULE
+RULE NEW ResProj:SumResIAQOptions_Central
+  DATATYPE
+    Integer
+  DESCRIPTION
+    "used to track changes to res (ResOtherZn & DwellUnitType) IAQ options prior to BudgetConversion"
+  INPUTCLASS 
+    NotInput
+ENDRULE
+RULE NEW ResOtherZn:IAQSubjectToAccessOrFIDAdjustment
+  DATATYPE
+    Integer
+  DESCRIPTION
+    "used to track changes to res (ResOtherZn & DwellUnitType) IAQ options prior to BudgetConversion"
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if (IfValidAnd( IAQDisabled > 0 ) .OR. IfValidAnd( AllowIAQInps < 1 ) .OR.
+        IfValidAnd( Area > 0 )==0)
+    then  0
+    else if (IfValidAnd( IAQOption == "Central Supply / Central Exhaust" ) .OR.
+             IfValidAnd( IAQOption == "Central Supply / Individual Exhaust" ) .OR.
+             IfValidAnd( IAQOption == "Central Exhaust / Individual Supply" ) .OR.
+             IfValidAnd( IAQOption == "Central Supply" ) .OR.
+             IfValidAnd( IAQOption == "Central Exhaust" ))
+    then  0
+    else if (IfValidAnd( IAQCFM_Exhaust > 0 ) .AND. IfValidAnd( IAQCFM_Supply < 0.1 ))
+    then  0
+    else  1   endif endif endif
+ENDRULE
+RULE NEW DwellUnitType:IAQSubjectToAccessOrFIDAdjustment
+  DATATYPE
+    Integer
+  DESCRIPTION
+    "used to track changes to res (ResOtherZn & DwellUnitType) IAQ options prior to BudgetConversion"
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if (IfValidAnd( IAQDisabled > 0 ) .OR. 
+        IfValidAnd( DUFloorAreaServed > 0 )==0)
+    then  0
+    else if (IfValidAnd( IAQOption == "Central Supply / Central Exhaust" ) .OR.
+             IfValidAnd( IAQOption == "Central Supply / Individual Exhaust" ) .OR.
+             IfValidAnd( IAQOption == "Central Exhaust / Individual Supply" ) .OR.
+             IfValidAnd( IAQOption == "Central Supply" ) .OR.
+             IfValidAnd( IAQOption == "Central Exhaust" ))
+    then  0
+    else if (IfValidAnd( IAQCFM_Exhaust > 0 ) .AND. IfValidAnd( IAQCFM_Supply < 0.1 ))
+    then  0
+    else  1   endif endif endif
+ENDRULE
+
+; SAC 02/21/23 (tic #3418)   ; revised checks to warnings for Proj:EnableResearchMode - SAC 03/02/23
+RULE ResOtherZn:ActiveDHWSystem
+  CHECKCODE
+    if (LocalCompAssigned( ActiveDHWSystem) < 1 .AND. ShowDHWSysAssignment > 0)
+    then  if ( (EnumValue(SpcFunc) == 231 .OR. EnumValue(SpcFunc) == 342) .AND.      ; 231, "Laundry Area"
+               SumRevRef( DwellUnit:WasherZoneRef, DwellUnit:TotalDHWFlrArea ) > 1 )
+          then  if (IfValidAnd( Proj:EnableResearchMode > 0 ))
+                then  PostWarning( "DHW system assignment missing for ResOtherZn '%s' - required for central laundry zones.", Name )
+                else  PostError(   "DHW system assignment missing for ResOtherZn '%s' - required for central laundry zones.", Name )
+                endif
+          else if (HotWtrHrlyUsePerPers > 0)
+          then  if (IfValidAnd( Proj:EnableResearchMode > 0 ))
+                then  PostWarning( "DHW system assignment missing for ResOtherZn '%s' - required for zones with nonresidential hot water use (based on space function).", Name )
+                else  PostError(   "DHW system assignment missing for ResOtherZn '%s' - required for zones with nonresidential hot water use (based on space function).", Name )
+                endif
+          else  UNCHANGED  endif endif
+    else  UNCHANGED  endif
+ENDRULE
+
+; SAC 02/28/23 (tic #3418)
+; removed remaining error check - now all supported - SAC 03/24/23 (tic #3418) 
+;RULE ResOtherZn:Action
+;  CHECKCODE
+;    if (LocalCompAssigned( ActiveDHWSystem ) > 0 .AND. ShowDHWSysAssignment > 0)
+;    then  if ( (EnumValue(SpcFunc) == 231 .OR. EnumValue(SpcFunc) == 342) .AND.      ; 231, "Laundry Area"
+;               SumRevRef( DwellUnit:WasherZoneRef, DwellUnit:CentralLaundryAssigned ) > 0.5 .AND.
+;               IfValidAnd( ActiveDHWSystem:NResFloorAreaServed > 0.1 ) )
+;          then  if (IfValidAnd( Proj:EnableResearchMode > 0 ))
+;                then  PostWarning( "Residential central laundry zone '%s' references DHW system '%s' that serves both residential & nonresidential uses/zones, which is not supported (systems must be all-res or all-nonres).", Name, ActiveDHWSystem:Name )
+;                else  PostError(   "Residential central laundry zone '%s' references DHW system '%s' that serves both residential & nonresidential uses/zones, which is not supported (systems must be all-res or all-nonres).", Name, ActiveDHWSystem:Name )
+;                endif
+;          else  UNCHANGED  endif
+;    else  UNCHANGED  endif
+;ENDRULE
+; removed error msg preventing assignment of central DHW systems - SAC 03/16/23 (tic #3418)
+;          else if ( IfValidAnd( HotWtrHrlyUsePerPers > 0 ) .AND.
+;                    IfValidAnd( ActiveDHWSystem:CentralRecircType = "Non-Central" )==0 )
+;          then  if (IfValidAnd( Proj:EnableResearchMode > 0 ))
+;                then  PostWarning( "Residential common area '%s' references a central DHW system ('%s'), which is not yet supported.", Name, ActiveDHWSystem:Name )
+;                else  PostError(   "Residential common area '%s' references a central DHW system ('%s'), which is not yet supported.", Name, ActiveDHWSystem:Name )
+;                endif
+; removed error msg preventing assignment of central DHW systems to both Res & NRes uses - SAC 03/24/23 (tic #3418)
+;          else if ( IfValidAnd( HotWtrHrlyUsePerPers > 0 ) .AND.
+;                    IfValidAnd( ActiveDHWSystem:NResFloorAreaServed < (ActiveDHWSystem:FloorAreaServed[1] - 0.1) ) )
+;          then  if (IfValidAnd( Proj:EnableResearchMode > 0 ))
+;                then  PostWarning( "Residential common area '%s' includes a nonresidential water heating load but references a DHW system ('%s') that also provides residential water heating, which is not supported (systems must be all-res or all-nonres).", Name, ActiveDHWSystem:Name )
+;                else  PostError(   "Residential common area '%s' includes a nonresidential water heating load but references a DHW system ('%s') that also provides residential water heating, which is not supported (systems must be all-res or all-nonres).", Name, ActiveDHWSystem:Name )
+;                endif
+
+// tracks which enduses are gas fueled: 1-Any, 2-Sum, 3-SpcHtg, 4-WtrHtg, 5-Cookng, 6-Dryer -- SAC 03/06/24
+RULE DwellUnitType:GasFueled[3]
+  ; space heating gas?
+  DEFAULT
+    switch (HVACSysType)
+       case  "Heat Pump Heating and Cooling System" :  0
+       case  "Central Heating and Cooling System"   :
+                  switch (CentralEqpType)
+                     case  "Water source heat pump"    :  1  ; assume central boiler gas?
+                     case  "Variable refrigerant flow" :  0
+                     case  "Four-pipe fan coil"        :  1
+                     default :  0
+                  endswitch
+       case  "Other Heating and Cooling System"     :
+                     if (T24RHeatingEquipment:UseGas( "CodeBase", EnumValue( Proj:StdDesignBase ), "StdVer", ResProj:StdsVersionYr,
+                                                      "SysType", ValidOr( HeatEqpTypeAbbrev, "type unknown" ) ) > 0.5)
+                     then  1  else  0  endif
+       default :  0
+    endswitch
+ENDRULE
+RULE DwellUnitType:GasFueled[4]
+  ; water heating gas?
+  DEFAULT
+    switch (NumDHWSysTypes)
+      case  1 :  if (IfValidAnd( DHWSysRef[1]:NumFuelHeaters > 0 )) then  1  else  0  endif
+      case  2 :  if (IfValidAnd( DHWSysRef[1]:NumFuelHeaters > 0 ) .OR.
+                     IfValidAnd( DHWSysRef[2]:NumFuelHeaters > 0 )) then  1  else  0  endif
+      case  3 :  if (IfValidAnd( DHWSysRef[1]:NumFuelHeaters > 0 ) .OR.
+                     IfValidAnd( DHWSysRef[2]:NumFuelHeaters > 0 ) .OR.
+                     IfValidAnd( DHWSysRef[3]:NumFuelHeaters > 0 )) then  1  else  0  endif
+      case  4 :  if (IfValidAnd( DHWSysRef[1]:NumFuelHeaters > 0 ) .OR.
+                     IfValidAnd( DHWSysRef[2]:NumFuelHeaters > 0 ) .OR.
+                     IfValidAnd( DHWSysRef[3]:NumFuelHeaters > 0 ) .OR.
+                     IfValidAnd( DHWSysRef[4]:NumFuelHeaters > 0 )) then  1  else  0  endif
+      case  5 :  if (IfValidAnd( DHWSysRef[1]:NumFuelHeaters > 0 ) .OR.
+                     IfValidAnd( DHWSysRef[2]:NumFuelHeaters > 0 ) .OR.
+                     IfValidAnd( DHWSysRef[3]:NumFuelHeaters > 0 ) .OR.
+                     IfValidAnd( DHWSysRef[4]:NumFuelHeaters > 0 ) .OR.
+                     IfValidAnd( DHWSysRef[5]:NumFuelHeaters > 0 )) then  1  else  0  endif
+      default :  0
+    endswitch
+ENDRULE
+RULE DwellUnitType:GasFueled[5]
+  ; cooking gas?
+  DEFAULT
+    if (IfValidAnd( HaveCook > 0 ) .AND. IfValidAnd( CookFuel = "Gas" ))
+    then  1  else  0  endif
+ENDRULE
+RULE DwellUnitType:GasFueled[6]
+  ; dryer gas?
+  DEFAULT
+    if (IfValidAnd( DryerOption != "- none -" ) .AND. IfValidAnd( DryerFuel = "Gas" ))
+    then  1  else  0  endif
+ENDRULE
+RULE DwellUnitType:GasFueled[1]
+  ; ANY enduse (0/1)
+  DEFAULT
+    if (GasFueled[3] > 0 .OR. GasFueled[4] > 0 .OR. GasFueled[5] > 0 .OR. GasFueled[6] > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE DwellUnitType:GasFueled[2]
+  ; num enduses gas-fueled
+  DEFAULT
+    GasFueled[3] + GasFueled[4] + GasFueled[5] + GasFueled[6]
+ENDRULE
+
+// reporting of GasFueled DwellUnitType enduse(s) - SAC 03/08/24
+RULE NEW DwellUnitType:GasFueledErrMsg
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if (GasFueled[1] < 1) then  UNDEFINED
+    else  Format("- '%s' enduse(s):  ", Name )  endif
+ENDRULE
+;  CHECKSIM
+;    if (Proj:GasType != "None" .OR. GasFueled[1] < 1) then  UNDEFINED
+;    else  Format("Project Fuel Type of 'None' is incompatible with ResZn '%s' gas-fueled enduse(s):  ", Name )  endif
+RULE NEW DwellUnitType:GasFueledErrMsg
+  DEFAULT
+    if (LocalStatus( GasFueledErrMsg ) < 1 .OR. GasFueled[3] < 1) then  UNCHANGED
+    else  GasFueledErrMsg + "space heating"  endif
+ENDRULE
+RULE NEW DwellUnitType:GasFueledErrMsg
+  DEFAULT
+    if (LocalStatus( GasFueledErrMsg ) < 1 .OR. GasFueled[4] < 1) then  UNCHANGED
+    else  if (GasFueled[3] < 1)
+          then  GasFueledErrMsg + "water heating"
+          else  GasFueledErrMsg + ", water heating"
+          endif endif
+ENDRULE
+RULE NEW DwellUnitType:GasFueledErrMsg
+  DEFAULT
+    if (LocalStatus( GasFueledErrMsg ) < 1 .OR. GasFueled[5] < 1) then  UNCHANGED
+    else  if (GasFueled[3] < 1 .AND. GasFueled[4] < 1)
+          then  GasFueledErrMsg + "cooking"
+          else  GasFueledErrMsg + ", cooking"
+          endif endif
+ENDRULE
+RULE NEW DwellUnitType:GasFueledErrMsg
+  DEFAULT
+    if (LocalStatus( GasFueledErrMsg ) < 1 .OR. GasFueled[6] < 1) then  UNCHANGED
+    else  if (GasFueled[3] < 1 .AND. GasFueled[4] < 1 .AND. GasFueled[5] < 1)
+          then  GasFueledErrMsg + "clothes dryer"
+          else  GasFueledErrMsg + ", clothes dryer"
+          endif endif
+ENDRULE
+; RULE NEW DwellUnitType:GasFueledErrMsg
+;   CHECKSIM
+;     if (LocalStatus( GasFueledErrMsg ) < 1) then  UNCHANGED
+;     else  PostError( GasFueledErrMsg )  endif
+; ENDRULE
+
+// reporting of scenario where Proj:GasType = "None" while ResOtherZn includes GasFueled enduse(s) - SAC 03/08/24
+RULE NEW DwellUnitType:GasFueledChkCodeMsg
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  CHECKCODE
+    if (IfValidAnd( DUFloorAreaServed > 0 )==0 .OR. Proj:GasType != "None" .OR. GasFueled[1] < 1) then  UNDEFINED
+    else  Format("Project Fuel Type of 'None' is incompatible with DwellUnitType '%s' gas-fueled enduse(s):  ", Name )  endif
+ENDRULE
+RULE NEW DwellUnitType:GasFueledChkCodeMsg
+  CHECKCODE
+    if (LocalStatus( GasFueledChkCodeMsg ) < 1 .OR. GasFueled[3] < 1) then  UNCHANGED
+    else  GasFueledChkCodeMsg + "space heating"  endif
+ENDRULE
+RULE NEW DwellUnitType:GasFueledChkCodeMsg
+  CHECKCODE
+    if (LocalStatus( GasFueledChkCodeMsg ) < 1 .OR. GasFueled[4] < 1) then  UNCHANGED
+    else  if (GasFueled[3] < 1)
+          then  GasFueledChkCodeMsg + "water heating"
+          else  GasFueledChkCodeMsg + ", water heating"
+          endif endif
+ENDRULE
+RULE NEW DwellUnitType:GasFueledChkCodeMsg
+  CHECKCODE
+    if (LocalStatus( GasFueledChkCodeMsg ) < 1 .OR. GasFueled[5] < 1) then  UNCHANGED
+    else  if (GasFueled[3] < 1 .AND. GasFueled[4] < 1)
+          then  GasFueledChkCodeMsg + "cooking"
+          else  GasFueledChkCodeMsg + ", cooking"
+          endif endif
+ENDRULE
+RULE NEW DwellUnitType:GasFueledChkCodeMsg
+  CHECKCODE
+    if (LocalStatus( GasFueledChkCodeMsg ) < 1 .OR. GasFueled[6] < 1) then  UNCHANGED
+    else  if (GasFueled[3] < 1 .AND. GasFueled[4] < 1 .AND. GasFueled[5] < 1)
+          then  GasFueledChkCodeMsg + "clothes dryer"
+          else  GasFueledChkCodeMsg + ", clothes dryer"
+          endif endif
+ENDRULE
+RULE NEW DwellUnitType:GasFueledChkCodeMsg
+  CHECKCODE
+    if (LocalStatus( GasFueledChkCodeMsg ) < 1) then  UNCHANGED
+    else  PostError( GasFueledChkCodeMsg )  endif
+ENDRULE
+
+// pass DwellUnitType GasFueled up to referencing DwellUnit
+RULE DwellUnit:GasFueled[1]
+  ; ANY enduse (0/1)
+  DEFAULT
+    ValidOr( DwellUnitTypeRef:GasFueled[1], 0 )
+ENDRULE
+RULE DwellUnit:GasFueled[2]
+  ; num enduses gas-fueled
+  DEFAULT
+    ValidOr( DwellUnitTypeRef:GasFueled[2], 0 )
+ENDRULE
+RULE DwellUnit:GasFueled[3]
+  ; space heating gas?
+  DEFAULT
+    ValidOr( DwellUnitTypeRef:GasFueled[3], 0 )
+ENDRULE
+RULE DwellUnit:GasFueled[4]
+  ; water heating gas?
+  DEFAULT
+    ValidOr( DwellUnitTypeRef:GasFueled[4], 0 )
+ENDRULE
+RULE DwellUnit:GasFueled[5]
+  ; cooking gas?
+  DEFAULT
+    ValidOr( DwellUnitTypeRef:GasFueled[5], 0 )
+ENDRULE
+RULE DwellUnit:GasFueled[6]
+  ; dryer gas?
+  DEFAULT
+    ValidOr( DwellUnitTypeRef:GasFueled[6], 0 )
+ENDRULE
+
+// pass DwellUnit GasFueled up to parent ResZn
+RULE ResZn:GasFueled[1]
+  ; ANY enduse (0/1)
+  DEFAULT
+    if (SumChildren( DwellUnit:GasFueled[1] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResZn:GasFueled[3]
+  ; space heating gas?
+  DEFAULT
+    if (SumChildren( DwellUnit:GasFueled[3] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResZn:GasFueled[4]
+  ; water heating gas?
+  DEFAULT
+    if (SumChildren( DwellUnit:GasFueled[4] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResZn:GasFueled[5]
+  ; cooking gas?
+  DEFAULT
+    if (SumChildren( DwellUnit:GasFueled[5] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResZn:GasFueled[6]
+  ; dryer gas?
+  DEFAULT
+    if (SumChildren( DwellUnit:GasFueled[6] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResZn:GasFueled[2]
+  ; num enduses gas-fueled
+  DEFAULT
+    GasFueled[3] + GasFueled[4] + GasFueled[5] + GasFueled[6]
+ENDRULE
+
+// pass ResZn GasFueled up to ResProj - SAC 03/08/24
+RULE ResProj:DwellingGasFueled[1]
+  ; ANY enduse (0/1)
+  DEFAULT
+    if (SumAll( ResZn:GasFueled[1] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResProj:DwellingGasFueled[3]
+  ; space heating gas?
+  DEFAULT
+    if (SumAll( ResZn:GasFueled[3] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResProj:DwellingGasFueled[4]
+  ; water heating gas?
+  DEFAULT
+    if (SumAll( ResZn:GasFueled[4] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResProj:DwellingGasFueled[5]
+  ; cooking gas?
+  DEFAULT
+    if (SumAll( ResZn:GasFueled[5] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResProj:DwellingGasFueled[6]
+  ; dryer gas?
+  DEFAULT
+    if (SumAll( ResZn:GasFueled[6] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResProj:DwellingGasFueled[2]
+  ; num enduses gas-fueled
+  DEFAULT
+    DwellingGasFueled[3] + DwellingGasFueled[4] + DwellingGasFueled[5] + DwellingGasFueled[6]
+ENDRULE
+
+// pass ResZn GasFueled data to AffordableGasFueled
+RULE ResZn:AffordableGasFueled[3]
+  ; space heating gas?
+  DEFAULT
+    if (IfValidAnd( AffordableHousing > 0 ))
+    then  GasFueled[3]  else  0  endif
+ENDRULE
+RULE ResZn:AffordableGasFueled[4]
+  ; water heating gas?
+  DEFAULT
+    if (IfValidAnd( AffordableHousing > 0 ) .AND.
+        IfValidAnd( CUAC_IncludeDHW > 0 ))
+    then  GasFueled[4]  else  0  endif
+ENDRULE
+RULE ResZn:AffordableGasFueled[5]
+  ; cooking gas?
+  DEFAULT
+    if (IfValidAnd( AffordableHousing > 0 ))
+    then  GasFueled[5]  else  0  endif
+ENDRULE
+RULE ResZn:AffordableGasFueled[6]
+  ; dryer gas?
+  DEFAULT
+    if (IfValidAnd( AffordableHousing > 0 ))
+    then  GasFueled[6]  else  0  endif
+ENDRULE
+RULE ResZn:AffordableGasFueled[1]
+  ; ANY enduse (0/1)
+  DEFAULT
+    if (AffordableGasFueled[3] > 0 .OR. AffordableGasFueled[4] > 0 .OR.
+        AffordableGasFueled[5] > 0 .OR. AffordableGasFueled[6] > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResZn:AffordableGasFueled[2]
+  ; num enduses gas-fueled
+  DEFAULT
+    if (IfValidAnd( AffordableHousing > 0 ))
+    then  AffordableGasFueled[3] + AffordableGasFueled[4] +
+          AffordableGasFueled[5] + AffordableGasFueled[6]
+    else  0  endif
+ENDRULE
+
+// pass ResZn AffordableGasFueled up to ResProj - SAC 03/08/24
+RULE ResProj:AffordableDwellingGasFueled[1]
+  ; ANY enduse (0/1)
+  DEFAULT
+    if (SumAll( ResZn:AffordableGasFueled[1] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResProj:AffordableDwellingGasFueled[3]
+  ; space heating gas?
+  DEFAULT
+    if (SumAll( ResZn:AffordableGasFueled[3] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResProj:AffordableDwellingGasFueled[4]
+  ; water heating gas?
+  DEFAULT
+    if (SumAll( ResZn:AffordableGasFueled[4] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResProj:AffordableDwellingGasFueled[5]
+  ; cooking gas?
+  DEFAULT
+    if (SumAll( ResZn:AffordableGasFueled[5] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResProj:AffordableDwellingGasFueled[6]
+  ; dryer gas?
+  DEFAULT
+    if (SumAll( ResZn:AffordableGasFueled[6] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResProj:AffordableDwellingGasFueled[2]
+  ; num enduses gas-fueled
+  DEFAULT
+    AffordableDwellingGasFueled[3] + AffordableDwellingGasFueled[4] +
+    AffordableDwellingGasFueled[5] + AffordableDwellingGasFueled[6]
+ENDRULE
+
+
+// tracks which ResOtherZn enduses are gas fueled: 1-Any, 2-Sum, 3-SpcHtg, 4-WtrHtg, 5-Cookng, 6-Dryer -- SAC 03/07/24
+RULE ResOtherZn:GasFueled[3]
+  ; space heating gas?  (ignoring AirSys since error reporting already in place there)
+  DEFAULT
+    if (EnumValue( Type ) >= 10 .OR. EnumValue( CondType ) != 1) then  0
+    else if (LocalCompAssigned( ActiveHVACSystem ) == ComponentType( "ResHVACSys" ))
+    then  switch (ActiveHVACSystem:Type)
+             case  "Heat Pump Heating and Cooling System" :  0
+             case  "Central Heating and Cooling System"   :
+                        switch (ActiveHVACSystem:CentralEqpType)
+                           case  "Water source heat pump"    :  1  ; assume central boiler gas?
+                           case  "Variable refrigerant flow" :  0
+                           case  "Four-pipe fan coil"        :  1
+                           default :  0
+                        endswitch
+             case  "Other Heating and Cooling System"     :
+                        if (T24RHeatingEquipment:UseGas( "CodeBase", EnumValue( Proj:StdDesignBase ), "StdVer", ResProj:StdsVersionYr,
+                                                         "SysType", ValidOr( ActiveHVACSystem:HeatSysTypeAbbrev, "type unknown" ) ) > 0.5)
+                        then  1  else  0  endif
+             default :  0
+          endswitch
+    else  0  endif endif
+ENDRULE
+  ; removed following from above rule since gas equipment when Proj:GasType = 'None' is already reported for each AirSys
+  ;  else if (LocalCompAssigned( ActiveHVACSystem ) == ComponentType( "AirSys" ))
+  ;  then  if (IfValidAnd( ActiveHVACSystem:HtgFuelSrc = 1 ))
+  ;        then  1  else  0  endif
+RULE ResOtherZn:GasFueled[4]
+  ; water heating gas?
+  DEFAULT
+    if (IfValidAnd( ShowDHWSysAssignment > 0 )==0) then  0
+    else if (LocalCompAssigned( ActiveDHWSystem ) == ComponentType( "ResDHWSys" ))
+    then  if (IfValidAnd( ActiveDHWSystem:NumFuelHeaters > 0 ))
+          then  1  else  0  endif
+    else  0  endif endif
+ENDRULE
+RULE ResOtherZn:GasFueled[5]
+  ; cooking gas?
+  DEFAULT
+    0
+ENDRULE
+RULE ResOtherZn:GasFueled[6]
+  ; dryer gas?
+  DEFAULT
+    0
+ENDRULE
+RULE ResOtherZn:GasFueled[1]
+  ; ANY enduse (0/1)
+  DEFAULT
+    if (GasFueled[3] > 0 .OR. GasFueled[4] > 0 .OR. GasFueled[5] > 0 .OR. GasFueled[6] > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResOtherZn:GasFueled[2]
+  ; num enduses gas-fueled
+  DEFAULT
+    GasFueled[3] + GasFueled[4] + GasFueled[5] + GasFueled[6]
+ENDRULE
+
+// reporting of scenario where Proj:GasType = "None" while ResOtherZn includes GasFueled enduse(s) - SAC 03/08/24
+RULE NEW ResOtherZn:GasFueledErrMsg
+  DATATYPE
+    String
+  INPUTCLASS
+    NotInput
+  CHECKCODE
+    if (Proj:GasType != "None" .OR. GasFueled[1] < 1) then  UNDEFINED
+    else  Format("Project Fuel Type of 'None' is incompatible with ResOtherZn '%s' gas-fueled enduse(s):  ", Name )  endif
+ENDRULE
+RULE NEW ResOtherZn:GasFueledErrMsg
+  CHECKCODE
+    if (LocalStatus( GasFueledErrMsg ) < 1 .OR. GasFueled[3] < 1) then  UNCHANGED
+    else  GasFueledErrMsg + "space heating"  endif
+ENDRULE
+RULE NEW ResOtherZn:GasFueledErrMsg
+  CHECKCODE
+    if (LocalStatus( GasFueledErrMsg ) < 1 .OR. GasFueled[4] < 1) then  UNCHANGED
+    else  if (GasFueled[3] < 1)
+          then  GasFueledErrMsg + "water heating"
+          else  GasFueledErrMsg + ", water heating"
+          endif endif
+ENDRULE
+RULE NEW ResOtherZn:GasFueledErrMsg
+  CHECKCODE
+    if (LocalStatus( GasFueledErrMsg ) < 1 .OR. GasFueled[5] < 1) then  UNCHANGED
+    else  if (GasFueled[3] < 1 .AND. GasFueled[4] < 1)
+          then  GasFueledErrMsg + "cooking"
+          else  GasFueledErrMsg + ", cooking"
+          endif endif
+ENDRULE
+RULE NEW ResOtherZn:GasFueledErrMsg
+  CHECKCODE
+    if (LocalStatus( GasFueledErrMsg ) < 1 .OR. GasFueled[6] < 1) then  UNCHANGED
+    else  if (GasFueled[3] < 1 .AND. GasFueled[4] < 1 .AND. GasFueled[5] < 1)
+          then  GasFueledErrMsg + "clothes dryer"
+          else  GasFueledErrMsg + ", clothes dryer"
+          endif endif
+ENDRULE
+RULE NEW ResOtherZn:GasFueledErrMsg
+  CHECKCODE
+    if (LocalStatus( GasFueledErrMsg ) < 1) then  UNCHANGED
+    else  PostError( GasFueledErrMsg )  endif
+ENDRULE
+
+// pass ResOtherZn GasFueled up to ResProj - SAC 03/08/24
+RULE ResProj:OtherZnGasFueled[1]
+  ; ANY enduse (0/1)
+  DEFAULT
+    if (SumAll( ResOtherZn:GasFueled[1] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResProj:OtherZnGasFueled[3]
+  ; space heating gas?
+  DEFAULT
+    if (SumAll( ResOtherZn:GasFueled[3] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResProj:OtherZnGasFueled[4]
+  ; water heating gas?
+  DEFAULT
+    if (SumAll( ResOtherZn:GasFueled[4] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResProj:OtherZnGasFueled[5]
+  ; cooking gas?
+  DEFAULT
+    if (SumAll( ResOtherZn:GasFueled[5] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResProj:OtherZnGasFueled[6]
+  ; dryer gas?
+  DEFAULT
+    if (SumAll( ResOtherZn:GasFueled[6] ) > 0)
+    then  1  else  0  endif
+ENDRULE
+RULE ResProj:OtherZnGasFueled[2]
+  ; num enduses gas-fueled
+  DEFAULT
+    OtherZnGasFueled[3] + OtherZnGasFueled[4] + OtherZnGasFueled[5] + OtherZnGasFueled[6]
+ENDRULE
+
+
+; porting of range checks from CBECC-Res - SAC 03/01/23
+RULE ResConsAssm:AbvDeckInsulLayerRVal
+  MINIMUM   0
+ENDRULE
+RULE ResConsAssm:SheathInsul2LayerRVal
+  MINIMUM   0
+ENDRULE
+RULE ResConsAssm:FurringInsul2LayerRVal
+  MINIMUM   0
+ENDRULE
+RULE ResConsAssm:FurringInsulLayerRVal
+  MINIMUM   0
+ENDRULE
+RULE ResConsAssm:SheathInsulLayerRVal
+  MINIMUM   0
+ENDRULE
+
+RULE ResWinType:Area
+  MINIMUM   0.01
+ENDRULE
+RULE ResWinType:Height
+  MINIMUM   0.01
+ENDRULE
+RULE ResWinType:Width
+  MINIMUM   0.01
+ENDRULE
+RULE ResWinType:NFRCUfactor
+  MINIMUM   0.01
+ENDRULE
+RULE ResWinType:NFRCSHGC
+  MINIMUM   0.01
+ENDRULE
+RULE ResWinType:NFRCVT
+  MINIMUM   0.01
+ENDRULE
+
+RULE DwellUnitType:NumHeatEquipTypes
+  MINIMUM   0
+  MAXIMUM   5
+ENDRULE
+RULE DwellUnitType:NumCoolEquipTypes
+  MINIMUM   0
+  MAXIMUM   5
+ENDRULE
+RULE DwellUnitType:NumHtPumpEquipTypes
+  MINIMUM   0
+  MAXIMUM   5
+ENDRULE
+RULE DwellUnitType:NumDHWSysTypes
+  MINIMUM   1
+  MAXIMUM   5
+ENDRULE
+RULE DwellUnitType:TotShowersServed
+  MINIMUM   0
+ENDRULE
+RULE DwellUnitType:TotBathsServed
+  MINIMUM   0
+ENDRULE
+RULE DwellUnitType:CDNumFloorsServed
+  MINIMUM   0.01
+ENDRULE
+RULE DwellUnitType:CDMBathFixDist
+  MINIMUM   0.01
+ENDRULE
+RULE DwellUnitType:CDKitFixDist
+  MINIMUM   0.01
+ENDRULE
+RULE DwellUnitType:DWHRSysShowers1
+  MINIMUM   0
+ENDRULE
+RULE DwellUnitType:DWHRSysShowers2
+  MINIMUM   0
+ENDRULE
+RULE DwellUnitType:DWHRSysShowers3
+  MINIMUM   0
+ENDRULE
+RULE DwellUnitType:DWHRSysShowers4
+  MINIMUM   0
+ENDRULE
+RULE DwellUnitType:DWHRSysShowers5
+  MINIMUM   0
+ENDRULE
+RULE DwellUnitType:DWHRSysShowers6
+  MINIMUM   0
+ENDRULE
+RULE DwellUnitType:DWHRSysTakeCold1
+  MINIMUM   0
+ENDRULE
+RULE DwellUnitType:DWHRSysTakeCold2
+  MINIMUM   0
+ENDRULE
+RULE DwellUnitType:DWHRSysTakeCold3
+  MINIMUM   0
+ENDRULE
+RULE DwellUnitType:DWHRSysTakeCold4
+  MINIMUM   0
+ENDRULE
+RULE DwellUnitType:DWHRSysTakeCold5
+  MINIMUM   0
+ENDRULE
+RULE DwellUnitType:DWHRSysTakeCold6
+  MINIMUM   0
+ENDRULE
+
+RULE ResZn:FloorArea
+  MINIMUM   0.01
+ENDRULE
+RULE ResZn:CeilingHeight
+  MINIMUM   0.01
+ENDRULE
+RULE ResZn:NumStories
+  MINIMUM   1
+  MAXIMUM   3
+ENDRULE
+
+RULE ResOtherZn:Area
+  MINIMUM   0.01
+ENDRULE
+RULE ResOtherZn:Perim
+  MINIMUM   0.01
+ENDRULE
+
+RULE ResAttic:RoofRise
+  MINIMUM   0
+  MAXIMUM   20.78
+ENDRULE
+RULE ResAttic:RoofSolReflect
+  MINIMUM   0
+  MAXIMUM   1
+ENDRULE
+RULE ResAttic:RoofEmiss
+  MINIMUM   0
+  MAXIMUM   1
+ENDRULE
+
+RULE ResCrawlSpc:Perimeter
+  MINIMUM   10
+ENDRULE
+RULE ResCrawlSpc:AvgWallHeight
+  MINIMUM   2
+ENDRULE
+
+RULE DwellUnit:Count
+  MINIMUM   1
+ENDRULE
+
+RULE ResExtWall:Area
+  MINIMUM   0.01
+ENDRULE
+RULE ResExtWall:Tilt
+  MINIMUM   60
+  MAXIMUM   179.9
+ENDRULE
+
+RULE ResIntWall:Area
+  MINIMUM   0.01
+ENDRULE
+
+RULE ResUndgrWall:Area
+  MINIMUM   0.01
+ENDRULE
+
+RULE ResCathedralCeiling:Area
+  MINIMUM   0.01
+ENDRULE
+RULE ResCathedralCeiling:RoofRise
+  MINIMUM   0
+  MAXIMUM   20.78
+ENDRULE
+RULE ResCathedralCeiling:RoofSolReflect
+  MINIMUM   0
+  MAXIMUM   1
+ENDRULE
+RULE ResCathedralCeiling:RoofEmiss
+  MINIMUM   0
+  MAXIMUM   1
+ENDRULE
+
+RULE ResCeilingBelowAttic:Area
+  MINIMUM   0.01
+ENDRULE
+
+RULE ResIntCeiling:Area
+  MINIMUM   0.01
+ENDRULE
+
+RULE ResSlabFlr:Area
+  MINIMUM   0.01
+ENDRULE
+
+RULE ResExtFlr:Area
+  MINIMUM   0.01
+ENDRULE
+RULE ResExtFlr:FloorZ
+  MINIMUM   0
+ENDRULE
+
+RULE ResFlrOverCrawlSpc:Area
+  MINIMUM   0.01
+ENDRULE
+RULE ResFlrOverCrawlSpc:FloorZ
+  MINIMUM   0
+ENDRULE
+
+RULE ResIntFlr:Area
+  MINIMUM   0.01
+ENDRULE
+RULE ResIntFlr:FloorZ
+  MINIMUM   0
+ENDRULE
+
+RULE ResUndgrFlr:Area
+  MINIMUM   0.01
+ENDRULE
+
+RULE ResOpening:Width
+  MINIMUM   0.01
+ENDRULE
+RULE ResOpening:Height
+  MINIMUM   0.01
+ENDRULE
+RULE ResOpening:BottomHt
+  MINIMUM   0
+ENDRULE
+
+RULE ResWin:Area
+  MINIMUM   0.01
+ENDRULE
+RULE ResWin:Height
+  MINIMUM   0.01
+ENDRULE
+RULE ResWin:Width
+  MINIMUM   0.01
+ENDRULE
+RULE ResWin:Multiplier
+  MINIMUM   0.01
+ENDRULE
+RULE ResWin:NFRCUfactor
+  MINIMUM   0.01
+ENDRULE
+RULE ResWin:NFRCSHGC
+  MINIMUM   0.01
+ENDRULE
+RULE ResWin:NFRCVT
+  MINIMUM   0.01
+ENDRULE
+
+RULE ResSkylt:Area
+  MINIMUM   0.01
+ENDRULE
+RULE ResSkylt:Multiplier
+  MINIMUM   0.01
+ENDRULE
+RULE ResSkylt:NFRCUfactor
+  MINIMUM   0.01
+ENDRULE
+RULE ResSkylt:NFRCSHGC
+  MINIMUM   0.01
+ENDRULE
+
+RULE ResDr:Area
+  MINIMUM   0.01
+ENDRULE
+RULE ResDr:Ufactor
+  MINIMUM   0.01
+ENDRULE
+
+RULE ResHVACSys:NumHeatSystemTypes
+  MINIMUM   0
+  MAXIMUM   10
+ENDRULE
+RULE ResHVACSys:NumCoolSystemTypes
+  MINIMUM   0
+  MAXIMUM   10
+ENDRULE
+RULE ResHVACSys:NumHtPumpSystemTypes
+  MINIMUM   0
+  MAXIMUM   10
+ENDRULE
+
+; trimmed range from 100-600 to 150-550 per CSE req.s - SAC 09/03/24 (Res tic #539)
+RULE ResClgSys:CFMperTon
+  MINIMUM   150
+  MAXIMUM   550
+ENDRULE
+
+RULE ResHtPumpSys:Cap47
+  MINIMUM   0.01
+ENDRULE
+RULE ResHtPumpSys:Cap17
+  MINIMUM   0.01
+ENDRULE
+RULE ResHtPumpSys:COP47
+  MINIMUM   0.01
+ENDRULE
+RULE ResHtPumpSys:COP17
+  MINIMUM   0.01
+ENDRULE
+RULE ResHtPumpSys:SEER
+  MINIMUM   0.01
+ENDRULE
+RULE ResHtPumpSys:SEER2
+  MINIMUM   0.01
+ENDRULE
+RULE ResHtPumpSys:EER
+  MINIMUM   0.01
+ENDRULE
+RULE ResHtPumpSys:EER2
+  MINIMUM   0.01
+ENDRULE
+RULE ResHtPumpSys:CEER
+  MINIMUM   0.01
+ENDRULE
+; trimmed range from 100-600 to 150-550 per CSE req.s - SAC 09/03/24 (tic #539)
+RULE ResHtPumpSys:CFMperTon
+  MINIMUM   150
+  MAXIMUM   550
+ENDRULE
+
+RULE ResDistSys:DuctLeakageVal
+  MINIMUM   0.1
+  MAXIMUM   89.9
+ENDRULE
+
+RULE ResIAQFan:IAQCFM
+  MINIMUM   0.01
+ENDRULE
+RULE ResIAQFan:SensRecovEff
+  MINIMUM   0
+  MAXIMUM   99.9
+ENDRULE
+RULE ResIAQFan:AdjSensRecovEff
+  MINIMUM   0
+  MAXIMUM   99.9
+ENDRULE
+RULE ResIAQFan:HVIListedInterpCFM
+  MINIMUM   0.01
+ENDRULE
+RULE ResIAQFan:HVIListedInterpSRE
+  MINIMUM   0
+  MAXIMUM   99.9
+ENDRULE
+RULE ResIAQFan:HVIListedInterpASRE
+  MINIMUM   0
+  MAXIMUM   99.9
+ENDRULE
+
+RULE ResDHWSys:CDMBathFixDist
+  MINIMUM   0.01
+ENDRULE
+RULE ResDHWSys:CDKitFixDist
+  MINIMUM   0.01
+ENDRULE
+RULE ResDHWSys:HeaterMult
+  MINIMUM   0
+ENDRULE
+RULE ResDHWSys:TotShowersServed
+  MINIMUM   0
+ENDRULE
+RULE ResDHWSys:TotBathsServed
+  MINIMUM   0
+ENDRULE
+;RULE ResDHWSys:DWHRSysShowers
+;  MINIMUM   0
+;ENDRULE
+;RULE ResDHWSys:DWHRSysTakeCold
+;  MINIMUM   ResDHWSys:DWHRSysShowers
+;ENDRULE
+
+RULE ResDWHRSys:CSARatedEff
+  MINIMUM   0.01
+  MAXIMUM   99.9
+ENDRULE
+
+RULE ResWtrHtr:TankVolume
+  MINIMUM   0
+ENDRULE
+RULE ResWtrHtr:RecovEff
+  MINIMUM   0.01
+ENDRULE
+RULE ResWtrHtr:FirstHourRating
+  MINIMUM   0
+ENDRULE
+RULE ResWtrHtr:RatedFlow
+  MINIMUM   0
+ENDRULE
+RULE ResWtrHtr:HPWHModel
+  RESETS
+    ResetTheFollowingWhenThisIsModified
+      ResWtrHtr:JA13UICompliance
+ENDRULE
+
+RULE DHWSolSys:RatedSSF
+  MINIMUM   0.01
+  MAXIMUM   0.99
+ENDRULE
+RULE DHWSolSys:Count
+  MINIMUM   0.01
+ENDRULE
+RULE DHWSolSys:Azimuth
+  MINIMUM   0
+ENDRULE
+RULE DHWSolSys:Tilt
+  MINIMUM   0
+ENDRULE
+RULE DHWSolSys:TankVolume
+  MINIMUM   0
+ENDRULE
+RULE DHWSolSys:Manufacturer
+  RESETS
+    ResetTheFollowingWhenThisIsModified
+      DHWSolSys:Brand
+      DHWSolSys:Model
+ENDRULE
+RULE DHWSolSys:Brand
+  RESETS
+    ResetTheFollowingWhenThisIsModified
+      DHWSolSys:Model
+ENDRULE
+
+
+; added to ensure no use of verified alteration feature (for time being) - SAC 05/21/23 (tic #3479)
+RULE ResZn:HVACSysVerified
+  INPUTCLASS 
+    NotInput  IgnoreUserInput  "verified alteration not available in multifamily analysis"
+ENDRULE
+RULE ResZn:DHWSys1Verified
+  INPUTCLASS 
+    NotInput  IgnoreUserInput  "verified alteration not available in multifamily analysis"
+ENDRULE
+RULE ResAttic:IsVerified
+  INPUTCLASS 
+    NotInput  IgnoreUserInput  "verified alteration not available in multifamily analysis"
+ENDRULE
+RULE ResExtWall:IsVerified
+  INPUTCLASS 
+    NotInput  IgnoreUserInput  "verified alteration not available in multifamily analysis"
+ENDRULE
+RULE ResIntWall:IsVerified
+  INPUTCLASS 
+    NotInput  IgnoreUserInput  "verified alteration not available in multifamily analysis"
+ENDRULE
+RULE ResUndgrWall:IsVerified
+  INPUTCLASS 
+    NotInput  IgnoreUserInput  "verified alteration not available in multifamily analysis"
+ENDRULE
+RULE ResCathedralCeiling:IsVerified
+  INPUTCLASS 
+    NotInput  IgnoreUserInput  "verified alteration not available in multifamily analysis"
+ENDRULE
+RULE ResCeilingBelowAttic:IsVerified
+  INPUTCLASS 
+    NotInput  IgnoreUserInput  "verified alteration not available in multifamily analysis"
+ENDRULE
+RULE ResSlabFlr:IsVerified
+  INPUTCLASS 
+    NotInput  IgnoreUserInput  "verified alteration not available in multifamily analysis"
+ENDRULE
+RULE ResExtFlr:IsVerified
+  INPUTCLASS 
+    NotInput  IgnoreUserInput  "verified alteration not available in multifamily analysis"
+ENDRULE
+RULE ResFlrOverCrawlSpc:IsVerified
+  INPUTCLASS 
+    NotInput  IgnoreUserInput  "verified alteration not available in multifamily analysis"
+ENDRULE
+RULE ResUndgrFlr:IsVerified
+  INPUTCLASS 
+    NotInput  IgnoreUserInput  "verified alteration not available in multifamily analysis"
+ENDRULE
+RULE ResIntFlr:IsVerified
+  INPUTCLASS 
+    NotInput  IgnoreUserInput  "verified alteration not available in multifamily analysis"
+ENDRULE
+RULE ResIntCeiling:IsVerified
+  INPUTCLASS 
+    NotInput  IgnoreUserInput  "verified alteration not available in multifamily analysis"
+ENDRULE
+RULE ResWin:IsVerified
+  INPUTCLASS 
+    NotInput  IgnoreUserInput  "verified alteration not available in multifamily analysis"
+ENDRULE
+RULE ResSkylt:IsVerified
+  INPUTCLASS 
+    NotInput  IgnoreUserInput  "verified alteration not available in multifamily analysis"
+ENDRULE
+RULE ResDr:IsVerified
+  INPUTCLASS 
+    NotInput  IgnoreUserInput  "verified alteration not available in multifamily analysis"
+ENDRULE
+RULE ResHVACSys:IsVerified
+  INPUTCLASS 
+    NotInput  IgnoreUserInput  "verified alteration not available in multifamily analysis"
+ENDRULE
+RULE ResDistSys:IsVerified
+  INPUTCLASS 
+    NotInput  IgnoreUserInput  "verified alteration not available in multifamily analysis"
+ENDRULE
+
+
+; added to ensure ProposedModelCodeCheck rulelist evaluated BEFORE analysis - SAC 05/18/22
+RULE ResProj:Action
+ PREANALYSISCHECK
+   EvalRulelist( "ProposedModelCodeCheck" )
+ENDRULE

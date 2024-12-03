@@ -1,0 +1,128 @@
+; -------------------------------------------------------------------------
+; Rules pertaining to:   Conversion of Proposed Building Model into Budget/Standard Design
+; CEC Title-24 Residential Energy Code
+; -------------------------------------------------------------------------
+; Copyright (c) 2012-2014, California Energy Commission
+; Copyright (c) 2012-2014, Wrightsoft Corporation
+; All rights reserved.
+; Redistribution and use in source and binary forms, with or without modification,
+; are permitted provided that the following conditions are met:
+; - Redistributions of source code must retain the above copyright notice, this
+;   list of conditions and the following disclaimer.
+; - Redistributions in binary form must reproduce the above copyright notice, this
+;   list of conditions, the following disclaimer in the documentation and/or other
+;   materials provided with the distribution.
+; - Neither the name of the California Energy Commission nor the names of its
+;   contributors may be used to endorse or promote products derived from this
+;   software without specific prior written permission.
+; DISCLAIMER: THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+; "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+; THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+; NON-INFRINGEMENT ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION,
+; WRIGHTSOFT CORPORATION, ITRON, INC. OR ANY OTHER AUTHOR OR COPYRIGHT HOLDER OF
+; THIS SOFTWARE (COLLECTIVELY, THE "AUTHORS") BE LIABLE FOR ANY DIRECT, INDIRECT,
+; INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+; LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA,
+; OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+; LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
+; OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+; ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.  EACH LICENSEE AND SUBLICENSEE OF THE
+; SOFTWARE AGREES NOT TO ASSERT ANY CLAIM AGAINST ANY OF THE AUTHORS RELATING TO
+; THIS SOFTWARE, WHETHER DUE TO PERFORMANCE ISSUES, TITLE OR INFRINGEMENT ISSUES,
+; STRICT LIABILITY OR OTHERWISE.
+; -------------------------------------------------------------------------
+
+ENUM_PROPERTIES_VALUE   ; ensures retrieval/logic/us of enum properties assume numeric value (alternative is ENUM_PROPERTIES_STRING)
+
+;*************************************************************************
+;*************************************************************************
+RULELIST  "BudgetConversion_MFam_Envelope" 1 0 1 0
+;*************************************************************************
+;*************************************************************************
+;"store BEMProc details" ResProj:Action = {  StoreBEMProc( "begin BudgetConv_MFamEnv", 0 )  }
+;"dbg" ResProj:Action = {  PostMessageToLog( "   eval rulelist 'BudgetConversion_MFam_Envelope' for run %s", RunAbbrev )  }
+
+   ;--------------------------------------------------------------------
+   ; BudgetConversion: 
+   ;--------------------------------------------------------------------
+
+   "Setup Wall/Window/Door Area Totals"   ResProj:Action   = {   EvalRulelist( "SetupWallWindowDoorAreaTotals" )  }
+
+   "Assign new ResExtWall:Construction based on wall type: AreaByWallType 1:wood framed 2:steel framed 3:concrete/CMU"  ResExtWall:Construction =
+      { if (IfValidAnd( IsNew > 0.5 )==0) then  UNCHANGED
+        else if( Construction:ConsType = 1 ) ; Matel-building
+             then RuleLibrary( Cons, T24RClimateZoneCodeBase:StdMatelBldgExtWallCons( "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr ) )
+             else if( Construction:ConsType = 4 ) ; Mass light
+             then RuleLibrary( Cons, T24RClimateZoneCodeBase:StdMassExtWallCons( "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr ) )
+             else if( Construction:ConsType = 5 ) ; Mass heavy
+             then RuleLibrary( Cons, T24RClimateZoneCodeBase:StdMassHeavyExtWallCons( "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr ) )
+             else if( IfValidAnd( Construction:FireRtdFlag > 0 ) ) ; All other
+             then RuleLibrary( Cons, T24RClimateZoneCodeBase:StdFrameHiHRExtWallCons ( "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr ) )
+             else RuleLibrary( Cons, T24RClimateZoneCodeBase:StdFrameExtWallCons( "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr ) )
+             endif endif endif endif
+        endif }
+
+   "Adjust New/Alt ResWin of Cond zones"     ResWin:Action =
+      {  if (Status == 1 .OR. IfValidAnd( CondFloorArea > 0 )==0) then  UNCHANGED   
+         else  EvalRulelist( "BudgetConversion_MFam_Envelope_ResWin", 1 )  endif  }
+
+
+; MFAM TO DO
+; ResSkylt perfomance ??
+
+
+;"dbg BEMProc details"  ResProj:Action = {  StoreBEMProc( "end of BudgetConv_MFamEnv", 0 )  }
+;"dbg" ResProj:Action = {  MessageBox( "End of 'BudgetConversion_MFam_Envelope' for run %s", RunAbbrev )  }
+END
+;*************************************************************************
+
+
+;*************************************************************************
+RULELIST  "BudgetConversion_MFam_Envelope_ResWin" 1 0 1 0
+
+   "Set ResWin:NFRCUfactor"      ResWin:NFRCUfactor  =
+      {  switch( WinProdType )
+			   case 1  : T24RClimateZoneCodeBase:CurtainWallStorefrontUfactor( "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )
+			   case 2  : T24RClimateZoneCodeBase:NAFS2017ClassAWUfactor( "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )
+			   default : T24RClimateZoneCodeBase:WindowUfactor( "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )
+			   endswitch  }
+   "Adjust ResWin:NFRCUfactor"   ResWin:NFRCUfactor  =         ; SAC 01/22/21
+      {  if (IfValidAnd( ResProj:StdDesignWinAdj_Ufactor > 0 )==0) then  UNCHANGED
+         else  NFRCUfactor + ResProj:StdDesignWinAdj_Ufactor  endif  }
+
+   "Set ResWin:NFRCSHGC"         ResWin:NFRCSHGC  =
+      {  switch( WinProdType )
+			   case 1  : T24RClimateZoneCodeBase:CurtainWallStorefrontSHGC( "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )
+			   case 2  : T24RClimateZoneCodeBase:NAFS2017ClassAWSHGC( "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )
+			   default : T24RClimateZoneCodeBase:WindowSHGC( "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )
+			   endswitch  }
+   "Adjust ResWin:NFRCSHGC"      ResWin:NFRCSHGC  =            ; SAC 01/22/21
+      {  if (IfValidAnd( ResProj:StdDesignWinAdj_SHGC > 0 )==0) then  UNCHANGED
+         else  NFRCSHGC + ResProj:StdDesignWinAdj_SHGC  endif  }
+
+   ; ExteriorShade = "Insect Screen (default)" - ACM section 2.3.5.5.3
+   "Set ResWin:ExteriorShade"    ResWin:ExteriorShade    = {  "Insect Screen (default)"  }
+   "Set ResWin:IsStdCondZoneWin" ResWin:IsStdCondZoneWin = {  1  }      ; SAC 2/11/14
+
+   "Adjust ResWin Area and remove fins/overhangs"  ResWin:Action =
+      {  if (SpecMethod == 2)
+         then  EvalRulelist( "BudgetConversion_MFam_Envelope_ResWin_Area", 1 )
+         else  EvalRulelist( "BudgetConversion_MFam_Envelope_ResWin_Dimensions", 1 )  endif  } 
+END
+;*************************************************************************
+RULELIST  "BudgetConversion_MFam_Envelope_ResWin_Area" 1 0 1 0
+   "Set ResWin:Area"                ResWin:Area              = {  Area   * 1.0  }
+END
+;*************************************************************************
+RULELIST  "BudgetConversion_MFam_Envelope_ResWin_Dimensions" 1 0 1 0
+   "Set ResWin:ModelFinsOverhang"   ResWin:ModelFinsOverhang = {  0  }
+   "Set ResWin:Height"              ResWin:Height            = {  Height * 1.0  }
+   ; check/confirm Area re-defaulted before simulation
+END
+;*************************************************************************
+
+
+;*************************************************************************
+;*************************************************************************
+
+ENDFILE
