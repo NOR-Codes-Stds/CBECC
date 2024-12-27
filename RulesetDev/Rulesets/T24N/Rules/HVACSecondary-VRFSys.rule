@@ -767,6 +767,44 @@ ENDRULE
 
 // ---------- Efficiencies ----------------------------------------------------*
 // Determine code minimum SEER/EER/IEER for VRF
+// 
+RULE NEW VRFSys:EffRtg
+  DATATYPE
+    Enumeration
+  LONGFORM
+    EfficiencyRating
+  INPUTCLASS
+    Default
+  OPTION
+    AHRI 1230-2014
+    AHRI 1230-2021/2023
+  DEFAULT
+    "AHRI 1230-2014"
+  CHECKCODE
+    if(EffRtg = "AHRI 1230-2021/2023" .AND. ClgCapNetRtd < 65000)
+    then PostError("AHRI 1230-2021/2023 does not cover VRF < 65,000 Btu/h, and VRFs rated with
+                    SEER2 with AHRI 210/240 are not currently supported. Change Efficiency Rating of
+                    VRFSystem '%s' to 'AHRI 1230-2014' or model the system as a mini-split system."
+                    , name)
+    else UNCHANGED
+    endif
+ENDRULE
+
+RULE NEW VRFSys:VRF2023Factor
+  DATATYPE
+    Float
+  DESCRIPTION
+    "A factor that converts the EER measured under the AHRI1230-2023 condition to the equivlent 
+     EER measured under the AHRI1230-2014 condition."
+  INPUTCLASS
+    NotInput
+  SIZING
+    if(EffRtg = "AHRI 1230-2021/2023")
+    then -1.60926 * 10 ** (-7) * ClgCapNetRtd + 1.14394
+    else UNDEFINED
+    endif
+ENDRULE
+
 RULE NEW VRFSys:CodeMinSEER
   DATATYPE
     Float
@@ -824,13 +862,29 @@ RULE NEW VRFSys:CodeMinEER
   REPORTPRECISION
     1
   DEFAULT
-    if( IfValidAnd( ClgCapNetRtd > 0 ) )
+    if(IfValidAnd(ClgCapNetRtd > 0))
     then
-      if( IfValidAnd( ClgCapNetRtd < 65000 ) )
-      then // SEER rated
-        0
-      else
-      if( IfValidAnd( HtgCapNetRtd > 0 ) )
+      if(IfValidAnd(ClgCapNetRtd < 65000))
+      then 0 // SEER rated
+      else if(EffRtg = "AHRI 1230-2021/2023")
+      then  // New Standard, ticket 3647
+        if(IfValidAnd(HtgCapNetRtd > 0))
+        then // Is VRF HP
+          UnitaryACHPMinEffReq:EER(
+            "StandardsVersion", "Compliance2025",
+            "Category", "VRF",
+            "SubCategory", "HP",
+            "CondenserType", "Air",
+            "SizeCategory", ClgCapNetRtd) - EERDeduction
+        else // Is VRF AC
+          UnitaryACHPMinEffReq:EER(
+            "StandardsVersion", "Compliance2025",
+            "Category", "VRF",
+            "SubCategory", "AC",
+            "CondenserType", "Air",
+            "SizeCategory", ClgCapNetRtd)
+        endif
+      else if(IfValidAnd(HtgCapNetRtd > 0))
       then // Is VRF HP
         UnitaryACHPMinEffReq:EER(
           "StandardsVersion", Proj:StdsVersion,
@@ -845,7 +899,7 @@ RULE NEW VRFSys:CodeMinEER
           "SubCategory", "AC",
           "CondenserType", "Air",
           "SizeCategory", ClgCapNetRtd)
-      endif endif
+      endif endif endif
     else UNDEFINED
     endif
 ENDRULE
@@ -862,13 +916,39 @@ RULE NEW VRFSys:CodeMinIEER
   REPORTPRECISION
     1
   DEFAULT
-    if( IfValidAnd( ClgCapNetRtd > 0 ) )
+    if(IfValidAnd(ClgCapNetRtd > 0))
     then
-      if( IfValidAnd( ClgCapNetRtd < 65000 ) )
-      then // SEER rated
-        0
-      else
-      if( IfValidAnd( HtgCapNetRtd > 0 ) )
+      if(IfValidAnd(ClgCapNetRtd < 65000))
+      then 0 // SEER rated
+      else if(EffRtg = "AHRI 1230-2021/2023")
+      then  // New Standard, ticket 3647
+        if(IfValidAnd(HtgCapNetRtd > 0))
+        then // Is VRF HP
+          if(IfValidAnd(HtRcvry = "Yes"))
+          then UnitaryACHPMinEffReq:IEER(
+                "StandardsVersion", "Compliance2025",
+                "Category", "VRF",
+                "SubCategory", "HP",
+                "CondenserType", "Air",
+                "SizeCategory", ClgCapNetRtd,
+                "AdditionalCriteria", "HasHeatRecovery") - EERDeduction
+          else  UnitaryACHPMinEffReq:IEER(
+                "StandardsVersion", "Compliance2025",
+                "Category", "VRF",
+                "SubCategory", "HP",
+                "CondenserType", "Air",
+                "SizeCategory", ClgCapNetRtd,
+                "AdditionalCriteria", "NoHeatRecovery") - EERDeduction
+          endif
+        else // Is VRF AC
+          UnitaryACHPMinEffReq:IEER(
+            "StandardsVersion", "Compliance2025",
+            "Category", "VRF",
+            "SubCategory", "AC",
+            "CondenserType", "Air",
+            "SizeCategory", ClgCapNetRtd)
+        endif
+      else if( IfValidAnd( HtgCapNetRtd > 0 ) )
       then // Is VRF HP
         UnitaryACHPMinEffReq:IEER(
           "StandardsVersion", Proj:StdsVersion,
@@ -883,7 +963,7 @@ RULE NEW VRFSys:CodeMinIEER
           "SubCategory", "AC",
           "CondenserType", "Air",
           "SizeCategory", ClgCapNetRtd)
-      endif endif
+      endif endif endif
     else UNDEFINED
     endif
 ENDRULE
@@ -958,10 +1038,10 @@ RULE VRFSys:EER
   REPORTPRECISION
     1
   DEFAULT
-    if( IfValidAnd( ClgCapNetRtd > 0 ) .AND.
-        Proj:AutoEffInput = 1 )
+    if(IfValidAnd(ClgCapNetRtd > 0) .AND.
+       Proj:AutoEffInput = 1 )
     then 
-      if( IfValidAnd( CodeMinEER > 0 ) )
+      if(IfValidAnd(CodeMinEER > 0))
       then // Default to CodeMinEER
         CodeMinEER
       else 
@@ -970,21 +1050,21 @@ RULE VRFSys:EER
     else UNDEFINED
     endif
   CHECKCODE : T24N
-    if( ( IfValidAnd( CodeMinEER > 0 ) .OR. IfValidAnd( CodeMinSEER > 0 ) ) .AND. 
-        IfValidAnd( EER > 0 ) = 0 )
+    if((IfValidAnd(CodeMinEER > 0) .OR. IfValidAnd(CodeMinSEER > 0)) .AND. 
+        IfValidAnd(EER > 0) = 0)
     then
       PostError("VRF system '%s' must be specified with AHRI rated EER, 
                  even if cooling capacity is <65kBtu/hr.", Name)
     else 
-    if( ( BypassMinEffCheck > 0 .OR. BypassCheckCode = 1 )  
+    if((BypassMinEffCheck > 0 .OR. BypassCheckCode = 1)  
         .OR. 
-        ( BypassCheckCode = 2 .AND. BypassMinEffCheck > 0 ) )
+       (BypassCheckCode = 2 .AND. BypassMinEffCheck > 0))
     then // Is a non-healthcare system w/ BypassMinEff or CheckCode applicable
          // Or a new healthcare system w/ BypassMinEff checked
       UNCHANGED
     else
-    if( IfValidAnd( CodeMinEER > 0 ) .AND.
-        IfValidAnd( EER < CodeMinEER ) )
+    if(IfValidAnd(CodeMinEER > 0) .AND.
+       IfValidAnd(EER < CodeMinEER))
     then
       PostError("EER of VRF system '%s' is less than the code minimum required efficiency 
                  of EER-%.1f. Select the bypass of efficiency check
@@ -992,8 +1072,57 @@ RULE VRFSys:EER
     else UNCHANGED 
     endif endif endif
   SIZING
-    if( IsBaseHlthCareSys > 0 .AND. IfValidAnd( CodeMinEER > 0 ) )
+    if(EffRtg = "AHRI 1230-2021/2023")
+    then EER * VRF2023Factor
+    else if(IsBaseHlthCareSys > 0 .AND. IfValidAnd(CodeMinEER > 0))
     then CodeMinEER
+    else UNCHANGED
+    endif endif
+ENDRULE
+
+RULE NEW VRFSys:IEER
+  DESCRIPTION
+    "The cooling IEER of the VRF system at AHRI conditions."
+  INPUTCLASS
+    CondRequired
+  UNITS 
+    Btu/h-W
+  REPORTPRECISION
+    1
+  DEFAULT
+    if(IfValidAnd(ClgCapNetRtd > 0) .AND.
+       Proj:AutoEffInput = 1)
+    then 
+      if(IfValidAnd(CodeMinIEER > 0))
+      then CodeMinIEER
+      else UNDEFINED
+      endif
+    else UNDEFINED
+    endif
+  CHECKCODE : T24N
+    if(IfValidAnd(CodeMinIEER > 0) .AND. 
+       IfValidAnd(IEER > 0) = 0)
+    then
+      PostError("VRF system '%s' must be specified with AHRI rated IEER", Name)
+    else 
+    if((BypassMinEffCheck > 0 .OR. BypassCheckCode = 1)  
+       .OR. 
+       (BypassCheckCode = 2 .AND. BypassMinEffCheck > 0))
+    then // Is a non-healthcare system w/ BypassMinEff or CheckCode applicable
+         // Or a new healthcare system w/ BypassMinEff checked
+      UNCHANGED
+    else
+    if(IfValidAnd(CodeMinIEER > 0) .AND.
+       IfValidAnd(IEER < CodeMinIEER))
+    then 
+      PostError("IEER of VRF system '%s' is less than the code minimum required efficiency 
+                 of IEER-%.1f. Select the bypass of efficiency check
+                 if this is not applicable.", Name, CodeMinIEER)
+    else UNCHANGED 
+    endif endif endif
+  SIZING
+    if(IsBaseHlthCareSys > 0 .AND. IfValidAnd(CodeMinIEER > 0))
+    then CodeMinIEER
     else UNCHANGED
     endif
 ENDRULE
