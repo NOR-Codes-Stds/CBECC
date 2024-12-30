@@ -348,12 +348,15 @@ ENDRULE
 // ----- Exhaust -----
 RULE ResOtherZn:IAQCFM_Exhaust
   DEFAULT
-    if(IAQDisabled > 0 .OR. AllowIAQInps < 1) then
-      0
-    else if(IAQOption = "Minimum Exhaust IAQ Fan") then
-      MinIAQCFM
-    else if(IAQOption = "Individual IAQ Fans") then
-      switch(IAQNumFanRefs)
+    if(ServedByAirSys > 0 .AND. 
+       LocalCompAssigned(ExhaustIAQFanRef))
+    then ExhaustIAQFanRef:IAQCFM * ValidOr(ExhaustIAQFanCnt, 1)
+    else if(IAQDisabled > 0 .OR. AllowIAQInps < 1)
+    then 0
+    else if(IAQOption = "Minimum Exhaust IAQ Fan")
+    then MinIAQCFM
+    else if(IAQOption = "Individual IAQ Fans")
+    then switch(IAQNumFanRefs)
         case  1 : IAQFanCnt[1] * IAQFanRef[1]:IAQCFMExh
         case  2 : IAQFanCnt[1] * IAQFanRef[1]:IAQCFMExh + IAQFanCnt[2] * IAQFanRef[2]:IAQCFMExh
         case  3 : IAQFanCnt[1] * IAQFanRef[1]:IAQCFMExh + IAQFanCnt[2] * IAQFanRef[2]:IAQCFMExh
@@ -364,17 +367,20 @@ RULE ResOtherZn:IAQCFM_Exhaust
       endswitch
     else
       0
-    endif endif endif
+    endif endif endif endif
 ENDRULE
 
 RULE ResOtherZn:IAQPwr_Exhaust
   DEFAULT
-    if(IAQDisabled > 0 .OR. AllowIAQInps < 1) then
-      0
-    else if(IAQOption = "Minimum Exhaust IAQ Fan") then
-      MinIAQCFM * ResProj:DefaultIAQFanPwr
-    else if(IAQOption = "Individual IAQ Fans") then
-      switch(IAQNumFanRefs)
+    if(ServedByAirSys > 0 .AND. 
+       LocalCompAssigned(ExhaustIAQFanRef))
+    then IAQCFM_Exhaust * ExhaustIAQFanRef:WperCFMExh
+    else if(IAQDisabled > 0 .OR. AllowIAQInps < 1)
+    then 0
+    else if(IAQOption = "Minimum Exhaust IAQ Fan")
+    then MinIAQCFM * ResProj:DefaultIAQFanPwr
+    else if(IAQOption = "Individual IAQ Fans")
+    then switch(IAQNumFanRefs)
         case  1 : IAQCFM[1] * IAQFanRef[1]:WperCFMExh
         case  2 : IAQCFM[1] * IAQFanRef[1]:WperCFMExh + IAQCFM[2] * IAQFanRef[2]:WperCFMExh
         case  3 : IAQCFM[1] * IAQFanRef[1]:WperCFMExh + IAQCFM[2] * IAQFanRef[2]:WperCFMExh
@@ -384,7 +390,7 @@ RULE ResOtherZn:IAQPwr_Exhaust
         default : 0
       endswitch
     else 0
-    endif endif endif
+    endif endif endif endif
 ENDRULE
 
 // ----- Supply -----
@@ -638,8 +644,7 @@ RULE ResOtherZn:ExhaustIAQCFM
   DESCRIPTION
     "The total flow rate of individual exhaust fan(s) paired with the central system."
   DEFAULT
-    if(IAQOption = "Central Supply / Individual Exhaust" .AND.
-       LocalCompAssigned(ExhaustIAQFanRef)) then
+    if(LocalCompAssigned(ExhaustIAQFanRef)) then
       ExhaustIAQFanRef:IAQCFM * ExhaustIAQFanCnt
     else
       0
@@ -859,15 +864,16 @@ RULE ResOtherZn:MakeupExhCFM
   DESCRIPTION
     "The flow rate of exhaust make-up air."
   DEFAULT
-    if(IAQDisabled > 0) then
-      0
-    else if(IAQOption = "Minimum Exhaust IAQ Fan") then
-      MinIAQCFM
-    else if(IfValidAnd(CentralExhaustCFM > 0)) then ; Central w/ exhaust
-      Max(CentralExhaustCFM - ValidOr(CentralSupplyCFM, 0), 0)
-    else
-      Max(IAQCFM_Exhaust - IAQCFM_Supply, 0) ; individual IAQ fans
-    endif endif endif
+    if(IAQDisabled > 0)
+    then 0
+    else if(IAQOption = "Air System")
+    then Max(ValidOr(IAQCFM_Exhaust, 0) - AirSysVentCFM, 0)
+    else if(IAQOption = "Minimum Exhaust IAQ Fan")
+    then MinIAQCFM
+    else if(IfValidAnd(CentralExhaustCFM > 0)) ; Central w/ exhaust
+    then Max(CentralExhaustCFM - ValidOr(CentralSupplyCFM, 0), 0)
+    else Max(IAQCFM_Exhaust - IAQCFM_Supply, 0) ; individual IAQ fans
+    endif endif endif endif
 ENDRULE
 
 RULE ResOtherZn:MakeupExhLbl
@@ -962,25 +968,27 @@ RULE ResOtherZn:MinIAQCFMLbl
   INPUTCLASS
     NotInput
   DEFAULT
-    if(IAQDisabled > 0) then
-      Format("IAQ Ventilation disabled (%s required but not met)", FltToStr(MinIAQCFM, 1))
-    else if(MinIAQCFM < 0.05) then ; no ventilation requirement
-      if(IfValidAnd(MinExhCFM < 0.05)) then ; no exhaust requirement
-        " "
-      else if(ValidOr(TotalExhCFM, 0) < (ValidOr(MinExhCFM, 0) - 0.05)) then ; not meeting exhaust requirement
-        if(IfValidAnd(ServedByAirSys > 0)) then
-          Format("Min Exhaust NOT MET: Air System doesn't include an exhaust fan, use a different system type and add an exhaust fan.")
-        else
-          Format("Min Exhaust NOT MET: %s CFM required, %s entered %s", FltToStr(MinExhCFM, 1), FltToStr(TotalExhCFM, 1), MakeupExhLbl)
-        endif
-      else ; meeting exhaust requirement
-        Format("Minimum Exhaust:  %s CFM (%s entered) %s", FltToStr(MinExhCFM, 1), FltToStr(TotalExhCFM, 1), MakeupExhLbl)
+    if(IAQDisabled > 0)
+    then Format("IAQ Ventilation disabled (%s required but not met)", FltToStr(MinIAQCFM, 1))
+    else if(MinIAQCFM < 0.05) ; no ventilation requirement
+    then 
+      if(IfValidAnd(MinExhCFM < 0.05)) ; no exhaust requirement
+      then " "
+      else if(ValidOr(TotalExhCFM, 0) < (ValidOr(MinExhCFM, 0) - 0.05)) ; not meeting exhaust requirement
+      then Format("Min Exhaust NOT MET: %s CFM required, %s entered %s", FltToStr(MinExhCFM, 1), FltToStr(TotalExhCFM, 1), MakeupExhLbl)
+      else Format("Minimum Exhaust:  %s CFM (%s entered) %s", FltToStr(MinExhCFM, 1), FltToStr(TotalExhCFM, 1), MakeupExhLbl)
       endif endif
-    else if(TotalIAQCFM < (MinIAQCFM - 0.05)) then ; not meeting ventilation requirement
-     Format("Min IAQ Vent -NOT MET- locally:  %s CFM required, %s entered", FltToStr(MinIAQCFM, 1), FltToStr(TotalIAQCFM, 1))
+    else if(TotalIAQCFM < (MinIAQCFM - 0.05)) ; not meeting ventilation requirement
+    then Format("Min IAQ Vent -NOT MET- locally:  %s CFM required, %s entered", FltToStr(MinIAQCFM, 1), FltToStr(TotalIAQCFM, 1))
+    else if(ValidOr(TotalExhCFM, 0) < (ValidOr(MinExhCFM, 0) - 0.05)) ; not meeting exhaust requirement
+    then Format("Min Exhaust NOT MET: %s CFM required, %s entered %s", FltToStr(MinExhCFM, 1), FltToStr(TotalExhCFM, 1), MakeupExhLbl)
     else ; meeting ventilation requirement
-      Format("Minimum IAQ Ventilation: %s CFM (%s entered)", FltToStr(MinIAQCFM, 1), FltToStr(TotalIAQCFM, 1))
-    endif endif endif
+      if(IfValidAnd(MinExhCFM < 0.05))
+      then Format("Minimum IAQ Ventilation: %s CFM (%s entered)", FltToStr(MinIAQCFM, 1), FltToStr(TotalIAQCFM, 1))
+      else Format("Minimum IAQ Ventilation: %s CFM (%s entered); Minimum Exhaust:  %s CFM (%s entered) %s", 
+                  FltToStr(MinIAQCFM, 1), FltToStr(TotalIAQCFM, 1), FltToStr(MinExhCFM, 1), FltToStr(TotalExhCFM, 1), MakeupExhLbl)
+      endif
+    endif endif endif endif
 ENDRULE
 
 RULE ResOtherZn:TotalOACFMToZn
