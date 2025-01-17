@@ -472,6 +472,10 @@ RULELIST "CUAC_ZoneUnitCounts" 0 0 0 0
          else  "Allocation of affordable housing tenant PV successful!"
          endif endif endif endif endif endif endif endif  }
 
+   ; On-peak DHW elec use multiplied by this factor and shifted to prior period (*1.07 (7% increase in elec use)) - SAC 01/15/25
+   "Set CUAC:AffordableUnitJA13DHWBillAdjFactor[1-7]"   for:#U=(1to7)  CUAC:AffordableUnitJA13DHWBillAdjFactor[#U]  = 
+      {  if (IfValidAnd( PerformJA13DHWBillAdj > 0 ) .AND. IfValidAnd( AffordableUnitsByBedrms[#U] > 0 )) then  0.32  else  UNDEFINED  endif  }
+
    ; moved CUAC error checking rules HERE to ensure all above rules processed PRIOR to error checks - SAC 12/09/22
    ; previsouly ... moved to Battery.rule from Project-Multifamily.rule to ensure PV & Batt data refreshed BEFORE error checks which also setup PV/Batt messages - SAC 11/21/22
    ; WAS previously data model Proj:Action rule ->
@@ -1222,6 +1226,9 @@ RULELIST "CUAC_DefaultGen2Rates" 0 0 0 0
          else if (LocalCompAssigned( Tiers[2]  ) > 0) then   2
          else if (LocalCompAssigned( Tiers[1]  ) > 0) then   1
          else  0  endif endif endif endif endif  endif endif endif endif endif  endif endif endif endif endif  endif endif endif endif endif  }
+   "ensure correct CPR_NetSurplusCompensationCost Tier order"     CPR_NetSurplusCompensationCost:Action =      ; SAC 01/13/25
+      {  if (NumTiers < 2) then  UNCHANGED
+         else  OrderAssignments( "Tiers", "CPR_Tier:TierNumber" )  endif  }
 
    "Set CPR_PeriodCost:NumDemandCosts"             CPR_PeriodCost:NumDemandCosts =       ; SAC 08/28/23
       {       if (LocalCompAssigned( DemandCosts[20] ) > 0) then  20
@@ -1312,6 +1319,9 @@ RULELIST "CUAC_DefaultGen2Rates" 0 0 0 0
          else if (LocalCompAssigned( Tiers[2]  ) > 0) then   2
          else if (LocalCompAssigned( Tiers[1]  ) > 0) then   1
          else  0  endif endif endif endif endif  endif endif endif endif endif  endif endif endif endif endif  endif endif endif endif endif  }
+   "ensure correct CPR_DemandCost Tier order"      CPR_DemandCost:Action =       ; SAC 01/13/25
+      {  if (NumTiers < 2) then  UNCHANGED
+         else  OrderAssignments( "Tiers", "CPR_Tier:TierNumber" )  endif  }
 
    "Set CPR_EnergyCost:NumTiers"              CPR_EnergyCost:NumTiers =          ; SAC 08/28/23
       {       if (LocalCompAssigned( Tiers[20] ) > 0) then  20
@@ -1335,6 +1345,9 @@ RULELIST "CUAC_DefaultGen2Rates" 0 0 0 0
          else if (LocalCompAssigned( Tiers[2]  ) > 0) then   2
          else if (LocalCompAssigned( Tiers[1]  ) > 0) then   1
          else  0  endif endif endif endif endif  endif endif endif endif endif  endif endif endif endif endif  endif endif endif endif endif  }
+   "ensure correct CPR_EnergyCost Tier order"      CPR_EnergyCost:Action =       ; SAC 01/13/25
+      {  if (NumTiers < 2) then  UNCHANGED
+         else  OrderAssignments( "Tiers", "CPR_Tier:TierNumber" )  endif  }
 
    "Set CPR_NetExcessCreditCost:NumTiers"          CPR_NetExcessCreditCost:NumTiers =     ; SAC 08/28/23
       {       if (LocalCompAssigned( Tiers[20] ) > 0) then  20
@@ -1358,6 +1371,9 @@ RULELIST "CUAC_DefaultGen2Rates" 0 0 0 0
          else if (LocalCompAssigned( Tiers[2]  ) > 0) then   2
          else if (LocalCompAssigned( Tiers[1]  ) > 0) then   1
          else  0  endif endif endif endif endif  endif endif endif endif endif  endif endif endif endif endif  endif endif endif endif endif  }
+   "ensure correct CPR_NetExcessCreditCost Tier order"      CPR_NetExcessCreditCost:Action =             ; SAC 01/13/25
+      {  if (NumTiers < 2) then  UNCHANGED
+         else  OrderAssignments( "Tiers", "CPR_Tier:TierNumber" )  endif  }
 
    "Set CPR_HourlyTOUCost:NumHourlyTimeOfUseMonths"      CPR_HourlyTOUCost:NumHourlyTimeOfUseMonths =    ; SAC 08/28/23
       {       if (LocalCompAssigned( HourlyTimeOfUseMonths[12] ) > 0) then  12
@@ -1673,6 +1689,23 @@ RULELIST "CUAC_FinalCalcs" 1 0 1 0
       {  if (TrashRateType < 1) then  0
          else  ValidOr( TrashMonthlyCost, 0 )  endif  }
 
+   ; ResultsSummary rules - SAC 01/02/25
+   "set CUAC:ResultsSummary - init"    CUAC:ResultsSummary =
+      {  if (IfValidAnd( GasTariffReqd > 0 ) .AND. GasUtility > 0 .AND. GasUtility < 999)
+         then  "Monthly Avg Utility Bills:  "
+         else  "Monthly Avg Electricity Bills:  "  endif  }
+   "set CUAC:ResultsSummary - by unit type"   for:#U=(1to7)   CUAC:ResultsSummary =
+      {  if (LocalCompAssigned( CUACResultsRef[#U] ) > 0)
+         then  if (IfValidAnd( GasTariffReqd > 0 ) .AND. GasUtility > 0 .AND. GasUtility < 999)
+               then  ResultsSummary + Format( "%s elec $%.2f, gas $%.2f / ", substr( CUACResultsRef[#U]:Name, 0, strlen( CUACResultsRef[#U]:Name )-8 ), ValidOr( CUACResultsRef[#U]:ElecCosts[2], 0 ), ValidOr( CUACResultsRef[#U]:GasCosts[2], 0 ) )
+               else  ResultsSummary + Format( "%s $%.2f / ",                 substr( CUACResultsRef[#U]:Name, 0, strlen( CUACResultsRef[#U]:Name )-8 ), ValidOr( CUACResultsRef[#U]:ElecCosts[2], 0 ) )
+               endif
+         else  UNCHANGED  endif  }
+   "set CUAC:ResultsSummary - clean up"      CUAC:ResultsSummary =
+      {  if (strlen( ResultsSummary ) > 5)
+         then  substr( ResultsSummary, 0, strlen( ResultsSummary )-3 )
+         else  UNCHANGED  endif  }
+
 ; TESTING
 ;         "store properties to be marked 'defaults' (to avoid file storage)"  CUAC:Action = { EvalRulelist( "CUAC_FinalCalcs_Defaulted", 1 ) }   ; SAC 09/20/23
 ;      END
@@ -1926,8 +1959,8 @@ RULELIST "CUAC_WriteInputOutputCSV" 1 0 0 0
    "Replace '\' w/ '/' in CUAC:ModelPathFwdSlash"     CUAC:ModelPathFwdSlash = {  ReplaceInString( "\", "/" )  }
 
 ;   "Write CUAC I/O CSV Header-1"    CUAC:Action  = {  WriteToExportFile( InOutCSVFileIdx, "10,1,Row/Col hourly use data begin\n" )  }
-   ; increment w/ each CHANGE to file contents/organization  ; 1->2 - SAC 01/25/24  ; 2->3 - SAC 10/22/24  ; 3->4 - SAC 11/06/24  ; 4->5 - SAC 11/13/24
-   "Write CUAC I/O CSV Header-2"    CUAC:Action  = {  WriteToExportFile( InOutCSVFileIdx, "6,format index\n" )  }    ; 5->6 add Batt rptg - SAC 12/12/24
+   ; increment w/ each CHANGE to file contents/organization  ; 1->2 - SAC 01/25/24  ; 2->3 - SAC 10/22/24  ; 3->4 - SAC 11/06/24  ; 4->5 - SAC 11/13/24  ; 5->6 add Batt rptg - SAC 12/12/24
+   "Write CUAC I/O CSV Header-2"    CUAC:Action  = {  WriteToExportFile( InOutCSVFileIdx, "7,format index\n" )  }    ; 6->7 add Batt rptg - SAC 01/03/25
    "Write CUAC I/O CSV Header-3"    CUAC:Action  = {  WriteToExportFile( InOutCSVFileIdx, "CUAC Analysis Inputs and Results Report\n" )  }
    "Write CUAC I/O CSV Header-4"    CUAC:Action  = {  WriteToExportFile( InOutCSVFileIdx, ",Software:,%c%s%c\n",     34, ValidOr( ProjSoftwareVersionRpt,    "" ), 34 )  }
    "Write CUAC I/O CSV Header-5"    CUAC:Action  = {  WriteToExportFile( InOutCSVFileIdx, ",Ruleset:,%c%s%c\n",      34, ValidOr( ProjCompManagerVersionRpt, "" ), 34 )  }
@@ -1937,6 +1970,11 @@ RULELIST "CUAC_WriteInputOutputCSV" 1 0 0 0
    "Write CUAC I/O CSV Header-9"    CUAC:Action  = {  WriteToExportFile( InOutCSVFileIdx, "Run Date/Time:,,%s\n",        ValidOr( RunDateFmtRpt,      "" ) )  }
    "Write CUAC I/O CSV Header-10"   CUAC:Action  = {  WriteToExportFile( InOutCSVFileIdx, "Model File:,,%c%s%s%c\n", 34, ValidOr( ModelPathFwdSlash,  "" ), ValidOr( Proj:ModelFile, "" ), 34 )  }
    "Write CUAC I/O CSV Header-11"   CUAC:Action  = {  WriteToExportFile( InOutCSVFileIdx, "Weather File:,,%c%s%c\n", 34, ValidOr( WeatherFileNameRpt, "" ), 34 )  }
+   "Write CUAC I/O CSV Header-12"   CUAC:Action  = {  if (IfValidAnd( NumInvalidAnalyses > 1 ))
+                                                      then  WriteToExportFile( InOutCSVFileIdx, "Analysis Status:,,%c%g Invalid Analyses%c\n", 34, NumInvalidAnalyses, 34 )
+                                                      else if (LocalStatus( AnalysisInvalidMsg ) < 1)
+                                                      then  WriteToExportFile( InOutCSVFileIdx, "Analysis Status:,,%cValid%c\n", 34, 34 )
+                                                      else  WriteToExportFile( InOutCSVFileIdx, "Analysis Status:,,%cInvalid - %s%c\n", 34, ValidOr( AnalysisInvalidMsg, "" ), 34 )  endif endif  }   ; SAC 01/03/25
 
    "Set CUAC:UnitTypeLabels[1]"  CUAC:UnitTypeLabels[1] = { if (IfValidAnd( AffordableUnitsByBedrms[1] > 0 )==0) then  UNDEFINED  else  "Studio"     endif  }
    "Set CUAC:UnitTypeLabels[2]"  CUAC:UnitTypeLabels[2] = { if (IfValidAnd( AffordableUnitsByBedrms[2] > 0 )==0) then  UNDEFINED  else  "1 Bedroom"  endif  }
