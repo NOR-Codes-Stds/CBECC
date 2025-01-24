@@ -1,9 +1,9 @@
 ; -------------------------------------------------------------------------
-; Rules pertaining to:   Defaulting the Proposed Building Model - focusing on DHW properties
+; Rules pertaining to:   CUAC Defaulting & Analysis
 ; CEC Title-24 Residential Energy Code
 ; -------------------------------------------------------------------------
-; Copyright (c) 2012-2014, California Energy Commission
-; Copyright (c) 2012-2014, Wrightsoft Corporation
+; Copyright (c) 2012-2024, California Energy Commission
+; Copyright (c) 2024, SAC Software Solutions, LLC
 ; All rights reserved.
 ; Redistribution and use in source and binary forms, with or without modification,
 ; are permitted provided that the following conditions are met:
@@ -19,17 +19,17 @@
 ; "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
 ; THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
 ; NON-INFRINGEMENT ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION,
-; WRIGHTSOFT CORPORATION, ITRON, INC. OR ANY OTHER AUTHOR OR COPYRIGHT HOLDER OF
-; THIS SOFTWARE (COLLECTIVELY, THE "AUTHORS") BE LIABLE FOR ANY DIRECT, INDIRECT,
-; INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-; LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA,
-; OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
-; LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
-; OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-; ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.  EACH LICENSEE AND SUBLICENSEE OF THE
-; SOFTWARE AGREES NOT TO ASSERT ANY CLAIM AGAINST ANY OF THE AUTHORS RELATING TO
-; THIS SOFTWARE, WHETHER DUE TO PERFORMANCE ISSUES, TITLE OR INFRINGEMENT ISSUES,
-;STRICT LIABILITY OR OTHERWISE.
+; SAC SOFTWARE SOLUTIONS, WRIGHTSOFT CORPORATION, ITRON, INC. OR ANY OTHER AUTHOR
+; OR COPYRIGHT HOLDER OF THIS SOFTWARE (COLLECTIVELY, THE "AUTHORS") BE LIABLE FOR
+; ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+; (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+; OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+; THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+; NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
+; IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.  EACH LICENSEE AND SUBLICENSEE OF
+; THE SOFTWARE AGREES NOT TO ASSERT ANY CLAIM AGAINST ANY OF THE AUTHORS RELATING
+; TO THIS SOFTWARE, WHETHER DUE TO PERFORMANCE ISSUES, TITLE OR INFRINGEMENT
+; ISSUES, STRICT LIABILITY OR OTHERWISE.
 ; -------------------------------------------------------------------------
 
 ENUM_PROPERTIES_VALUE   ; ensures retrieval/logic/us of enum properties assume numeric value (alternative is ENUM_PROPERTIES_STRING)
@@ -38,6 +38,20 @@ ENUM_PROPERTIES_VALUE   ; ensures retrieval/logic/us of enum properties assume n
 RULELIST "CUAC_ZoneUnitCounts" 0 0 0 0
 ;*************************************************************************
 ; these rules only evaluated if:  IfValidAnd( Proj:AffordableHousing > 0 ) .AND. IfValidAnd( Proj:CUACReport > 0 )
+
+   "Set CUAC:PerformJA13DHWBillAdj"    CUAC:PerformJA13DHWBillAdj =     ; prescribed, allow input override for testing - SAC 01/15/25
+      {  if (IfValidAnd( ResProj:SimulateDemRespHPWH > 0 )==0 .AND.
+             SumAcrossIf( ResDHWSys:DemRespCompat, ResDHWSys:FloorAreaServed[1] > 1 ) > 0)
+         then  1  else  0  endif  }
+   "Set CUAC:JA13DHWBillAdjPctUseIncrease - pct increase in DHW elec use on peak-shifted days"
+      CUAC:JA13DHWBillAdjPctUseIncrease =    ; prescribed, allow input override for testing - SAC 01/17/25
+      {  if (PerformJA13DHWBillAdj > 0) then   7  else  UNDEFINED  endif  }
+   "Set CUAC:JA13DHWBillAdjPctDeltaPkPrice - minimum pct difference in on-peak vs. off-peak elec price to perform peak shift"
+      CUAC:JA13DHWBillAdjPctDeltaPkPrice =   ; prescribed, allow input override for testing - SAC 01/21/25
+      {  if (PerformJA13DHWBillAdj > 0) then  12  else  UNDEFINED  endif  }
+   "Set CUAC:JA13DHWBillAdjMaxOffPeakMult - maximum off-peak elec use multiplier (to cover on-peak reduction), else remaining use distributed evenly in 4 prior hours"
+      CUAC:JA13DHWBillAdjMaxOffPeakMult =    ; prescribed, allow input override for testing - SAC 01/22/25
+      {  if (PerformJA13DHWBillAdj > 0) then   5  else  UNDEFINED  endif  }
 
    "Set ResZn:AffordableUnitsByBedrmsWithMult[1] - Studio"     ResZn:AffordableUnitsByBedrmsWithMult[1] =      ; SAC 08/04/22 (CUAC)
       {  if (IfValidAnd( AffordableHousing > 0 )) then  NumDwellingUnitsByBedrmsWithMult[1]  else  UNDEFINED  endif  }
@@ -406,6 +420,10 @@ RULELIST "CUAC_ZoneUnitCounts" 0 0 0 0
                else  "Allocation of affordable housing tenant PV successful!"  endif
          endif endif endif endif endif endif endif endif endif endif endif  }
 
+   ; On-peak DHW elec use multiplied by this factor and shifted to prior period (*1.07 (7% increase in elec use)) - SAC 01/15/25
+   "Set CUAC:AffordableUnitJA13DHWBillAdjFactor[1-7]"   for:#U=(1to7)  CUAC:AffordableUnitJA13DHWBillAdjFactor[#U]  = 
+      {  if (IfValidAnd( PerformJA13DHWBillAdj > 0 ) .AND. IfValidAnd( AffordableUnitsByBedrms[#U] > 0 )) then  0.32  else  UNDEFINED  endif  }
+
    "remove restricted CUAC user inputs if not in research mode"   CUAC:Action =
       {  if (IfValidAnd( Proj:EnableResearchMode > 0 )==0 .AND. 
              ( LocalStatus( ElecBillReconBeginMo ) > 5 .OR. LocalStatus( ElecBillMinMoCharge ) > 5 .OR.
@@ -431,6 +449,18 @@ END
 RULELIST "CUAC_ZoneUnitCounts_OldCUAC" 0 0 0 0
 ;*************************************************************************
 ; these rules only evaluated if:  IfValidAnd( Proj:AffordableHousing > 0 ) .AND. IfValidAnd( Proj:CUACReport > 0 ) .AND. IfValidAnd( CUAC_OldAccessDB > 0 )
+
+   "Set CUAC:PerformJA13DHWBillAdj"    CUAC:PerformJA13DHWBillAdj =     ; prescribed, allow input override for testing - SAC 01/15/25
+      {  0  }
+   "Set CUAC:JA13DHWBillAdjPctUseIncrease - pct increase in DHW elec use on peak-shifted days"
+      CUAC:JA13DHWBillAdjPctUseIncrease =    ; prescribed, allow input override for testing - SAC 01/17/25
+      {  UNDEFINED  }
+   "Set CUAC:JA13DHWBillAdjPctDeltaPkPrice - minimum pct difference in on-peak vs. off-peak elec price to perform peak shift"
+      CUAC:JA13DHWBillAdjPctDeltaPkPrice =   ; prescribed, allow input override for testing - SAC 01/21/25
+      {  UNDEFINED  }
+   "Set CUAC:JA13DHWBillAdjMaxOffPeakMult - maximum off-peak elec use multiplier (to cover on-peak reduction), else remaining use distributed evenly in 4 prior hours"
+      CUAC:JA13DHWBillAdjMaxOffPeakMult =    ; prescribed, allow input override for testing - SAC 01/22/25
+      {  UNDEFINED  }
 
    "Set CUAC:AffordableUnitsByBedrms[1] - Studio"     CUAC:AffordableUnitsByBedrms[1] = {  SumAcrossIf( OldCUACApt:NumAffordableUnits, OldCUACApt:NumBedrooms = 0 )  }      ; SAC 09/18/23
    "Set CUAC:AffordableUnitsByBedrms[2] - 1 Bdrm"     CUAC:AffordableUnitsByBedrms[2] = {  SumAcrossIf( OldCUACApt:NumAffordableUnits, OldCUACApt:NumBedrooms = 1 )  }
