@@ -768,26 +768,35 @@ ENDRULE
 // ---------- Efficiencies ----------------------------------------------------*
 // Determine code minimum SEER/EER/IEER for VRF
 // 
-RULE NEW VRFSys:EffRtg
-  DATATYPE
-    Enumeration
-  LONGFORM
-    EfficiencyRating
-  INPUTCLASS
-    Default
-  OPTION
-    AHRI 1230-2014
-    AHRI 1230-2021/2023
+RULE VRFSys:IsSmallVRF
+  DESCRIPTION
+    "A flag that indicates the system cooling capacity is under 65,000 Btu/h.
+     It is only used for EffRtg enum list control."
+  DEFAULT
+    if(IfValidAnd(ClgCapNetRtd < 65000))then
+      1
+    else
+      0
+    endif
+ENDRULE
+
+RULE VRFSys:EffRtg
+  DESCRIPTION
+    "The test standard the system is tested under."
+  HELP
+    "AHRI 1230 test procedure changes in 2021/2023 affect VRF EER ratings. To account for this, 
+     equipment rated under 2021/2023 or newer AHRI 1230 must select 2021/2023. Systems rated under 
+     older procedures must select 2014.
+
+
+     VRFs with capacities less than 65,000 Btu/hr are no longer covered by AHRI 1230-2021/2023. 
+     Instead, they are now covered by AHRI 210/240-2023. But CBECC does not support modeling VRFs 
+     rated under AHRI 210/240 currently. Model those VRFs as mini-split systems in CBECC."
+  ; OPTION
+    ; AHRI 1230-2014
+    ; AHRI 1230-2021/2023
   DEFAULT
     "AHRI 1230-2014"
-  CHECKCODE
-    if(EffRtg = "AHRI 1230-2021/2023" .AND. ClgCapNetRtd < 65000)
-    then PostError("AHRI 1230-2021/2023 does not cover VRF < 65,000 Btu/h, and VRFs rated with
-                    SEER2 with AHRI 210/240 are not currently supported. Change Efficiency Rating of
-                    VRFSystem '%s' to 'AHRI 1230-2014' or model the system as a mini-split system."
-                    , name)
-    else UNCHANGED
-    endif
 ENDRULE
 
 RULE NEW VRFSys:VRF2023Factor
@@ -862,30 +871,11 @@ RULE NEW VRFSys:CodeMinEER
   REPORTPRECISION
     1
   DEFAULT
-    if(IfValidAnd(ClgCapNetRtd > 0))
-    then
-      if(IfValidAnd(ClgCapNetRtd < 65000))
-      then 0 // SEER rated
-      else if(EffRtg = "AHRI 1230-2021/2023")
-      then  // New Standard, ticket 3647
-        if(IfValidAnd(HtgCapNetRtd > 0))
-        then // Is VRF HP
-          UnitaryACHPMinEffReq:EER(
-            "StandardsVersion", "Compliance2025",
-            "Category", "VRF",
-            "SubCategory", "HP",
-            "CondenserType", "Air",
-            "SizeCategory", ClgCapNetRtd) - EERDeduction
-        else // Is VRF AC
-          UnitaryACHPMinEffReq:EER(
-            "StandardsVersion", "Compliance2025",
-            "Category", "VRF",
-            "SubCategory", "AC",
-            "CondenserType", "Air",
-            "SizeCategory", ClgCapNetRtd)
-        endif
-      else if(IfValidAnd(HtgCapNetRtd > 0))
-      then // Is VRF HP
+    if(IfValidAnd(ClgCapNetRtd > 0))then
+      if(IfValidAnd(ClgCapNetRtd < 65000))then
+        0 // SEER rated
+      else if(IfValidAnd(HtgCapNetRtd > 0))then
+        // Is VRF HP
         UnitaryACHPMinEffReq:EER(
           "StandardsVersion", Proj:StdsVersion,
           "Category", "VRF",
@@ -899,8 +889,9 @@ RULE NEW VRFSys:CodeMinEER
           "SubCategory", "AC",
           "CondenserType", "Air",
           "SizeCategory", ClgCapNetRtd)
-      endif endif endif
-    else UNDEFINED
+      endif endif
+    else
+      UNDEFINED
     endif
 ENDRULE
 
@@ -916,29 +907,27 @@ RULE NEW VRFSys:CodeMinIEER
   REPORTPRECISION
     1
   DEFAULT
-    if(IfValidAnd(ClgCapNetRtd > 0))
-    then
-      if(IfValidAnd(ClgCapNetRtd < 65000))
-      then 0 // SEER rated
-      else if(EffRtg = "AHRI 1230-2021/2023")
-      then  // New Standard, ticket 3647
-        if(IfValidAnd(HtgCapNetRtd > 0))
-        then // Is VRF HP
-          if(IfValidAnd(HtRcvry = "Yes"))
-          then UnitaryACHPMinEffReq:IEER(
-                "StandardsVersion", "Compliance2025",
-                "Category", "VRF",
-                "SubCategory", "HP",
-                "CondenserType", "Air",
-                "SizeCategory", ClgCapNetRtd,
-                "AdditionalCriteria", "HasHeatRecovery") - EERDeduction
-          else  UnitaryACHPMinEffReq:IEER(
-                "StandardsVersion", "Compliance2025",
-                "Category", "VRF",
-                "SubCategory", "HP",
-                "CondenserType", "Air",
-                "SizeCategory", ClgCapNetRtd,
-                "AdditionalCriteria", "NoHeatRecovery") - EERDeduction
+    if(IfValidAnd(ClgCapNetRtd > 0))then
+      if(IfValidAnd(ClgCapNetRtd < 65000))then
+        0 // SEER rated
+      else if(EffRtg = "AHRI 1230-2021/2023")then  // New Standard, ticket 3647
+        if(IfValidAnd(HtgCapNetRtd > 0))then // Is VRF HP
+          if(IfValidAnd(HtRcvry = "Yes"))then
+            UnitaryACHPMinEffReq:IEER(
+              "StandardsVersion", "Compliance2025",
+              "Category", "VRF",
+              "SubCategory", "HP",
+              "CondenserType", "Air",
+              "SizeCategory", ClgCapNetRtd,
+              "AdditionalCriteria", "HasHeatRecovery") - EERDeduction
+          else // without heat recovery
+            UnitaryACHPMinEffReq:IEER(
+              "StandardsVersion", "Compliance2025",
+              "Category", "VRF",
+              "SubCategory", "HP",
+              "CondenserType", "Air",
+              "SizeCategory", ClgCapNetRtd,
+              "AdditionalCriteria", "NoHeatRecovery") - EERDeduction
           endif
         else // Is VRF AC
           UnitaryACHPMinEffReq:IEER(
@@ -948,23 +937,11 @@ RULE NEW VRFSys:CodeMinIEER
             "CondenserType", "Air",
             "SizeCategory", ClgCapNetRtd)
         endif
-      else if( IfValidAnd( HtgCapNetRtd > 0 ) )
-      then // Is VRF HP
-        UnitaryACHPMinEffReq:IEER(
-          "StandardsVersion", Proj:StdsVersion,
-          "Category", "VRF",
-          "SubCategory", "HP",
-          "CondenserType", "Air",
-          "SizeCategory", ClgCapNetRtd) - EERDeduction
-      else // Is VRF AC
-        UnitaryACHPMinEffReq:IEER(
-          "StandardsVersion", Proj:StdsVersion,
-          "Category", "VRF",
-          "SubCategory", "AC",
-          "CondenserType", "Air",
-          "SizeCategory", ClgCapNetRtd)
-      endif endif endif
-    else UNDEFINED
+      else
+        0 // No IEER check for system rated using 2014 test procedures
+      endif endif
+    else
+      UNDEFINED
     endif
 ENDRULE
 
