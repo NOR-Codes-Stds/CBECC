@@ -6,14 +6,14 @@ echo BEMCompiler25c.exe returned (%ERRORLEVEL%) for T24N_2025
 if %ERRORLEVEL%==0 goto :copyfiles
 goto :error
 :copyfiles
-copy "..\RulesetDev\Rulesets\T24N\T24N_2025 Screens.txt"  "..\CBECC-Com64\Data\Rulesets\T24_2025\T24_2025 Screens.txt"
-copy "..\RulesetDev\Rulesets\T24N\T24N ToolTips.txt" "..\CBECC-Com64\Data\Rulesets\T24_2025\T24_2025 ToolTips.txt"
-copy "..\RulesetDev\Rulesets\T24N\*.jpg" "..\CBECC-Com64\Data\Rulesets\T24_2025\*.*"
-copy "..\RulesetDev\Rulesets\T24N\RTF\*.*" "..\CBECC-Com64\Data\Rulesets\T24_2025\RTF\*.*"
-copy "..\RulesetDev\Rulesets\shared\Screens*.txt" "..\CBECC-Com64\Data\Rulesets\T24_2025\*.*"
-copy "..\RulesetDev\Rulesets\shared\*.jpg" "..\CBECC-Com64\Data\Rulesets\T24_2025\*.*"
+copy "..\RulesetDev\Rulesets\T24N\T24N_2025 Screens.txt"  "..\CBECC\Data\Rulesets\T24_2025\T24_2025 Screens.txt"
+copy "..\RulesetDev\Rulesets\T24N\T24N ToolTips.txt" "..\CBECC\Data\Rulesets\T24_2025\T24_2025 ToolTips.txt"
+copy "..\RulesetDev\Rulesets\T24N\*.jpg" "..\CBECC\Data\Rulesets\T24_2025\*.*"
+copy "..\RulesetDev\Rulesets\T24N\RTF\*.*" "..\CBECC\Data\Rulesets\T24_2025\RTF\*.*"
+copy "..\RulesetDev\Rulesets\shared\Screens*.txt" "..\CBECC\Data\Rulesets\T24_2025\*.*"
+copy "..\RulesetDev\Rulesets\shared\*.jpg" "..\CBECC\Data\Rulesets\T24_2025\*.*"
 rem copy "..\RulesetDev\Rulesets\CEC 2013 Nonres\CEC 2013 NonRes Defaults.dbd" "..\CBECC-Com\Data\Rulesets\T24_2025\T24_2025 Defaults.dbd"
-copy "..\RulesetDev\Rulesets\T24N\DHWDU2.txt" "..\CBECC-Com64\CSE\*.*"
+rem copy "..\RulesetDev\Rulesets\T24N\DHWDU2.txt" "..\CBECC\CSE\*.*"
 goto :done
 :error
 echo -
