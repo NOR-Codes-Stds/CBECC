@@ -698,30 +698,46 @@ RULELIST "Default_AllHVAC" 0 0 0 0
 											default :  EvalRulelist( "Default_HtPump_unknown", 1 )
 										endswitch  }
 
+
+   "Set HVACHtPump:AllowBackupOpt - compatible w/ backup htg"     HVACHtPump:AllowBackupOpt =      ; for now, only SplitHeatPump & HeatPumpV3 - SAC 02/21/25 (tic #1379)
+      {  if (IfValidAnd( Proj:AnalysisVersion >= 250000 )==0) then  0
+         else if (Type == 4 || Type == 36) then  1
+         else  0  endif endif  }
+   "default HVACHtPump:BackupOption"   HVACHtPump:BackupOption = {  -1  }  ; no selection
+
    ; properties added for dual fuel heat pumps - SAC 12/08/20
    "Set HVACHtPump:AllowDualFuel - compatible w/ dual fuel flag"        HVACHtPump:AllowDualFuel =    ; logic added to prevent access in code vints prior to 2022 - SAC 03/10/21
-      {  if (IfValidAnd( Proj:AnalysisVersion >= 220000 )==0) then  0
+      {  if (IfValidAnd( Proj:AnalysisVersion >= 220000 )==0 .OR. AllowBackupOpt > 0) then  0
          else if (T24RHeatingEquipment:DuctFlag(  "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", TypeAbbrevStr ) > 0 .AND.
                   Type != 35)
          then  1  else  0  endif endif  }       ; HeatPumpDHWCombo - SAC 04/03/23 (tic #1349)
    "Default HVACHtPump:IsDualFuel - user dual fuel selection"           HVACHtPump:IsDualFuel =
       {  if (AllowDualFuel < 1) then  UNDEFINED  else  0  endif  }
+
+   "Set HVACHtPump:ShowAFUE"        HVACHtPump:ShowAFUE =      ; SAC 02/22/25 (tic #1379)
+      {  if ((AllowDualFuel  > 0 .AND. IfValidAnd( IsDualFuel > 0 )) .OR.
+             (AllowBackupOpt > 0 .AND. BackupOption == 2)) then  1  else  0  endif  }
+   "Set HVACHtPump:ShowLockout"     HVACHtPump:ShowLockout =
+      {  if (Type == 36) then  0
+         else if ((AllowDualFuel  > 0 .AND. IfValidAnd( IsDualFuel > 0 )) .OR.
+                  (AllowBackupOpt > 0 .AND. BackupOption >  0)) then  1  else  0  endif endif  }
+
    "Default HVACHtPump:AFUE  - backup efficiency (%)"                   HVACHtPump:AFUE =
-      {  if (AllowDualFuel < 1 .OR. IfValidAnd( IsDualFuel > 0 )==0) then  UNDEFINED
+      {  if (ShowAFUE < 1) then  UNDEFINED
          else  T24RHeatingEquipment:AFUE(  "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", "CntrlFurnace" )  endif  }
    "Default HVACHtPump:HasHPLockout - has lockout temp for HP"          HVACHtPump:HasHPLockout =     ; revised to leave UNCHANGED for type = 36 (HeatPumpV3) - SAC 09/05/24
       {  if (Type == 36) then  UNCHANGED
-         else if (AllowDualFuel < 1 .OR. IfValidAnd( IsDualFuel > 0 )==0) then  UNDEFINED  else  1  endif endif  }
+         else if (ShowLockout < 1) then  UNDEFINED  else  1  endif endif  }
    "Default HVACHtPump:HPLockoutTemp - lockout temperature for HP"      HVACHtPump:HPLockoutTemp =
       {  if (Type == 36) then  UNCHANGED
-         else if (AllowDualFuel < 1 .OR. IfValidAnd( IsDualFuel > 0 )==0) then  UNDEFINED  else  35  endif endif  }
-   "set HVACHtPump:HPLockoutTempActive"      HVACHtPump:HPLockoutTempActive =          ; SAC 01/24/25 (tic #1390)
-      {  if (AllowDualFuel > 0 .AND. IfValidAnd( Proj:EnableResearchMode > 0 )==0 .AND.
-             IfValidAnd( IsDualFuel > 0 ) .AND. IfValidAnd( HasHPLockout > 0 ))
+         else if (ShowLockout < 1) then  UNDEFINED  else  35  endif endif  }
+   "set HVACHtPump:HPLockoutTempActive"      HVACHtPump:HPLockoutTempActive =          ; SAC 01/24/25 (tic #1390)  ; revised for BackupOption - SAC 02/22/25 (tic #1379)
+      {  if (ShowLockout > 0 .AND. IfValidAnd( HasHPLockout > 0 ) .AND. IfValidAnd( Proj:EnableResearchMode > 0 )==0)
          then  1  else  UNDEFINED  endif  }
-   "Set HVACHtPump:ModelDualFuel - whether dual fuel is compatible, selected & includes valid inputs"    HVACHtPump:ModelDualFuel =
-      {  if (AllowDualFuel > 0 .AND. IfValidAnd( IsDualFuel > 0 ) .AND. IfValidAnd( AFUE > 0 ))
-         then  1  else  UNDEFINED  endif  }
+   "Set HVACHtPump:ModelDualFuel - whether dual fuel is compatible, selected & includes valid inputs"    HVACHtPump:ModelDualFuel =       ; revised for BackupOption - SAC 02/22/25 (tic #1379)
+      {  if (IfValidAnd( AFUE > 0 )==0) then  UNDEFINED
+         else if (ShowAFUE > 0)
+         then  1  else  UNDEFINED  endif endif  }
 
   "Call subordinate rulelist to default cooling system data"
 		HVACCool:Action = {	switch (Local( Type ))
@@ -2611,7 +2627,8 @@ RULELIST "SetupHVACSys_Round2_HeatCool" 0 0 0 0
 	"Init HVACSys:HPSysCOP17"         HVACSys:HPSysCOP17        = {	UNDEFINED  }
 	"Init HVACSys:HPSysAuxHtgCap"     HVACSys:HPSysAuxHtgCap    = {	UNDEFINED  }
 	"Init HVACSys:HPSysVCHPFanPwr"    HVACSys:HPSysVCHPFanPwr   = {	UNDEFINED  }
-	"Init HVACSys:HPModelDualFuel"    HVACSys:HPModelDualFuel   = {	UNDEFINED  }
+   "Init HVACSys:HPBackupOption"     HVACSys:HPBackupOption    = {	-1  }     ; SAC 02/23/25
+;	"Init HVACSys:HPModelDualFuel"    HVACSys:HPModelDualFuel   = {	UNDEFINED  }
 	"Init HVACSys:HPDFAFUE"           HVACSys:HPDFAFUE          = {	UNDEFINED  }
 	"Init HVACSys:HPLockoutTemp"      HVACSys:HPLockoutTemp     = {	UNDEFINED  }
    "Init HVACSys:LrgHtPumpStdFanPwr" HVACSys:LrgHtPumpStdFanPwr =    ; 2022 - SAC 03/11/21  ; SAC 03/15/21
@@ -2845,39 +2862,48 @@ RULELIST "SetupHVACSys_Round2_HeatPump" 0 0 0 0
 	"Set HVACSys:HPSysVCHPFanPwr - 9" 	HVACSys:HPSysVCHPFanPwr	= {	if (NumHtPumpSystemTypes > 8 .AND. LocalCompAssigned( HtPumpSystem[9]  ) .AND. LocalStatus( HtPumpSystem[9]:VCHPFanPower  ) > 0) then  HPSysVCHPFanPwr + (HtPumpSystem[9]:VCHPFanPower  * HtPumpSystemCount[9] )  else  UNCHANGED  endif  }
 	"Set HVACSys:HPSysVCHPFanPwr - 10"	HVACSys:HPSysVCHPFanPwr	= {	if (NumHtPumpSystemTypes > 9 .AND. LocalCompAssigned( HtPumpSystem[10] ) .AND. LocalStatus( HtPumpSystem[10]:VCHPFanPower ) > 0) then  HPSysVCHPFanPwr + (HtPumpSystem[10]:VCHPFanPower * HtPumpSystemCount[10])  else  UNCHANGED  endif  }
 
-	"Set HVACSys:HPModelDualFuel - 1"	HVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 0 .AND. IfValidAnd( HtPumpSystem[1]:ModelDualFuel  > 0 )) then  1  else      0      endif  }  ; SAC 12/08/20
-	"Set HVACSys:HPModelDualFuel - 2"	HVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 1 .AND. IfValidAnd( HtPumpSystem[2]:ModelDualFuel  > 0 )) then  1  else  UNCHANGED  endif  }
-	"Set HVACSys:HPModelDualFuel - 3"	HVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 2 .AND. IfValidAnd( HtPumpSystem[3]:ModelDualFuel  > 0 )) then  1  else  UNCHANGED  endif  }
-	"Set HVACSys:HPModelDualFuel - 4"	HVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 3 .AND. IfValidAnd( HtPumpSystem[4]:ModelDualFuel  > 0 )) then  1  else  UNCHANGED  endif  }
-	"Set HVACSys:HPModelDualFuel - 5"	HVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 4 .AND. IfValidAnd( HtPumpSystem[5]:ModelDualFuel  > 0 )) then  1  else  UNCHANGED  endif  }
-	"Set HVACSys:HPModelDualFuel - 6"	HVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 5 .AND. IfValidAnd( HtPumpSystem[6]:ModelDualFuel  > 0 )) then  1  else  UNCHANGED  endif  }
-	"Set HVACSys:HPModelDualFuel - 7"	HVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 6 .AND. IfValidAnd( HtPumpSystem[7]:ModelDualFuel  > 0 )) then  1  else  UNCHANGED  endif  }
-	"Set HVACSys:HPModelDualFuel - 8"	HVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 7 .AND. IfValidAnd( HtPumpSystem[8]:ModelDualFuel  > 0 )) then  1  else  UNCHANGED  endif  }
-	"Set HVACSys:HPModelDualFuel - 9"	HVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 8 .AND. IfValidAnd( HtPumpSystem[9]:ModelDualFuel  > 0 )) then  1  else  UNCHANGED  endif  }
-	"Set HVACSys:HPModelDualFuel - 10"	HVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 9 .AND. IfValidAnd( HtPumpSystem[10]:ModelDualFuel > 0 )) then  1  else  UNCHANGED  endif  }
+	"Set HVACSys:HPBackupOption - 1"	                     HVACSys:HPBackupOption =         ; SAC 02/23/25 (tic #1379)
+      {  if (NumHtPumpSystemTypes > 0 .AND. IfValidAnd( HtPumpSystem[1]:AllowBackupOpt > 0 ) .AND.
+             IfValidAnd( HtPumpSystem[1]:BackupOption > 0 ))    then  HtPumpSystem[1]:BackupOption
+         else if (NumHtPumpSystemTypes > 0 .AND. IfValidAnd( HtPumpSystem[1]:AllowDualFuel > 0 ) .AND.
+                  IfValidAnd( HtPumpSystem[1]:IsDualFuel > 0 )) then  2   ; gas furnace
+         else  0  endif endif  }
+	"Set HVACSys:HPBackupOption - 2-10"	 for:#HP=(2to10)  HVACSys:HPBackupOption =
+      {  if (NumHtPumpSystemTypes < #HP .OR. HPBackupOption > 0)     then  UNCHANGED   ; already set
+         else if (IfValidAnd( HtPumpSystem[#HP]:AllowBackupOpt > 0 ) .AND.
+                  IfValidAnd( HtPumpSystem[#HP]:BackupOption > 0 ))  then  HtPumpSystem[#HP]:BackupOption
+         else if (IfValidAnd( HtPumpSystem[#HP]:AllowDualFuel > 0 )  .AND.
+                  IfValidAnd( HtPumpSystem[#HP]:IsDualFuel > 0 ))    then  2   ; gas furnace
+         else  UNCHANGED  endif endif endif  }
+;	"Set HVACSys:HPModelDualFuel - 1"	HVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 0 .AND. IfValidAnd( HtPumpSystem[1]:ModelDualFuel  > 0 )) then  1  else      0      endif  }  ; SAC 12/08/20
+;	"Set HVACSys:HPModelDualFuel - 2"	HVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 1 .AND. IfValidAnd( HtPumpSystem[2]:ModelDualFuel  > 0 )) then  1  else  UNCHANGED  endif  }
+;	"Set HVACSys:HPModelDualFuel - 3"	HVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 2 .AND. IfValidAnd( HtPumpSystem[3]:ModelDualFuel  > 0 )) then  1  else  UNCHANGED  endif  }
+;	"Set HVACSys:HPModelDualFuel - 4"	HVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 3 .AND. IfValidAnd( HtPumpSystem[4]:ModelDualFuel  > 0 )) then  1  else  UNCHANGED  endif  }
+;	"Set HVACSys:HPModelDualFuel - 5"	HVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 4 .AND. IfValidAnd( HtPumpSystem[5]:ModelDualFuel  > 0 )) then  1  else  UNCHANGED  endif  }
+;	"Set HVACSys:HPModelDualFuel - 6"	HVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 5 .AND. IfValidAnd( HtPumpSystem[6]:ModelDualFuel  > 0 )) then  1  else  UNCHANGED  endif  }
+;	"Set HVACSys:HPModelDualFuel - 7"	HVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 6 .AND. IfValidAnd( HtPumpSystem[7]:ModelDualFuel  > 0 )) then  1  else  UNCHANGED  endif  }
+;	"Set HVACSys:HPModelDualFuel - 8"	HVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 7 .AND. IfValidAnd( HtPumpSystem[8]:ModelDualFuel  > 0 )) then  1  else  UNCHANGED  endif  }
+;	"Set HVACSys:HPModelDualFuel - 9"	HVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 8 .AND. IfValidAnd( HtPumpSystem[9]:ModelDualFuel  > 0 )) then  1  else  UNCHANGED  endif  }
+;	"Set HVACSys:HPModelDualFuel - 10"	HVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 9 .AND. IfValidAnd( HtPumpSystem[10]:ModelDualFuel > 0 )) then  1  else  UNCHANGED  endif  }
 
-	"Set HVACSys:HPDFAFUE - 1"	   HVACSys:HPDFAFUE  = {	if (NumHtPumpSystemTypes > 0 .AND. IfValidAnd( HtPumpSystem[1]:ModelDualFuel  > 0 ) .AND. IfValidAnd( HtPumpSystem[1]:AFUE > 0 ))        then  HtPumpSystem[1]:AFUE  else     101     endif  }
-	"Set HVACSys:HPDFAFUE - 2"	   HVACSys:HPDFAFUE  = {	if (NumHtPumpSystemTypes > 1 .AND. IfValidAnd( HtPumpSystem[2]:ModelDualFuel  > 0 ) .AND. IfValidAnd( HtPumpSystem[2]:AFUE < HPDFAFUE )) then  HtPumpSystem[2]:AFUE  else  UNCHANGED  endif  }
-	"Set HVACSys:HPDFAFUE - 3"	   HVACSys:HPDFAFUE  = {	if (NumHtPumpSystemTypes > 2 .AND. IfValidAnd( HtPumpSystem[3]:ModelDualFuel  > 0 ) .AND. IfValidAnd( HtPumpSystem[3]:AFUE < HPDFAFUE )) then  HtPumpSystem[3]:AFUE  else  UNCHANGED  endif  }
-	"Set HVACSys:HPDFAFUE - 4"	   HVACSys:HPDFAFUE  = {	if (NumHtPumpSystemTypes > 3 .AND. IfValidAnd( HtPumpSystem[4]:ModelDualFuel  > 0 ) .AND. IfValidAnd( HtPumpSystem[4]:AFUE < HPDFAFUE )) then  HtPumpSystem[4]:AFUE  else  UNCHANGED  endif  }
-	"Set HVACSys:HPDFAFUE - 5"	   HVACSys:HPDFAFUE  = {	if (NumHtPumpSystemTypes > 4 .AND. IfValidAnd( HtPumpSystem[5]:ModelDualFuel  > 0 ) .AND. IfValidAnd( HtPumpSystem[5]:AFUE < HPDFAFUE )) then  HtPumpSystem[5]:AFUE  else  UNCHANGED  endif  }
-	"Set HVACSys:HPDFAFUE - 6"	   HVACSys:HPDFAFUE  = {	if (NumHtPumpSystemTypes > 5 .AND. IfValidAnd( HtPumpSystem[6]:ModelDualFuel  > 0 ) .AND. IfValidAnd( HtPumpSystem[6]:AFUE < HPDFAFUE )) then  HtPumpSystem[6]:AFUE  else  UNCHANGED  endif  }
-	"Set HVACSys:HPDFAFUE - 7"	   HVACSys:HPDFAFUE  = {	if (NumHtPumpSystemTypes > 6 .AND. IfValidAnd( HtPumpSystem[7]:ModelDualFuel  > 0 ) .AND. IfValidAnd( HtPumpSystem[7]:AFUE < HPDFAFUE )) then  HtPumpSystem[7]:AFUE  else  UNCHANGED  endif  }
-	"Set HVACSys:HPDFAFUE - 8"	   HVACSys:HPDFAFUE  = {	if (NumHtPumpSystemTypes > 7 .AND. IfValidAnd( HtPumpSystem[8]:ModelDualFuel  > 0 ) .AND. IfValidAnd( HtPumpSystem[8]:AFUE < HPDFAFUE )) then  HtPumpSystem[8]:AFUE  else  UNCHANGED  endif  }
-	"Set HVACSys:HPDFAFUE - 9"	   HVACSys:HPDFAFUE  = {	if (NumHtPumpSystemTypes > 8 .AND. IfValidAnd( HtPumpSystem[9]:ModelDualFuel  > 0 ) .AND. IfValidAnd( HtPumpSystem[9]:AFUE < HPDFAFUE )) then  HtPumpSystem[9]:AFUE  else  UNCHANGED  endif  }
-	"Set HVACSys:HPDFAFUE - 10"	HVACSys:HPDFAFUE  = {	if (NumHtPumpSystemTypes > 9 .AND. IfValidAnd( HtPumpSystem[10]:ModelDualFuel > 0 ) .AND. IfValidAnd( HtPumpSystem[10]AFUE < HPDFAFUE )) then  HtPumpSystem[10]AFUE  else  UNCHANGED  endif  }
+	"Set HVACSys:HPDFAFUE - 1"	                       HVACSys:HPDFAFUE  =
+      {  if (NumHtPumpSystemTypes > 0 .AND. IfValidAnd( HtPumpSystem[1]:ModelDualFuel  > 0 ) .AND.
+             IfValidAnd( HtPumpSystem[1]:AFUE > 0 ))
+         then  HtPumpSystem[1]:AFUE  else     101     endif  }
+	"Set HVACSys:HPDFAFUE - 2-10"   for:#HP=(2to10)   HVACSys:HPDFAFUE  =
+      {  if (NumHtPumpSystemTypes >= #HP .AND. IfValidAnd( HtPumpSystem[#HP]:ModelDualFuel  > 0 ) .AND.
+             IfValidAnd( HtPumpSystem[#HP]:AFUE < HPDFAFUE ))
+         then  HtPumpSystem[#HP]:AFUE  else  UNCHANGED  endif  }
 
-   ; revised for HP type HeatPumpV3 - SAC 09/05/24
-	"Set HVACSys:HPLockoutTemp - 1"	   HVACSys:HPLockoutTemp  = {	if (NumHtPumpSystemTypes > 0 .AND. (IfValidAnd( HtPumpSystem[1]:Type  = 36 ) .OR. IfValidAnd( HtPumpSystem[1]:ModelDualFuel  > 0 )) .AND. IfValidAnd( HtPumpSystem[1]:HasHPLockout > 0 ) .AND. IfValidAnd( HtPumpSystem[1]:HPLockoutTemp > -999 ))          then  HtPumpSystem[1]:HPLockoutTemp  else    -999     endif  }
-	"Set HVACSys:HPLockoutTemp - 2"	   HVACSys:HPLockoutTemp  = {	if (NumHtPumpSystemTypes > 1 .AND. (IfValidAnd( HtPumpSystem[2]:Type  = 36 ) .OR. IfValidAnd( HtPumpSystem[2]:ModelDualFuel  > 0 )) .AND. IfValidAnd( HtPumpSystem[2]:HasHPLockout > 0 ) .AND. IfValidAnd( HtPumpSystem[2]:HPLockoutTemp > HPLockoutTemp )) then  HtPumpSystem[2]:HPLockoutTemp  else  UNCHANGED  endif  }
-	"Set HVACSys:HPLockoutTemp - 3"	   HVACSys:HPLockoutTemp  = {	if (NumHtPumpSystemTypes > 2 .AND. (IfValidAnd( HtPumpSystem[3]:Type  = 36 ) .OR. IfValidAnd( HtPumpSystem[3]:ModelDualFuel  > 0 )) .AND. IfValidAnd( HtPumpSystem[3]:HasHPLockout > 0 ) .AND. IfValidAnd( HtPumpSystem[3]:HPLockoutTemp > HPLockoutTemp )) then  HtPumpSystem[3]:HPLockoutTemp  else  UNCHANGED  endif  }
-	"Set HVACSys:HPLockoutTemp - 4"	   HVACSys:HPLockoutTemp  = {	if (NumHtPumpSystemTypes > 3 .AND. (IfValidAnd( HtPumpSystem[4]:Type  = 36 ) .OR. IfValidAnd( HtPumpSystem[4]:ModelDualFuel  > 0 )) .AND. IfValidAnd( HtPumpSystem[4]:HasHPLockout > 0 ) .AND. IfValidAnd( HtPumpSystem[4]:HPLockoutTemp > HPLockoutTemp )) then  HtPumpSystem[4]:HPLockoutTemp  else  UNCHANGED  endif  }
-	"Set HVACSys:HPLockoutTemp - 5"	   HVACSys:HPLockoutTemp  = {	if (NumHtPumpSystemTypes > 4 .AND. (IfValidAnd( HtPumpSystem[5]:Type  = 36 ) .OR. IfValidAnd( HtPumpSystem[5]:ModelDualFuel  > 0 )) .AND. IfValidAnd( HtPumpSystem[5]:HasHPLockout > 0 ) .AND. IfValidAnd( HtPumpSystem[5]:HPLockoutTemp > HPLockoutTemp )) then  HtPumpSystem[5]:HPLockoutTemp  else  UNCHANGED  endif  }
-	"Set HVACSys:HPLockoutTemp - 6"	   HVACSys:HPLockoutTemp  = {	if (NumHtPumpSystemTypes > 5 .AND. (IfValidAnd( HtPumpSystem[6]:Type  = 36 ) .OR. IfValidAnd( HtPumpSystem[6]:ModelDualFuel  > 0 )) .AND. IfValidAnd( HtPumpSystem[6]:HasHPLockout > 0 ) .AND. IfValidAnd( HtPumpSystem[6]:HPLockoutTemp > HPLockoutTemp )) then  HtPumpSystem[6]:HPLockoutTemp  else  UNCHANGED  endif  }
-	"Set HVACSys:HPLockoutTemp - 7"	   HVACSys:HPLockoutTemp  = {	if (NumHtPumpSystemTypes > 6 .AND. (IfValidAnd( HtPumpSystem[7]:Type  = 36 ) .OR. IfValidAnd( HtPumpSystem[7]:ModelDualFuel  > 0 )) .AND. IfValidAnd( HtPumpSystem[7]:HasHPLockout > 0 ) .AND. IfValidAnd( HtPumpSystem[7]:HPLockoutTemp > HPLockoutTemp )) then  HtPumpSystem[7]:HPLockoutTemp  else  UNCHANGED  endif  }
-	"Set HVACSys:HPLockoutTemp - 8"	   HVACSys:HPLockoutTemp  = {	if (NumHtPumpSystemTypes > 7 .AND. (IfValidAnd( HtPumpSystem[8]:Type  = 36 ) .OR. IfValidAnd( HtPumpSystem[8]:ModelDualFuel  > 0 )) .AND. IfValidAnd( HtPumpSystem[8]:HasHPLockout > 0 ) .AND. IfValidAnd( HtPumpSystem[8]:HPLockoutTemp > HPLockoutTemp )) then  HtPumpSystem[8]:HPLockoutTemp  else  UNCHANGED  endif  }
-	"Set HVACSys:HPLockoutTemp - 9"	   HVACSys:HPLockoutTemp  = {	if (NumHtPumpSystemTypes > 8 .AND. (IfValidAnd( HtPumpSystem[9]:Type  = 36 ) .OR. IfValidAnd( HtPumpSystem[9]:ModelDualFuel  > 0 )) .AND. IfValidAnd( HtPumpSystem[9]:HasHPLockout > 0 ) .AND. IfValidAnd( HtPumpSystem[9]:HPLockoutTemp > HPLockoutTemp )) then  HtPumpSystem[9]:HPLockoutTemp  else  UNCHANGED  endif  }
-	"Set HVACSys:HPLockoutTemp - 10"	   HVACSys:HPLockoutTemp  = {	if (NumHtPumpSystemTypes > 9 .AND. (IfValidAnd( HtPumpSystem[10]:Type = 36 ) .OR. IfValidAnd( HtPumpSystem[10]:ModelDualFuel > 0 )) .AND. IfValidAnd( HtPumpSystem[10]HasHPLockout > 0 ) .AND. IfValidAnd( HtPumpSystem[10]HPLockoutTemp > HPLockoutTemp )) then  HtPumpSystem[10]HPLockoutTemp  else  UNCHANGED  endif  }
+   ; revised for HP type HeatPumpV3 - SAC 09/05/24    ; revised w/ ShowLockout - SAC 02/23/25 
+	"Set HVACSys:HPLockoutTemp - 1"	                      HVACSys:HPLockoutTemp  =
+      {  if (NumHtPumpSystemTypes > 0 .AND. (IfValidAnd( HtPumpSystem[1]:Type = 36 ) .OR. IfValidAnd( HtPumpSystem[1]:ShowLockout > 0 )) .AND.
+             IfValidAnd( HtPumpSystem[1]:HasHPLockout > 0 ) .AND. IfValidAnd( HtPumpSystem[1]:HPLockoutTemp > -999 ))
+         then  HtPumpSystem[1]:HPLockoutTemp  else    -999     endif  }
+	"Set HVACSys:HPLockoutTemp - 2-10"   for:#HP=(2to10)   HVACSys:HPLockoutTemp  =
+      {  if (NumHtPumpSystemTypes >= #HP .AND. (IfValidAnd( HtPumpSystem[#HP]:Type = 36 ) .OR. IfValidAnd( HtPumpSystem[#HP]:ShowLockout > 0 )) .AND.
+             IfValidAnd( HtPumpSystem[#HP]:HasHPLockout > 0 ) .AND. IfValidAnd( HtPumpSystem[#HP]:HPLockoutTemp > HPLockoutTemp ))
+         then  HtPumpSystem[#HP]:HPLockoutTemp  else  UNCHANGED  endif  }
 
    ; added logic to several rules below preventing table look-ups when no valid ht pump assigned - SAC 07/03/24
    "Set HVACSys:LrgHtPumpStdFanPwr"    HVACSys:LrgHtPumpStdFanPwr =        ; 2022 - SAC 03/11/21  ; SAC 03/15/21
@@ -2914,14 +2940,16 @@ RULELIST "SetupHVACSys_Round2_HeatPump" 0 0 0 0
 					      then  if (HtPumpSystem[1]:Type == 7)
       							then	Format( "%.0f %s unit(s), auto-sized", NumHtPumpSysUnits, HtPumpSysTypeAbbrev )
 		      					else if (HtPumpSystem[1]:Type == 11 .OR. HtPumpSystem[1]:Type == 26 .OR. HtPumpSystem[1]:Type == 24)
-      							then	if (HPModelDualFuel > 0)
-                                 then  Format( "%.0f DF %s unit(s), @47: COP %.1f, auto-sized", NumHtPumpSysUnits, HtPumpSysTypeAbbrev, HPSysCOP47 )
-                                 else  Format( "%.0f %s unit(s), @47: COP %.1f, auto-sized",    NumHtPumpSysUnits, HtPumpSysTypeAbbrev, HPSysCOP47 )
-                                 endif
-		      					else	if (HPModelDualFuel > 0)
-                                 then  Format( "%.0f DF %s unit(s), %s %.1f, auto-sized", NumHtPumpSysUnits, HtPumpSysTypeAbbrev, EffMetricLbls[3], EffMetricVals[3] )
-                                 else  Format( "%.0f %s unit(s), %s %.1f, auto-sized",    NumHtPumpSysUnits, HtPumpSysTypeAbbrev, EffMetricLbls[3], EffMetricVals[3] )
-                                 endif
+      							then	switch (HPBackupOption)
+                                    case 1  : Format( "%.0f ElecBackup %s unit(s), @47: COP %.1f, auto-sized", NumHtPumpSysUnits, HtPumpSysTypeAbbrev, HPSysCOP47 )
+                                    case 2  : Format( "%.0f GasBackup %s unit(s), @47: COP %.1f, auto-sized", NumHtPumpSysUnits, HtPumpSysTypeAbbrev, HPSysCOP47 )
+                                    default : Format( "%.0f %s unit(s), @47: COP %.1f, auto-sized",    NumHtPumpSysUnits, HtPumpSysTypeAbbrev, HPSysCOP47 )
+                                 endswitch
+		      					else	switch (HPBackupOption)
+                                    case 1  : Format( "%.0f ElecBackup %s unit(s), %s %.1f, auto-sized", NumHtPumpSysUnits, HtPumpSysTypeAbbrev, EffMetricLbls[3], EffMetricVals[3] )
+                                    case 2  : Format( "%.0f GasBackup %s unit(s), %s %.1f, auto-sized", NumHtPumpSysUnits, HtPumpSysTypeAbbrev, EffMetricLbls[3], EffMetricVals[3] )
+                                    default : Format( "%.0f %s unit(s), %s %.1f, auto-sized",    NumHtPumpSysUnits, HtPumpSysTypeAbbrev, EffMetricLbls[3], EffMetricVals[3] )
+                                 endswitch
 				      			endif endif
 					      else  if (HtPumpSystem[1]:Type == 7)
       							then	Format( "%.0f %s unit(s), @47: Cap %s Btuh", NumHtPumpSysUnits, HtPumpSysTypeAbbrev, FltToStr( HPSysCap47 ) )
@@ -2930,16 +2958,18 @@ RULELIST "SetupHVACSys_Round2_HeatPump" 0 0 0 0
       							else if (HtPumpSystem[1]:Type == 35)
       							then	Format( "%.0f %s unit(s)", NumHtPumpSysUnits, HtPumpSysTypeAbbrev )
       							else if (HtPumpSystem[1]:Type == 11 .OR. HtPumpSystem[1]:Type == 26 .OR. HtPumpSystem[1]:Type == 24)
-      							then	if (HPModelDualFuel > 0)
-                                 then  Format( "%.0f DF %s unit(s), @47: COP %.1f, Cap %s Btuh", NumHtPumpSysUnits, HtPumpSysTypeAbbrev, HPSysCOP47, FltToStr( HPSysCap47 ) )
-                                 else  Format( "%.0f %s unit(s), @47: COP %.1f, Cap %s Btuh",    NumHtPumpSysUnits, HtPumpSysTypeAbbrev, HPSysCOP47, FltToStr( HPSysCap47 ) )
-                                 endif
+      							then	switch (HPBackupOption)
+                                    case 1  : Format( "%.0f ElecBackup %s unit(s), @47: COP %.1f, Cap %s Btuh", NumHtPumpSysUnits, HtPumpSysTypeAbbrev, HPSysCOP47, FltToStr( HPSysCap47 ) )
+                                    case 2  : Format( "%.0f GasBackup %s unit(s), @47: COP %.1f, Cap %s Btuh", NumHtPumpSysUnits, HtPumpSysTypeAbbrev, HPSysCOP47, FltToStr( HPSysCap47 ) )
+                                    default : Format( "%.0f %s unit(s), @47: COP %.1f, Cap %s Btuh",    NumHtPumpSysUnits, HtPumpSysTypeAbbrev, HPSysCOP47, FltToStr( HPSysCap47 ) )
+                                 endswitch
       							else if (HtPumpSystem[1]:Type == 22)   ; SAC 11/2/18 - VCHP  - SAC 11/13/18 - removed Cap17 reporting
       							then	Format( "%.0f %s unit(s), Cap@47 %s Btuh", NumHtPumpSysUnits, HtPumpSysTypeAbbrev, FltToStr( HPSysCap47 ) )
-		      					else	if (HPModelDualFuel > 0)
-                                 then  Format( "%.0f DF %s unit(s), %s %.1f, Cap@47 %s Btuh", NumHtPumpSysUnits, HtPumpSysTypeAbbrev, EffMetricLbls[3], EffMetricVals[3], FltToStr( HPSysCap47 ) )
-                                 else  Format( "%.0f %s unit(s), %s %.1f, Cap@47 %s Btuh",    NumHtPumpSysUnits, HtPumpSysTypeAbbrev, EffMetricLbls[3], EffMetricVals[3], FltToStr( HPSysCap47 ) )
-                                 endif
+                           else  switch (HPBackupOption)
+                                    case 1  : Format( "%.0f ElecBackup %s unit(s), %s %.1f, Cap@47 %s Btuh", NumHtPumpSysUnits, HtPumpSysTypeAbbrev, EffMetricLbls[3], EffMetricVals[3], FltToStr( HPSysCap47 ) )
+                                    case 2  : Format( "%.0f GasBackup %s unit(s), %s %.1f, Cap@47 %s Btuh", NumHtPumpSysUnits, HtPumpSysTypeAbbrev, EffMetricLbls[3], EffMetricVals[3], FltToStr( HPSysCap47 ) )
+                                    default : Format( "%.0f %s unit(s), %s %.1f, Cap@47 %s Btuh",    NumHtPumpSysUnits, HtPumpSysTypeAbbrev, EffMetricLbls[3], EffMetricVals[3], FltToStr( HPSysCap47 ) )
+                                 endswitch
 				      			endif endif endif endif endif endif
 					else	Format( "%.0f %s unit(s),  ?? efficiency ??", NumHtPumpSysUnits, HtPumpSysTypeAbbrev )
 					endif endif endif endif  }
@@ -9374,7 +9404,8 @@ RULELIST "Setup_HVACSys_HtPump_SplitHeatPump"       1 0 1 0
    "Set HVACSys:HPSysCOP35"					HVACSys:HPSysCOP35				= {	0  }  ; UNDEFINED  }
    "Set HVACSys:HPSysCOP17"					HVACSys:HPSysCOP17				= {	0  }  ; UNDEFINED  }
    "Set HVACSys:HPSysAuxHtgCap"				HVACSys:HPSysAuxHtgCap			= {	0  }  ; if (LocalStatus( HPSysCap47 ) < 2) then  UNDEFINED  else  (HPSysCap47 * 10)  endif  }
-   "Set HVACSys:HPModelDualFuel"			   HVACSys:HPModelDualFuel		   = {	0  }     ; SAC 12/08/20
+   "Set HVACSys:HPBackupOption"			   HVACSys:HPBackupOption		   = {	0  }     ; SAC 02/23/25
+;   "Set HVACSys:HPModelDualFuel"			   HVACSys:HPModelDualFuel		   = {	0  }     ; SAC 12/08/20
 ;	"debug Setup Split HP"	HVACSys:Action	=	{ if (FloorAreaServed > 0.5) then PostWarning( "Setup_HVACSys_HtPump_SplitHeatPump -> HVACSys:HPSysHSPF = %g", HPSysHSPF ) else UNCHANGED endif }
 END
 ; SAC 1/7/16 - added SDHVSplitHeatPump (small duct, high velocity) heating type (tic 598)
@@ -9422,7 +9453,8 @@ RULELIST "Setup_HVACSys_HtPump_SDHVSplitHeatPump"       1 0 1 0
    "Set HVACSys:HPSysCOP35"					HVACSys:HPSysCOP35				= {	0  }  ; UNDEFINED  }
    "Set HVACSys:HPSysCOP17"					HVACSys:HPSysCOP17				= {	0  }  ; UNDEFINED  }
    "Set HVACSys:HPSysAuxHtgCap"				HVACSys:HPSysAuxHtgCap			= {	0  }  ; if (LocalStatus( HPSysCap47 ) < 2) then  UNDEFINED  else  (HPSysCap47 * 10)  endif  }
-   "Set HVACSys:HPModelDualFuel"			   HVACSys:HPModelDualFuel		   = {	0  }     ; SAC 12/08/20
+   "Set HVACSys:HPBackupOption"			   HVACSys:HPBackupOption		   = {	0  }     ; SAC 02/23/25
+;   "Set HVACSys:HPModelDualFuel"			   HVACSys:HPModelDualFuel		   = {	0  }     ; SAC 12/08/20
 ;	"debug Setup Split HP"	HVACSys:Action	=	{ if (FloorAreaServed > 0.5) then PostWarning( "Setup_HVACSys_HtPump_SplitHeatPump -> HVACSys:HPSysHSPF = %g", HPSysHSPF ) else UNCHANGED endif }
 END
 ;*************************************************************************
@@ -9448,7 +9480,8 @@ RULELIST "Setup_HVACSys_HtPump_DuctlessMiniSplitHeatPump"       1 0 1 0
    "Set HVACSys:HPSysCOP35"					HVACSys:HPSysCOP35				= {	0  }  
    "Set HVACSys:HPSysCOP17"					HVACSys:HPSysCOP17				= {	0  }  
    "Set HVACSys:HPSysAuxHtgCap"			HVACSys:HPSysAuxHtgCap		= {	0  }  
-   "Set HVACSys:HPModelDualFuel"			HVACSys:HPModelDualFuel		= {	0  }     ; SAC 12/08/20
+   "Set HVACSys:HPBackupOption"			HVACSys:HPBackupOption		= {	0  }     ; SAC 02/23/25
+;   "Set HVACSys:HPModelDualFuel"			HVACSys:HPModelDualFuel		= {	0  }     ; SAC 12/08/20
 
 	"Set HVACSys:ClSysSEER"          HVACSys:ClSysSEER             = {   if (EffMetric > 1) then  UNCHANGED
                                                                         else  T24RCoolingEquipment:SEER(  "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", EnumString( StdCoolingType ) )  endif  }
