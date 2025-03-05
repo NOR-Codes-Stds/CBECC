@@ -1,0 +1,7 @@
+copy "..\RulesetSrc\T24NRMF\T24N_2022 Screens.txt"  "..\CBECC\Data\Rulesets\T24N_2022\T24N_2022 Screens.txt"
+copy "..\RulesetSrc\T24NRMF\T24N ToolTips.txt" "..\CBECC\Data\Rulesets\T24N_2022\T24N_2022 ToolTips.txt"
+copy "..\RulesetSrc\T24NRMF\*.jpg" "..\CBECC\Data\Rulesets\T24N_2022\*.*"
+copy "..\RulesetSrc\T24NRMF\RTF\*.*" "..\CBECC\Data\Rulesets\T24N_2022\RTF\*.*"
+copy "..\RulesetSrc\shared\RTF\*.*" "..\CBECC\Data\Rulesets\T24N_2022\RTF\*.*"
+copy "..\RulesetSrc\shared\Screens*.txt" "..\CBECC\Data\Rulesets\T24N_2022\*.*"
+copy "..\RulesetSrc\shared\*.jpg" "..\CBECC\Data\Rulesets\T24N_2022\*.*"

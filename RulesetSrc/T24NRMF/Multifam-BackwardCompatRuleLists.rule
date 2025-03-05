@@ -1,0 +1,231 @@
+// Multifamily
+//
+// -------------------------------------------------------------------------
+//  Copyright (c) 2012-2017, California Energy Commission
+//  All rights reserved.
+//  Redistribution and use in source and binary forms, with or without
+//  modification, are permitted provided that the following conditions are
+//  met:
+//
+//    * Redistributions of source code must retain the above copyright
+//  notice, this list of conditions and the following disclaimer.
+//    * Redistributions in binary form must reproduce the above copyright
+//  notice, this list of conditions and the following disclaimer in
+//  the documentation and/or other materials provided with the
+//  distribution.
+//    * Neither the name of the California Energy Commission nor the names of its
+//  contributors may be used to endorse or promote products
+//  derived from this software without specific prior written
+//  permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+//  IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+//  TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION
+//  BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+//  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+//  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+//  BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+//  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+//  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// -------------------------------------------------------------------------
+//
+
+// No direct correlation of ACM topics...
+
+// Rulelist Boolean Flags:
+//    #1 - 0 prevents overwriting user input / 1 forces eval of each rule
+//    #2 - (something about iterating rules...)
+//    #3 - 0 causes data status of rule/program default / 1 specifes user defined
+//    #4 - 0 causes normal Resets to be evaluated / 1 PREVENTS Resets from being evaluated
+
+
+;*************************************************************************
+RULELIST "ComMFam_BackwardCompat"  1 0 1 1
+
+   "Set Proj:ResDwellUnits"     Proj:ResDwellUnits =
+      {  if ( IfValidAnd( Bldg:HighRiseResLivingUnitCnt > 0 )  )
+         then  1  
+         else  0  endif  }
+   
+   "Create DwellUnitTypeRefs for each Spc"   for:#DU=(1to6)    Spc:DwellUnitTypeRef[#DU] =
+      {  if (SpcFunc == "High-Rise Residential Living Spaces" .AND. 
+             IfValidAnd( DwellingUnitTypeCnt[#DU]  > 0  .AND. 
+             IfValidAnd( DwellingUnitTypeArea[#DU] > 0 )))
+         then  CreateComp( DwellUnitType, Name + Format("-DUT-%gbr", #DU-1) )
+         else  UNCHANGED  endif  }
+
+
+
+   "Set Spc:InclResZones"     Spc:InclResZones =
+      {  if (LocalCompAssigned( DwellUnitTypeRef[1] ) .OR.
+             LocalCompAssigned( DwellUnitTypeRef[2] ) .OR.
+             LocalCompAssigned( DwellUnitTypeRef[3] ) .OR.
+             LocalCompAssigned( DwellUnitTypeRef[4] ) .OR.
+             LocalCompAssigned( DwellUnitTypeRef[5] ) .OR.
+             LocalCompAssigned( DwellUnitTypeRef[6] ))
+         then  1  else  UNDEFINED  endif  }
+
+
+   "Create ResZnGrp object(s) if needed"     Story:ResZnGrpRef =
+      {  if (SumChildren( Spc:InclResZones ) > 0)
+         then  CreateComp( ResZnGrp, Name + "-ResZnGrp" )
+         else  UNCHANGED  endif  }
+   "Set Story:ResZnGrpRef:Parent"   Story:ResZnGrpRef:Parent = {  Bldg:Name  }
+
+
+   "Create ResZn object(s) if needed"        Spc:ResZnRef =
+      {  if (IfValidAnd( InclResZones > 0 ))
+         then  CreateComp( ResZn, Name + "-ResZn" )
+         else  UNCHANGED  endif  }
+   "Set ResZn:Parent"         Spc:ResZnRef:Parent = {  ResZnGrpRef  }
+
+
+   "Set each Spc DwellUnitType CondFlrArea"   for:#DU=(1to6)    Spc:DwellUnitTypeRef[#DU]:CondFlrArea = {  DwellingUnitTypeArea[#DU]  }
+   "Set each Spc DwellUnitType NumBedrooms"   for:#DU=(1to6)    Spc:DwellUnitTypeRef[#DU]:NumBedrooms = {  #DU-1  }
+
+
+ "Create ResIntCeiling object(s) if needed"        Ceiling:ResIntCeilingRef =
+      {  if (IfValidAnd( ResZnRef <> "" ) )
+         then CreateComp( ResIntCeiling, Name + "-r") 
+         else  UNCHANGED  endif  }         
+   "Set ResIntCeiling:Parent"           Ceiling:ResIntCeilingRef:Parent = {  ResZnRef  }
+   "Set ResIntCeiling:Status"           Ceiling:ResIntCeilingRef:Status = {  Status  }
+   "Set ResIntCeiling:Area"             Ceiling:ResIntCeilingRef:Area = {  Area  } 
+   "Set ResIntCeiling:Outside"          Ceiling:ResIntCeilingRef:Outside = {  AdjacentSpcRef  }         
+   "Set ResIntCeiling:IsPartySurface"   ResIntCeiling:IsPartySurface = 
+      {  if ( ResIntCeiling:Outside = "- none -" )
+         then 0
+         else 1 endif  }
+
+
+ "Create ResExtFlr  object(s) if needed"        ExtFlr:ResExtFlrRef =
+      {  if (IfValidAnd( ResZnRef <> "" ) )
+         then CreateComp( ResExtFlr, Name + "-r" ) 
+         else  UNCHANGED  endif  }         
+   "Set ResExtFlr:Parent"         ExtFlr:ResExtFlrRef:Parent = {  ResZnRef  }
+
+   "Set ResExtFlr:Area"           ExtFlr:ResExtFlrRef:Area = {  Area  }
+   "Set ResExtFlr:FloorZ"         ExtFlr:ResExtFlrRef:FloorZ = {  Z  }
+
+ "Create ResExtWall object(s) if needed"        ExtWall:ResExtWallRef =
+      {  if (IfValidAnd( ResZnRef <> "" ) )
+         then CreateComp( ResExtWall, Name + "-r" ) 
+         else  UNCHANGED  endif  }         
+   "Set ResExtWall:Parent"         ExtWall:ResExtWallRef:Parent = {  ResZnRef  }
+
+   "Set ResExtWall:Status"       ExtWall:ResExtWallRef:Status = {  Status  }
+   "Set ResExtWall:Area"         ExtWall:ResExtWallRef:Area = {  Area  }
+   "Set ResExtWall:Tilt"         ExtWall:ResExtWallRef:Tilt = {  Tilt  }
+   "Set ResExtWall:Orientation"  ResExtWall:Orientation = { "- specify -" }
+   "Set ResExtWall:OrientationValue"  ExtWall:ResExtWallRef:OrientationValue = { Az }   
+
+
+ "Create ResIntFlr  object(s) if needed"        IntFlr:ResIntFlrRef =
+      {  if (IfValidAnd( ResZnRef <> "" ) )
+         then CreateComp( ResIntFlr, Name + "-r" ) 
+         else  UNCHANGED  endif  }         
+   "Set ResIntFlr:Parent"         IntFlr:ResIntFlrRef:Parent = {  ResZnRef  }
+
+   "Set ResIntFlr:Area"              IntFlr:ResIntFlrRef:Area = {  Area  }
+   "Set ResIntFlr:FloorZ"            IntFlr:ResIntFlrRef:FloorZ = {  Z  }
+;   "Set ResIntFlr:IsPartySurface"    IntFlr:ResIntFlrRef:IsPartySurface = {   }  // TBD Check adjacency to see if space is DU or nonresindetial
+;   "Set ResIntFlr:Outside"           IntFlr:ResIntFlrRef:Outside = {   }         // TBD Space/Zone name of DU if adjacent
+   
+
+ "Create ResIntWall object(s) if needed"        IntWall:ResIntWallRef =
+      {  if (IfValidAnd( ResZnRef <> "" ) )
+         then CreateComp( ResIntWall, Name + "-r" ) 
+         else  UNCHANGED  endif  }         
+   "Set ResIntWall:Parent"         IntWall:ResIntWallRef:Parent = {  ResZnRef  }
+
+   "Set ResIntWall:Area"         IntWall:ResIntWallRef:Area = {  Area  }
+   "Set ResIntWall:Outside"      IntWall:ResIntWallRef:Outside = {  AdjacentSpcRef  }         
+   "Set ResIntWall:IsPartySurface"   ResIntWall:IsPartySurface = 
+      {  if ( ResIntWall:Outside = "- none -" )
+         then 0
+         else 1 endif  }
+
+;   "Set ResIntWall:IsPartySurface"    IntFlr:ResIntWall:IsPartySurface = {   }  // TBD Check adjacency to see if space is DU or nonresindetial
+;   "Set ResIntWall:Outside"           IntFlr:ResIntWall:Outside = {   }         // TBD Space/Zone name of DU if adjacent   
+
+
+ "Create ResCathedralCeiling object(s) if needed"        Roof:ResCathedralCeilingRef =
+      {  if (IfValidAnd( ResZnRef <> "" ) )
+         then CreateComp( ResCathedralCeiling, Name + "-r" ) 
+         else  UNCHANGED  endif  }         
+   "Set ResCathedralCeiling:Parent"         Roof:ResCathedralCeilingRef:Parent = {  ResZnRef  }
+   
+   "Set ResCathedralCeiling:Area"            Roof:ResCathedralCeilingRef:Area = {  Area  }   
+   "Set ResCathedralCeiling:RoofRise"        Roof:ResCathedralCeilingRef:RoofRise = { 12 * TAN( (Tilt / 180 ) *3.14159 )  }   
+;   "Set ResCathedralCeiling:Orientation"     Roof:ResCathedralCeilingRef:Orientation = {    }  // TBD
+   "Set ResCathedralCeiling:RoofSolReflect"  Roof:ResCathedralCeilingRef:RoofSolReflect = {  CRRCInitialRefl  }   // Need to confirm with nonresidential rules
+   "Set ResCathedralCeiling:RoofEmiss"       Roof:ResCathedralCeilingRef:RoofEmiss = {  CRRCInitialEmit  }        // Need to confirm with nonresidential rules
+
+ "Create ResUndgrFlr  object(s) if needed"        UndgrFlr:ResUndgrFlrRef =
+      {  if (IfValidAnd( ResZnRef <> "" ) )
+         then CreateComp( ResUndgrFlr, Name + "-r" ) 
+         else  UNCHANGED  endif  }         
+   "Set ResUndgrFlr:Parent"         UndgrFlr:ResUndgrFlrRef:Parent = {  ResZnRef  }
+
+   "Set ResUndgrFlr:Area"         UndgrFlr:ResUndgrFlrRef:Area = {  Area  }
+;   "Set ResUndgrFlr:DepthBelowGrade"         UndgrFlr:ResUndgrFlrRef:DepthBelowGrade = {    }   // TBD
+
+
+ "Create ResUndgrWall object(s) if needed"        UndgrWall:ResUndgrWallRef =
+      {  if (IfValidAnd( ResZnRef <> "" ) )
+         then CreateComp( ResUndgrWall, Name + "-r" ) 
+         else  UNCHANGED  endif  }         
+   "Set ResUndgrWall:Parent"         UndgrWall:ResUndgrWallRef:Parent = {  ResZnRef  }
+
+   "Set ResUndgrWall:Area"         UndgrWall:ResUndgrWallRef:Area = {  Area  }
+;   "Set ResUndgrWall:DepthBelowGrade"         UndgrWall:ResUndgrWallRef:DepthBelowGrade = {    }   // TBD
+
+
+ "Create ResWin object(s) if needed"        Win:ResWinRef =
+      {  if ( IfValidAnd( ResExtWallRef <> "" ) .OR. IfValidAnd( ResIntWallRef <> "" ) ) 
+         then CreateComp( ResWin, Name + "-r" ) 
+         else  UNCHANGED  endif  }         
+   "Set ResWin:Parent"         Win:ResWinRef:Parent = {  if ( IfValidAnd( ResExtWallRef <> "" ) )
+                                                      then ResExtWallRef 
+                                                      else ResIntWallRef 
+                                                      endif }    
+
+   "Set ResWin:SpecMethod"         Win:ResWinRef:SpecMethod = { "Overall Window Area" }    
+   "Set ResWin:ModelFinsOverhang"  Win:ResWinRef:ModelFinsOverhang = { 0 }                    // currently set to None                                                      
+   "Set ResWin:Area"               Win:ResWinRef:Area = { Area  }                             // To be updated for Detailed Geometry 
+   "Set ResWin:UFactorSHGCSource"  Win:ResWinRef:UFactorSHGCSource = { "NFRC"  }              // To be updated based on user input - currently set to NFRC   
+;   "Set ResWin:NFRCUFactor"        Win:ResWinRef:NFRCUFactor = { Area  }                     // TBD
+;   "Set ResWin:NFRCSHGC"           Win:ResWinRef:SHGC = { Area  }                            // TBD
+   "Set ResWin:ExteriorShade"      Win:ResWinRef:ExteriorShade = { "None"  }                  // currently set to None
+   
+   
+ "Create ResDr object(s) if needed"        Dr:ResDrRef =
+      {  if ( IfValidAnd( ResExtWallRef <> "" ) .OR. IfValidAnd( ResIntWallRef <> "" ) ) 
+         then CreateComp( ResDr, Name + "-r" ) 
+         else  UNCHANGED  endif  }         
+   "Set ResDr:Parent"         Dr:ResDrRef:Parent = {  if ( IfValidAnd( ResExtWallRef <> "" ) )
+                                                      then ResExtWallRef 
+                                                      else ResIntWallRef 
+                                                      endif }    
+
+
+;   "Delete each HRR Spc"   Spc:Action =
+;      {  if (SpcFunc == "High-Rise Residential Living Spaces")
+;         then  DeleteComp()
+;         else  UNCHANGED  endif  }
+
+END
+
+// -----------------------------------------------------------------------------
+
+
+;*************************************************************************  SAC 06/10/22
+RULELIST "ModelErrorCheck_SpcFunc_HighRiseRes"  1 0 0 0
+   "Post error for Spc w/ invalid highrise res SpcFunc"    Spc:Action =
+      {  if (IfValidAnd( SpcFunc = "High-Rise Residential Living Spaces" ))
+         then  PostError( "Space '%s' space function (SpcFunc): 'High-Rise Residential Living Spaces' is no longer supported. %cResidential dwellings now must be defined via DwellUnitType and residential zones (ResZn). Search for 'Creating a Dwelling Unit Type' in CBECC user manual.", Name, 13 )
+         else  UNCHANGED  endif  }
+END
+

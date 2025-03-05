@@ -1,0 +1,946 @@
+// HVAC Secondary Systems - Fans - Exhaust
+//
+// -------------------------------------------------------------------------
+//  Copyright (c) 2012-2017, California Energy Commission
+//  All rights reserved.
+//  Redistribution and use in source and binary forms, with or without
+//  modification, are permitted provided that the following conditions are
+//  met:
+// 
+//    * Redistributions of source code must retain the above copyright
+//  notice, this list of conditions and the following disclaimer.
+//    * Redistributions in binary form must reproduce the above copyright
+//  notice, this list of conditions and the following disclaimer in
+//  the documentation and/or other materials provided with the
+//  distribution.
+//    * Neither the name of the California Energy Commission nor the names of its
+//  contributors may be used to endorse or promote products
+//  derived from this software without specific prior written
+//  permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+//  IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+//  TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION
+//  BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+//  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+//  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+//  BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+//  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+//  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// -------------------------------------------------------------------------
+
+
+//  This rule file addresses the following building descriptors:
+
+// Rules to determine proposed design exhaust system fan MtrHP
+// For systems
+// Sum MtrHP to AirSeg
+RULE NEW AirSys:AirSeg:FanMtrHP
+  DATATYPE
+    Float
+  LONGFORM
+    FanMotorHP
+  INPUTCLASS
+    NotInput
+  UNITS
+    hp
+  DEFAULT
+    if( AirSys:IsExhSys > 0 )
+    then SumChildren( Fan:MtrHP ) 
+    else 0
+    endif
+ENDRULE
+// Sum MtrHP to AirSys
+RULE NEW AirSys:PropExhSysTotFanMtrHP
+  DATATYPE
+    Float
+  LONGFORM
+    ProposedExhaustSystemTotalFanMotorHP
+  INPUTCLASS
+    NotInput
+  UNITS
+    hp
+  DEFAULT
+    if( IsExhSys > 0 )
+    then MaxChild( AirSeg:FanMtrHP ) 
+    else 0
+    endif
+ENDRULE
+// Sum MtrHP to ZnSys
+RULE NEW ZnSys:PropExhSysTotFanMtrHP
+  DATATYPE
+    Float
+  LONGFORM
+    ProposedExhaustSystemTotalFanMotorHP
+  INPUTCLASS
+    NotInput
+  UNITS
+    hp
+  DEFAULT
+    if( IsExhSys > 0 )
+    then SumChildren( Fan:MtrHP ) 
+    else 0
+    endif
+ENDRULE
+// Transfer MtrHP to ThrmlZn
+RULE NEW ThrmlZn:PropExhSysTotFanMtrHP
+  DATATYPE
+    Float
+  LONGFORM
+    ProposedExhaustSystemTotalFanMotorHP
+  DESCRIPTION
+    "The total motor horsepower of proposed exhaust fan system."
+  INPUTCLASS
+    NotInput
+  UNITS
+    hp
+  DEFAULT  
+    if( ExhFlow > 0 )
+    then 
+      if( LocalCompAssigned( ExhSysRef ) )   
+      then ExhSysRef:PropExhSysTotFanMtrHP
+      else 0
+      endif
+    else UNDEFINED
+    endif
+  SIZING
+    if( ExhFlow > 0 .AND. 
+        IfValidAnd( PropExhSysTotFanMtrHP > 0 ) )
+    then UNCHANGED
+    else UNDEFINED
+    endif
+  ANNUAL  
+    z:PropExhSysTotFanMtrHP
+ENDRULE
+// Define ExhSys total design flow at ThrmlZn
+RULE NEW ThrmlZn:TotSysZnExhFlowSim
+  DATATYPE
+    Float
+  LONGFORM
+    TotalSystemZoneExhaustFlowSimulated
+  DESCRIPTION
+    "The total design exhaust air flow of the zones, for simulation, of the 
+     exhaust system that serves the zone."
+  INPUTCLASS
+    NotInput
+  UNITS
+    cfm
+  DEFAULT
+    if( LocalCompAssigned( ExhSysRef ) )
+    then // Exhaust fan capacity only
+      ValidOr( ExhSysRef:SysExhFlow, 0 ) *
+      ValidOr( ExhSysRef:Cnt, 0 )
+    else 0
+    endif
+  SIZING
+    if( ExhFlow > 0 .AND. 
+        IfValidAnd( TotSysZnExhFlowSim > 0 ) )
+    then UNCHANGED
+    else UNDEFINED
+    endif
+  ANNUAL  
+    z:TotSysZnExhFlowSim
+ENDRULE
+// Define ExhSys total code flow at ThrmlZn
+RULE NEW ThrmlZn:TotSysZnCodeExhFlowSim
+  DATATYPE
+    Float
+  LONGFORM
+    TotalSystemZoneCodeExhaustFlowSimulated
+  DESCRIPTION
+    "The total code exhaust air flow of the zones, for simulation, of the 
+     exhaust system that serves the zone."
+  INPUTCLASS
+    NotInput
+  UNITS
+    cfm
+  DEFAULT
+    if( LocalCompAssigned( ExhSysRef ) )
+    then // Exhaust fan capacity only
+      ValidOr( ExhSysRef:SysCodeExhFlow, 0 ) *
+      ValidOr( ExhSysRef:Cnt, 0 )
+    else 0
+    endif
+  SIZING
+    if( ExhFlow > 0 .AND. 
+        IfValidAnd( TotSysZnCodeExhFlowSim > 0 ) )
+    then UNCHANGED
+    else 0
+    endif
+  ANNUAL  
+    z:TotSysZnCodeExhFlowSim
+ENDRULE
+
+// Identify at thermal zone whether the proposed lab system has anemometer or
+// contaminant based controls. If so, fan power adjustment will be applied
+RULE NEW ThrmlZn:ExhLabCtrlPwrAdj
+  DATATYPE
+    Float
+  LONGFORM
+    ExhaustLaboratoryControlPowerAdjustment
+  DESCRIPTION
+    "The amount of power adjustment for lab exhaust system controls."
+  INPUTCLASS
+    NotInput
+  UNITS
+    W/cfm
+  DEFAULT
+    if( LocalCompAssigned( ExhSysRef ) )
+    then // Check for available control adjusments
+      if( IfValidAnd( ExhSysRef:LabExhHasAnemometerCtrl > 0 ) )
+      then 0.2
+      else
+      if( IfValidAnd( ExhSysRef:LabExhHasContaminantCtrl > 0 ) )
+      then 0.2
+      else 0 // No adjustments
+      endif endif
+    else 0
+    endif
+  ANNUAL
+    if( LocalCompAssigned( ExhSysRef ) )
+    then // Check for available control adjusments
+      if( IfValidAnd( ExhSysRef:LabExhHasAnemometerCtrl > 0 ) )
+      then 0.2
+      else
+      if( IfValidAnd( ExhSysRef:LabExhHasContaminantCtrl > 0 ) )
+      then 0.2
+      else 0 // No adjustments
+      endif endif
+    else 0
+    endif
+ENDRULE
+
+RULE NEW ThrmlZn:ExhSysFanPwrAdj
+  DATATYPE
+    Float
+  LONGFORM
+    ExhaustSystemFanPowerAdjustment
+  DESCRIPTION
+    "The exhaust fan power adjustment transferred from the system to the thermal zone."
+  INPUTCLASS
+    NotInput 
+  UNITS
+    BHP
+  ANNUAL : T24N_2016
+    UNDEFINED
+  ANNUAL
+    if( BaseSysNum > 0 .AND. ExhFlow > 0 .AND. LocalCompAssigned( PriAirCondgSysRef[1] ) )
+    then
+      if( IsRes > 0 )
+      then // Is residential exhaust, all of the exh fan power adjustment is applied
+        PriAirCondgSysRef[1]:TotExhSysFanPwrAdj
+      else
+      if( LabArea > 0 .AND. Bldg:LabExhFlow > 10000 )
+      then 0 // Lab exhaust fan power limit per 140.9(c)3. See ThrmlZn:BaseExhSysPwrIdx rule below
+      else
+        // Calculate baseline exhaust fan power using 140.4(c) fan power allowance rules
+        // For process and residential cases, see ExhTotStaticPress rules below
+        PriAirCondgSysRef[1]:BaseFanBHPWithAdj * PriAirCondgSysRef[1]:ExhFanPwrRat
+      endif endif
+    else 0
+    endif
+ENDRULE
+
+// Calculated normalized exhaust fan power for zone (W/cfm) from proposed inputs
+RULE NEW ThrmlZn:ExhSysPwrIdx
+  DATATYPE
+    Float
+  LONGFORM
+    ExhaustSystemPowerIndex
+  DESCRIPTION
+    "The exhaust system power per unit of flow for the proposed
+     exhaust system that serves the zone."  
+  INPUTCLASS
+    NotInput
+  UNITS
+    W/cfm
+  DEFAULT
+    if( PropVentSysIsExh > 0 .AND. LocalCompAssigned( VentSysRef ) )
+    then // Ventilation system is exhaust
+      ValidOr( VentSysRef:ExhSysFanPwrIdx, 0 ) * ValidOr( VentSysRef:HRRFanPwrAdj, 1 )
+    else // Other exhaust systems
+    if( LocalCompAssigned( ExhSysRef ) )
+    then ValidOr( ExhSysRef:ExhSysFanPwrIdx, 0 )
+    else 0
+    endif endif
+  CHECKCODE
+    if( HasUnknownHVAC = 0 .AND. 
+        ExhFlow > 0 .AND. LocalCompAssigned( ExhSysRef ) .AND. ExhSysPwrIdx = 0 )
+    then // Zone exhaust flow is > 0 cfm but there is no exhuast fan power
+      PostError("ThermalZone '%s' has a design exhaust flow > 0, but the
+                 system fan power of exhaust system '%s' is 0.",
+                 Name, ExhSysRef:Name)
+    else UNCHANGED
+    endif
+  ANNUAL : T24N_2016
+    if( LocalCompAssigned( ExhSysRef ) ) 
+    then ValidOr( ExhSysRef:ExhSysFanPwrIdx, 0 )
+    else 0
+    endif
+  ANNUAL
+    UNCHANGED
+ENDRULE
+
+// Set the baseline exhaust fan power index when it applies, such as:
+// Labs subject to 140.9(c)3
+// HRR exhaust systems
+// Hotel/motel guestrooms
+
+RULE NEW ThrmlZn:BaseExhSysPwrIdx
+  DATATYPE
+    Float
+  LONGFORM
+    BaselineExhaustSystemPowerIndex
+  DESCRIPTION
+    "The exhaust system power per unit of flow for the baseline
+     exhaust system that serves the zone, if applicable."  
+  INPUTCLASS
+    NotInput
+  UNITS
+    W/cfm
+  ANNUAL
+    if( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 )
+    then // Defined W/cfm for baseline systems that use this method  
+      if( LabArea > 0 ) 
+      then
+        if( Bldg:LabExhFlow > 10000 )
+        then // Trigger lab exhaust fan power limit per 140.9(c)3
+          if( IfValidAnd( ExhFiltersPwrAdj > 0 ) )
+          then // Lab system has ExhFilters PD credit
+            0.85
+          else // Lab system has NO ExhFilters PD credit
+            0.65
+          endif
+        else // Use 140.4(c) BHP allowance rules
+          0
+        endif
+      else
+      if( PrkgGarArea > 0 )
+      then // Parking garage system. 
+        if( HasUnknownHVAC > 0 )
+        then // Set default fan power if HasUnknownHVAC is set
+          if( ExhCtrlMthd = "COControl" )
+          then 0.35 * 0.125 // Reduction for CO controls
+          else 0.35
+          endif
+        else // Ticket 3061: Baseline parking fan power = proposed, use ExhSysPwrIdx
+          UNDEFINED 
+        endif
+      else
+// Rule used for 2019.2.0 ACM release
+      if( Proj:HRRVentSysChange > 0 )
+      then 
+        if( BaseVentSysIsExh = 2 ) 
+        then // HRR w/ exhaust
+          0.35
+        else
+        if( BaseVentSysIsExh = 3 )
+        then // Hotel/Motel Guestroom
+          0.58 
+        else 0
+        endif endif
+      else  
+// Ticket 3040/3057: Baseline HRR ventilation to be same as proposed up to 1.20 W/cfm. 
+// Rule used for 2019.1.2/1.3 release
+      if( BaseVentSysIsExh = 2 )
+      then
+        if( PropResVentSysPwrIdx > 0 )
+        then // Min of proposed fan power or 1.20 W/cfm
+          Min( PropResVentSysPwrIdx, 1.20 )
+        else // Default assumption for HasUnknownHVAC > 0 or proposed = 0 W/cfm
+          0.60 
+        endif
+      else
+      if( BaseVentSysIsExh = 3 )
+      then // Hotel/Motel Guestroom
+        0.58 
+      else
+        0
+      endif endif endif endif endif
+    else 0
+    endif
+ENDRULE
+
+// Proposed zone exhaust fan motor HP for simulation
+// Zone exhaust fan motor performance index, for determining motor efficiency
+RULE NEW ThrmlZn:ExhFanMtrPerfIdx
+  DATATYPE
+    Integer
+  LONGFORM
+    ExhaustFanMotorPerformanceIndex
+  DESCRIPTION
+    "The index of motor size according to a list of standard sizes."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( ExhFlow > 0 )
+    then
+      if( IfValidAnd( PropExhSysTotFanMtrHP > 0 ) ) 
+      then // Use proposed motor HP.  This won't work perfectly for AirSys with 2 motors of different MtrHP.
+        StdElecMtrSize:MotorHPIndex( "InputMotorHP", PropExhSysTotFanMtrHP )
+      else
+        StdElecMtrSize:MotorHPIndex( "InputMotorHP", ExhSysPwrIdx * ExhFlow / 745.6 )
+      endif
+    else UNDEFINED
+    endif 
+  ANNUAL
+    if( ExhFlow > 0 )
+    then
+      if( IfValidAnd( BaseExhSysPwrIdx > 0 ) )
+      then StdElecMtrSize:MotorHPIndex( "InputMotorHP", BaseExhSysPwrIdx * ExhFlow / 745.6 )
+      else 
+      if( IfValidAnd( PropExhSysTotFanMtrHP > 0 ) ) 
+      then // Use proposed motor HP.  This won't work perfectly for AirSys with 2 motors of different MtrHP.
+        StdElecMtrSize:MotorHPIndex( "InputMotorHP", PropExhSysTotFanMtrHP )
+      else
+        StdElecMtrSize:MotorHPIndex( "InputMotorHP", ExhSysPwrIdx * ExhFlow / 745.6 )
+      endif endif
+    else UNCHANGED
+    endif     
+ENDRULE
+// Proposed zone exhaust fan motor efficiency for simulation
+RULE NEW ThrmlZn:ExhFanMtrEff
+  DATATYPE
+    Float
+  LONGFORM
+    ExhaustFanMotorEfficiency
+  DESCRIPTION
+    "Indicates how well the motor converts electrical power into mechanical power
+     and is defined as output power divided by input power expressed as a ratio."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IfValidAnd( ExhFanMtrPerfIdx > 0 ) )
+    then 
+      StdElecMtrPerf:MotorEfficiency( "MotorHPIndex", ExhFanMtrPerfIdx ) 
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( IfValidAnd( ExhFanMtrPerfIdx > 0 ) )
+    then 
+      StdElecMtrPerf:MotorEfficiency( "MotorHPIndex", ExhFanMtrPerfIdx ) 
+    else UNCHANGED
+    endif   
+ENDRULE
+// Proposed zone exhaust fan flow eff for simulation
+RULE NEW ThrmlZn:ExhFanFlowEff
+  DATATYPE
+    Float
+  LONGFORM
+    ExhaustFanFlowEfficiency
+  DESCRIPTION
+    "The efficiency of the exhaust fan at design conditions."  
+  HELP
+    "This efficiency term includes belt/drive losses, but does not include 
+     motor losses."
+  INPUTCLASS
+    NotInput   
+  DEFAULT
+    if( ExhFlow > 0 )
+    then // Use baseline assumptions
+      if( IfValidAnd( LabArea > 0 ) )
+      then 0.62
+      else if( IfValidAnd( CommKitArea > 0 ) )
+      then 0.5
+      else 0.65 // Standard assumption for other systems
+      endif endif
+    else UNDEFINED
+    endif
+  SIZING : T24N_2016
+    if( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 )
+    then // Use baseline assumptions
+      if( LabArea > 0 )
+      then 0.62
+      else if( CommKitArea > 0 )
+      then 0.5
+      else 0.6 // Standard assumption for other systems
+      endif endif
+    else UNCHANGED // FlowEff defined at system components
+    endif
+  ANNUAL
+    if( ExhFlow > 0 )
+    then
+      if( BaseSysNum > 0 .AND. IsNewExh != 0 )
+      then // Use baseline assumptions
+        if( IfValidAnd( LabArea > 0 ) )
+        then 0.62
+        else if( IfValidAnd( CommKitArea > 0 ) )
+        then 0.5
+        else 0.65 // Standard assumption for other systems
+        endif endif
+      else ValidOr( ExhFanFlowEff, 0.65 )
+      endif
+    else UNCHANGED
+    endif
+ENDRULE
+// Proposed zone exhaust fan total eff
+RULE ThrmlZn:ExhTotEff
+  DESCRIPTION
+    "The total efficiency of the fan. It is the product of the flow (fan) and 
+     motor efficiency, for simulation."
+  INPUTCLASS 
+    NotInput
+  DEFAULT : T24N_2016
+    if( ExhFlow > 0 )
+    then 0.54 // Default assumption for simulation, 60% fan, 90% motor
+    else UNDEFINED
+    endif 
+  DEFAULT
+    if( IfValidAnd( ExhFlowSim > 0 ) .AND.
+        IfValidAnd( ExhFanFlowEff > 0 ) .AND.
+        IfValidAnd( ExhFanMtrEff > 0 ) )
+    then ExhFanFlowEff * ExhFanMtrEff
+    else UNDEFINED
+    endif 
+  ANNUAL
+    if( IfValidAnd( ExhFlowSim > 0 ) .AND.
+        IfValidAnd( ExhFanFlowEff > 0 ) .AND.
+        IfValidAnd( ExhFanMtrEff > 0 ) )
+    then ExhFanFlowEff * ExhFanMtrEff
+    else UNDEFINED
+    endif 
+ENDRULE
+
+// Annual rule for ExhFanMtrBHP
+RULE NEW ThrmlZn:ExhFanMtrBHP
+  DATATYPE
+    Float
+  LONGFORM
+    ExhaustFanMotorBrakeHorsePower
+  DESCRIPTION
+    "The design motor shaft brake horsepower of the exhaust fan."  
+  HELP
+    "The motor brake horse power is the power at the motor shaft, including fan
+     and drive efficiencies." 
+  INPUTCLASS
+    NotInput 
+  ANNUAL : T24N_2016
+    UNCHANGED
+  ANNUAL
+    if( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 )
+    then 
+      if( IfValidAnd( BaseExhSysPwrIdx > 0 ) )
+      then // If BaseExhSysPwrIdx is defined (see above), BHP is not used
+        UNDEFINED
+      else
+      if( IfValidAnd( ZnToSysPropExhFanPwrRat > 0 ) )
+      then
+        // Calculate baseline exahust fan power using 140.4(c) fan power allowance rules
+        ExhSysFanPwrAdj * ZnToSysPropExhFanPwrRat
+      else // Same as proposed, calculate BHP from ExhSysPwrIdx
+      if( IfValidAnd( ExhSysPwrIdx > 0 ) .AND. IfValidAnd( ExhFanMtrEff > 0 ) )
+      then
+        ExhSysPwrIdx * ExhFlow / 745.6 * ExhFanMtrEff
+      else 0
+      endif endif endif
+    else // Proposed system
+    if( ExhFlow > 0 .AND.
+        IfValidAnd( ExhSysPwrIdx > 0 ) .AND.
+        IfValidAnd( ExhFanMtrEff > 0 ) )
+    then
+      ExhSysPwrIdx * ExhFlow / 745.6 * ExhFanMtrEff
+    else UNDEFINED
+    endif endif
+ENDRULE
+
+// Zone exhaust fan total static pressure
+RULE ThrmlZn:ExhTotStaticPress
+  DESCRIPTION
+    "The total static pressure drop across the exhaust fan at design conditions."  
+  INPUTCLASS 
+    NotInput
+  UNITS
+    inchesH2O 
+  DEFAULT
+    if( IfValidAnd( ExhSysPwrIdx > 0 ) .AND.
+        IfValidAnd( ExhTotEff > 0 ) )
+    then ExhSysPwrIdx * ExhTotEff / 0.1175 
+    else
+    if( ExhFlow > 0 )
+    then 0
+    else UNDEFINED
+    endif endif
+  SIZING : T24N_2016
+    if( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 )
+    then // Use baseline assumptions
+      if( LabArea > 0 )
+      then // Lab system, based on # of stories
+        if( Bldg:AboveGrdStoryCnt > 6 )
+        then 4.5
+        else 4
+        endif
+      else if( CommKitArea > 0 )
+      then // Commerical kitchen system
+        2.5
+      else if( PrkgGarArea > 0 .AND. VentSrc = "Forced" )
+      then // Use proposed or 0.35 W/cfm equiv if not defined
+        ValidOr( ExhTotStaticPress, 1.6085 )
+// Default for parking garage system, 0.35 W/cfm, assume TotEff is 0.54
+;       0.35 * 0.54 / 0.1175 = 1.6085 inH20
+      else if( IsRes > 0 .AND. VentSrc = "Forced" )
+      then // Residential space, 0.58 W/cfm, assume TotEff is 0.54
+        0.58 * 0.54 / 0.1175
+      else // Non-process exahust, use proposed or 1.0" if not defined
+        ValidOr( ExhTotStaticPress, 1.0 ) 
+      endif endif endif endif
+    else ExhTotStaticPress
+    endif
+  SIZING
+    if( IfValidAnd( ExhFlowSim > 0 ) .AND. BaseSysNum > 0 .AND. IsNewExh != 0 )
+    then // Fan power is set to near 0 for sizing.
+      0 // Was 0.00001 since previously using 0 could cause E+ sim failures. See GC 618 for background
+    else
+    if( IfValidAnd( ExhFlowSim > 0 ) )
+    then ExhTotStaticPress
+    else UNDEFINED
+    endif endif
+  ANNUAL : T24N_2016
+    if( ExhFlow > 0 .AND. PrkgGarArea > 0 .AND. ExhCtrlMthd = "COControl" )
+    then z:ExhTotStaticPress * 0.125
+    else z:ExhTotStaticPress
+    endif
+  ANNUAL
+    if( IfValidAnd( ExhFlowSim > 0 ) )
+    then
+      if( BaseSysNum > 0 .AND. IsNewExh != 0 )
+      then // Use baseline assumptions
+        if( CommKitArea > 0 )
+        then // Commerical kitchen system has separate exhaust fan power allowance
+          2.5
+        else
+        if( LabArea > 0 ) 
+        then
+          if( Bldg:LabExhFlow > 10000 )
+          then // Trigger lab exhaust fan power limit per 140.9(c)3
+            BaseExhSysPwrIdx * ValidOr( ExhTotEff, 0.54 ) / 0.1175
+          else // Use 140.4(c) BHP allowance rules
+          if( IfValidAnd( ExhFanMtrBHP > 0 ) )
+          then // Use fraction of fan power allowance that is assigned for zone
+            ExhFanMtrBHP * ExhFanFlowEff / ExhFlow / ( 0.1175 / 745.6 )
+          else 0
+          endif endif
+        else
+        if( PrkgGarArea > 0 .AND. IfValidAnd( BaseExhSysPwrIdx > 0 ) )
+        then // Parking garage, not defined in proposed so use default
+          BaseExhSysPwrIdx * ValidOr( ExhTotEff, 0.54 ) / 0.1175
+        else
+        if( IsRes > 0 .AND. VentSrc = "Forced" .AND. IfValidAnd( BaseExhSysPwrIdx > 0 ) )
+        then
+          // Residential space, 0.58 W/cfm, assume TotEff = proposed or 0.54
+          // For baseline Res systems, TotNonSysFanPwrAdj only includes credit for
+          // FullyDuctedExhPDAdj. MERVGTE16PDAdj to SupFanBHP.
+          ( BaseExhSysPwrIdx * ValidOr( ExhTotEff, 0.54 ) / 0.1175 ) +
+          ( ExhSysFanPwrAdj * ExhFanFlowEff / ExhFlow / ( 0.1175 / 745.6 ) )
+        else
+        if( IfValidAnd( ExhFanMtrBHP > 0 ) )
+        then // Use fraction of fan power allowance that is assigned for zone
+          ExhFanMtrBHP * ExhFanFlowEff / ExhFlow / ( 0.1175 / 745.6 )
+  ;     else if( PropExhSysTotFanMtrHP > 1.0 )
+  ;     then // Proposed exhaust system fan HP is > 1 HP
+  ;     0.75
+        else // Non-process exhaust, use proposed or 0 if not defined
+          ValidOr( zp:ExhTotStaticPress, 0 ) 
+        endif endif endif endif endif
+      else // Based on proposed 
+      if( IfValidAnd( ExhSysPwrIdx > 0 ) .AND.
+          IfValidAnd( ExhTotEff > 0 ) )
+      then
+        if( PrkgGarArea > 0 .AND. ExhCtrlMthd = "COControl" )
+        then // Reduction for CO controls
+          ExhSysPwrIdx * ExhTotEff / 0.1175 * 0.125 // Reduction for CO controls
+        else
+        if( LabArea > 0 )
+        then // Adjust lab exhaust fan power for applicable controls
+          ( ExhSysPwrIdx - ExhLabCtrlPwrAdj ) * ExhTotEff / 0.1175
+        else ExhSysPwrIdx * ExhTotEff / 0.1175
+        endif endif
+      else UNCHANGED
+      endif endif
+   else UNDEFINED
+   endif
+ENDRULE
+
+// 2019.0.2 rules for fan power adjustment
+; // Calculate PD Credit adjustment 
+; RULE NEW ThrmlZn:ExhFanPwrAdj
+;   DATATYPE
+;     Float
+;   LONGFORM
+;     ExhaustFanPowerAdjustment
+;   HELP
+;     "The exhaust fan power adjustment for filtration and special processes."
+;   UNITS
+;     inH2O
+;   ANNUAL : T24N_2016
+;     UNDEFINED // not used for 2016
+;   ANNUAL
+;     if( BaseSysNum > 0 .AND. ExhFlow > 0 )
+;     then // Is baseline, flow eff is al
+;       ThrmlZn:TotExhFanPwrAdj * ExhFanFlowEff / ExhFlow / ( 0.1175 / 745.6 )
+;     else 0
+;     endif
+; ENDRULE
+; // Zone exhaust fan motor BHP
+; RULE NEW ThrmlZn:ExhFanMtrBHP
+;   DATATYPE
+;     Float
+;   LONGFORM
+;     ExhaustFanMotorBrakeHorsePower
+;   DESCRIPTION
+;     "The design motor shaft brake horsepower of the exhaust fan."  
+;   HELP
+;     "The motor brake horse power is the power at the motor shaft, including fan
+;      and drive efficiencies." 
+;   INPUTCLASS
+;     NotInput 
+;   ANNUAL
+;     if( BaseSysNum > 0 .AND. TotSysZnCodeExhFlowSim > 0 .AND. 
+;         IfValidAnd( ExhTotStaticPress > 0 ) .AND. IfValidAnd( ExhFanFlowEff > 0 ) )
+;     then
+;       TotSysZnCodeExhFlowSim * ( ExhTotStaticPress + ExhFanPwrAdj ) * 
+;       ( 0.1175 / 745.6 ) / ExhFanFlowEff  
+;     else UNDEFINED
+;     endif
+; ENDRULE
+
+RULE NEW ThrmlZn:ExhFanMtrBHP
+  SIZING : T24N_2016
+    if( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 )
+    then // Use baseline assumptions
+      ExhFlow * ExhTotStaticPress * ( 0.1175 / 745.6 ) / ExhFanFlowEff  
+    else UNDEFINED // Exhaust system MtrBHP defined at system components
+    endif
+  ANNUAL
+    if( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 )
+    then // Use baseline assumptions
+      ExhFlow * ValidOr( ExhTotStaticPress, 0 ) * ( 0.1175 / 745.6 ) / ExhFanFlowEff  
+    else UNDEFINED // Exhaust system MtrBHP defined at system components
+    endif
+ENDRULE
+
+// Zone exhaust fan motor HP for system process exhaust spaces 
+// Baseline zone exhaust fan motor HP calculated from BHP
+RULE NEW ThrmlZn:ExhFanMtrHP
+  DATATYPE
+    Float
+  LONGFORM
+    ExhaustFanMotorHorsePower
+  DESCRIPTION
+    "The motor nameplate horsepower of the exhaust fan."
+  INPUTCLASS
+    NotInput 
+  SIZING : T24N_2016
+    if( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 )
+    then // Use baseline assumptions
+      StdElecMtrSize:MotorHPValue("InputMotorHP", ExhFanMtrBHP) 
+    else UNDEFINED // Exhaust system MtrBHP defined at system components
+    endif 
+  ANNUAL : T24N_2016
+    z:ExhFanMtrHP
+  ANNUAL
+    if( BaseSysNum > 0 .AND.
+        IfValidAnd( ExhFanMtrBHP > 0 ) )
+    then // Use baseline assumptions
+      StdElecMtrSize:MotorHPValue("InputMotorHP", ExhFanMtrBHP) 
+    else UNCHANGED
+    endif
+ENDRULE
+// Baseline zone exhaust fan motor HP
+RULE NEW ThrmlZn:ExhFanMtrPerfIdx
+  DATATYPE
+    Integer
+  LONGFORM
+    ExhaustFanMotorPerformanceIndex
+  DESCRIPTION
+    "The index of motor size according to a list of standard sizes."
+  INPUTCLASS
+    NotInput
+  SIZING : T24N_2016
+    if( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 )
+    then // Use baseline assumptions
+      StdElecMtrSize:MotorHPIndex("InputMotorHP", ExhFanMtrHP)
+    else UNDEFINED // Exhaust system MtrBHP defined at system components
+    endif
+  ANNUAL : T24N_2016
+    z:ExhFanMtrPerfIdx
+  ANNUAL
+    if( BaseSysNum > 0 .AND.
+        IfValidAnd( ExhFanMtrHP > 0 ) ); .AND.
+;        ( LabArea + CommKitArea + PrkgGarArea + IsRes ) > 0 )
+// MtrEff applicable to all baseline systems 
+    then // Use baseline assumptions
+      StdElecMtrSize:MotorHPIndex("InputMotorHP", ExhFanMtrHP)
+    else UNCHANGED
+    endif    
+ENDRULE
+// Baseline zone exhaust fan motor efficiency
+RULE NEW ThrmlZn:ExhFanMtrEff
+  DATATYPE
+    Float
+  LONGFORM
+    ExhaustFanMotorEfficiency
+  DESCRIPTION
+    "Indicates how well the motor converts electrical power into mechanical power
+     and is defined as output power divided by input power expressed as a ratio."
+  INPUTCLASS
+    NotInput
+  SIZING : T24N_2016
+    if( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 )
+    then // Use baseline assumptions
+      if( ( LabArea + CommKitArea ) > 0 )
+      then // Is a covered process exhaust system
+        StdElecMtrPerf:MotorEfficiency("MotorHPIndex", ExhFanMtrPerfIdx) 
+      else // Use default assumption for simulating general exhaust, 60% fan, 90% motor
+        0.90  
+      endif
+    else UNDEFINED // Exhaust system MtrBHP defined at system components
+    endif 
+  ANNUAL : T24N_2016
+    z:ExhFanMtrEff
+  ANNUAL
+    if( BaseSysNum > 0 .AND.
+        IfValidAnd( ExhFanMtrHP > 0 ) ); .AND.
+;        ( LabArea + CommKitArea + PrkgGarArea + IsRes ) > 0 )
+// MtrEff applicable to all baseline systems 
+    then 
+      StdElecMtrPerf:MotorEfficiency("MotorHPIndex", ExhFanMtrPerfIdx) 
+    else UNCHANGED
+    endif    
+ENDRULE
+
+// Zone exhaust fan total eff
+RULE ThrmlZn:ExhTotEff
+  SIZING : T24N_2016
+    if( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 )
+    then ExhFanFlowEff * ExhFanMtrEff
+    else ExhTotEff
+    endif
+  ANNUAL : T24N_2016
+    z:ExhTotEff
+  ANNUAL
+    if( IfValidAnd( ExhFlowSim > 0 ) .AND.
+        IfValidAnd( ExhFanFlowEff > 0 ) .AND. 
+        IfValidAnd( ExhFanMtrEff > 0 ) )
+    then ExhFanFlowEff * ExhFanMtrEff
+    else UNDEFINED 
+    endif
+ENDRULE
+
+// Summary calculations
+// Total zone exhaust fan power
+RULE NEW ThrmlZn:ExhPwrSim
+  DATATYPE
+    Float
+  LONGFORM
+    ExhaustPowerSimulated
+  DESCRIPTION
+    "The simulated exhaust fan power."
+  UNITS
+    kW
+  DEFAULT
+    if( IfValidAnd( ExhFlowSim > 0 ) .AND. 
+        IfValidAnd( ExhTotEff > 0 ) .AND.
+        IfValidAnd( ExhTotStaticPress > 0 ) )
+    then ExhFlowSim * ExhTotStaticPress * 0.1175 / ExhTotEff / 1000
+    else 0
+    endif    
+  ANNUAL
+    if( IfValidAnd( ExhFlowSim > 0 ) .AND. 
+        IfValidAnd( ExhTotEff > 0 ) .AND.
+        IfValidAnd( ExhTotStaticPress > 0 ) )
+    then ExhFlowSim * ExhTotStaticPress * 0.1175 / ExhTotEff / 1000
+    else 0
+    endif
+ENDRULE
+// Total zone exhaust fan power per flow
+RULE NEW ThrmlZn:ExhPwrIdxSim
+  DATATYPE
+    Float
+  LONGFORM
+    ExhaustPowerIndexSimulated
+  DESCRIPTION
+    "The simulated exhaust fan power per flow."
+  UNITS
+    W/cfm
+  DEFAULT
+    if( IfValidAnd( ExhFlowSim > 0 ) )
+    then ExhPwrSim * 1000 / ExhFlowSim
+    else 0
+    endif
+  ANNUAL
+    if( IfValidAnd( ExhFlowSim > 0 ) )
+    then ExhPwrSim * 1000 / ExhFlowSim
+    else 0
+    endif
+ENDRULE
+
+// ---------- Simulation Properties --------------------------------------------
+RULE ThrmlZn:ExhFanName
+  DESCRIPTION
+    "The name of the zone exhaust fan, used for simulation. In E+, the name of
+     the Fan:ZoneExhaust component."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    if( IfValidAnd( ExhFlowSim > 0 ) )
+    then Format("%s PropExhFan", Name)
+    else UNDEFINED
+    endif
+  SIZING_PROPOSED
+    if( IfValidAnd( ExhFlowSim > 0 ) )
+    then Format("%s PropExhFan", Name)
+    else UNDEFINED
+    endif 
+  SIZING_BASELINE
+    if( IfValidAnd( ExhFlowSim > 0 ) )
+    then
+      if( BaseSysNum > 0 .AND. ExhFlowSim > 0 )
+      then Format("%s BaseExhFan", Name)
+      else zp:ExhFanName
+      endif  
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE ThrmlZn:ExhFanEndUseCat 
+  DESCRIPTION
+    "Defines an EnergyPlus end use subcategory for process motors.  This is 
+     currently only associated with exhaust fans serving unconditioned spaces"
+  INPUTCLASS 
+    NotInput
+  OPTION
+    General         
+    ProcessMotors
+  DEFAULT 
+    if( IfValidAnd( ExhFlowSim > 0 ) )
+    then 
+      if( Type = "Unconditioned" )
+      then "ProcessMotors"
+      else "General"
+      endif
+    else UNDEFINED
+    endif
+  SIZING
+    if( IfValidAnd( ExhFlowSim > 0 ) )
+    then 
+      if( Type = "Unconditioned" )
+      then "ProcessMotors"
+      else "General"
+      endif
+    else UNDEFINED
+    endif
+  ANNUAL
+    if( IfValidAnd( ExhFlowSim > 0 ) )
+    then 
+      if( Type = "Unconditioned" )
+      then "ProcessMotors"
+      else "General"
+      endif
+    else UNDEFINED
+    endif  
+ENDRULE
+
+
+ 
