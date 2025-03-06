@@ -747,6 +747,7 @@ RULELIST "Default_AllHVAC" 0 0 0 0
   "Call subordinate rulelist to default cooling system data"
 		HVACCool:Action = {	switch (Local( Type ))
 										case  1 :  EvalRulelist( "Default_Cool_None"										, 1 )   				; "NoCooling - No cooling equipment"
+										case 37 :  EvalRulelist( "Default_Cool_SplitAirCondPM"					, 1 )   				; "SplitAirCondPM - Split air conditioning system"    ; SAC 03/05/25 (tic #1379)
 										case  2 :  EvalRulelist( "Default_Cool_SplitAirCond"						, 1 )   				; "SplitAirCond - Split air conditioning system"
 										case 25 :  EvalRulelist( "Default_Cool_PkgTermAirCond"					, 1 )   				; "PkgTermAirCond - Packaged terminal air conditioner (PTAC)"     ; SAC 6/20/20 (tic #1225)
 										case 23 :  EvalRulelist( "Default_Cool_PkgTermAirCond"   				, 1 )   				; "SglPkgVertAirCond - Single package vertical A/C system"        ; SAC 6/20/20 (tic #1226)
@@ -5420,9 +5421,14 @@ RULELIST "Default_HVACCool" 0 0 0 0
   ; SAC 3/4/13
 	"Default HVACCool:RefrigChgAdjFctr"		HVACCool:RefrigChgAdjFctr	= {	UNDEFINED  }
 
+   "Set HVACCool:Speeds"               HVACCool:Speeds            = {   if (Type == 37) then  1  else  0  endif  }   ; SAC 03/05/25 (tic #1379)
+   "Set HVACCool:SpeedsLbl"            HVACCool:SpeedsLbl         = {   if (Type == 37) then  "Speed"  else  UNDEFINED  endif  } 
+
 	"Set HVACCool:ShowMultiSpeed"			HVACCool:ShowMultiSpeed		= {	if (Type < 1 .OR. IsAvailable < 0.5) then  0
 																								else  T24RCoolingEquipment:ShowMultSpd( "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", TypeAbbrevStr )  endif  }
-	"Default HVACCool:IsMultiSpeed"		HVACCool:IsMultiSpeed		= {	0  }
+   "Blast HVACCool:IsMultiSpeed if user defined and Speeds option is available"     HVACCool:Action =
+      {  if (Type == 37 .AND. Localstatus( IsMultiSpeed ) > 4) then  EvalRulelist( "Blast_HVACCool_IsMultiSpeed", 1 )  else  UNCHANGED  endif  }
+	"Default HVACCool:IsMultiSpeed"		HVACCool:IsMultiSpeed		= {	if (Type == 37 .AND. Speeds > 1) then  1  else  0  endif  }    ; SAC 03/05/25 (tic #1379)
 
 ;	mjb - moved from HVAC:Dist 	8/21/13
 ;	"Set HVACCool:ShowIsZonal"		HVACCool:ShowIsZonal		= {	if (HVACCool:Ducted < 1) then  0  else	1  endif  }
@@ -7965,6 +7971,43 @@ RULELIST "Default_Cool_None" 0 0 0 1
 ;*************************************************************************
 	"Default HVACCool:ACCharge"        		HVACCool:ACCharge         = {  "Not Verified"  }		; mjb 10/30/14 - switched default enum to 'Not Verified' (issue #403)
 END
+;************************************************************************* ; SAC 03/05/25 (tic #1379)
+RULELIST "Default_Cool_SplitAirCondPM" 0 0 0 1      ; defaulting for HVACCool:Type = "SplitAirCondPM - Split air conditioning system"
+;*************************************************************************
+	"Default HVACCool:TotalCapacity"   		HVACCool:TotalCapacity    = {   UNDEFINED  }
+   "Default HVACCool:Cap95"               HVACCool:Cap95            =      ; based on default sizing of VCHP3 - SAC 03/05/25 (tic #1379)
+      {  if (Speeds == 1)
+         then  int( ((36000 - 180) / 0.98 )+0.5 )
+         else  int( ((36000 - 607) / 1.022)+0.5 )  endif  }
+
+	"Default HVACCool:SEER"            		HVACCool:SEER             = {   T24RCoolingEquipment:SEER( "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", TypeAbbrevStr )  }
+   "Default HVACCool:SEER2"               HVACCool:SEER2            = {   if (T24RCoolingEquipment:SEER2Valid( "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", TypeAbbrevStr ) > 0)
+                                                                          then  T24RCoolingEquipment:SEER2(    "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", TypeAbbrevStr )
+                                                                          else  UNDEFINED  endif  }
+	"Default HVACCool:EER (via rulelist)"	HVACCool:Action           = {		EvalRulelist( "Default_Cool_CaliforniaSEERtoEERFormula", 1 )  }
+   "Default HVACCool:CEER"                HVACCool:CEER             = {  UNDEFINED  }     ; SAC 08/19/20 (tic #1003)
+; mjb 1/30/15 - mods to lookup CFMperTon and ACCharge from T24RClimateZoneCodeBase
+;	"Default HVACCool:CFMperTon"       		HVACCool:CFMperTon        = {  350  }
+;	"Default HVACCool:ACCharge"        		HVACCool:ACCharge         = {  "Verified"  }		; SAC 4/1/13 - switched default enum to 'Verified' (issue #59)
+	; SAC 2/21/15 - fixed bug in following rules where obejct being set were HVACHtPump but should have been HVACCool ! (during debugging of GC issue 473)
+	; SAC 1/5/16 - added logic to set default CFMperTon to 150 for CEC 2013/16 & IsZonal & NOT IsMultiSpeed (tic 140, comment 6/22/15) - same change to each Default_Cool_* rulelist
+	"Default HVACCool:CFMperTon"       		HVACCool:CFMperTon        = {	if ((Proj:StdDesignBase == 2013 .OR. Proj:StdDesignBase >= 2016) .AND. IfValidAnd( ShowMultiSpeed > 0 ) .AND. IsMultiSpeed < 0.5 .AND.
+																											IfValidAnd( ShowIsZonal > 0 ) .AND. IsZonal > 0.5 ) then  150
+																								else	T24RClimateZoneCodeBase:CFMperTon( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )  endif  }
+	"Default HVACCool:ACCharge"        		HVACCool:ACCharge         = {  if ( T24RClimateZoneCodeBase:VerifyCharge( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr ) > 0.5 ) then "Verified" else "Not Verified" endif }    ; SAC 4/1/13 - switched default enum to 'Verified' (issue #59)
+	"Default HVACCool:RefrigerantType" 		HVACCool:RefrigerantType  = {  "R410A"     }
+  ; SAC 3/4/13 - based on e-mail from BAW 3/1/13
+	"Default HVACCool:RefrigChgAdjFctr"		HVACCool:RefrigChgAdjFctr	= {	switch (ACCharge)
+																										case  2 :  0.96		; "Verified"
+																										case  3 :  0.96		; 2013: "CID (charge indicator)"  2016: "FID (fault indicator)"
+																										default :  0.90		; "Not Verified" (or any other setting)
+																									endswitch    }
+;	"Default HVACCool:EvapCondEff" 			HVACCool:EvapCondEff  		= {  UNDEFINED   }
+	"Default HVACCool:UseEERinAnalysis"		HVACCool:UseEERinAnalysis	= {	0  }
+
+   "Evaluate PerfMap calc prep rules"     HVACCool:Action  =
+      {  EvalRulelist( "ClgPerfMap_Defaulting", 1 )  }
+END
 ;*************************************************************************
 RULELIST "Default_Cool_SplitAirCond" 0 0 0 1      ; defaulting for HVACCool:Type = "SplitAirCond - Split air conditioning system"
 ;*************************************************************************
@@ -8473,6 +8516,7 @@ RULELIST "PostProposedInput_HVAC" 1 0 0 1
 			HVACSys:Action		= {	if (FloorAreaServed < 0.1 .OR. LocalStatus( CoolSysTypeAbbrev ) < 1) then  UNCHANGED
 											else if (T24RCoolingEquipment:PropEqStd( "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", CoolSysTypeAbbrev ) == 0) then  UNCHANGED
 											else	switch (StdCoolingType)
+														case 37 :	Evalrulelist( "Setup_HVACSys_Cool_SplitAirCond" , 1 )       ; SAC 03/05/25 (tic #1379)
 														case  2 :	Evalrulelist( "Setup_HVACSys_Cool_SplitAirCond" , 1 )
 														case  5 :	Evalrulelist( "Setup_HVACSys_Cool_RoomAirCond"  , 1 )
 														case  6 :	UNCHANGED		; SplitHeatPump
@@ -10266,6 +10310,12 @@ RULELIST "Blast_HVACCool_CFMperTon" 1 0 0 0
 END
 ;*************************************************************************
 
+;************************************************************************* SAC 03/05/25 (tic #1379)
+RULELIST "Blast_HVACCool_IsMultiSpeed" 1 0 0 0
+   "Blast HVACCool:IsMultiSpeed"    HVACCool:IsMultiSpeed   = {  UNDEFINED  }
+END
+;*************************************************************************
+
 
 ; SAC 11/20/14 - rules to FORCE reset of array elements beyond those valid based on NumHeatSystemTypes (same for Cool & HtPump)
 ;*************************************************************************
@@ -10936,6 +10986,17 @@ RULELIST "ForceDefault_HVACHtPump_Capacities_HeatPumpV3"  1 0 0 1
    "Blast HVACHtPump:Cap95"      HVACHtPump:Cap95  = {  UNDEFINED  }
 END
 ;*************************************************************************
+
+;*************************************************************************
+RULELIST "Blast_HVACCool_SEER2" 1 0 0 1
+   "blast HVACCool:SEER2"   HVACCool:SEER2  = {  UNDEFINED  }
+END
+;*************************************************************************
+RULELIST "Blast_HVACCool_EER2" 1 0 0 1
+   "blast HVACCool:EER2"    HVACCool:EER2   = {  UNDEFINED  }
+END
+;*************************************************************************
+
 
 
 

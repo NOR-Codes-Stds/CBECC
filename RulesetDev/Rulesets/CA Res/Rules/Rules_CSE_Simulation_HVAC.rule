@@ -140,9 +140,11 @@ RULELIST "HVACSys_CSE_Defaulting" 0 0 0 1
 							            then                                                                               11		; ACPkgRoomRes          - SAC 6/24/20 (tic #1226)
 							            else                                                                               10		; ACPkgRoomFurnace      - SAC 6/24/20 (tic #1226)
 							            endif
+                           else if (IfValidAnd( CoolSysType = 37 ))
+                           then                                                                                     16     ; ACPMFurnace           - SAC 03/05/25 (tic #1379)
 							      else if (T24RHeatingEquipment:UseElec( "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", HeatSysTypeAbbrev ) > 0.5) then		2		; ACResistance
 									else																													1		; ACFurnace
-									endif endif
+									endif endif endif
 							endif
 					else if (LocalCompAssigned( CoolSystem ))
 					then  if (IfValidAnd( CoolSysType = 25 ) .OR. IfValidAnd( CoolSysType = 23 ))                               ; PkgTermAirCond or SglPkgVertAirCond - SAC 6/22/20 (tic #1226)
@@ -541,6 +543,15 @@ RULELIST "HVACSys_CSE_Defaulting" 0 0 0 1
                else  EvalRulelist( "VCHP3_CreatePerformanceMaps_Variable",    1 )  endif
          else  UNCHANGED  endif  }
 
+   ; SAC 03/05/25 (tic #1379)
+   "Create & setup csePERFORMANCEMAP objects for HVACCool"     HVACCool:Action  = 
+      {  if (Type == 37 .AND. SumRevRef( HVACSys:CoolSystem, HVACSys:ClFlrAreaServed ) > 1 .AND.
+             SumRevRef( HVACSys:CoolSystem, HVACSys:CoolSysType ) > 35 .AND. LocalCompAssigned( PerfMapClgRef ) < 1)
+         then  if (Speeds == 1)
+               then  EvalRulelist( "ClgPerfMap_CreatePerformanceMaps_SingleSpeed", 1 )
+               else  EvalRulelist( "ClgPerfMap_CreatePerformanceMaps_Variable",    1 )  endif
+         else  UNCHANGED  endif  }
+
    ; SAC 11/4/18 - separate rules to setup VCHP RSYS inputs  - SAC 11/5/18 - logic to prevent these settings for runs other than User or Prop*   ; VCHP2 - SAC 11/01/20
    ; added AWHP setup - SAC 12/04/22   ; HeatPumpDHWCombo - SAC 03/31/23 (tic #1349)   ; ensure proper HVAC setup for Existing systems in Std design - SAC 10/25/23  ; VCHP3 - SAC 05/16/24 (tic #1379)
    "Setup VCHP & AWHP RSYS"    HVACSys:cseRSYS:Action  = {
@@ -563,6 +574,21 @@ RULELIST "HVACSys_CSE_Defaulting" 0 0 0 1
                else if (HtPumpSysType == 35)
                then  EvalRulelist( "HVACSys_SetupRSYS_HeatPumpDHWCombo", 1 )
                else  UNCHANGED  endif endif endif endif endif
+         else  UNCHANGED  endif  }
+
+   ; SplitAirCondPM - SAC 03/05/25 (tic #1379)
+   "Setup SplitAirCondPM RSYS"    HVACSys:cseRSYS:Action  = {
+         if (HaveCooling > 0 .AND. 
+             (Status == 1 .OR.
+              Proj:RunAbbrev = "p"   .OR. Proj:RunAbbrev = "p-N" .OR. Proj:RunAbbrev = "p-E" .OR. 
+                                          Proj:RunAbbrev = "p-S" .OR. Proj:RunAbbrev = "p-W" .OR.
+              Proj:RunAbbrev = "pfx" .OR. Proj:RunAbbrev = "pfx-N" .OR. Proj:RunAbbrev = "pfx-E" .OR.
+                                          Proj:RunAbbrev = "pfx-S" .OR. Proj:RunAbbrev = "pfx-W" .OR.
+              Proj:RunAbbrev = "pp"  .OR. Proj:RunAbbrev = "pp-N" .OR. Proj:RunAbbrev = "pp-E" .OR.
+                                          Proj:RunAbbrev = "pp-S" .OR. Proj:RunAbbrev = "pp-W" ))
+         then  if (CoolSysType == 37)
+               then  EvalRulelist( "HVACSys_SetupRSYS_SplitAirCondPM", 1 )
+               else  UNCHANGED  endif
          else  UNCHANGED  endif  }
 
 ; TO DO - default properly based on the TYPE of HVAC equipment defined
@@ -1423,6 +1449,104 @@ RULELIST "HVACSys_SetupRSYS_VCHP3" 1 0 0 1
                                                                            else  HtPumpSystem[1]:VCHP3PerfMapHtgRef:Name  endif  }
    "Set HVACSys:cseRSYS:rsPerfMapClg"   HVACSys:cseRSYS:rsPerfMapClg  = {  if (LocalCompAssigned( HtPumpSystem[1]:VCHP3PerfMapClgRef ) < 1) then  UNDEFINED
                                                                            else  HtPumpSystem[1]:VCHP3PerfMapClgRef:Name  endif  }
+END
+;*************************************************************************
+
+;************************************************************************* SAC 03/05/25 (tic #1379)
+RULELIST "HVACSys_SetupRSYS_SplitAirCondPM" 1 0 0 1
+;*************************************************************************
+   "Set HVACSys:cseRSYS:rsFEffC_x"     HVACSys:cseRSYS:rsFEffC_x    = {  UNDEFINED  }   ; for VCHP2 was: "1/FVCHPC" 
+   "Set HVACSys:cseRSYS:rsFanPwrC"     HVACSys:cseRSYS:rsFanPwrC    =      ; SAC 05/17/24 (tic #1379)  ; leave fan pwr alone for ducted - SAC 05/21/24 (tic #1379)
+      {  if (IfValidAnd( HtOrClDucted > 0 ))
+         then  UNCHANGED  ; 0.281  
+         else  0.171  endif  }
+   "Set HVACSys:cseRSYS:rsFanPwrC_x"   HVACSys:cseRSYS:rsFanPwrC_x  = {  UNDEFINED  }   ; for VCHP2 was: "0.35*FVCHPC" 
+
+;   "Set HVACSys:cseRSYS:rsFEffH_x"     HVACSys:cseRSYS:rsFEffH_x    = {  UNDEFINED  }   ; for VCHP2 was: "1"      ; don't use VCHP mult for htg - was: 1/FVCHPH - SAC 11/01/20
+;   "Set HVACSys:cseRSYS:rsFanPwrH"     HVACSys:cseRSYS:rsFanPwrH    =      ; SAC 05/17/24 (tic #1379)  ; leave fan pwr alone for ducted - SAC 05/21/24 (tic #1379)
+;      {  if (IfValidAnd( HtOrClDucted > 0 ))
+;         then  UNCHANGED  ; 0.281  
+;         else  0.171  endif  }
+;   "Set HVACSys:cseRSYS:rsFanPwrH_x"   HVACSys:cseRSYS:rsFanPwrH_x  = {  UNDEFINED  }   ; for VCHP2 was: "0.35*FVCHPH" 
+
+;   "Set HVACSys:cseRSYS:rsFanMotTy"    HVACSys:cseRSYS:rsFanMotTy   =         ; switched from basing FanMotTy on Variable vs. Single speed as opposed to Eff Metric - SAC 03/03/25 (tic #1379)
+;      {  if (IfValidAnd( CoolSystem[1]:Speeds != 1 ))
+;         then  "BPM"
+;         else  "PSC"  endif  }
+
+;   "Blast HVACSys:cseRSYS:rsCap17"     HVACSys:cseRSYS:rsCap17      = {  UNDEFINED  }     ; removed Cap17 & Cap05 for VCHP2 - SAC 07/26/21
+
+;   "Blast HVACSys:cseRSYS:rsFxCapAuxH"   HVACSys:cseRSYS:rsFxCapAuxH   = {  UNDEFINED  }
+
+;	"throw error if HVACSys:cseRSYS:rsOAVType != 'None'"		HVACSys:Action		=     ; VCHP2 - SAC 11/10/20
+;      {	if (IfValidAnd( cseRSYS:rsOAVType > 0 ))
+;         then  switch (cseRSYS:rsOAVType)
+;                  case  1 :   PostError( "OAV type 'FixedFlow' incompatible with VCHP2 system '%s' (CSE RSYS '%s')", Name, cseRSYS:Name )
+;                  case  2 :   PostError( "OAV type 'VarFlow' incompatible with VCHP2 system '%s' (CSE RSYS '%s')", Name, cseRSYS:Name )
+;                  default :  UNCHANGED
+;               endswitch
+;         else  UNCHANGED  endif  }
+
+;   "Set HVACSys:cseRSYS:rsCap17"       HVACSys:cseRSYS:rsCap17  = {  UNDEFINED  }
+;   "Set HVACSys:cseRSYS:rsCapRat1747_x" HVACSys:cseRSYS:rsCapRat1747_x  = {  UNDEFINED  }
+;   "Set HVACSys:cseRSYS:rsCapRat1747"  HVACSys:cseRSYS:rsCapRat1747  = {  UNDEFINED  }
+
+   "Set HVACSys:cseRSYS:rsCap115"      HVACSys:cseRSYS:rsCap115  = {  UNDEFINED  }
+   "Set HVACSys:cseRSYS:rsCapRat11595_x" HVACSys:cseRSYS:rsCapRat11595_x  = {  UNDEFINED  }
+   "Set HVACSys:cseRSYS:rsCapRat11595" HVACSys:cseRSYS:rsCapRat11595  = {  UNDEFINED  }
+
+;   "Set HVACSys:cseRSYS:rsCap95"       HVACSys:cseRSYS:rsCap95  =             ; SAC 09/22/21
+   "Set HVACSys:cseRSYS:rsCapC"        HVACSys:cseRSYS:rsCapC  =              ; SAC 09/23/21
+      {  if (IfValidAnd( CoolSystem[1]:AutoSize > 0 )==0 .AND.
+             IfValidAnd( CoolSystem[1]:Cap95 > 0 ))
+         then  CoolSystem[1]:Cap95
+         else  UNDEFINED  endif  }
+   "Set HVACSys:cseRSYS:rsCapRat9547_x" HVACSys:cseRSYS:rsCapRat9547_x  = {  UNDEFINED  }
+   "Set HVACSys:cseRSYS:rsCapRat9547"  HVACSys:cseRSYS:rsCapRat9547  = {  UNDEFINED  }
+
+   "Set HVACSys:cseRSYS:rsCap82"       HVACSys:cseRSYS:rsCap82  = {  UNDEFINED  }
+   "Set HVACSys:cseRSYS:rsCapRat8295_x" HVACSys:cseRSYS:rsCapRat8295_x  = {  UNDEFINED  }
+   "Set HVACSys:cseRSYS:rsCapRat8295"  HVACSys:cseRSYS:rsCapRat8295  = {  UNDEFINED  }
+
+;   "Set HVACSys:cseRSYS:rsCap05"       HVACSys:cseRSYS:rsCap05  = {  UNDEFINED  }
+;   "Set HVACSys:cseRSYS:rsCapRat0547_x" HVACSys:cseRSYS:rsCapRat0547_x  = {  UNDEFINED  }
+;   "Set HVACSys:cseRSYS:rsCapRat0547"  HVACSys:cseRSYS:rsCapRat0547  = {  UNDEFINED  }
+
+;   ; removed 0.75 denominator & default to 1.1 - SAC 02/11/22 (VCHP2)
+;   "Set HVACSys:cseRSYS:rsFxCapH"      HVACSys:cseRSYS:rsFxCapH      =        ; VCHP2 - SAC 11/10/20  ; default 1.1->1.2 - SAC 02/25/22  ; disable when not autosizing and specify only when EnableResearchMode activated - SAC 03/03/22
+;      {  if (IfValidAnd( CoolSystem[1]:AutoSize > 0 )==0) then  UNDEFINED
+;         else if (Proj:IsStdOrSMFRun .OR. Proj:RunAbbrev == "dr") 
+;         then  if (Proj:EnergyCodeYearNum < 2025)
+;               then  0.75
+;               else  1.1   endif
+;         else if (IfValidAnd( Proj:EnableResearchMode > 0.5 ) .AND.
+;                  IfValidAnd( CoolSystem[1]:HtgSizingFactor > 0 ))
+;         then  CoolSystem[1]:HtgSizingFactor
+;         else  1.1  endif endif endif  }
+;      ;{  1.5  }      ; VCHP3 - SAC 05/16/24 (tic #1379)  ; removed and restored prior logic w/ mods to 1.1 for 2025 std + prop - SAC 05/21/24 (tic #1379)
+
+;	"Set HVACSys:cseRSYS:rsParElec_x"	HVACSys:cseRSYS:rsParElec_x   =        ; VCHP2 - SAC 11/10/20
+;      {  if (LocalStatus( CoolSystem[1]:ParElecExprs ))
+;         then  CoolSystem[1]:ParElecExprs
+;         else  UNCHANGED  endif  }
+
+;   "Set HVACSys:cseRSYS:rsASHPLockOutT"      HVACSys:cseRSYS:rsASHPLockOutT =    ; SAC 09/05/24
+;      {  if (IfValidAnd( HPLockoutTemp > -999 ))
+;         then  HPLockoutTemp
+;         else  UNDEFINED  endif  }
+
+   "Remove HVACSys:cseRSYS:rsEER"         HVACSys:cseRSYS:rsEER      = {  UNDEFINED  } 
+;   "Hardwire HVACSys:cseRSYS:rsCapAuxH"   HVACSys:cseRSYS:rsCapAuxH  = {  65000  }        ; updated 25k -> 65k per group conf. call - SAC 09/06/24
+
+;   "Hardwire HVACSys:cseRSYS:rsCdH"       HVACSys:cseRSYS:rsCdH      =        ; SAC 09/09/24 (VCHP3)   ; updated to vary by HPSys data - SAC 09/18/24
+;      {  if (IfValidAnd( CoolSystem[1]:HP3_Cd > 0 )) then  CoolSystem[1]:HP3_Cd  else  UNDEFINED  endif  }      
+   "Hardwire HVACSys:cseRSYS:rsCdC"       HVACSys:cseRSYS:rsCdC      = {  cseRSYS:rsCdH  } 
+
+   ; VCHP3 - SAC 05/16/24 (tic #1379)
+;   "Set HVACSys:cseRSYS:rsPerfMapHtg"   HVACSys:cseRSYS:rsPerfMapHtg  = {  if (LocalCompAssigned( CoolSystem[1]:PerfMapHtgRef ) < 1) then  UNDEFINED
+;                                                                           else  CoolSystem[1]:PerfMapHtgRef:Name  endif  }
+   "Set HVACSys:cseRSYS:rsPerfMapClg"   HVACSys:cseRSYS:rsPerfMapClg  = {  if (LocalCompAssigned( CoolSystem[1]:PerfMapClgRef ) < 1) then  UNDEFINED
+                                                                           else  CoolSystem[1]:PerfMapClgRef:Name  endif  }
 END
 ;*************************************************************************
 
