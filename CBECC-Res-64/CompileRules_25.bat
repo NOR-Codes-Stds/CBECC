@@ -7,7 +7,7 @@ if %ERRORLEVEL%==0 goto :copyfiles2
 goto :error2
 :copyfiles2
 copy "..\RulesetDev\Rulesets\CA Res\CAR25 Screens.txt"  "Data\Rulesets\CA Res 2025\*.*"
-copy "..\RulesetDev\Rulesets\CA Res\CAR13 ToolTips.txt" "Data\Rulesets\CA Res 2025\CAR25 ToolTips.txt"
+copy "..\RulesetDev\Rulesets\CA Res\T24R ToolTips.txt" "Data\Rulesets\CA Res 2025\CAR25 ToolTips.txt"
 copy "..\RulesetDev\Rulesets\CA Res\RTF\*.*" "Data\Rulesets\CA Res 2025\RTF\*.*"
 copy "..\RulesetDev\Rulesets\CA Res\DHWDU2.txt" "CSE\*.*"
 goto :finalDone
