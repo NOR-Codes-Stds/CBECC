@@ -556,6 +556,15 @@ RULELIST "Default_AllHVAC" 0 0 0 0
                else  Format( "%s %s, not assigned", EnumString( Status ), TypeAbbrevStr )
                endif  endif  }
 
+   "set HVACCool:UsePMModel"     HVACCool:UsePMModel =            ; SAC 03/12/25 (tic #1379)
+      {  if ( Type == 37  .OR. 
+             (Type ==  2 .AND. Proj:EnergyCodeYearNum >= 2025) )
+         then  1  else  0  endif  }
+   "set HVACHtPump:UsePMModel"   HVACHtPump:UsePMModel =          ; SAC 03/12/25 (tic #1379)
+      {  if ( Type == 36  .OR. 
+             (Type ==  4 .AND. Proj:EnergyCodeYearNum >= 2025) )
+         then  1  else  0  endif  }
+
 ; SAC 8/24/13 - setup initial set of HVACHeat/Cool/HtPump assignment properties
 	"Initialize HVACSys Heat/Cool/HtPump properties"		HVACSys:Action		= {	if (Type == 1 .OR. Type == 3)
 																											then  EvalRulelist( "SetupHVACSys_Round1_HeatCool", 1 )
@@ -675,7 +684,9 @@ RULELIST "Default_AllHVAC" 0 0 0 0
 
 	"Call subordinate rulelist to default type-specific heat pump system data"
 		HVACHtPump:Action = {	switch (Local( Type ))
-											case  4 :  EvalRulelist( "Default_HtPump_SplitHeatPump"       , 1 )   				; "SplitHeatPump - Heating side of central split heat pump"
+											case  4 :  if (UsePMModel)
+                                            then  EvalRulelist( "Default_HtPump_SplitHeatPumpPM", 1 )
+                                            else  EvalRulelist( "Default_HtPump_SplitHeatPump"  , 1 )  endif      ; "SplitHeatPump - Heating side of central split heat pump"
 											case 26 :  EvalRulelist( "Default_HtPump_PkgTermHeatPump"     , 1 )   				; "PkgTermHeatPump - Packaged terminal heat pump (PTHP)"          ; SAC 6/22/20 (tic #1225)
 											case 24 :  EvalRulelist( "Default_HtPump_PkgTermHeatPump"     , 1 )   				; "SglPkgVertHeatPump - Single package vertical heat pump"        ; SAC 6/22/20 (tic #1226)
 											case 19 :  EvalRulelist( "Default_HtPump_SDHVSplitHeatPump"   , 1 )   				; "SDHVSplitHeatPump - Small duct, high velocity, central split heat pump"
@@ -692,15 +703,15 @@ RULELIST "Default_AllHVAC" 0 0 0 0
 											case 12 :  EvalRulelist( "Default_HtPump_GroundSourceHeatPump", 1 )   				; "GroundSourceHeatPump - Ground source heat pump (able to heat DHW)"
 											case 22 :  EvalRulelist( "Default_HtPump_VariableCapHeatPump" , 1 )   				; "VCHP" - SAC 11/2/18
 											case 33 :  EvalRulelist( "Default_HtPump_VariableCapHeatPump2", 1 )   				; "VCHP2" - SAC 11/01/20
-											case 36 :  EvalRulelist( "Default_HtPump_VariableCapHeatPump3", 1 )   				; "VCHP3" - SAC 05/16/24 (tic #1379)
-											case 34 :  EvalRulelist( "Default_HtPump_AirToWaterHeatPump", 1 )  				   ; "AirToWaterHeatPump - Air to water heat pump (able to heat DHW)"   - NEW version - SAC 12/04/22
-											case 35 :  EvalRulelist( "Default_HtPump_HeatPumpDHWCombo", 1 )  				      ; "HeatPumpDHWCombo - Combined Heating / DHW Heat Pump"   - SAC 03/31/23 (tic #1349)
+											case 36 :  EvalRulelist( "Default_HtPump_SplitHeatPumpPM"     , 1 )   			   ; "VCHP3" - SAC 05/16/24 (tic #1379)  ; renamed - SAC 03/12/25 (tic #1379)
+											case 34 :  EvalRulelist( "Default_HtPump_AirToWaterHeatPump"  , 1 )  			   ; "AirToWaterHeatPump - Air to water heat pump (able to heat DHW)"   - NEW version - SAC 12/04/22
+											case 35 :  EvalRulelist( "Default_HtPump_HeatPumpDHWCombo"    , 1 )  		      ; "HeatPumpDHWCombo - Combined Heating / DHW Heat Pump"   - SAC 03/31/23 (tic #1349)
 											default :  EvalRulelist( "Default_HtPump_unknown", 1 )
 										endswitch  }
 
    "Set HVACHtPump:AllowBackupOpt - compatible w/ backup htg"     HVACHtPump:AllowBackupOpt =      ; for now, only SplitHeatPump & HeatPumpV3 - SAC 02/21/25 (tic #1379)
       {  if (IfValidAnd( Proj:AnalysisVersion >= 250000 )==0) then  0
-         else if (Type == 4 || Type == 36) then  1
+         else if (UsePMModel) then  1
          else  0  endif endif  }
    "Force setting of BackupOption to 'Gas Furnace' if original model had indicated Dual Fuel"   HVACHtPump:Action =
       {  if (IfValidAnd( Proj:AnalysisVersion >= 220000 ) .AND. Type != 35 .AND.
@@ -723,18 +734,18 @@ RULELIST "Default_AllHVAC" 0 0 0 0
       {  if ((AllowDualFuel  > 0 .AND. IfValidAnd( IsDualFuel > 0 )) .OR.
              (AllowBackupOpt > 0 .AND. BackupOption == 2)) then  1  else  0  endif  }
    "Set HVACHtPump:ShowLockout"     HVACHtPump:ShowLockout =
-      {  if (Type == 36) then  0
+      {  if (UsePMModel) then  0
          else if ((AllowDualFuel  > 0 .AND. IfValidAnd( IsDualFuel > 0 )) .OR.
                   (AllowBackupOpt > 0 .AND. BackupOption >  0)) then  1  else  0  endif endif  }
 
    "Default HVACHtPump:AFUE  - backup efficiency (%)"                   HVACHtPump:AFUE =
       {  if (ShowAFUE < 1) then  UNDEFINED
          else  T24RHeatingEquipment:AFUE(  "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", "CntrlFurnace" )  endif  }
-   "Default HVACHtPump:HasHPLockout - has lockout temp for HP"          HVACHtPump:HasHPLockout =     ; revised to leave UNCHANGED for type = 36 (HeatPumpV3) - SAC 09/05/24
-      {  if (Type == 36) then  UNCHANGED
+   "Default HVACHtPump:HasHPLockout - has lockout temp for HP"          HVACHtPump:HasHPLockout =     ; revised to leave UNCHANGED for UsePMModel (HeatPumpV3) - SAC 09/05/24
+      {  if (UsePMModel) then  UNCHANGED
          else if (ShowLockout < 1) then  UNDEFINED  else  1  endif endif  }
    "Default HVACHtPump:HPLockoutTemp - lockout temperature for HP"      HVACHtPump:HPLockoutTemp =
-      {  if (Type == 36) then  UNCHANGED
+      {  if (UsePMModel) then  UNCHANGED
          else if (ShowLockout < 1) then  UNDEFINED  else  35  endif endif  }
    "set HVACHtPump:HPLockoutTempActive"      HVACHtPump:HPLockoutTempActive =          ; SAC 01/24/25 (tic #1390)  ; revised for BackupOption - SAC 02/22/25 (tic #1379)
       {  if (ShowLockout > 0 .AND. IfValidAnd( HasHPLockout > 0 ) .AND. IfValidAnd( Proj:EnableResearchMode > 0 )==0)
@@ -748,7 +759,9 @@ RULELIST "Default_AllHVAC" 0 0 0 0
 		HVACCool:Action = {	switch (Local( Type ))
 										case  1 :  EvalRulelist( "Default_Cool_None"										, 1 )   				; "NoCooling - No cooling equipment"
 										case 37 :  EvalRulelist( "Default_Cool_SplitAirCondPM"					, 1 )   				; "SplitAirCondPM - Split air conditioning system"    ; SAC 03/05/25 (tic #1379)
-										case  2 :  EvalRulelist( "Default_Cool_SplitAirCond"						, 1 )   				; "SplitAirCond - Split air conditioning system"
+										case  2 :  if (UsePMModel)
+                                         then  EvalRulelist( "Default_Cool_SplitAirCondPM"			, 1 )
+                                         else  EvalRulelist( "Default_Cool_SplitAirCond"				, 1 )  endif		; "SplitAirCond - Split air conditioning system"
 										case 25 :  EvalRulelist( "Default_Cool_PkgTermAirCond"					, 1 )   				; "PkgTermAirCond - Packaged terminal air conditioner (PTAC)"     ; SAC 6/20/20 (tic #1225)
 										case 23 :  EvalRulelist( "Default_Cool_PkgTermAirCond"   				, 1 )   				; "SglPkgVertAirCond - Single package vertical A/C system"        ; SAC 6/20/20 (tic #1226)
 										case  3 :  EvalRulelist( "Default_Cool_PkgAirCond"							, 1 )   				; "PkgAirCond - Central packaged A/C system (< 65 kBtuh)"
@@ -774,7 +787,7 @@ RULELIST "Default_AllHVAC" 0 0 0 0
 
    "Reset HVACSys:AutoSizeCool[1] iff Autosized VCHP2/3"   HVACSys:AutoSizeCool[1] =        ; SAC 09/23/21 (VCHP2)  ; VCHP3 - SAC 05/16/24 (tic #1379)
       {  if (FloorAreaServed[1] > 0.5 .AND. Type == 2 .AND.
-             ( IfValidAnd( HtPumpSystem[1]:Type = 33 ) .OR. IfValidAnd( HtPumpSystem[1]:Type = 36 )) .AND.
+             ( IfValidAnd( HtPumpSystem[1]:Type = 33 ) .OR. IfValidAnd( HtPumpSystem[1]:UsePMModel > 0 )) .AND.
              IfValidAnd( HtPumpSystem[1]:AutoSize = 0 )) then  0
          else  UNCHANGED  endif  }
 
@@ -1081,7 +1094,7 @@ RULELIST "Default_AllHVAC" 0 0 0 0
          then  "HSPF, Cap @ 17, SEER and EER for reporting only, no analysis impact"
          else if (Type == 33)  ; VCHP2
          then  "This system type NOT currently approved for Compliance Analysis"
-         else if (Type == 36)  ; VCHP3 - SAC 05/16/24 (tic #1379)
+         else if (UsePMModel)  ; VCHP3 - SAC 05/16/24 (tic #1379)
          then  if (IfValidAnd( HP3_SEER2Min > 0 ) .AND. IfValidAnd( SEER2 >= HP3_SEER2Min )==0)
                then  Format( "Invalid heat pump input:  SEER2 must be >= %g", ValidOr( HP3_SEER2Min, 0 ) )
                else if (IfValidAnd( HP3_SEER2Max > 0 ) .AND. IfValidAnd( SEER2 <= HP3_SEER2Max )==0)
@@ -1098,8 +1111,9 @@ RULELIST "Default_AllHVAC" 0 0 0 0
                then  Format( "Invalid heat pump input:  Cap17/Cap47 (%g) must be >= %g", ValidOr( HP3_HeatCapRatio, 0 ), ValidOr( HP3_HeatCapRatioMin, 0 ) )
                else if (IfValidAnd( HP3_HeatCapRatioMax > 0 ) .AND. IfValidAnd( HP3_HeatCapRatio <= HP3_HeatCapRatioMax )==0)
                then  Format( "Invalid heat pump input:  Cap17/Cap47 (%g) must be <= %g", ValidOr( HP3_HeatCapRatio, 0 ), ValidOr( HP3_HeatCapRatioMax, 0 ) )
-               else  "This system type NOT currently approved for Compliance Analysis"
-               endif endif endif endif endif endif endif endif
+               else if (Type == 36)
+               then  "This system type NOT currently approved for Compliance Analysis"
+               else  UNDEFINED  endif endif endif endif endif endif endif endif endif
          else  UNDEFINED  endif endif endif endif  }
       ;   else if (Type == 35 .AND. IfValidAnd( Proj:AnalysisVersion >= 220202 )==0)  ; HeatPumpDHWCombo  ; removed HeatPumpDHWCombo not approved msg - SAC 06/01/23
       ;   then  "This system type NOT currently approved for Compliance Analysis"
@@ -2903,11 +2917,11 @@ RULELIST "SetupHVACSys_Round2_HeatPump" 0 0 0 0
 
    ; revised for HP type HeatPumpV3 - SAC 09/05/24    ; revised w/ ShowLockout - SAC 02/23/25 
 	"Set HVACSys:HPLockoutTemp - 1"	                      HVACSys:HPLockoutTemp  =
-      {  if (NumHtPumpSystemTypes > 0 .AND. (IfValidAnd( HtPumpSystem[1]:Type = 36 ) .OR. IfValidAnd( HtPumpSystem[1]:ShowLockout > 0 )) .AND.
+      {  if (NumHtPumpSystemTypes > 0 .AND. (IfValidAnd( HtPumpSystem[1]:UsePMModel > 0 ) .OR. IfValidAnd( HtPumpSystem[1]:ShowLockout > 0 )) .AND.
              IfValidAnd( HtPumpSystem[1]:HasHPLockout > 0 ) .AND. IfValidAnd( HtPumpSystem[1]:HPLockoutTemp > -999 ))
          then  HtPumpSystem[1]:HPLockoutTemp  else    -999     endif  }
 	"Set HVACSys:HPLockoutTemp - 2-10"   for:#HP=(2to10)   HVACSys:HPLockoutTemp  =
-      {  if (NumHtPumpSystemTypes >= #HP .AND. (IfValidAnd( HtPumpSystem[#HP]:Type = 36 ) .OR. IfValidAnd( HtPumpSystem[#HP]:ShowLockout > 0 )) .AND.
+      {  if (NumHtPumpSystemTypes >= #HP .AND. (IfValidAnd( HtPumpSystem[#HP]:UsePMModel > 0 ) .OR. IfValidAnd( HtPumpSystem[#HP]:ShowLockout > 0 )) .AND.
              IfValidAnd( HtPumpSystem[#HP]:HasHPLockout > 0 ) .AND. IfValidAnd( HtPumpSystem[#HP]:HPLockoutTemp > HPLockoutTemp ))
          then  HtPumpSystem[#HP]:HPLockoutTemp  else  UNCHANGED  endif  }
 
@@ -3085,7 +3099,7 @@ RULELIST "SetupHVACSys_Round2_HeatPump" 0 0 0 0
 					else if (HtPumpSystem[1]:IsAvailable > 0)
 			;		then	Format( "%.0f %s unit(s), %.1f %s, %.1f %s, %.1f CFM/ton", NumCoolSysUnits, CoolSysTypeAbbrev, EffMetricVals[1], EffMetricLbls[1], EffMetricVals[2], EffMetricLbls[2], ClSysCFMperTon )
 					then	if (HtPumpSystem[1]:Type == 22 .OR. HtPumpSystem[1]:Type == 33 .OR. HtPumpSystem[1]:Type == 34 .OR.
-                         HtPumpSystem[1]:Type == 35 .OR. HtPumpSystem[1]:Type == 36)   ; SAC 11/2/18 - VCHP   ; VCHP2 - SAC 11/01/20   ; AWHP - SAC 12/04/22   ; HeatPumpDHWCombo - SAC 03/31/23 (tic #1349)  ; VCHP3 - SAC 05/16/24 (tic #1379)
+                         HtPumpSystem[1]:Type == 35)   ; SAC 11/2/18 - VCHP   ; VCHP2 - SAC 11/01/20   ; AWHP - SAC 12/04/22   ; HeatPumpDHWCombo - SAC 03/31/23 (tic #1349)  ; VCHP3 - SAC 05/16/24 (tic #1379)
   							then  " "
 							else if (IfValidAnd( HtPumpSystem[1]:ShowCEER > 0 ))
 							then	Format( "%.1f CEER", HtPumpSystem[1]:CEER )
@@ -5374,8 +5388,8 @@ RULELIST "Default_HVACHeatPump" 0 0 0 0
 
    "Default HVACHtPump:ClSizingFactor"		HVACHtPump:ClSizingFactor		= {	1.2  }      ; SAC 02/25/22
 
-   "Set HVACHtPump:Speeds"                HVACHtPump:Speeds             = {   if (Type == 36) then  9  else  0  endif  }   ; SAC 07/21/24 (VCHP3)
-   "Set HVACHtPump:SpeedsLbl"             HVACHtPump:SpeedsLbl          = {   if (Type == 36) then  "Speed"  else  UNDEFINED  endif  } 
+   "Set HVACHtPump:Speeds"                HVACHtPump:Speeds             = {   if (UsePMModel) then  1  else  0  endif  }   ; SAC 07/21/24 (VCHP3)  ; switch default to Single speed for UsePMModel - SAC 03/12/25 (tic #1379)
+   "Set HVACHtPump:SpeedsLbl"             HVACHtPump:SpeedsLbl          = {   if (UsePMModel) then  "Speed"  else  UNDEFINED  endif  } 
 
    ; revise logic to enable showing for new AWHP option - SAC 12/04/22
 	"Set HVACHtPump:ShowMultiSpeed"			HVACHtPump:ShowMultiSpeed		= {	if (Type < 1 .OR. IsAvailable < 0.5) then  0
@@ -5383,7 +5397,7 @@ RULELIST "Default_HVACHeatPump" 0 0 0 0
                                                                               then  0
                                                                               else if (Type == 34 .OR. (Type != 10 .AND. Type < 20))
                                                                               then  1  else  0  endif endif endif  }
-	"Default HVACHtPump:IsMultiSpeed"		HVACHtPump:IsMultiSpeed			= {	if (Type == 36 .AND. Speeds > 1) then  1  else  0  endif  }    ; revised for VCHP3 - SAC 07/21/24
+	"Default HVACHtPump:IsMultiSpeed"		HVACHtPump:IsMultiSpeed			= {	if (UsePMModel .AND. Speeds > 1) then  1  else  0  endif  }    ; revised for VCHP3 - SAC 07/21/24
 
 	"Set HVACHtPump:ShowIsZonal"		HVACHtPump:ShowIsZonal	= {	if (CountRefs( HVACSys:HtPumpSystem, HVACSys:NumHtPumpSystemTypes ) < 1) then  0
 																						else if (SumRevRef( HVACSys:HtPumpSystem, HVACSys:HtPumpDucted ) < 1) then  0  else	1  endif endif  }		; SAC 11/19/15 - CoolDucted -> HtPumpDucted
@@ -5421,14 +5435,14 @@ RULELIST "Default_HVACCool" 0 0 0 0
   ; SAC 3/4/13
 	"Default HVACCool:RefrigChgAdjFctr"		HVACCool:RefrigChgAdjFctr	= {	UNDEFINED  }
 
-   "Set HVACCool:Speeds"               HVACCool:Speeds            = {   if (Type == 37) then  1  else  0  endif  }   ; SAC 03/05/25 (tic #1379)
-   "Set HVACCool:SpeedsLbl"            HVACCool:SpeedsLbl         = {   if (Type == 37) then  "Speed"  else  UNDEFINED  endif  } 
+   "Set HVACCool:Speeds"               HVACCool:Speeds            = {   if (UsePMModel) then  1  else  0  endif  }   ; SAC 03/05/25 (tic #1379)
+   "Set HVACCool:SpeedsLbl"            HVACCool:SpeedsLbl         = {   if (UsePMModel) then  "Speed"  else  UNDEFINED  endif  } 
 
 	"Set HVACCool:ShowMultiSpeed"			HVACCool:ShowMultiSpeed		= {	if (Type < 1 .OR. IsAvailable < 0.5) then  0
 																								else  T24RCoolingEquipment:ShowMultSpd( "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", TypeAbbrevStr )  endif  }
    "Blast HVACCool:IsMultiSpeed if user defined and Speeds option is available"     HVACCool:Action =
-      {  if (Type == 37 .AND. Localstatus( IsMultiSpeed ) > 4) then  EvalRulelist( "Blast_HVACCool_IsMultiSpeed", 1 )  else  UNCHANGED  endif  }
-	"Default HVACCool:IsMultiSpeed"		HVACCool:IsMultiSpeed		= {	if (Type == 37 .AND. Speeds > 1) then  1  else  0  endif  }    ; SAC 03/05/25 (tic #1379)
+      {  if (UsePMModel .AND. Localstatus( IsMultiSpeed ) > 4) then  EvalRulelist( "Blast_HVACCool_IsMultiSpeed", 1 )  else  UNCHANGED  endif  }
+	"Default HVACCool:IsMultiSpeed"		HVACCool:IsMultiSpeed		= {	if (UsePMModel .AND. Speeds > 1) then  1  else  0  endif  }    ; SAC 03/05/25 (tic #1379)
 
 ;	mjb - moved from HVAC:Dist 	8/21/13
 ;	"Set HVACCool:ShowIsZonal"		HVACCool:ShowIsZonal		= {	if (HVACCool:Ducted < 1) then  0  else	1  endif  }
@@ -7631,8 +7645,8 @@ RULELIST "Default_HtPump_VariableCapHeatPump2" 0 0 0 1
            else  UNCHANGED
            endif  }
 END
-;*************************************************************************    ; VCHP3 - SAC 05/15/24 (tic #1379)
-RULELIST "Default_HtPump_VariableCapHeatPump3" 0 0 0 1
+;*************************************************************************    ; VCHP3 - SAC 05/15/24 (tic #1379)  ; renamed - SAC 03/12/25 (tic #1379)
+RULELIST "Default_HtPump_SplitHeatPumpPM" 0 0 0 1
 ;*************************************************************************
 	"Default HVACHtPump:TotalCapacity"   	HVACHtPump:TotalCapacity  = {  UNDEFINED  }
 	"Set HVACHtPump:TypeDescrip"			   HVACHtPump:TypeDescrip	  = { "RTF\Ht_VCHP3.rtf" } 
@@ -7814,7 +7828,7 @@ RULELIST "Default_HtPump_VariableCapHeatPump3" 0 0 0 1
 ;         else  1  endif endif  }
 
    "Evaluate VCHP3-specific calc prep rules"    HVACHtPump:Action =
-      {  EvalRulelist( "VCHP3_Defaulting", 1 )  }
+      {  EvalRulelist( "HtPumpPerfMap_Defaulting", 1 )  }
 
    ; RJH 2/13/20 tic #1176
    "Set HVACHtPump:SpeclFeatrs_ComplianceOptionVCHP"    HVACHtPump:SpeclFeatrs_ComplianceOptionVCHP = {
@@ -9413,10 +9427,20 @@ RULELIST "SwitchSystemToHeatPump"		1 0 1 1   ; prevent Resets so that HtPumpSyst
 	"Round2 of HVACSys HtPump property init"		HVACSys:Action		= {	EvalRulelist( "SetupHVACSys_Round2_HeatPump", 1 )  }
 END
 
+
+; add rulelist to force setup of HtPump system even if current system HP - for 2025 PM model equipment - SAC 03/12/25 (tic #1379)
+;*************************************************************************
+RULELIST "Setup_HVACSys_SplitHeatPumpPM"       1 0 1 1
+   "set HVACSys:Type to HP"                     HVACSys:Type                  = {  2  }
+   "set HVACSys:NumHtPumpSystemTypes to 1"      HVACSys:NumHtPumpSystemTypes  = {  1  }
+   "set HVACSys:HtPumpSystemCount to 1"         HVACSys:HtPumpSystemCount     = {  1  }
+   "set HVACSys:HtPumpSystem[1] from library"   HVACSys:HtPumpSystem[1]       = {  RuleLibrary( HVACHtPump, "t24-SplitHeatPumpMP", 1 )  }
+END
+
 ; SAC 12/5/13 - replaced individual equipment-based HVACHtPump budget conversion mechanism (above) w/ following that sets data directly to the HVACSys object(s)
 ;*************************************************************************
 RULELIST "Setup_HVACSys_HtPump_SplitHeatPump"       1 0 1 0
-; SAC 1/13/14 - added rule to switch system type to HtPump (if it isn't already set)
+   ; SAC 1/13/14 - added rule to switch system type to HtPump (if it isn't already set)
 	"Ensure HVACSys:Type set to HtPump"		HVACSys:Action	= {	if (Type != 2 && LocalCompAssigned( HtPumpSystem[1] ) > 0)
 																					then  EvalRulelist( "SwitchSystemToHeatPump", 1 )  else  UNCHANGED  endif  }
 
