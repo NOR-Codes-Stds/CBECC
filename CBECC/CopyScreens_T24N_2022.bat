@@ -3,5 +3,5 @@ copy "..\RulesetSrc\T24NRMF\T24N ToolTips.txt" "..\CBECC\Data\Rulesets\T24N_2022
 copy "..\RulesetSrc\T24NRMF\*.jpg" "..\CBECC\Data\Rulesets\T24N_2022\*.*"
 copy "..\RulesetSrc\T24NRMF\RTF\*.*" "..\CBECC\Data\Rulesets\T24N_2022\RTF\*.*"
 copy "..\RulesetSrc\shared\RTF\*.*" "..\CBECC\Data\Rulesets\T24N_2022\RTF\*.*"
-copy "..\RulesetSrc\shared\Screens*.txt" "..\CBECC\Data\Rulesets\T24N_2022\*.*"
+copy "..\RulesetSrc\shared\Screens_Res-2022.txt" "..\CBECC\Data\Rulesets\T24N_2022\Screens_Res.txt"
 copy "..\RulesetSrc\shared\*.jpg" "..\CBECC\Data\Rulesets\T24N_2022\*.*"
