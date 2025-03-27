@@ -1271,6 +1271,97 @@ RULE ZnSys:TypeSim
     endswitch
 ENDRULE
 
+// -----------------------------------------------------------------------------
+// Add a dummy electric boiler if AWHP is the only electric heating source
+// this is to ensure the heating energy be reported properly
+RULE NEW Proj:AWHPIsOnlyElecHtgSrc
+  DESCRIPTION
+    "A flag that indicates that the Air to Water Heat Pump is the only heating
+     source."
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  SIZING
+    if( SumAll(FluidSys:HasHtPumpBlr) > 0 .AND.
+        SumChildrenIf(Blr:CapRtd, Blr:FuelSrc = "Electric") = 0 .AND.
+        SumChildrenIf(CoilHtg:CapTotGrossRtdSim, CoilHtg:Type = "Resistance") = 0 .AND.
+        SumChildrenIf(CoilHtg:CapTotGrossRtdSim, CoilHtg:Type = "HeatPump") = 0 .AND.
+        SumChildrenIf(CoilHtg:CapTotGrossRtdSim, CoilHtg:Type = "VRF") = 0)
+    then 1
+    else 0
+    endif
+ENDRULE
+
+RULE NEW FluidSys:HtPumpBlrRef
+  DATATYPE
+    WtrHtr
+  INPUTCLASS
+    NotInput
+  SIZING
+    if(Proj:AWHPIsOnlyElecHtgSrc> 0 .AND.
+       IfValidAnd(HasHtPumpBlr > 0))
+    then MaxChildComp(WtrHtr:CapRtd)
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW FluidSys:HtPumpBlrFluidSegInRef
+  DATATYPE
+    FluidSeg
+  INPUTCLASS
+    NotInput
+  SIZING
+    if(LocalCompAssigned(HtPumpBlrRef))
+    then HtPumpBlrRef:FluidSegInRef
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW FluidSys:HtPumpBlrFluidSegOutRef
+  DATATYPE
+    FluidSeg
+  INPUTCLASS
+    NotInput
+  SIZING
+    if(LocalCompAssigned(HtPumpBlrRef))
+    then HtPumpBlrRef:FluidSegOutRef
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE NEW FluidSys:DummyBlrRef
+  DATATYPE
+    Blr
+  DESCRIPTION
+    "Creates a dummy boiler."
+  INPUTCLASS
+    NotInput
+  SIZING
+    if(Proj:AWHPIsOnlyElecHtgSrc > 0 .AND.
+       IfValidAnd(HasHtPumpBlr > 0))
+      then RuleLibrary(Blr, "Dummy Boiler", 1, name)
+    else UNDEFINED
+    endif
+ENDRULE
+
+RULE Blr:FluidSegInRef
+  SIZING
+    if(IfValidAnd(IsDummy > 0) .AND.
+       LocalCompAssigned(FluidSegInRef) = 0)
+    then Parent(HtPumpBlrFluidSegInRef)
+    else UNCHANGED
+    endif
+ENDRULE
+
+RULE Blr:FluidSegOutRef
+  SIZING
+    if(IfValidAnd(IsDummy > 0) .AND.
+       LocalCompAssigned(FluidSegOutRef) = 0)
+    then Parent(HtPumpBlrFluidSegOutRef)
+    else UNCHANGED
+    endif
+ENDRULE
 
 // -----------------------------------------------------------------------------
 RULE AirSys:ExcludeFromRpt
@@ -1317,6 +1408,17 @@ RULE FluidSys:ExcludeFromRpt
      should be excluded from the compliance report."
   SIZING_PROPOSED
     if( IsBaseSys > 0 )
+    then 1
+    else 0
+    endif
+ENDRULE
+
+RULE Blr:ExcludeFromRpt
+  DESCRIPTION
+    "A flag that indicates whether the boiler
+     should be excluded from the compliance report."
+  SIZING_PROPOSED
+    if(IfValidAnd(IsDummy > 0))
     then 1
     else 0
     endif
