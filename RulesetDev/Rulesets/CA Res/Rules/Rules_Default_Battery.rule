@@ -53,11 +53,18 @@ RULELIST "ProposedInput_Battery" 0 0 0 0
          if (BatteryControl != 100) then  UNDEFINED
          else  "Utility or aggregator controlled"  endif  }
 
-   "Set Proj:BattDegradePercent - % total battery capacity held back from simulation"  ; SAC 12/31/17   ; switched from % to sim to % held back - SAC 07/31/23 (2025)
-      Proj:BattDegradePercent  = {  if (EnergyCodeYearNum < 2025) then  15  else  40  endif  }
+   ; SAC 12/31/17   ; switched from % to sim to % held back - SAC 07/31/23 (2025)
+   "Set/default Proj:BattDegradePercent - % total battery capacity held back from simulation"   ; switched 2025+ default 40->15 - SAC 03/27/25 (2025)
+      Proj:BattDegradePercent  = {  15  }
 
    "Set Proj:BattCapRatio - user input kWh / 14 (1.0 for a default Powerwall II)"  ; SAC 12/31/17
       Proj:BattCapRatio  = {  ValidOr( BattMaxCap, 0 ) / 14  }
+
+   "Blast Proj:BattGridHarmCredit if toggled off for 2025+"    Proj:Action =     ; SAC 03/27/25 (2025)
+      {  if (EnableResearchMode == 0 .AND. Proj:EnergyCodeYearNum >= 2025 .AND.
+             IfValidAnd( BattGridHarmCredit < 1 ))
+         then  EvalRulelist("ForceOn_BattGridHarmCredit")
+         else  UNCHANGED  endif  }
 
    "Default Proj:BattGridHarmCredit - take the grid harmonization battery credit"
       Proj:BattGridHarmCredit  = {  1  }     ; switched to default of 'ON' - SAC 10/10/23
@@ -75,9 +82,16 @@ RULELIST "ProposedInput_Battery" 0 0 0 0
    "Set Proj:BatteryUIMsg2[3]"   Proj:BatteryUIMsg2[3]  = {
       "the battery from freezing in winter if outdoors."  }
 
-; APB 03/30/22 - Add warning that Battery won't be simulated if roundtrip efficiency < 80% (tic #1319)
+   ; APB 03/30/22 - Add warning that Battery won't be simulated if roundtrip efficiency < 80% (tic #1319)
    "Set Proj:BatteryUIMsg2[4]"   Proj:BatteryUIMsg2[4]  = {
       "WARNING: the battery will NOT be simulated if roundtrip efficiency < 80%."  }
+
+   "Blast Proj:TDVSummerPkFirstHr, StandaloneChgStartHr, TOUStartMonth and TOUEndMonth if not ResearchMode for 2025+"   Proj:Action =     ; SAC 03/27/25 (2025)
+      {  if (EnableResearchMode == 0 .AND. Proj:EnergyCodeYearNum >= 2025 .AND.
+             (LocalStatus(TDVSummerPkFirstHr) > 5 .OR. LocalStatus(StandaloneChgStartHr) > 5 .OR.
+              LocalStatus(TOUStartMonth) > 5 .OR. LocalStatus(TOUEndMonth) > 5))
+         then  EvalRulelist("ForceDefault_TDVSummerPkFirstHr_StandaloneChgStartHr_TOUStartMonth_TOUEndMonth")
+         else  UNCHANGED  endif  }
 
    ; APB 03/30/22 - Enable hour to start charging for TOU or Advanced DR control for standalone battery without PV (tic #1319)
    ; fix typo in eval rulelist call: "Reset Standal..." -> "ForceDefault_Standal..." - SAC 05/23/22
@@ -87,11 +101,11 @@ RULELIST "ProposedInput_Battery" 0 0 0 0
       then  EvalRulelist("ForceDefault_StandaloneChgStartHr")
       else  UNCHANGED  endif  }
    "default Proj:StandaloneChgStartHr"    Proj:StandaloneChgStartHr  =     ; added 2025+ default of 12 (begin charging @ noon) - SAC 03/23/25
-      {  if (Proj:EnergyCodeYearNum >= 2025) then  12
+      {  if (Proj:EnergyCodeYearNum >= 2025) then  11
          else  1  endif  }   ; Default to 12a -> 1a
 
-; APB 03/30/22 - Add logic to enable standalone battery without PV (tic #1319)
-; APB 05/11/2022 - allow standalone batt inputs with community solar (tic #1319)
+   ; APB 03/30/22 - Add logic to enable standalone battery without PV (tic #1319)
+   ; APB 05/11/2022 - allow standalone batt inputs with community solar (tic #1319)
    "Set Proj:SimulateBattery"    Proj:SimulateBattery =           ; SAC 1/29/20 - toggle OFF simulation of Battery is PVEception specified as 0kW (tic #1193)
    {  if (AllowBattInputs > 0 .AND. BattMaxCap > 0)
       then 
@@ -109,8 +123,7 @@ RULELIST "ProposedInput_Battery" 0 0 0 0
       else  0  endif endif endif endif  }
 
 ; APB 03/30/22 - Enable standalone battery without PV (tic #1319)
-   "Default Proj:SimStandaloneBatt"     Proj:SimStandaloneBatt = {  
-      0 }   ; Turn off by default
+   "Default Proj:SimStandaloneBatt"     Proj:SimStandaloneBatt = {  0  }   ; Turn off by default
 
 ; APB 04/13/22 - Reset Proj:SimStandaloneBatt if PV size reset > 0 kW
 	"Blast user-defined SimStandaloneBatt if PV capacity increased > 0 kW"  Proj:Action  = {
@@ -148,18 +161,19 @@ RULELIST "ProposedInput_Battery" 0 0 0 0
 
    ; APB 04/12/22 - Allow user to set discharge start hour for TOU control (PV-tied or standalone) as well as standalone Adv DR control (tic #1319)
    ; revise to show discharge hr in 2025 - SAC 05/18/23 (NEM3)
-   "Default Proj:AllowDischgStartHr"     Proj:AllowDischgStartHr = { 
-      if (IfValidAnd( EnableResearchMode > 0 ) .OR. Proj:EnergyCodeYearNum >= 2025) then                       ; expose if in Research Mode -or- 2025+ code
+   "Default Proj:AllowDischgStartHr"     Proj:AllowDischgStartHr =      ; remove from 2025 UI unless EnableResearchMode > 0 - SAC 03/27/25
+    { if (IfValidAnd( EnableResearchMode > 0 )) then 
          if (BatteryControl == 10) then 1                                     ; expose if Time of Use control
          else if (SimStandaloneBatt > 0.5 .AND. BatteryControl == 101) then 1 ; expose if standalone battery and Advanced DR control
          else  0  endif endif  ; Default to not allow/show in screens
       else  0  endif }   ; Default to not allow/show in screens
 
-; APB 3/30/22 - add standalone battery charge start hour for TOU or Advanced DR control (tic #1319)
-   "Default Proj:AllowStandaloneChgStartHr"     Proj:AllowStandaloneChgStartHr = {  
-      if (IfValidAnd( EnableResearchMode > 0 ) .OR. Proj:EnergyCodeYearNum >= 2025) then                       ; expose if in Research Mode -or- 2025+ code
+   ; APB 3/30/22 - add standalone battery charge start hour for TOU or Advanced DR control (tic #1319)
+   "Default Proj:AllowStandaloneChgStartHr"     Proj:AllowStandaloneChgStartHr =    ; remove from 2025 UI unless EnableResearchMode > 0 - SAC 03/27/25
+    { if (IfValidAnd( EnableResearchMode > 0 )) then 
          if (SimStandaloneBatt > 0.5 .AND. (BatteryControl == 10 .OR. BatteryControl == 101)) then 1 ; expose if standalone battery and Time of Use or Advanced DR control
-         else  0  endif     ; Default to not allow/show in screens
+         else if (Proj:EnergyCodeYearNum >= 2025 .AND. (BatteryControl == 10 .OR. BatteryControl == 101)) then 1   ; allow for 2025 - SAC 03/27/25
+         else  0  endif endif     ; Default to not allow/show in screens
       else  0  endif  }   ; Default to not allow/show in screens
 
 ; APB 03/30/22 - Enable roundtrip efficiency as alternative to charge & discharge efficiency (tic #1319)
@@ -314,6 +328,10 @@ END
 RULELIST "ForceOff_BattGridHarmCredit" 1 0 0 0
    "Blast Proj:BattGridHarmCredit"  Proj:BattGridHarmCredit  = {  0  }
 END
+;************************************************************************* SAC 03/27/25 (2025)
+RULELIST "ForceOn_BattGridHarmCredit" 1 0 0 0
+   "toggle on Proj:BattGridHarmCredit"  Proj:BattGridHarmCredit  = {  1  }
+END
 ;*************************************************************************
 
 ; APB 04/12/22 - blast user-defined SimStandaloneBatt if PV capacity increased > 0 kW
@@ -331,6 +349,17 @@ RULELIST "ForceDefault_StandaloneChgStartHr" 1 0 0 0
    "Blast Proj:StandaloneChgStartHr"  Proj:StandaloneChgStartHr  = { UNDEFINED }
 END
 ;*************************************************************************
+
+;************************************************************************* ; SAC 03/27/25 (2025)
+RULELIST "ForceDefault_TDVSummerPkFirstHr_StandaloneChgStartHr_TOUStartMonth_TOUEndMonth"  1 0 0 1
+;*************************************************************************
+   "Blast Proj:TDVSummerPkFirstHr"     Proj:TDVSummerPkFirstHr    = { UNDEFINED }
+   "Blast Proj:StandaloneChgStartHr"   Proj:StandaloneChgStartHr  = { UNDEFINED }
+   "Blast Proj:TOUStartMonth"          Proj:TOUStartMonth         = { UNDEFINED }
+   "Blast Proj:TOUEndMonth"            Proj:TOUEndMonth           = { UNDEFINED }
+END
+;*************************************************************************
+
 
 ;*************************************************************************
 ;*************************************************************************
