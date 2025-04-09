@@ -34,11 +34,13 @@
 // -------------- # Occupants / Density ---------------------------------------
 // -------------- Designed Occupancy ------------------------------------------
 RULE ResOtherZn:DsgnOcc
+  RULESETS
+    T24N_2022
   DESCRIPTION
     "A flag that indicates that the space uses the expected number of 
      occupants or fixed seating criteria for determining space ventilation 
      requirements."
-  HELP : T24N_2022
+  HELP
     "If selected an exceptional reporting condition will be triggered."
   INPUTCLASS
     Default
@@ -46,6 +48,8 @@ RULE ResOtherZn:DsgnOcc
     0
 ENDRULE
 RULE ResOtherZn:DsgnOccNum
+  RULESETS
+    T24N_2022
   DESCRIPTION
     "A number of occupants in the space for simulation and ventilation calculations
      if Designed Occupancy is selected and is a valid choice. This number shall be the 
@@ -57,6 +61,31 @@ RULE ResOtherZn:DsgnOccNum
   DEFAULT
     ValidOr( OccNum, 0 ) * ValidOr( ResProj:OtherZnOccFrac, 0 )
 ENDRULE
+// -------------- Fixed Seating ------------------------------------------
+RULE Spc:FxdSeat
+  DESCRIPTION
+    "A flag that indicates that the space has fixed seating and the space 
+     occupancy will be entered as a number of occupants."
+  PREVIOUSNAMES
+    DsgnOcc
+  INPUTCLASS
+    Default
+  DEFAULT
+    0
+ENDRULE
+RULE Spc:OccNumFxdSeat
+  DESCRIPTION
+    "A number of occupants in the space for simulation and ventilation calculations
+     if FixedSeating is selected and is a valid choice."
+  PREVIOUSNAMES
+    DsgnOccNum
+  INPUTCLASS
+    Default
+  UNITS
+    people
+  DEFAULT
+    ValidOr( OccNum, 0 ) * ValidOr( OccFrac, 0.5 )
+ENDRULE
 // Occupant number / density 
 RULE ResOtherZn:OccDens
   DESCRIPTION
@@ -65,9 +94,17 @@ RULE ResOtherZn:OccDens
     NotInput
   UNITS 
     people/1000ft2
-  DEFAULT
+  DEFAULT : T24N_2022
     if( IfValidAnd( SpcFunc != "- specify -" ) )
     then SpaceFunctionData:OccDens( "FuncType", SpcFunc )
+    else 0
+    endif
+  DEFAULT
+    if( LocalStatus( VentSpcFunc ) > 0 )
+    then if( find( VentSpcFunc, "Exhaust" ) .AND. LocalStatus( SpcFunc ) > 0 )
+         then SpaceFunctionData:OccDens( "FuncType", SpcFunc )
+         else 2 * VentilationSpaceFunctionData:MinOccDens( "VentFuncType", VentSpcFunc )
+         endif
     else 0
     endif
 ENDRULE
@@ -108,10 +145,15 @@ RULE ResOtherZn:OccFrac
     Default
   RESETS
     ResetThisWhenTheFollowingIsModified
-      OccNumSim
-  DEFAULT
+      FxdSeat
+  DEFAULT : T24N_2022
     if( IfValidAnd( DsgnOcc > 0 ) )
     then DsgnOccNum / OccNum
+    else ResProj:OtherZnOccFrac
+    endif
+  DEFAULT
+    if( IfValidAnd( FxdSeat > 0 ) )
+    then OccNumFxdSeat / OccNum
     else ResProj:OtherZnOccFrac
     endif
 ENDRULE
@@ -133,14 +175,34 @@ RULE ResOtherZn:OccNumSim
     "The number of people in a space for simulation. It is also used in ventilation 
      calculations."  
   INPUTCLASS
-    Default
+    NotInput
   RESETS
     ResetThisWhenTheFollowingIsModified
+      FxdSeat
       OccFrac
-  DEFAULT 
+  DEFAULT : T24N_2022
     if( IfValidAnd( DsgnOcc > 0 ) .AND. IfValidAnd( DsgnOccNum > 0 ) )
     then DsgnOccNum
     else OccNum * OccFrac
+    endif
+  DEFAULT
+    if( IfValidAnd( FxdSeat > 0 ) .AND. IfValidAnd( OccNumFxdSeat > 0 ) )
+    then OccNumFxdSeat
+    else OccNum * OccFrac
+    endif
+ENDRULE
+
+RULE NEW ResOtherZn:MinOccNumSim
+  DESCRIPTION
+    "The minimum number of people used in ventilation calculations."
+  DATATYPE
+    Float
+  INPUTCLASS
+    Default
+  DEFAULT 
+    if( IfValidAnd( FxdSeat > 0 ) .AND. IfValidAnd( OccNumFxdSeat > 0 ) )
+    then OccNumFxdSeat
+    else OccNum * 0.5
     endif
 ENDRULE
 
@@ -152,7 +214,7 @@ RULE ResOtherZn:OccSchRef
   INPUTCLASS
     Prescribed
   SIZING_PROPOSED
-    if( FuncSchGrp = "- specify -" .OR. IfValidAnd( OccNumSim > 0) == 0 )
+    if( FuncSchGrp = "- specify -" .OR. IfValidAnd( OccNumSim > 0 ) == 0 )
     then UNDEFINED
     else RuleLibrary( Sch, SpaceFunctionGroups:OccSchRef( "FuncGroup", FuncSchGrp ) )
     endif
@@ -168,8 +230,8 @@ RULE ResOtherZn:OccSensHtRt
   UNITS 
     Btu/hr-person
   DEFAULT
-    if( IfValidAnd( SpcFunc != "- specify -" ) .AND. IfValidAnd( OccNumSim > 0 ) ) 
-    then SpaceFunctionData:OccSensHtRt("FuncType",SpcFunc)
+    if( IfValidAnd( SpcFunc != "- specify -" ) .AND. IfValidAnd( OccNumSim > 0 ) )
+    then SpaceFunctionData:OccSensHtRt( "FuncType",SpcFunc )
     else UNDEFINED
     endif
 ENDRULE
@@ -182,8 +244,8 @@ RULE ResOtherZn:OccLatHtRt
   UNITS 
     Btu/hr-person
   DEFAULT
-    if( IfValidAnd( SpcFunc != "- specify -" ) .AND. IfValidAnd( OccNumSim > 0 ) ) 
-    then SpaceFunctionData:OccLatHtRt("FuncType",SpcFunc)
+    if( IfValidAnd( SpcFunc != "- specify -" ) .AND. IfValidAnd( OccNumSim > 0 ) )
+    then SpaceFunctionData:OccLatHtRt( "FuncType",SpcFunc )
     else UNDEFINED
     endif
 ENDRULE
