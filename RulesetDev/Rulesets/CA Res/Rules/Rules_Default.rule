@@ -264,8 +264,7 @@ RULELIST "ProposedInput" 0 0 0 0
 ;	mjb 4/24/14	- Additions Alone params defaulted
 	"Default Proj:IsAddAlone"			Proj:IsAddAlone			= {	0	}
 	"Default Proj:AdditionCFAFrac"	Proj:AdditionCFAFrac		= {	1	}
-
-   "Set Proj:ShowStatus"      Proj:ShowStatus  = {  if (RunScope == 2 .OR. (RunScope == 1 .AND. IsAddAlone > 0.5)) then  1  else  0  endif  }      ; SAC 4/10/15  ; moved from HVACDist to Proj for more widespread use - SAC 03/29/24 (tic #1304)
+   "Set Proj:ShowStatus"   Proj:ShowStatus  = {  if (RunScope == 2 .OR. (RunScope == 1 .AND. IsAddAlone > 0.5)) then  1  else  0  endif  }      ; SAC 4/10/15  ; moved from HVACDist to Proj for more widespread use - SAC 03/29/24 (tic #1304)
 
 	"Force resets for non-New Cons (necessary for third party analysis)"		Proj:Action	= {	if (RunScope == 1 .OR. (IsAddAlone == 0 .AND. AdditionCFAFrac == 1)) then  UNCHANGED
 																															else	EvalRulelist( "ForceDefault_IsAddAlone_AddFrac" )  endif  }
@@ -2138,6 +2137,20 @@ RULELIST "LoadModelAdjustments" 1 0 0 0
          then  EvalRulelist( "GasDHWHeater_ConvertToNew_ConsumerInstantaneousUEF", 1 )
          else  UNCHANGED  endif  }
 
+   "Blast DHWHeater:HPWHCategory 'Non-UEF Rated (existing only)' if not a valid selection"  ; SAC 04/08/25
+      DHWHeater:Action  = {
+         if (IfValidAnd( Proj:EnergyCodeYearNum >= 2025 ) .AND. IfValidAnd( Proj:RunScope == 1 ) .AND.
+             IfValidAnd( Proj:IsAddAlone < 0.5 ) .AND. IfValidAnd( HPWHCategory = 4 ))
+         then  EvalRulelist( "Blast_DHWHeater_HPWHCategory", 1 )
+         else  UNCHANGED  endif  }
+
+   "Shift DHWHeater:HPWHBrand '(generic)' to HPWHCategory 'Generic Tier'"     ; SAC 04/08/25 (tic #1399)
+      DHWHeater:Action  = {
+         if (IfValidAnd( Proj:EnergyCodeYearNum >= 2025 ) .AND. IfValidAnd( HeaterElementType = 5 ) .AND.
+             IfValidAnd( HPWHCategory = 1 ) .AND. IfValidAnd( HPWHBrand = 99 ))
+         then  EvalRulelist( "DHWHeater_Reset_Generic", 1 )
+         else  UNCHANGED  endif  }
+
    "Transform old DHWSys:RecircPumpHP & Eff to roughly consistent RecircPumpPwr"    DHWSys:Action  =     ; SAC 2/11/20 (tic #862)
       {  if (LocalStatus( RecircPumpHP ) > 0 .OR. LocalStatus( RecircPumpEff ) > 0)
          then  EvalRulelist( "TransformOld_DHWSys_RecircPump", 1 )
@@ -2340,6 +2353,39 @@ RULELIST "Blast_HtPump_AutoSize_NoResets" 1 0 0 1
    "post message regarding reset"  HVACHtPump:Action  = {
          PostMessageToLog( "Removing specification of HVACHtPump '%s' AutoSize due to EnableHPAutosize being deactivated.", Name )  }     ; SAC 6/21/19
    "Blast HVACHtPump:AutoSize"  HVACHtPump:AutoSize  = {  0  }
+END
+;*************************************************************************
+
+
+;*************************************************************************  ; SAC 04/08/25
+RULELIST "Blast_DHWHeater_HPWHCategory" 1 0 0 1
+   ;"post message regarding reset"  DHWHeater:Action  = {
+   ;      PostMessageToLog( "Removing ... '%s' ... .", Name )  } 
+   "Blast DHWHeater:HPWHCategory"   DHWHeater:HPWHCategory  = {  UNDEFINED  }
+END
+;*************************************************************************
+
+;*************************************************************************  ; SAC 04/08/25
+RULELIST "DHWHeater_Reset_Generic" 1 0 1 1
+   ;"post message regarding reset"  DHWHeater:Action  = {
+   ;      PostMessageToLog( "Removing ... '%s' ... .", Name )  } 
+   "Set DHWHeater:HPWHCategory to 'Generic Tier'"        DHWHeater:HPWHCategory      = {  5  }  ; "Generic Tier"
+   "Set DHWHeater:HPWHTierAndTankSz based on HPWHModel"  DHWHeater:HPWHTierAndTankSz =
+      {  if( IfValidAnd( HPWHModel > 0 )==0 ) then  0
+         else  switch( HPWHModel )
+                  case  9900138  :  9900138  ; "UEF 2  (50 gal)"
+                  case  9900787  :  9900787  ; "tier 4  (40+ gal)"
+                  case  9900888  :  9900888  ; "tier 4  (50+ gal)"
+                  case  9900989  :  9900989  ; "tier 4  (65+ gal)"
+                  case  9901090  :  9901090  ; "tier 4  (80+ gal)"
+                  case  9900273  :  9900273  ; "tier 3  (40+ gal)"
+                  case  9900374  :  9900374  ; "tier 3  (50+ gal)"
+                  case  9900475  :  9900475  ; "tier 3  (65+ gal)"
+                  case  9900576  :  9900576  ; "tier 3  (80+ gal)"
+                  default        :  0
+               endswitch  endif  }
+   "blast DHWHeater:HPWHBrand"      DHWHeater:HPWHBrand = {  UNDEFINED  }
+   "blast DHWHeater:HPWHModel"      DHWHeater:HPWHModel = {  UNDEFINED  }
 END
 ;*************************************************************************
 
