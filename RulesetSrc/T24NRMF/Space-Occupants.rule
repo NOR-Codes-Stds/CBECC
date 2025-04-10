@@ -46,6 +46,7 @@
 
 // -------------- Minimum # Occupants / Density -------------------------------
 // Minimum for egress/DCV design purposes
+// The DCV requirement is deteremined based on the minimum or the designe which is greater
 RULE NEW Spc:MinOccNum
   DATATYPE
     Float
@@ -57,23 +58,49 @@ RULE NEW Spc:MinOccNum
     NotInput
   UNITS 
     people
-  DEFAULT 
+  DEFAULT : T24N_2022
     if( HasNoInternalLds )
     then 0 // Is Unoccupied, Attic/Crawlspace, or Plenum space
     else if( IsHighRiseRes )
     then // Is high-rise res or hotel/motel
-      2 * ValidOr( DwellingUnitTypeCnt[1], 0 ) +
-      2 * ValidOr( DwellingUnitTypeCnt[2], 0 ) +
-      3 * ValidOr( DwellingUnitTypeCnt[3], 0 ) +
-      4 * ValidOr( DwellingUnitTypeCnt[4], 0 ) +
-      5 * ValidOr( DwellingUnitTypeCnt[5], 0 ) +
-      6 * ValidOr( DwellingUnitTypeCnt[6], 0 )  
+         2 * ValidOr( DwellingUnitTypeCnt[1], 0 ) +
+         2 * ValidOr( DwellingUnitTypeCnt[2], 0 ) +
+         3 * ValidOr( DwellingUnitTypeCnt[3], 0 ) +
+         4 * ValidOr( DwellingUnitTypeCnt[4], 0 ) +
+         5 * ValidOr( DwellingUnitTypeCnt[5], 0 ) +
+         6 * ValidOr( DwellingUnitTypeCnt[6], 0 )  
     else if( IfValidAnd( DsgnOcc > 0 ) .AND. IfValidAnd( DsgnOccEligible > 0 ) )
     then // Fixed seating can be used
-      ValidOr( DsgnOccNum, 0 )
+         ValidOr( DsgnOccNum, 0 )
     else if( LocalStatus( SpcFunc ) > 0 .AND. IfValidAnd( Area > 0 ) )
     then // Calculated using OccDens
-      SpaceFunctionData:OccDens("FuncType", SpcFunc) * Area / 1000
+         SpaceFunctionData:OccDens( "FuncType", SpcFunc ) * Area / 1000
+    else 0
+    endif endif endif endif
+  DEFAULT
+    if( HasNoInternalLds )
+    then 0 // Is Unoccupied, Attic/Crawlspace, or Plenum space
+    else if( IsHighRiseRes )
+    then // Is high-rise res or hotel/motel
+         2 * ValidOr( DwellingUnitTypeCnt[1], 0 ) +
+         2 * ValidOr( DwellingUnitTypeCnt[2], 0 ) +
+         3 * ValidOr( DwellingUnitTypeCnt[3], 0 ) +
+         4 * ValidOr( DwellingUnitTypeCnt[4], 0 ) +
+         5 * ValidOr( DwellingUnitTypeCnt[5], 0 ) +
+         6 * ValidOr( DwellingUnitTypeCnt[6], 0 )  
+    else if( IfValidAnd( FxdSeat > 0 ) .AND. IfValidAnd( FxdSeatEligible > 0 ) )
+    then ValidOr( OccNumFxdSeat, 0 ) // Fixed seating can be used
+    else if( LocalStatus( VentSpcFunc ) > 0 .AND. IfValidAnd( Area > 0 ) )
+    then // Calculated using OccDens
+         if( find( VentSpcFunc, "Exhaust" ) .AND. LocalStatus( SpcFunc ) > 0 )
+         then // Not defined in Table 120.1-A. Therefore, define based on space function from App5-4A
+              SpaceFunctionData:OccDens( "FuncType", SpcFunc ) * Area / 1000
+         else if( find( VentSpcFunc, "Retail" ) )
+         then // The densities for reatil listed in Table 120.1-A is close to the load for egress purposes in CBC
+              VentilationSpaceFunctionData:MinOccDens( "VentFuncType", VentSpcFunc ) * Area / 1000
+         else // Times 2 because the densities listed in Table 120.1-A are half of the load for egress purposes in CBC
+              2 * VentilationSpaceFunctionData:MinOccDens( "VentFuncType", VentSpcFunc ) * Area / 1000
+         endif endif
     else 0
     endif endif endif endif
 ENDRULE
@@ -113,7 +140,10 @@ RULE NEW ThrmlZn:MinOccDens
     endif
 ENDRULE
 
-// For simulation
+// For simulation/ventilation calculation purposes
+// For simulation if is residential or with fixed seating
+// Ventilation rate is determined based on the minimum or the designe which is greater
+// See RULE NEW Spc:CodeVentPerPersonFlow
 RULE NEW Spc:MinOccNumSim
   DATATYPE
     Float
@@ -125,18 +155,27 @@ RULE NEW Spc:MinOccNumSim
     NotInput
   UNITS 
     people
-  DEFAULT : T24N
+  DEFAULT : T24N_2022
     if( HasNoInternalLds )
     then 0 // Is Unoccupied, Attic/Crawlspace, or Plenum space
-    else
-    if( IsHighRiseRes )
+    else if( IsHighRiseRes )
     then MinOccNum
-    else
-    if( IfValidAnd( DsgnOcc > 0 ) .AND. IfValidAnd( DsgnOccEligible > 0 ) )
+    else if( IfValidAnd( DsgnOcc > 0 ) .AND. IfValidAnd( DsgnOccEligible > 0 ) )
     then MinOccNum
     else MinOccNum * 0.5 // 50% of egress density
     endif endif endif
-  DEFAULT : S901G ECBC
+  DEFAULT : T24N
+    if( HasNoInternalLds ) // Is Unoccupied, Attic/Crawlspace, or Plenum space
+    then 0
+    else if( IsHighRiseRes )
+    then MinOccNum
+    else if( IfValidAnd( FxdSeat > 0 ) .AND. IfValidAnd( FxdSeatEligible > 0 ) )
+    then ValidOr( OccNumFxdSeat, 0 )
+    else if( find( VentSpcFunc, "Retail" ) )
+    then MinOccNum // 100% of egress for Retail spaces
+    else MinOccNum * 0.5 // 50% of egress density
+    endif endif endif endif
+  DEFAULT : S901G
     MinOccNum * 0.5
 ENDRULE
 RULE NEW Spc:MinOccDensSim
@@ -160,31 +199,44 @@ ENDRULE
 
 // -------------- Occupancy Fraction ------------------------------------------
 RULE Spc:OccFrac
-  DESCRIPTION
-    "The expected fraction of the exiting density of people in a Space, based 
+  DESCRIPTION : S901G T24N_2022
+    "The expected fraction of the existing density of people in a Space, based 
      on SpaceFunction, which will determine the design occupancy."  
-  INPUTCLASS : S901G ECBC T24N_2013 T24N_2016 T24N_2019
-    Default
-  INPUTCLASS
+  DESCRIPTION : T24N
+    "The expected fraction of the existing density of people in a Space, based 
+     on VentilationSpaceFunction, which will determine the design occupancy."
+  INPUTCLASS : T24N_2022
     NotInput IgnoreUserInput "Spc:OccFrac no longer an allowed input as of version 2022.3.0, select Designed Occupancy if the space has expected number of occupants"
+  INPUTCLASS
+    Default
   MINIMUM
     0.5
   COMMONMAXIMUM
     1.0
   MAXIMUM
     5.0
-  DEFAULT : T24N 
+  DEFAULT : T24N_2022
     if( HasNoInternalLds )
     then UNDEFINED
-    else if( LocalCompAssigned( SpcFuncDefaultsRef ) .AND. LocalStatus( SpcFunc ) < 5 ) 
+    else if( LocalCompAssigned( SpcFuncDefaultsRef ) .AND. LocalStatus( SpcFunc ) < 5 )
     then SpcFuncDefaultsRef:OccFrac
     else Proj:OccFrac
     endif endif
+  DEFAULT : T24N 
+    if( HasNoInternalLds )
+    then UNDEFINED
+    else if( LocalCompAssigned( SpcFuncDefaultsRef ) .AND. LocalStatus( SpcFunc ) < 5 )
+    then SpcFuncDefaultsRef:OccFrac
+    else if( find( VentSpcFunc, "Retail" ) )
+    then 1 // special case for Retail spaces
+    else Proj:OccFrac
+    endif endif endif
 ENDRULE
 
-// JP 6/7/23 move this section from top to avoid erros and rename property names (tickets 3446 & 3490)
 // -------------- Designed Occupancy ------------------------------------------
 RULE NEW Spc:DsgnOccEligible
+  RULESETS
+    T24N_2022
   DATATYPE
     Integer
   LONGFORM
@@ -194,26 +246,26 @@ RULE NEW Spc:DsgnOccEligible
   DESCRIPTION
     "A flag that indicates that the space is eligible for using the designed occupancy
      method for determining space ventilation requirements."
-  HELP : T24N_2022
+  HELP
     "Space meets the requirements for Exception 1 to Section 120.1(c)3."
   INPUTCLASS
     NotInput
   DEFAULT
-    if( HasNoInternalLds > 0 .OR. 
-        IsRes > 0 .OR. 
-        SpcFunc = "Unleased Tenant Area" )
+    if( HasNoInternalLds > 0 .OR. IsRes > 0 .OR. SpcFunc = "Unleased Tenant Area" )
     then 0
     else 1
     endif
 ENDRULE
 RULE Spc:DsgnOcc
+  RULESETS
+    T24N_2022
   DESCRIPTION
     "A flag that indicates that the space uses the expected number of 
      occupants or fixed seating criteria for determining space ventilation 
      requirements."
   PREVIOUSNAMES
     FxdSeat
-  HELP : T24N_2022
+  HELP
     "Space must meet the requirements for Exception 1 to Section 120.1(c)3. If selected
      an exceptional reporting condition will be triggered."
   INPUTCLASS
@@ -222,13 +274,13 @@ RULE Spc:DsgnOcc
     0
   SIZING 
     if( DsgnOccEligible > 0 )
-    then u:DsgnOcc
+    then DsgnOcc
     else 0
     endif
-  ANNUAL
-    z:DsgnOcc
 ENDRULE
 RULE Spc:DsgnOccNum
+  RULESETS
+    T24N_2022
   DESCRIPTION
     "A number of occupants in the space for simulation and ventilation calculations
      if Designed Occupancy is selected and is a valid choice."
@@ -241,26 +293,93 @@ RULE Spc:DsgnOccNum
   DEFAULT
     MinOccNumSim
   CHECKCODE
-    if( DsgnOccNum > 0 .AND. 
-        DsgnOcc > 0 .AND.
-        DsgnOccEligible = 0 )
-   then
-     PostWarning("For Space '%s', DesignedOccupantNumber is not valid. This
-                  input will be ignored, and default occupancy will be used.",
-                  Name)
+    if( DsgnOccNum > 0 .AND. DsgnOcc > 0 .AND. DsgnOccEligible = 0 )
+    then PostWarning( "For Space '%s', DesignedOccupantNumber is not valid. This
+                       input will be ignored, and default occupancy will be used.", Name )
     else UNCHANGED
     endif
   SIZING
     if( DsgnOcc =  0 )
     then 0 
-    else u:DsgnOccNum
+    else DsgnOccNum
     endif
-  ANNUAL
-    z:DsgnOccNum
+ENDRULE
+// -------------- Fixed Seating ------------------------------------------
+// Reverse back to 2019 rule - JP 25/01/03
+RULE NEW Spc:FxdSeatEligible
+  RULESETS
+     S901G T24N_2025
+  DATATYPE
+    Integer
+  LONGFORM
+    FixedSeatingEligible
+  PREVIOUSNAMES
+    DsgnOccEligible DesignedOccupancyEligible
+  DESCRIPTION
+    "A flag that indicates that the space is eligible for using fixed seeting
+     for determining space ventilation requirements."
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( HasNoInternalLds > 0 .OR. IsRes > 0 .OR. SpcFunc = "Unleased Tenant Area" )
+    then 0
+    else 1
+    endif
+ENDRULE
+RULE Spc:FxdSeat
+  RULESETS
+     S901G T24N_2025
+  DESCRIPTION
+    "A flag that indicates that the space has fixed seating and the space 
+     occupancy will be entered as a number of occupants."
+  PREVIOUSNAMES
+    DsgnOcc
+  INPUTCLASS
+    Default
+  DEFAULT
+    0
+  SIZING 
+    if( HasNoInternalLds .OR. IsRes .OR. SpcFunc = "Unleased Tenant Area" )
+    then 0
+    else FxdSeat
+    endif
+ENDRULE
+RULE Spc:OccNumFxdSeat
+  RULESETS
+     S901G T24N_2025
+  DESCRIPTION
+    "A number of occupants in the space for simulation and ventilation calculations
+     if FixedSeating is selected and is a valid choice."
+  PREVIOUSNAMES
+    DsgnOccNum
+  INPUTCLASS
+    Default
+  UNITS
+    people
+  DEFAULT
+    if( LocalStatus( VentSpcFunc ) > 0 .AND. IfValidAnd( Area > 0 ) ) // Calculated using OccDens
+    then // Times 2 because the densities listed in Table 120.1-A are half of the load for egress purposes in CBC
+         2 * VentilationSpaceFunctionData:MinOccDens( "VentFuncType", VentSpcFunc ) * Area / 1000
+    else 0
+    endif
+  CHECKCODE
+    if( OccNumFxdSeat > 0 .AND. FxdSeat > 0 .AND.
+        ( HasNoInternalLds > 0 .OR. 
+          IsRes > 0 .OR. 
+          SpcFunc = "Unleased Tenant Area" ) )
+    then PostWarning( "For Space '%s', OccupantNumberFixedSeating is not valid. This
+                      input will be ignored, and default occupancy will be used.", Name )
+    else UNCHANGED
+    endif
+  SIZING
+    if( FxdSeat =  0 )
+    then 0 
+    else OccNumFxdSeat
+    endif
 ENDRULE
 
 // -------------- # Occupants / Density ---------------------------------------
-// Occupant number / density 
+// Occupant number / density
 RULE NEW Spc:OccNum
   DATATYPE
     Float
@@ -280,12 +399,9 @@ ENDRULE
 RULE Spc:OccDens
   DESCRIPTION
     "The density of occupants in the Space for egress/DCV design purposes."  
-  REFERENCE 
-    NACM 5.4.3 Occupants
-    NACM Appendix 5.4A
   INPUTCLASS : T24N
     NotInput  IgnoreUserInput  "Spc:OccDens no longer an allowed input as of version 2016.1.0 / 2013 v3d"
-  INPUTCLASS : S901G ECBC
+  INPUTCLASS : S901G
     Default
   MINIMUM 
     0
@@ -302,102 +418,83 @@ RULE Spc:OccDens
     then OccNum / Area * 1000
     else 0
     endif
-  DEFAULT : S901G ECBC
+  DEFAULT : S901G
     if( HasNoInternalLds )
     then UNDEFINED
-    else if( LocalCompAssigned( SpcFuncDefaultsRef ) .AND. LocalStatus( SpcFunc ) < 5 ) 
+    else if( LocalCompAssigned( SpcFuncDefaultsRef ) .AND. LocalStatus( SpcFunc ) < 5 )
     then SpcFuncDefaultsRef:OccDens
     else MinOccDens
     endif endif
-// Property is NotInput, CHECK no longer needed
-//CHECKCODE : T24N
-//  if( IfValidAnd( OccDens < MinOccDens - 0.01 ) )
-//  then 
-//    PostError("The specified OccupantDensity of Space '%s' is %.2f people/1000ft2,
-//               which is less than the default value of %.2f people/1000ft2 used
-//               for compliance analysis. Restore the default value for this
-//               property, or change to match or exceed the minimum.", 
-//               Name, OccDens, MinOccDens)
-//  else if( IfValidAnd( OccDens > MinOccDens + 0.01 ) )
-//  then 
-//    PostWarning("The specified OccupantDensity of Space '%s' is %.2f people/1000ft2,
-//               which is greater than the default value of %.2f people/1000ft2 used
-//               for compliance analysis. The specified value will be used for
-//               compliance analysis.", 
-//               Name, OccDens, MinOccDens)
-//  else UNCHANGED
-//  endif endif
   SIZING_PROPOSED : T24N
-    u:OccDens
-  SIZING_PROPOSED : S901G ECBC
-    if( HasNoInternalLds .OR. 
-        IfValidAnd( OccDens > 0 ) = 0 )
+    OccDens
+  SIZING_PROPOSED : S901G
+    if( HasNoInternalLds .OR. IfValidAnd( OccDens > 0 ) = 0 )
     then UNDEFINED
-    else u:OccDens
+    else OccDens
     endif
   SIZING_BASELINE
     zp:OccDens
-  ANNUAL
-    z:OccDens
 ENDRULE
-
 
 // For simulation
 RULE Spc:OccNumSim
-  DESCRIPTION
+  DESCRIPTION : T24N_2022
     "The number of people in a space for simulation. It is also used in ventilation 
      calculations if Designed Occupancy is selected."  
-  INPUTCLASS : T24N_2016
-    NotInput  IgnoreUserInput  "Removed in transition from 2013 version 3d to 3e and 2016.1 to .2"
-  INPUTCLASS : S901G ECBC T24N_2013 T24N_2019
-    Default
-  INPUTCLASS
+  DESCRIPTION
+    "The number of people in a space for simulation. It is also used in ventilation 
+     calculations following the equation under the Standard Section 120.1( c )3." 
+  INPUTCLASS : T24N_2022
     NotInput IgnoreUserInput "Spc:OccNumSim no longer an allowed input as of version 2022.3.0, select Designed Occupancy if the space has expected number of occupants"
-  DEFAULT 
-    if( HasNoInternalLds )
-    then 0 // Is Unoccupied, Attic/Crawlspace, or Plenum space
-    else if( IsRes > 0  )
-    then // Is high-rise res or hotel/motel
-      MinOccNumSim
-    else if( DsgnOcc > 0 .AND. IfValidAnd( DsgnOccEligible > 0 ) )
-    then // Fixed seating can be used
-      DsgnOccNum
-    else // Calculated using OccDensSim
-      OccDens * ValidOr( OccFrac, 0 ) * ValidOr( Area, 0 ) / 1000
+  INPUTCLASS : S901G T24N
+    Default
+  DEFAULT : T24N_2022
+    if( HasNoInternalLds ) // Is Unoccupied, Attic/Crawlspace, or Plenum space
+    then 0 
+    else if( IsRes > 0 ) // Is high-rise res or hotel/motel
+    then MinOccNumSim
+    else if( DsgnOcc > 0 .AND. IfValidAnd( DsgnOccEligible > 0 ) ) // Designed occupency 
+    then DsgnOccNum
+    else OccDens * ValidOr( OccFrac, 0 ) * ValidOr( Area, 0 ) / 1000 // Calculated using OccDensSim
     endif endif endif
-  CHECKCODE : T24N_2016
-    UNCHANGED
+  DEFAULT 
+    if( HasNoInternalLds ) // Is Unoccupied, Attic/Crawlspace, or Plenum space
+    then 0
+    else if( IsRes > 0 ) // Is high-rise res or hotel/motel
+    then MinOccNumSim
+    else if( FxdSeat > 0 .AND. IfValidAnd( FxdSeatEligible > 0 ) ) // Fixed seating can be used
+    then OccNumFxdSeat
+    else OccDens * ValidOr( OccFrac, 0 ) * ValidOr( Area, 0 ) / 1000 // Calculated using OccDensSim
+    endif endif endif
   CHECKCODE : T24N
     if( ( IsRes > 0 .OR. HasUnknownHVAC > 0 ) .AND. // Only check if IsRes or UnknownHVAC
         LocalStatus( OccNumSim ) > 4 .AND. // input is user defined
-        ( OccNumSim > MinOccNumSim * 1.001 .OR. OccNumSim < MinOccNumSim * 0.999  ) )
-    then 
-      PostWarning("Space '%s' is a residential space, or HasUnknownHVAC has been checked.
-                   The user-defined value for 'Total Occupants' will be ignored.", Name )
-    else     
-    if( IsRes = 0 .AND. 
-        OccNumSim < MinOccNumSim * 0.999 )
-    then
-      PostError("Space '%s' has a user-defined value for 'Total Occupants' less
-                 than the minimum required for the Space Function selected.", Name )
+        ( OccNumSim > MinOccNumSim * 1.001 .OR. OccNumSim < MinOccNumSim * 0.999 ) )
+    then PostWarning( "Space '%s' is a residential space, or HasUnknownHVAC has been checked.
+                       The user-defined value for 'Total Occupants' will be ignored.", Name )
+    else if( IsRes = 0 .AND. OccNumSim < MinOccNumSim * 0.999 )
+    then PostError( "Space '%s' has a user-defined value for 'Total Occupants' less
+                     than the minimum required for the Space Function selected.", Name )
     else UNCHANGED
     endif endif
-  SIZING : T24N_2016
-    u:OccNumSim
-  SIZING : T24N
+  SIZING : T24N_2022
     if( HasNoInternalLds )
     then 0 // Is Unoccupied, Attic/Crawlspace, or Plenum space
     else if( IsRes > 0 .OR. HasUnknownHVAC > 0 )
-    then // Is HRR, hotel/motel, or UnknownHVAC
-      MinOccNumSim
+    then MinOccNumSim // Is HRR, hotel/motel, or UnknownHVAC
     else if( DsgnOcc > 0 .AND. IfValidAnd( DsgnOccEligible > 0 ) )
-    then // Fixed seating can be used
-      DsgnOccNum
-    else // Use OccNumSim, either default calc or user input
-      OccNumSim
+    then DsgnOccNum // Fixed seating can be used
+    else OccNumSim // Use OccNumSim, either default calc or user input
     endif endif endif
-  ANNUAL
-    z:OccNumSim
+  SIZING
+    if( HasNoInternalLds ) // Is Unoccupied, Attic/Crawlspace, or Plenum space
+    then 0
+    else if( IsRes > 0 ) // Is high-rise res or hotel/motel
+    then MinOccNumSim
+    else if( FxdSeat > 0 .AND. IfValidAnd( FxdSeatEligible > 0 ) ) // Fixed seating can be used
+    then OccNumFxdSeat
+    else OccDens * ValidOr( OccFrac, 0 ) * ValidOr( Area, 0 ) / 1000 // Calculated using OccDensSim
+    endif endif endif
 ENDRULE
 RULE Spc:OccDensSim
   DESCRIPTION
@@ -413,16 +510,15 @@ RULE Spc:OccDensSim
     then OccNumSim / Area * 1000
     else 0
     endif endif
-  DEFAULT : S901G ECBC
+  DEFAULT : S901G
     if( HasNoInternalLds )
     then UNDEFINED
     else if( LocalCompAssigned( SpcFuncDefaultsRef ) .AND. 
-             LocalStatus( SpcFunc ) < 5 )
-    then
-      SpcFuncDefaultsRef:OccDens
+            LocalStatus( SpcFunc ) < 5 )
+    then SpcFuncDefaultsRef:OccDens
     else OccDens
     endif endif
-// See below for SIZING/ANNUAL rule
+  // See below for SIZING/ANNUAL rule
 ENDRULE
 
 
@@ -442,17 +538,15 @@ RULE NEW ThrmlZn:OccDens
   REPORTPRECISION
     0
   DEFAULT
-    if( IfValidAnd( FlrArea > 0 ) = 0 ) 
+    if( IfValidAnd( FlrArea > 0 ) = 0 )
     then 0
     else SumRevRef( Spc:ThrmlZnRef, Spc:OccNum ) / FlrArea * 1000
     endif
   SIZING
-    if( IfValidAnd( FlrArea > 0 ) = 0 ) 
+    if( IfValidAnd( FlrArea > 0 ) = 0 )
     then 0
     else SumRevRef( Spc:ThrmlZnRef, Spc:OccNum ) / FlrArea * 1000
     endif
-  ANNUAL
-    z:OccDens
 ENDRULE
 RULE ThrmlZn:OccNumSim
   DESCRIPTION
@@ -467,8 +561,6 @@ RULE ThrmlZn:OccNumSim
     SumRevRef( Spc:ThrmlZnRef, Spc:OccNumSim )
   SIZING
     SumRevRef( Spc:ThrmlZnRef, Spc:OccNumSim )
-  ANNUAL
-    z:OccNumSim
 ENDRULE
 RULE NEW ThrmlZn:OccDensSim
   DATATYPE
@@ -482,17 +574,15 @@ RULE NEW ThrmlZn:OccDensSim
   UNITS 
     people/1000ft2
   DEFAULT
-    if( IfValidAnd( FlrArea > 0 ) = 0 ) 
+    if( IfValidAnd( FlrArea > 0 ) = 0 )
     then 0
     else OccNumSim / FlrArea * 1000
     endif
   SIZING
-    if( FlrArea = 0 ) 
+    if( FlrArea = 0 )
     then 0
     else OccNumSim / FlrArea * 1000
     endif
-  ANNUAL
-    z:OccDensSim
 ENDRULE
 
 
@@ -534,45 +624,35 @@ RULE Spc:OccSchRef
   DESCRIPTION
     "Reference to a schedule that describes the fraction of occupancy on an 
      hourly basis."  
-  HELP
-    ""  
-  REFERENCE 
-    ACM-5.4.3 Occupants
   INPUTCLASS : T24N
     Prescribed
-  INPUTCLASS : S901G ECBC
+  INPUTCLASS : S901G
     Default
   DEFAULT
-    if( HasNoInternalLds .OR.
-        LocalStatus(OccDens) = 0 )
+    if( HasNoInternalLds .OR. LocalStatus( OccDens ) = 0 )
     then UNDEFINED
-    else if( LocalCompAssigned(SpcFuncDefaultsRef) .AND. LocalStatus(SpcFunc)<5) 
+    else if( LocalCompAssigned( SpcFuncDefaultsRef ) .AND. LocalStatus( SpcFunc )<5 )
     then SpcFuncDefaultsRef:OccSchRef
     else UNDEFINED
     endif endif
-  SIZING_PROPOSED : S901G ECBC
-    if( HasNoInternalLds .OR.
-        LocalStatus(OccDens) = 0 )
+  SIZING_PROPOSED : S901G
+    if( HasNoInternalLds .OR. LocalStatus( OccDens ) = 0 )
     then UNDEFINED
-    else if( (u:OccSchRef = "- none -" .OR.
-              LocalCompAssigned(u:OccSchRef) = 0) .AND.
-	      IfValidAnd(u:OccDens > 0) )
-    then RuleLibrary(Schedule,(SpaceFunctionGroups:OccSchRef("FuncGroup",FuncSchGrp)))
-    else if( u:OccSchRef != "- none -" .AND.
-	      IfValidAnd(u:OccDens > 0) )
+    else if( ( u:OccSchRef = "- none -" .OR.
+             LocalCompAssigned( u:OccSchRef ) = 0 ) .AND.
+	           IfValidAnd( u:OccDens > 0 ) )
+    then RuleLibrary( Schedule,( SpaceFunctionGroups:OccSchRef( "FuncGroup",FuncSchGrp ) ) )
+    else if( u:OccSchRef != "- none -" .AND. IfValidAnd( u:OccDens > 0 ) )
     then u:OccSchRef
     else UNDEFINED
     endif endif endif
   SIZING_PROPOSED
-    if( HasNoInternalLds .OR.
-        LocalStatus(OccDens) = 0 )
+    if( HasNoInternalLds .OR. LocalStatus( OccDens ) = 0 )
     then UNDEFINED
-    else RuleLibrary(Schedule,(SpaceFunctionGroups:OccSchRef("FuncGroup",FuncSchGrpSim)))
+    else RuleLibrary( Schedule,( SpaceFunctionGroups:OccSchRef( "FuncGroup",FuncSchGrpSim ) ) )
     endif
   SIZING_BASELINE
     zp:OccSchRef  
-  ANNUAL
-    z:OccSchRef
 ENDRULE
   
 
@@ -580,13 +660,9 @@ ENDRULE
 RULE Spc:OccSensHtRt
   DESCRIPTION
     "The rate of sensible heat released per person which is a function of activity"  
-  HELP
-    ""  
-  REFERENCE 
-    ACM-5.4.3 Occupants
   INPUTCLASS : T24N
     Prescribed
-  INPUTCLASS : S901G ECBC
+  INPUTCLASS : S901G
     Default
   MINIMUM 
     0
@@ -599,48 +675,37 @@ RULE Spc:OccSensHtRt
   UNITS 
     Btu/hr-person
   DEFAULT
-    if( HasNoInternalLds .OR.
-        LocalStatus(OccDens) = 0 )
+    if( HasNoInternalLds .OR. LocalStatus( OccDens ) = 0 )
     then UNDEFINED
-    else if( LocalCompAssigned(SpcFuncDefaultsRef) .AND. LocalStatus(SpcFunc)<5) 
+    else if( LocalCompAssigned( SpcFuncDefaultsRef ) .AND. LocalStatus( SpcFunc )<5 )
     then SpcFuncDefaultsRef:OccSensHtRt
-    else if( LocalStatus(SpcFunc) > 1 ) 
-    then SpaceFunctionData:OccSensHtRt("FuncType",SpcFunc)
+    else if( LocalStatus( SpcFunc ) > 1 )
+    then SpaceFunctionData:OccSensHtRt( "FuncType",SpcFunc )
     else UNDEFINED
     endif endif endif
-  SIZING_PROPOSED : S901G ECBC
-    if( HasNoInternalLds .OR.
-        IfValidAnd(u:OccDens = 0) )
+  SIZING_PROPOSED : S901G
+    if( HasNoInternalLds .OR. IfValidAnd( u:OccDens = 0 ) )
     then UNDEFINED
-    else if( IfValidAnd(u:OccSensHtRt = 0) .AND.
-	     IfValidAnd(u:OccDens > 0) )
-    then SpaceFunctionData:OccSensHtRt("FuncType",SpcFunc)
-    else if( IfValidAnd(u:OccSensHtRt > 0) .AND.
-	     IfValidAnd(u:OccDens > 0) )
+    else if( IfValidAnd( u:OccSensHtRt = 0 ) .AND. IfValidAnd( u:OccDens > 0 ) )
+    then SpaceFunctionData:OccSensHtRt( "FuncType",SpcFunc )
+    else if( IfValidAnd( u:OccSensHtRt > 0 ) .AND. IfValidAnd( u:OccDens > 0 ) )
     then u:OccSensHtRt
     else UNDEFINED
     endif endif endif
   SIZING_PROPOSED
-    if( HasNoInternalLds .OR.
-        LocalStatus(OccDens) = 0 )
+    if( HasNoInternalLds .OR. LocalStatus( OccDens ) = 0 )
     then UNDEFINED
-    else SpaceFunctionData:OccSensHtRt("FuncType",SpcFunc)  
+    else SpaceFunctionData:OccSensHtRt( "FuncType",SpcFunc )  
     endif
   SIZING_BASELINE
     zp:OccSensHtRt
-  ANNUAL
-    z:OccSensHtRt
 ENDRULE
 RULE Spc:OccLatHtRt
   DESCRIPTION
     "The rate of latent heat released per person which is a function of activity"  
-  HELP
-    ""  
-  REFERENCE 
-    ACM-5.4.3 Occupants
   INPUTCLASS : T24N
     Prescribed
-  INPUTCLASS : S901G ECBC
+  INPUTCLASS : S901G
     Default
   MINIMUM 
     0
@@ -653,67 +718,31 @@ RULE Spc:OccLatHtRt
   UNITS 
     Btu/hr-person
   DEFAULT
-    if( HasNoInternalLds .OR.
-        LocalStatus(OccDens) = 0 )
+    if( HasNoInternalLds .OR. LocalStatus( OccDens ) = 0 )
     then UNDEFINED
-    else if( LocalCompAssigned(SpcFuncDefaultsRef)  .AND. LocalStatus(SpcFunc)<5) 
+    else if( LocalCompAssigned( SpcFuncDefaultsRef ) .AND. LocalStatus( SpcFunc )<5 )
     then SpcFuncDefaultsRef:OccLatHtRt
-    else if( LocalStatus(SpcFunc) > 1 ) 
-    then SpaceFunctionData:OccLatHtRt("FuncType",SpcFunc)
+    else if( LocalStatus( SpcFunc ) > 1 )
+    then SpaceFunctionData:OccLatHtRt( "FuncType",SpcFunc )
     else UNDEFINED
     endif endif endif
-  SIZING_PROPOSED : S901G ECBC
-    if( HasNoInternalLds .OR.
-        IfValidAnd(u:OccDens = 0) )
+  SIZING_PROPOSED : S901G
+    if( HasNoInternalLds .OR. IfValidAnd( u:OccDens = 0 ) )
     then UNDEFINED
-    else if( IfValidAnd(u:OccLatHtRt = 0) .AND.
-	     IfValidAnd(u:OccDens > 0) )
-    then SpaceFunctionData:OccLatHtRt("FuncType",SpcFunc) 
-    else if( IfValidAnd(u:OccLatHtRt > 0) .AND.
-	     IfValidAnd(u:OccDens > 0) )
+    else if( IfValidAnd( u:OccLatHtRt = 0 ) .AND. IfValidAnd( u:OccDens > 0 ) )
+    then SpaceFunctionData:OccLatHtRt( "FuncType",SpcFunc ) 
+    else if( IfValidAnd( u:OccLatHtRt > 0 ) .AND. IfValidAnd( u:OccDens > 0 ) )
     then u:OccLatHtRt
     else UNDEFINED
     endif endif endif
   SIZING_PROPOSED
-    if( HasNoInternalLds .OR.
-        LocalStatus(OccDens) = 0 )
+    if( HasNoInternalLds .OR. LocalStatus( OccDens ) = 0 )
     then UNDEFINED
-    else SpaceFunctionData:OccLatHtRt("FuncType",SpcFunc)  
+    else SpaceFunctionData:OccLatHtRt( "FuncType",SpcFunc )  
     endif
   SIZING_BASELINE
     zp:OccLatHtRt
-  ANNUAL
-    z:OccLatHtRt
 ENDRULE
-
-
-
-; Removed, see Issue 1310 and OccFrac
-// ---------- Occupancy Fraction for Minimum Design Ventilation Calculations ---
-;RULE NEW Spc:OccVentFrac
-;  DATATYPE
-;    Float
-;  LONGFORM
-;    OccupancyVentilationFraction
-;  DESCRIPTION
-;    "The fraction of design occupancy that is assumed for calculating the minimum
-;     design ventilation rate for compliance analysis."
-;  INPUTCLASS
-;    NotInput
-;  DEFAULT : T24N
-;    if( HasNoInternalLds )
-;    then 1.0
-;    else SpaceFunctionData:OccVentFrac("FuncType",SpcFunc)
-;    endif
-;  SIZING
-;    u:OccVentFrac
-;ENDRULE
-
-
-; MOVED dwelling unit rules from HERE into new Space-DwellUnits.rule module - SAC 12/23/20
-;  incl: Spc:DwellingUnitTypeCnt[1-6], DwellingUnitTypeArea[1-6], DwellingUnitSpcTotArea, DefaultedDwellingUnitArea,
-;        Proj:DefaultedDwellingUnitArea, Spc:DwellingUnitSpcTotAreaWithMult
-
 
 // -----------------------------------------------------------------------------
 RULE NEW Spc:HaveResDHW
@@ -732,7 +761,7 @@ RULE NEW Spc:HaveResDHW
         ( LocalCompAssigned( ResDHWSysRef ) .OR.
         ExcludeWtrHtg ) .AND.
         DwellingUnitSpcTotArea > 0 )
-    then  1
-    else  0
+    then 1
+    else 0
     endif
 ENDRULE
