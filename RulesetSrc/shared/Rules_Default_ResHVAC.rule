@@ -559,6 +559,15 @@ RULELIST "Default_AllHVAC" 0 0 0 0
          then  EvalRulelist( "Blast_ResHVACSys_AutoSizeInputs", 1 )
          else  UNCHANGED  endif  }
 
+   "set ResClgSys:UsePMModel"    ResClgSys:UsePMModel =           ; SAC 03/12/25 (tic #1379)  ; ported to MF - SAC 04/14/25
+      {  if ( Type == 37  .OR. 
+             (Type ==  2 .AND. ResProj:EnergyCodeYearNum >= 2025) )
+         then  1  else  0  endif  }
+   "set ResHtPumpSys:UsePMModel" ResHtPumpSys:UsePMModel =        ; SAC 03/12/25 (tic #1379)
+      {  if ( Type == 36  .OR. 
+             (Type ==  4 .AND. ResProj:EnergyCodeYearNum >= 2025) )
+         then  1  else  0  endif  }
+
 ; SAC 8/24/13 - setup initial set of HVACHeat/Cool/HtPump assignment properties   ; SAC 03/18/22 (WSHP)
 	"Initialize HVACSys Heat/Cool/HtPump properties"  ResHVACSys:Action		= { if (Type == 1 .OR. Type == 3)
                                                                             then  EvalRulelist( "SetupHVACSys_Round1_HeatCool", 1 )
@@ -685,7 +694,9 @@ RULELIST "Default_AllHVAC" 0 0 0 0
 
 	"Call subordinate rulelist to default type-specific heat pump system data"
 		ResHtPumpSys:Action = {	switch (Local( Type ))
-											case  4 :  EvalRulelist( "Default_HtPump_SplitHeatPump"       , 1 )   				; "SplitHeatPump - Heating side of central split heat pump"
+											case  4 :  if (UsePMModel)
+                                            then  EvalRulelist( "Default_HtPump_SplitHeatPumpPM", 1 )
+                                            else  EvalRulelist( "Default_HtPump_SplitHeatPump"  , 1 )  endif 		; "SplitHeatPump - Heating side of central split heat pump"
 											case 26 :  EvalRulelist( "Default_HtPump_PkgTermHeatPump"     , 1 )   				; "PkgTermHeatPump - Packaged terminal heat pump (PTHP)"          ; SAC 6/22/20 (tic #1225)
 											case 24 :  EvalRulelist( "Default_HtPump_PkgTermHeatPump"     , 1 )   				; "SglPkgVertHeatPump - Single package vertical heat pump"        ; SAC 6/22/20 (tic #1226)
 											case 19 :  EvalRulelist( "Default_HtPump_SDHVSplitHeatPump"   , 1 )   				; "SDHVSplitHeatPump - Small duct, high velocity, central split heat pump"
@@ -702,36 +713,63 @@ RULELIST "Default_AllHVAC" 0 0 0 0
 											case 12 :  EvalRulelist( "Default_HtPump_GroundSourceHeatPump", 1 )   				; "GroundSourceHeatPump - Ground source heat pump (able to heat DHW)"
 											case 22 :  EvalRulelist( "Default_HtPump_VariableCapHeatPump" , 1 )   				; "VCHP" - SAC 11/2/18
 											case 33 :  EvalRulelist( "Default_HtPump_VariableCapHeatPump2", 1 )   				; "VCHP2" - SAC 11/01/20
-											case 36 :  EvalRulelist( "Default_HtPump_VariableCapHeatPump3", 1 )   				; "VCHP3" - SAC 05/16/24 (tic #1379)
-											case 35 :  EvalRulelist( "Default_HtPump_HeatPumpDHWCombo", 1 )  				      ; "HeatPumpDHWCombo - Combined Heating / DHW Heat Pump"   - SAC 03/31/23 (tic #1349)
+											case 36 :  EvalRulelist( "Default_HtPump_SplitHeatPumpPM"     , 1 )   				; "VCHP3" - SAC 05/16/24 (tic #1379)
+											case 35 :  EvalRulelist( "Default_HtPump_HeatPumpDHWCombo"    , 1 )  		      ; "HeatPumpDHWCombo - Combined Heating / DHW Heat Pump"   - SAC 03/31/23 (tic #1349)
 											default :  EvalRulelist( "Default_HtPump_unknown", 1 )
 										endswitch  }
 
+   "Set ResHtPumpSys:AllowBackupOpt - compatible w/ backup htg"      ResHtPumpSys:AllowBackupOpt =      ; for now, only SplitHeatPump & HeatPumpV3 - SAC 02/21/25 (tic #1379)  ; ported to MF - SAC 04/14/25
+      {  if (IfValidAnd( Proj:AnalysisVersion >= 250000 )==0) then  0
+         else if (UsePMModel) then  1
+         else  0  endif endif  }
+   "Force setting of BackupOption to 'Gas Furnace' if original model had indicated Dual Fuel"   ResHtPumpSys:Action =
+      {  if (IfValidAnd( Proj:AnalysisVersion >= 220000 ) .AND. Type != 35 .AND.
+             T24RHeatingEquipment:DuctFlag(  "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", TypeAbbrevStr ) > 0 .AND.
+             AllowBackupOpt > 0 .AND. LocalStatus( IsDualFuel ) > 4 .AND. IfValidAnd( IsDualFuel > 0 ) .AND. LocalStatus( BackupOption ) < 5)
+         then  EvalRulelist( "Force_HVACHtPump_BackupOption_DualFuel", 1 )
+         else  UNCHANGED  endif  }
+   "default ResHtPumpSys:BackupOption"    ResHtPumpSys:BackupOption = {  -1  }  ; no selection
+
    ; properties added for dual fuel heat pumps - SAC 12/08/20
    "Set ResHtPumpSys:AllowDualFuel - compatible w/ dual fuel flag"        ResHtPumpSys:AllowDualFuel =    ; logic added to prevent access in code vints prior to 2022 - SAC 03/10/21
-      {  if (IfValidAnd( Proj:AnalysisVersion >= 220000 )==0) then  0
+      {  if (IfValidAnd( Proj:AnalysisVersion >= 220000 )==0 .OR. AllowBackupOpt > 0) then  0
          else if (T24RHeatingEquipment:DuctFlag(  "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", TypeAbbrevStr ) > 0 .AND.
                   Type != 35)
          then  1  else  0  endif endif  }          ; HeatPumpDHWCombo - SAC 09/20/24 (tic #3629)
    "Default ResHtPumpSys:IsDualFuel - user dual fuel selection"           ResHtPumpSys:IsDualFuel =
       {  if (AllowDualFuel < 1) then  UNDEFINED  else  0  endif  }
+
+   "Set ResHtPumpSys:ShowAFUE"        ResHtPumpSys:ShowAFUE =      ; SAC 02/22/25 (tic #1379)  ; ported to MF - SAC 04/14/25
+      {  if ((AllowDualFuel  > 0 .AND. IfValidAnd( IsDualFuel > 0 )) .OR.
+             (AllowBackupOpt > 0 .AND. BackupOption == 2)) then  1  else  0  endif  }
+   "Set ResHtPumpSys:ShowLockout"     ResHtPumpSys:ShowLockout =
+      {  if (UsePMModel) then  0
+         else if ((AllowDualFuel  > 0 .AND. IfValidAnd( IsDualFuel > 0 )) .OR.
+                  (AllowBackupOpt > 0 .AND. BackupOption >  0)) then  1  else  0  endif endif  }
+
    "Default ResHtPumpSys:AFUE  - backup efficiency (%)"                   ResHtPumpSys:AFUE =
-      {  if (AllowDualFuel < 1 .OR. IfValidAnd( IsDualFuel > 0 )==0) then  UNDEFINED
+      {  if (ShowAFUE < 1) then  UNDEFINED
          else  T24RHeatingEquipment:AFUE(  "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", "CntrlFurnace" )  endif  }
    "Default ResHtPumpSys:HasHPLockout - has lockout temp for HP"          ResHtPumpSys:HasHPLockout =     ; revised to leave UNCHANGED for type = 36 (HeatPumpV3) - SAC 09/05/24
-      {  if (Type == 36) then  UNCHANGED
-         else if (AllowDualFuel < 1 .OR. IfValidAnd( IsDualFuel > 0 )==0) then  UNDEFINED  else  1  endif endif  }
+      {  if (UsePMModel) then  UNCHANGED
+         else if (ShowLockout < 1) then  UNDEFINED  else  1  endif endif  }
    "Default ResHtPumpSys:HPLockoutTemp - lockout temperature for HP"      ResHtPumpSys:HPLockoutTemp =
-      {  if (Type == 36) then  UNCHANGED
-         else if (AllowDualFuel < 1 .OR. IfValidAnd( IsDualFuel > 0 )==0) then  UNDEFINED  else  35  endif endif  }
-   "Set ResHtPumpSys:ModelDualFuel - whether dual fuel is compatible, selected & includes valid inputs"    ResHtPumpSys:ModelDualFuel =
-      {  if (AllowDualFuel > 0 .AND. IfValidAnd( IsDualFuel > 0 ) .AND. IfValidAnd( AFUE > 0 ))
+      {  if (UsePMModel) then  UNCHANGED
+         else if (ShowLockout < 1) then  UNDEFINED  else  35  endif endif  }
+   "set ResHtPumpSys:HPLockoutTempActive"      ResHtPumpSys:HPLockoutTempActive =          ; SAC 01/24/25 (tic #1390)  ; revised for BackupOption - SAC 02/22/25 (tic #1379)  ; port to MF - SAC 04/14/25
+      {  if (ShowLockout > 0 .AND. IfValidAnd( HasHPLockout > 0 ) .AND. IfValidAnd( Proj:EnableResearchMode > 0 )==0)
          then  1  else  UNDEFINED  endif  }
+   "Set ResHtPumpSys:ModelDualFuel - whether dual fuel is compatible, selected & includes valid inputs"    ResHtPumpSys:ModelDualFuel =
+      {  if (IfValidAnd( AFUE > 0 )==0) then  UNDEFINED
+         else if (ShowAFUE > 0)
+         then  1  else  UNDEFINED  endif endif  }
 
   "Call subordinate rulelist to default cooling system data"
 		ResClgSys:Action = {	switch (Local( Type ))
 										case  1 :  EvalRulelist( "Default_Cool_None"										, 1 )   				; "NoCooling - No cooling equipment"
-										case  2 :  EvalRulelist( "Default_Cool_SplitAirCond"						, 1 )   				; "SplitAirCond - Split air conditioning system"
+										case  2 :  if (UsePMModel)
+                                         then  EvalRulelist( "Default_Cool_SplitAirCondPM"			, 1 )
+                                         else  EvalRulelist( "Default_Cool_SplitAirCond"				, 1 )  endif 		; "SplitAirCond - Split air conditioning system"
 										case 25 :  EvalRulelist( "Default_Cool_PkgTermAirCond"					, 1 )   				; "PkgTermAirCond - Packaged terminal air conditioner (PTAC)"     ; SAC 6/20/20 (tic #1225)
 										case 23 :  EvalRulelist( "Default_Cool_PkgTermAirCond"   				, 1 )   				; "SglPkgVertAirCond - Single package vertical A/C system"        ; SAC 6/20/20 (tic #1226)
 										case  3 :  EvalRulelist( "Default_Cool_PkgAirCond"							, 1 )   				; "PkgAirCond - Central packaged A/C system (< 65 kBtuh)"
@@ -757,7 +795,7 @@ RULELIST "Default_AllHVAC" 0 0 0 0
 
    "Reset HVACSys:AutoSizeCool[1] iff Autosized VCHP2"   ResHVACSys:AutoSizeCool[1] =        ; SAC 09/23/21 (VCHP2)  ; VCHP3 - SAC 05/16/24 (tic #1379)
       {  if (FloorAreaServed[1] > 0.5 .AND. Type == 2 .AND.
-             ( IfValidAnd( HtPumpSystem[1]:Type = 33 ) .OR. IfValidAnd( HtPumpSystem[1]:Type = 36 )) .AND.
+             ( IfValidAnd( HtPumpSystem[1]:Type = 33 ) .OR. IfValidAnd( HtPumpSystem[1]:UsePMModel > 0 )) .AND.
              IfValidAnd( HtPumpSystem[1]:AutoSize = 0 )) then  0
          else  UNCHANGED  endif  }
 
@@ -1067,7 +1105,7 @@ RULELIST "Default_AllHVAC" 0 0 0 0
          then  "HSPF, Cap @ 17, SEER and EER for reporting only, no analysis impact"
          else if (Type == 33)  ; VCHP2
          then  "This system type NOT currently approved for Compliance Analysis"
-         else if (Type == 36)  ; VCHP3 - SAC 05/16/24 (tic #1379)
+         else if (UsePMModel)  ; VCHP3 - SAC 05/16/24 (tic #1379)
          then  if (IfValidAnd( HP3_SEER2Min > 0 ) .AND. IfValidAnd( SEER2 >= HP3_SEER2Min )==0)
                then  Format( "Invalid heat pump input:  SEER2 must be >= %g", ValidOr( HP3_SEER2Min, 0 ) )
                else if (IfValidAnd( HP3_SEER2Max > 0 ) .AND. IfValidAnd( SEER2 <= HP3_SEER2Max )==0)
@@ -1084,8 +1122,9 @@ RULELIST "Default_AllHVAC" 0 0 0 0
                then  Format( "Invalid heat pump input:  Cap17/Cap47 (%g) must be >= %g", ValidOr( HP3_HeatCapRatio, 0 ), ValidOr( HP3_HeatCapRatioMin, 0 ) )
                else if (IfValidAnd( HP3_HeatCapRatioMax > 0 ) .AND. IfValidAnd( HP3_HeatCapRatio <= HP3_HeatCapRatioMax )==0)
                then  Format( "Invalid heat pump input:  Cap17/Cap47 (%g) must be <= %g", ValidOr( HP3_HeatCapRatio, 0 ), ValidOr( HP3_HeatCapRatioMax, 0 ) )
-               else  "This system type NOT currently approved for Compliance Analysis"
-               endif endif endif endif endif endif endif endif
+               else if (Type == 36)
+               then  "This system type NOT currently approved for Compliance Analysis"
+               else  UNDEFINED  endif endif endif endif endif endif endif endif endif
          else  UNDEFINED  endif endif endif endif  }
       ;   else if (Type == 35 .AND. IfValidAnd( Proj:AnalysisVersion >= 220202 )==0)  ; HeatPumpDHWCombo  ; removed HeatPumpDHWCombo not approved msg - SAC 06/01/23
       ;   then  "This system type NOT currently approved for Compliance Analysis"
@@ -2748,6 +2787,8 @@ RULELIST "SetupHVACSys_Round2_HeatCool" 0 0 0 0
 	"Set ResHVACSys:ClSysRefrigChgAdjFctr - 9"	ResHVACSys:ClSysRefrigChgAdjFctr	= {	if (NumCoolSystemTypes > 8 .AND. IfValidAnd( CoolSystem[9]:RefrigChgAdjFctr  >= 0 )) then  min( ClSysRefrigChgAdjFctr, CoolSystem[9]:RefrigChgAdjFctr  )  else  UNCHANGED  endif  }
 	"Set ResHVACSys:ClSysRefrigChgAdjFctr - 10"	ResHVACSys:ClSysRefrigChgAdjFctr	= {	if (NumCoolSystemTypes > 9 .AND. IfValidAnd( CoolSystem[10]:RefrigChgAdjFctr >= 0 )) then  min( ClSysRefrigChgAdjFctr, CoolSystem[10]:RefrigChgAdjFctr )  else  UNCHANGED  endif  }
 
+	"Set ResHVACSys:HtSysRefrigChgAdjFctr"		ResHVACSys:HtSysRefrigChgAdjFctr = {	UNDEFINED  }      ; SAC 03/31/25
+
 ; RULES TO SUMMARIZE ADDIITONAL COOLING PERFORMANCE PARAMETERS PASSED INTO CSE FOR SIMULATION
 
 	"Set ResHVACSys:ClSysSizingFactor - 1"		ResHVACSys:ClSysSizingFactor	= {	if (NumCoolSystemTypes > 0 .AND. LocalCompAssigned( CoolSystem[1]  ) .AND. CoolSystemCount[1]  > 0) then                      (CoolSystem[1]:SizingFactor  * CoolSystemCount[1] )  else      0      endif  }
@@ -2866,9 +2907,11 @@ RULELIST "SetupHVACSys_Round2_HeatCool" 0 0 0 0
 	"Init ResHVACSys:HPSysCOP47"         ResHVACSys:HPSysCOP47        = {	UNDEFINED  }
 	"Init ResHVACSys:HPSysCOP35"         ResHVACSys:HPSysCOP35        = {	UNDEFINED  }
 	"Init ResHVACSys:HPSysCOP17"         ResHVACSys:HPSysCOP17        = {	UNDEFINED  }
+   "Init ResHVACSys:HPSysCap95"         ResHVACSys:HPSysCap95        = {	UNDEFINED  }     ; SAC 03/18/25 (tic #1401)  ; ported to MF - SAC 04/14/25
 	"Init ResHVACSys:HPSysAuxHtgCap"     ResHVACSys:HPSysAuxHtgCap    = {	UNDEFINED  }
 	"Init ResHVACSys:HPSysVCHPFanPwr"    ResHVACSys:HPSysVCHPFanPwr   = {	UNDEFINED  }
-	"Init ResHVACSys:HPModelDualFuel"    ResHVACSys:HPModelDualFuel   = {	UNDEFINED  }
+   "Init ResHVACSys:HPBackupOption"     ResHVACSys:HPBackupOption    = {	-1  }     ; SAC 02/23/25
+;	"Init ResHVACSys:HPModelDualFuel"    ResHVACSys:HPModelDualFuel   = {	UNDEFINED  }
 	"Init ResHVACSys:HPDFAFUE"           ResHVACSys:HPDFAFUE          = {	UNDEFINED  }
 	"Init ResHVACSys:HPLockoutTemp"      ResHVACSys:HPLockoutTemp     = {	UNDEFINED  }
    "Init ResHVACSys:LrgHtPumpStdFanPwr" ResHVACSys:LrgHtPumpStdFanPwr =    ; 2022 - SAC 03/11/21  ; SAC 03/15/21
@@ -3105,39 +3148,51 @@ RULELIST "SetupHVACSys_Round2_HeatPump" 0 0 0 0
 	"Set ResHVACSys:HPSysVCHPFanPwr - 9" 	ResHVACSys:HPSysVCHPFanPwr	= {	if (NumHtPumpSystemTypes > 8 .AND. LocalCompAssigned( HtPumpSystem[9]  ) .AND. LocalStatus( HtPumpSystem[9]:VCHPFanPower  ) > 0) then  HPSysVCHPFanPwr + (HtPumpSystem[9]:VCHPFanPower  * HtPumpSystemCount[9] )  else  UNCHANGED  endif  }
 	"Set ResHVACSys:HPSysVCHPFanPwr - 10"	ResHVACSys:HPSysVCHPFanPwr	= {	if (NumHtPumpSystemTypes > 9 .AND. LocalCompAssigned( HtPumpSystem[10] ) .AND. LocalStatus( HtPumpSystem[10]:VCHPFanPower ) > 0) then  HPSysVCHPFanPwr + (HtPumpSystem[10]:VCHPFanPower * HtPumpSystemCount[10])  else  UNCHANGED  endif  }
 
-	"Set ResHVACSys:HPModelDualFuel - 1"	ResHVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 0 .AND. IfValidAnd( HtPumpSystem[1]:ModelDualFuel > 0 )) then  1  else      0      endif  }  ; SAC 12/08/20
-	"Set ResHVACSys:HPModelDualFuel - 2"	ResHVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 1 .AND. IfValidAnd( HtPumpSystem[2]:ModelDualFuel > 0 )) then  1  else  UNCHANGED  endif  }
-	"Set ResHVACSys:HPModelDualFuel - 3"	ResHVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 2 .AND. IfValidAnd( HtPumpSystem[3]:ModelDualFuel > 0 )) then  1  else  UNCHANGED  endif  }
-	"Set ResHVACSys:HPModelDualFuel - 4"	ResHVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 3 .AND. IfValidAnd( HtPumpSystem[4]:ModelDualFuel > 0 )) then  1  else  UNCHANGED  endif  }
-	"Set ResHVACSys:HPModelDualFuel - 5"	ResHVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 4 .AND. IfValidAnd( HtPumpSystem[5]:ModelDualFuel > 0 )) then  1  else  UNCHANGED  endif  }
-	"Set ResHVACSys:HPModelDualFuel - 6"	ResHVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 5 .AND. IfValidAnd( HtPumpSystem[6]:ModelDualFuel > 0 )) then  1  else  UNCHANGED  endif  }
-	"Set ResHVACSys:HPModelDualFuel - 7"	ResHVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 6 .AND. IfValidAnd( HtPumpSystem[7]:ModelDualFuel > 0 )) then  1  else  UNCHANGED  endif  }
-	"Set ResHVACSys:HPModelDualFuel - 8"	ResHVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 7 .AND. IfValidAnd( HtPumpSystem[8]:ModelDualFuel > 0 )) then  1  else  UNCHANGED  endif  }
-	"Set ResHVACSys:HPModelDualFuel - 9"	ResHVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 8 .AND. IfValidAnd( HtPumpSystem[9]:ModelDualFuel > 0 )) then  1  else  UNCHANGED  endif  }
-	"Set ResHVACSys:HPModelDualFuel - 10"	ResHVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 9 .AND. IfValidAnd( HtPumpSystem[10]ModelDualFuel > 0 )) then  1  else  UNCHANGED  endif  }
+   "Set ResHVACSys:HPSysCap95 - 1"                      ResHVACSys:HPSysCap95 = {  if (NumHtPumpSystemTypes >= 1   .AND. HPSysAutoSize = 0 .AND. LocalCompAssigned( HtPumpSystem[1]   ) .AND. IfValidAnd( HtPumpSystem[1]:Cap95   > 0 )) then               (HtPumpSystem[1]:Cap95   * HtPumpSystemCount[1]  )  else      0      endif  }     ; SAC 03/18/25 (tic #1401)  ; ported to MF - SAC 04/14/25
+   "Set ResHVACSys:HPSysCap95 - 2-10"  for:#HP=(2to10)  ResHVACSys:HPSysCap95 = {  if (NumHtPumpSystemTypes >= #HP .AND. HPSysAutoSize = 0 .AND. LocalCompAssigned( HtPumpSystem[#HP] ) .AND. IfValidAnd( HtPumpSystem[#HP]:Cap95 > 0 )) then  HPSysCap95 + (HtPumpSystem[#HP]:Cap95 * HtPumpSystemCount[#HP])  else  UNCHANGED  endif  } 
 
-	"Set ResHVACSys:HPDFAFUE - 1"	   ResHVACSys:HPDFAFUE  = {	if (NumHtPumpSystemTypes > 0 .AND. IfValidAnd( HtPumpSystem[1]:ModelDualFuel > 0 ) .AND. IfValidAnd( HtPumpSystem[1]:AFUE > 0 ))        then  HtPumpSystem[1]:AFUE  else     101     endif  }
-	"Set ResHVACSys:HPDFAFUE - 2"	   ResHVACSys:HPDFAFUE  = {	if (NumHtPumpSystemTypes > 1 .AND. IfValidAnd( HtPumpSystem[2]:ModelDualFuel > 0 ) .AND. IfValidAnd( HtPumpSystem[2]:AFUE < HPDFAFUE )) then  HtPumpSystem[2]:AFUE  else  UNCHANGED  endif  }
-	"Set ResHVACSys:HPDFAFUE - 3"	   ResHVACSys:HPDFAFUE  = {	if (NumHtPumpSystemTypes > 2 .AND. IfValidAnd( HtPumpSystem[3]:ModelDualFuel > 0 ) .AND. IfValidAnd( HtPumpSystem[3]:AFUE < HPDFAFUE )) then  HtPumpSystem[3]:AFUE  else  UNCHANGED  endif  }
-	"Set ResHVACSys:HPDFAFUE - 4"	   ResHVACSys:HPDFAFUE  = {	if (NumHtPumpSystemTypes > 3 .AND. IfValidAnd( HtPumpSystem[4]:ModelDualFuel > 0 ) .AND. IfValidAnd( HtPumpSystem[4]:AFUE < HPDFAFUE )) then  HtPumpSystem[4]:AFUE  else  UNCHANGED  endif  }
-	"Set ResHVACSys:HPDFAFUE - 5"	   ResHVACSys:HPDFAFUE  = {	if (NumHtPumpSystemTypes > 4 .AND. IfValidAnd( HtPumpSystem[5]:ModelDualFuel > 0 ) .AND. IfValidAnd( HtPumpSystem[5]:AFUE < HPDFAFUE )) then  HtPumpSystem[5]:AFUE  else  UNCHANGED  endif  }
-	"Set ResHVACSys:HPDFAFUE - 6"	   ResHVACSys:HPDFAFUE  = {	if (NumHtPumpSystemTypes > 5 .AND. IfValidAnd( HtPumpSystem[6]:ModelDualFuel > 0 ) .AND. IfValidAnd( HtPumpSystem[6]:AFUE < HPDFAFUE )) then  HtPumpSystem[6]:AFUE  else  UNCHANGED  endif  }
-	"Set ResHVACSys:HPDFAFUE - 7"	   ResHVACSys:HPDFAFUE  = {	if (NumHtPumpSystemTypes > 6 .AND. IfValidAnd( HtPumpSystem[7]:ModelDualFuel > 0 ) .AND. IfValidAnd( HtPumpSystem[7]:AFUE < HPDFAFUE )) then  HtPumpSystem[7]:AFUE  else  UNCHANGED  endif  }
-	"Set ResHVACSys:HPDFAFUE - 8"	   ResHVACSys:HPDFAFUE  = {	if (NumHtPumpSystemTypes > 7 .AND. IfValidAnd( HtPumpSystem[8]:ModelDualFuel > 0 ) .AND. IfValidAnd( HtPumpSystem[8]:AFUE < HPDFAFUE )) then  HtPumpSystem[8]:AFUE  else  UNCHANGED  endif  }
-	"Set ResHVACSys:HPDFAFUE - 9"	   ResHVACSys:HPDFAFUE  = {	if (NumHtPumpSystemTypes > 8 .AND. IfValidAnd( HtPumpSystem[9]:ModelDualFuel > 0 ) .AND. IfValidAnd( HtPumpSystem[9]:AFUE < HPDFAFUE )) then  HtPumpSystem[9]:AFUE  else  UNCHANGED  endif  }
-	"Set ResHVACSys:HPDFAFUE - 10"	ResHVACSys:HPDFAFUE  = {	if (NumHtPumpSystemTypes > 9 .AND. IfValidAnd( HtPumpSystem[10]ModelDualFuel > 0 ) .AND. IfValidAnd( HtPumpSystem[10]AFUE < HPDFAFUE )) then  HtPumpSystem[10]AFUE  else  UNCHANGED  endif  }
+	"Set ResHVACSys:HPBackupOption - 1"	                     ResHVACSys:HPBackupOption =         ; SAC 02/23/25 (tic #1379)  ; ported to MF - SAC 04/14/25
+      {  if (NumHtPumpSystemTypes > 0 .AND. IfValidAnd( HtPumpSystem[1]:AllowBackupOpt > 0 ) .AND.
+             IfValidAnd( HtPumpSystem[1]:BackupOption > 0 ))    then  HtPumpSystem[1]:BackupOption
+         else if (NumHtPumpSystemTypes > 0 .AND. IfValidAnd( HtPumpSystem[1]:AllowDualFuel > 0 ) .AND.
+                  IfValidAnd( HtPumpSystem[1]:IsDualFuel > 0 )) then  2   ; gas furnace
+         else  0  endif endif  }
+	"Set ResHVACSys:HPBackupOption - 2-10"	 for:#HP=(2to10)  ResHVACSys:HPBackupOption =
+      {  if (NumHtPumpSystemTypes < #HP .OR. HPBackupOption > 0)     then  UNCHANGED   ; already set
+         else if (IfValidAnd( HtPumpSystem[#HP]:AllowBackupOpt > 0 ) .AND.
+                  IfValidAnd( HtPumpSystem[#HP]:BackupOption > 0 ))  then  HtPumpSystem[#HP]:BackupOption
+         else if (IfValidAnd( HtPumpSystem[#HP]:AllowDualFuel > 0 )  .AND.
+                  IfValidAnd( HtPumpSystem[#HP]:IsDualFuel > 0 ))    then  2   ; gas furnace
+         else  UNCHANGED  endif endif endif  }
+	; "Set ResHVACSys:HPModelDualFuel - 1"	ResHVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 0 .AND. IfValidAnd( HtPumpSystem[1]:ModelDualFuel > 0 )) then  1  else      0      endif  }  ; SAC 12/08/20
+	; "Set ResHVACSys:HPModelDualFuel - 2"	ResHVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 1 .AND. IfValidAnd( HtPumpSystem[2]:ModelDualFuel > 0 )) then  1  else  UNCHANGED  endif  }
+	; "Set ResHVACSys:HPModelDualFuel - 3"	ResHVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 2 .AND. IfValidAnd( HtPumpSystem[3]:ModelDualFuel > 0 )) then  1  else  UNCHANGED  endif  }
+	; "Set ResHVACSys:HPModelDualFuel - 4"	ResHVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 3 .AND. IfValidAnd( HtPumpSystem[4]:ModelDualFuel > 0 )) then  1  else  UNCHANGED  endif  }
+	; "Set ResHVACSys:HPModelDualFuel - 5"	ResHVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 4 .AND. IfValidAnd( HtPumpSystem[5]:ModelDualFuel > 0 )) then  1  else  UNCHANGED  endif  }
+	; "Set ResHVACSys:HPModelDualFuel - 6"	ResHVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 5 .AND. IfValidAnd( HtPumpSystem[6]:ModelDualFuel > 0 )) then  1  else  UNCHANGED  endif  }
+	; "Set ResHVACSys:HPModelDualFuel - 7"	ResHVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 6 .AND. IfValidAnd( HtPumpSystem[7]:ModelDualFuel > 0 )) then  1  else  UNCHANGED  endif  }
+	; "Set ResHVACSys:HPModelDualFuel - 8"	ResHVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 7 .AND. IfValidAnd( HtPumpSystem[8]:ModelDualFuel > 0 )) then  1  else  UNCHANGED  endif  }
+	; "Set ResHVACSys:HPModelDualFuel - 9"	ResHVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 8 .AND. IfValidAnd( HtPumpSystem[9]:ModelDualFuel > 0 )) then  1  else  UNCHANGED  endif  }
+	; "Set ResHVACSys:HPModelDualFuel - 10"	ResHVACSys:HPModelDualFuel = {	if (NumHtPumpSystemTypes > 9 .AND. IfValidAnd( HtPumpSystem[10]ModelDualFuel > 0 )) then  1  else  UNCHANGED  endif  }
 
-   ; revised for HP type HeatPumpV3 - SAC 09/05/24
-	"Set ResHVACSys:HPLockoutTemp - 1"	   ResHVACSys:HPLockoutTemp  = {	if (NumHtPumpSystemTypes > 0 .AND. (IfValidAnd( HtPumpSystem[1]:Type  = 36 ) .OR. IfValidAnd( HtPumpSystem[1]:ModelDualFuel  > 0 )) .AND. IfValidAnd( HtPumpSystem[1]:HasHPLockout > 0 ) .AND. IfValidAnd( HtPumpSystem[1]:HPLockoutTemp > -999 ))          then  HtPumpSystem[1]:HPLockoutTemp  else    -999     endif  }
-	"Set ResHVACSys:HPLockoutTemp - 2"	   ResHVACSys:HPLockoutTemp  = {	if (NumHtPumpSystemTypes > 1 .AND. (IfValidAnd( HtPumpSystem[2]:Type  = 36 ) .OR. IfValidAnd( HtPumpSystem[2]:ModelDualFuel  > 0 )) .AND. IfValidAnd( HtPumpSystem[2]:HasHPLockout > 0 ) .AND. IfValidAnd( HtPumpSystem[2]:HPLockoutTemp > HPLockoutTemp )) then  HtPumpSystem[2]:HPLockoutTemp  else  UNCHANGED  endif  }
-	"Set ResHVACSys:HPLockoutTemp - 3"	   ResHVACSys:HPLockoutTemp  = {	if (NumHtPumpSystemTypes > 2 .AND. (IfValidAnd( HtPumpSystem[3]:Type  = 36 ) .OR. IfValidAnd( HtPumpSystem[3]:ModelDualFuel  > 0 )) .AND. IfValidAnd( HtPumpSystem[3]:HasHPLockout > 0 ) .AND. IfValidAnd( HtPumpSystem[3]:HPLockoutTemp > HPLockoutTemp )) then  HtPumpSystem[3]:HPLockoutTemp  else  UNCHANGED  endif  }
-	"Set ResHVACSys:HPLockoutTemp - 4"	   ResHVACSys:HPLockoutTemp  = {	if (NumHtPumpSystemTypes > 3 .AND. (IfValidAnd( HtPumpSystem[4]:Type  = 36 ) .OR. IfValidAnd( HtPumpSystem[4]:ModelDualFuel  > 0 )) .AND. IfValidAnd( HtPumpSystem[4]:HasHPLockout > 0 ) .AND. IfValidAnd( HtPumpSystem[4]:HPLockoutTemp > HPLockoutTemp )) then  HtPumpSystem[4]:HPLockoutTemp  else  UNCHANGED  endif  }
-	"Set ResHVACSys:HPLockoutTemp - 5"	   ResHVACSys:HPLockoutTemp  = {	if (NumHtPumpSystemTypes > 4 .AND. (IfValidAnd( HtPumpSystem[5]:Type  = 36 ) .OR. IfValidAnd( HtPumpSystem[5]:ModelDualFuel  > 0 )) .AND. IfValidAnd( HtPumpSystem[5]:HasHPLockout > 0 ) .AND. IfValidAnd( HtPumpSystem[5]:HPLockoutTemp > HPLockoutTemp )) then  HtPumpSystem[5]:HPLockoutTemp  else  UNCHANGED  endif  }
-	"Set ResHVACSys:HPLockoutTemp - 6"	   ResHVACSys:HPLockoutTemp  = {	if (NumHtPumpSystemTypes > 5 .AND. (IfValidAnd( HtPumpSystem[6]:Type  = 36 ) .OR. IfValidAnd( HtPumpSystem[6]:ModelDualFuel  > 0 )) .AND. IfValidAnd( HtPumpSystem[6]:HasHPLockout > 0 ) .AND. IfValidAnd( HtPumpSystem[6]:HPLockoutTemp > HPLockoutTemp )) then  HtPumpSystem[6]:HPLockoutTemp  else  UNCHANGED  endif  }
-	"Set ResHVACSys:HPLockoutTemp - 7"	   ResHVACSys:HPLockoutTemp  = {	if (NumHtPumpSystemTypes > 6 .AND. (IfValidAnd( HtPumpSystem[7]:Type  = 36 ) .OR. IfValidAnd( HtPumpSystem[7]:ModelDualFuel  > 0 )) .AND. IfValidAnd( HtPumpSystem[7]:HasHPLockout > 0 ) .AND. IfValidAnd( HtPumpSystem[7]:HPLockoutTemp > HPLockoutTemp )) then  HtPumpSystem[7]:HPLockoutTemp  else  UNCHANGED  endif  }
-	"Set ResHVACSys:HPLockoutTemp - 8"	   ResHVACSys:HPLockoutTemp  = {	if (NumHtPumpSystemTypes > 7 .AND. (IfValidAnd( HtPumpSystem[8]:Type  = 36 ) .OR. IfValidAnd( HtPumpSystem[8]:ModelDualFuel  > 0 )) .AND. IfValidAnd( HtPumpSystem[8]:HasHPLockout > 0 ) .AND. IfValidAnd( HtPumpSystem[8]:HPLockoutTemp > HPLockoutTemp )) then  HtPumpSystem[8]:HPLockoutTemp  else  UNCHANGED  endif  }
-	"Set ResHVACSys:HPLockoutTemp - 9"	   ResHVACSys:HPLockoutTemp  = {	if (NumHtPumpSystemTypes > 8 .AND. (IfValidAnd( HtPumpSystem[9]:Type  = 36 ) .OR. IfValidAnd( HtPumpSystem[9]:ModelDualFuel  > 0 )) .AND. IfValidAnd( HtPumpSystem[9]:HasHPLockout > 0 ) .AND. IfValidAnd( HtPumpSystem[9]:HPLockoutTemp > HPLockoutTemp )) then  HtPumpSystem[9]:HPLockoutTemp  else  UNCHANGED  endif  }
-	"Set ResHVACSys:HPLockoutTemp - 10"	   ResHVACSys:HPLockoutTemp  = {	if (NumHtPumpSystemTypes > 9 .AND. (IfValidAnd( HtPumpSystem[10]:Type = 36 ) .OR. IfValidAnd( HtPumpSystem[10]:ModelDualFuel > 0 )) .AND. IfValidAnd( HtPumpSystem[10]HasHPLockout > 0 ) .AND. IfValidAnd( HtPumpSystem[10]HPLockoutTemp > HPLockoutTemp )) then  HtPumpSystem[10]HPLockoutTemp  else  UNCHANGED  endif  }
+	"Set ResHVACSys:HPDFAFUE - 1"	                       ResHVACSys:HPDFAFUE  =
+      {  if (NumHtPumpSystemTypes > 0 .AND. IfValidAnd( HtPumpSystem[1]:ModelDualFuel  > 0 ) .AND.
+             IfValidAnd( HtPumpSystem[1]:AFUE > 0 ))
+         then  HtPumpSystem[1]:AFUE  else     101     endif  }
+	"Set ResHVACSys:HPDFAFUE - 2-10"   for:#HP=(2to10)   ResHVACSys:HPDFAFUE  =
+      {  if (NumHtPumpSystemTypes >= #HP .AND. IfValidAnd( HtPumpSystem[#HP]:ModelDualFuel  > 0 ) .AND.
+             IfValidAnd( HtPumpSystem[#HP]:AFUE < HPDFAFUE ))
+         then  HtPumpSystem[#HP]:AFUE  else  UNCHANGED  endif  }
+
+   ; revised for HP type HeatPumpV3 - SAC 09/05/24    ; revised w/ ShowLockout - SAC 02/23/25 
+	"Set ResHVACSys:HPLockoutTemp - 1"	                      ResHVACSys:HPLockoutTemp  =
+      {  if (NumHtPumpSystemTypes > 0 .AND. (IfValidAnd( HtPumpSystem[1]:UsePMModel > 0 ) .OR. IfValidAnd( HtPumpSystem[1]:ShowLockout > 0 )) .AND.
+             IfValidAnd( HtPumpSystem[1]:HasHPLockout > 0 ) .AND. IfValidAnd( HtPumpSystem[1]:HPLockoutTemp > -999 ))
+         then  HtPumpSystem[1]:HPLockoutTemp  else    -999     endif  }
+	"Set ResHVACSys:HPLockoutTemp - 2-10"   for:#HP=(2to10)   ResHVACSys:HPLockoutTemp  =
+      {  if (NumHtPumpSystemTypes >= #HP .AND. (IfValidAnd( HtPumpSystem[#HP]:UsePMModel > 0 ) .OR. IfValidAnd( HtPumpSystem[#HP]:ShowLockout > 0 )) .AND.
+             IfValidAnd( HtPumpSystem[#HP]:HasHPLockout > 0 ) .AND. IfValidAnd( HtPumpSystem[#HP]:HPLockoutTemp > HPLockoutTemp ))
+         then  HtPumpSystem[#HP]:HPLockoutTemp  else  UNCHANGED  endif  }
 
    ; added logic to several rules below preventing table look-ups when no valid ht pump assigned - SAC 07/03/24
    "Set ResHVACSys:LrgHtPumpStdFanPwr"    ResHVACSys:LrgHtPumpStdFanPwr =        ; 2022 - SAC 03/11/21  ; SAC 03/15/21
@@ -3175,14 +3230,16 @@ RULELIST "SetupHVACSys_Round2_HeatPump" 0 0 0 0
 					      then  if (HtPumpSystem[1]:Type == 7)
       							then	Format( "%.0f %s unit(s), auto-sized", NumHtPumpSysUnits, HtPumpSysTypeAbbrev )
 		      					else if (HtPumpSystem[1]:Type == 11 .OR. HtPumpSystem[1]:Type == 26 .OR. HtPumpSystem[1]:Type == 24)
-      							then	if (HPModelDualFuel > 0)
-                                 then  Format( "%.0f DF %s unit(s), @47: COP %.1f, auto-sized", NumHtPumpSysUnits, HtPumpSysTypeAbbrev, HPSysCOP47 )
-                                 else  Format( "%.0f %s unit(s), @47: COP %.1f, auto-sized",    NumHtPumpSysUnits, HtPumpSysTypeAbbrev, HPSysCOP47 )
-                                 endif
-		      					else	if (HPModelDualFuel > 0)
-                                 then  Format( "%.0f DF %s unit(s), %s %.1f, auto-sized", NumHtPumpSysUnits, HtPumpSysTypeAbbrev, EffMetricLbls[3], EffMetricVals[3] )
-                                 else  Format( "%.0f %s unit(s), %s %.1f, auto-sized",    NumHtPumpSysUnits, HtPumpSysTypeAbbrev, EffMetricLbls[3], EffMetricVals[3] )
-                                 endif
+      							then	switch (HPBackupOption)
+                                    case 1  : Format( "%.0f ElecBackup %s unit(s), @47: COP %.1f, auto-sized", NumHtPumpSysUnits, HtPumpSysTypeAbbrev, HPSysCOP47 )
+                                    case 2  : Format( "%.0f GasBackup %s unit(s), @47: COP %.1f, auto-sized", NumHtPumpSysUnits, HtPumpSysTypeAbbrev, HPSysCOP47 )
+                                    default : Format( "%.0f %s unit(s), @47: COP %.1f, auto-sized",    NumHtPumpSysUnits, HtPumpSysTypeAbbrev, HPSysCOP47 )
+                                 endswitch
+		      					else	switch (HPBackupOption)
+                                    case 1  : Format( "%.0f ElecBackup %s unit(s), %s %.1f, auto-sized", NumHtPumpSysUnits, HtPumpSysTypeAbbrev, EffMetricLbls[3], EffMetricVals[3] )
+                                    case 2  : Format( "%.0f GasBackup %s unit(s), %s %.1f, auto-sized", NumHtPumpSysUnits, HtPumpSysTypeAbbrev, EffMetricLbls[3], EffMetricVals[3] )
+                                    default : Format( "%.0f %s unit(s), %s %.1f, auto-sized",    NumHtPumpSysUnits, HtPumpSysTypeAbbrev, EffMetricLbls[3], EffMetricVals[3] )
+                                 endswitch
 				      			endif endif
 					      else  if (HtPumpSystem[1]:Type == 7)
       							then	Format( "%.0f %s unit(s), @47: Cap %s Btuh", NumHtPumpSysUnits, HtPumpSysTypeAbbrev, FltToStr( HPSysCap47 ) )
@@ -3191,16 +3248,18 @@ RULELIST "SetupHVACSys_Round2_HeatPump" 0 0 0 0
       							else if (HtPumpSystem[1]:Type == 35)
       							then	Format( "%.0f %s unit(s)", NumHtPumpSysUnits, HtPumpSysTypeAbbrev )
       							else if (HtPumpSystem[1]:Type == 11 .OR. HtPumpSystem[1]:Type == 26 .OR. HtPumpSystem[1]:Type == 24)
-      							then	if (HPModelDualFuel > 0)
-                                 then  Format( "%.0f DF %s unit(s), @47: COP %.1f, Cap %s Btuh", NumHtPumpSysUnits, HtPumpSysTypeAbbrev, HPSysCOP47, FltToStr( HPSysCap47 ) )
-                                 else  Format( "%.0f %s unit(s), @47: COP %.1f, Cap %s Btuh",    NumHtPumpSysUnits, HtPumpSysTypeAbbrev, HPSysCOP47, FltToStr( HPSysCap47 ) )
-                                 endif
+      							then	switch (HPBackupOption)
+                                    case 1  : Format( "%.0f ElecBackup %s unit(s), @47: COP %.1f, Cap %s Btuh", NumHtPumpSysUnits, HtPumpSysTypeAbbrev, HPSysCOP47, FltToStr( HPSysCap47 ) )
+                                    case 2  : Format( "%.0f GasBackup %s unit(s), @47: COP %.1f, Cap %s Btuh", NumHtPumpSysUnits, HtPumpSysTypeAbbrev, HPSysCOP47, FltToStr( HPSysCap47 ) )
+                                    default : Format( "%.0f %s unit(s), @47: COP %.1f, Cap %s Btuh",    NumHtPumpSysUnits, HtPumpSysTypeAbbrev, HPSysCOP47, FltToStr( HPSysCap47 ) )
+                                 endswitch
       							else if (HtPumpSystem[1]:Type == 22)   ; SAC 11/2/18 - VCHP  - SAC 11/13/18 - removed Cap17 reporting
       							then	Format( "%.0f %s unit(s), Cap@47 %s Btuh", NumHtPumpSysUnits, HtPumpSysTypeAbbrev, FltToStr( HPSysCap47 ) )
-		      					else	if (HPModelDualFuel > 0)
-                                 then  Format( "%.0f DF %s unit(s), %s %.1f, Cap@47 %s Btuh", NumHtPumpSysUnits, HtPumpSysTypeAbbrev, EffMetricLbls[3], EffMetricVals[3], FltToStr( HPSysCap47 ) )
-                                 else  Format( "%.0f %s unit(s), %s %.1f, Cap@47 %s Btuh",    NumHtPumpSysUnits, HtPumpSysTypeAbbrev, EffMetricLbls[3], EffMetricVals[3], FltToStr( HPSysCap47 ) )
-                                 endif
+                           else  switch (HPBackupOption)
+                                    case 1  : Format( "%.0f ElecBackup %s unit(s), %s %.1f, Cap@47 %s Btuh", NumHtPumpSysUnits, HtPumpSysTypeAbbrev, EffMetricLbls[3], EffMetricVals[3], FltToStr( HPSysCap47 ) )
+                                    case 2  : Format( "%.0f GasBackup %s unit(s), %s %.1f, Cap@47 %s Btuh", NumHtPumpSysUnits, HtPumpSysTypeAbbrev, EffMetricLbls[3], EffMetricVals[3], FltToStr( HPSysCap47 ) )
+                                    default : Format( "%.0f %s unit(s), %s %.1f, Cap@47 %s Btuh",    NumHtPumpSysUnits, HtPumpSysTypeAbbrev, EffMetricLbls[3], EffMetricVals[3], FltToStr( HPSysCap47 ) )
+                                 endswitch
 				      			endif endif endif endif endif endif
 					else	Format( "%.0f %s unit(s),  ?? efficiency ??", NumHtPumpSysUnits, HtPumpSysTypeAbbrev )
 					endif endif endif endif  }
@@ -3209,16 +3268,16 @@ RULELIST "SetupHVACSys_Round2_HeatPump" 0 0 0 0
   ; More HVACSys cooling equipment summarization
 
    "Set ResHVACSys:ClSysSEER - 1"                       ResHVACSys:ClSysSEER  = {  if (NumHtPumpSystemTypes > 0     .AND. IfValidAnd( HtPumpSystem[ 1  ]:EffMetric = 1 ) .AND. IfValidAnd( HtPumpSystem[ 1  ]:SEER > 0 )) then                  HtPumpSystem[ 1  ]:SEER     else      0      endif  }
-   "Set ResHVACSys:ClSysSEER - 2-10"  for:#Eqp=(1to10)  ResHVACSys:ClSysSEER  = {  if (NumHtPumpSystemTypes >= #Eqp .AND. IfValidAnd( HtPumpSystem[#Eqp]:EffMetric = 1 ) .AND. IfValidAnd( HtPumpSystem[#Eqp]:SEER > 0 )) then  min( ClSysSEER, HtPumpSystem[#Eqp]:SEER  )  else  UNCHANGED  endif  }
+   "Set ResHVACSys:ClSysSEER - 2-10"  for:#Eqp=(2to10)  ResHVACSys:ClSysSEER  = {  if (NumHtPumpSystemTypes >= #Eqp .AND. IfValidAnd( HtPumpSystem[#Eqp]:EffMetric = 1 ) .AND. IfValidAnd( HtPumpSystem[#Eqp]:SEER > 0 )) then  min( ClSysSEER, HtPumpSystem[#Eqp]:SEER  )  else  UNCHANGED  endif  }
 
    "Set ResHVACSys:ClSysSEER2 - 1"                       ResHVACSys:ClSysSEER2  = {  if (NumHtPumpSystemTypes > 0     .AND. IfValidAnd( HtPumpSystem[ 1  ]:EffMetric = 2 ) .AND. IfValidAnd( HtPumpSystem[ 1  ]:SEER2 > 0 )) then                   HtPumpSystem[ 1  ]:SEER2     else      0      endif  }   ; SAC 10/06/22 (tic #3431)
-   "Set ResHVACSys:ClSysSEER2 - 2-10"  for:#Eqp=(1to10)  ResHVACSys:ClSysSEER2  = {  if (NumHtPumpSystemTypes >= #Eqp .AND. IfValidAnd( HtPumpSystem[#Eqp]:EffMetric = 2 ) .AND. IfValidAnd( HtPumpSystem[#Eqp]:SEER2 > 0 )) then  min( ClSysSEER2, HtPumpSystem[#Eqp]:SEER2  )  else  UNCHANGED  endif  }
+   "Set ResHVACSys:ClSysSEER2 - 2-10"  for:#Eqp=(2to10)  ResHVACSys:ClSysSEER2  = {  if (NumHtPumpSystemTypes >= #Eqp .AND. IfValidAnd( HtPumpSystem[#Eqp]:EffMetric = 2 ) .AND. IfValidAnd( HtPumpSystem[#Eqp]:SEER2 > 0 )) then  min( ClSysSEER2, HtPumpSystem[#Eqp]:SEER2  )  else  UNCHANGED  endif  }
 
    "Set ResHVACSys:ClSysEER - 1"                       ResHVACSys:ClSysEER  = {  if (NumHtPumpSystemTypes > 0     .AND. IfValidAnd( HtPumpSystem[ 1  ]:EffMetric = 1 ) .AND. IfValidAnd( HtPumpSystem[ 1  ]:EER > 0 )) then                 HtPumpSystem[ 1  ]:EER     else      0      endif  }
-   "Set ResHVACSys:ClSysEER - 2-10"  for:#Eqp=(1to10)  ResHVACSys:ClSysEER  = {  if (NumHtPumpSystemTypes >= #Eqp .AND. IfValidAnd( HtPumpSystem[#Eqp]:EffMetric = 1 ) .AND. IfValidAnd( HtPumpSystem[#Eqp]:EER > 0 )) then  min( ClSysEER, HtPumpSystem[#Eqp]:EER  )  else  UNCHANGED  endif  }
+   "Set ResHVACSys:ClSysEER - 2-10"  for:#Eqp=(2to10)  ResHVACSys:ClSysEER  = {  if (NumHtPumpSystemTypes >= #Eqp .AND. IfValidAnd( HtPumpSystem[#Eqp]:EffMetric = 1 ) .AND. IfValidAnd( HtPumpSystem[#Eqp]:EER > 0 )) then  min( ClSysEER, HtPumpSystem[#Eqp]:EER  )  else  UNCHANGED  endif  }
 
    "Set ResHVACSys:ClSysEER2 - 1"                       ResHVACSys:ClSysEER2  = {  if (NumHtPumpSystemTypes > 0     .AND. IfValidAnd( HtPumpSystem[ 1  ]:EffMetric = 2 ) .AND. IfValidAnd( HtPumpSystem[ 1  ]:EER2 > 0 )) then                  HtPumpSystem[ 1  ]:EER2     else      0      endif  }   ; SAC 10/06/22 (tic #3431)
-   "Set ResHVACSys:ClSysEER2 - 2-10"  for:#Eqp=(1to10)  ResHVACSys:ClSysEER2  = {  if (NumHtPumpSystemTypes >= #Eqp .AND. IfValidAnd( HtPumpSystem[#Eqp]:EffMetric = 2 ) .AND. IfValidAnd( HtPumpSystem[#Eqp]:EER2 > 0 )) then  min( ClSysEER2, HtPumpSystem[#Eqp]:EER2  )  else  UNCHANGED  endif  }
+   "Set ResHVACSys:ClSysEER2 - 2-10"  for:#Eqp=(2to10)  ResHVACSys:ClSysEER2  = {  if (NumHtPumpSystemTypes >= #Eqp .AND. IfValidAnd( HtPumpSystem[#Eqp]:EffMetric = 2 ) .AND. IfValidAnd( HtPumpSystem[#Eqp]:EER2 > 0 )) then  min( ClSysEER2, HtPumpSystem[#Eqp]:EER2  )  else  UNCHANGED  endif  }
 
 	"Set ResHVACSys:ClSysCFMperTon - 1"		ResHVACSys:ClSysCFMperTon	= {	if (NumHtPumpSystemTypes > 0 .AND. LocalCompAssigned( HtPumpSystem[1]  ) .AND. IfValidAnd( HtPumpSystem[1]:CFMperTon  > 0 )) then                       HtPumpSystem[1]:CFMperTon     else      0      endif  }
 	"Set ResHVACSys:ClSysCFMperTon - 2"		ResHVACSys:ClSysCFMperTon	= {	if (NumHtPumpSystemTypes > 1 .AND. LocalCompAssigned( HtPumpSystem[2]  ) .AND. IfValidAnd( HtPumpSystem[2]:CFMperTon  > 0 )) then  min( ClSysCFMperTon, HtPumpSystem[2]:CFMperTon  )  else  UNCHANGED  endif  }
@@ -3241,6 +3300,10 @@ RULELIST "SetupHVACSys_Round2_HeatPump" 0 0 0 0
 	"Set ResHVACSys:ClSysRefrigChgAdjFctr - 8"	ResHVACSys:ClSysRefrigChgAdjFctr	= {	if (NumHtPumpSystemTypes > 7 .AND. LocalCompAssigned( HtPumpSystem[8]  ) .AND. IfValidAnd( HtPumpSystem[8]:RefrigChgAdjFctr  > 0 )) then  min( ClSysRefrigChgAdjFctr, HtPumpSystem[8]:RefrigChgAdjFctr  )  else  UNCHANGED  endif  }
 	"Set ResHVACSys:ClSysRefrigChgAdjFctr - 9"	ResHVACSys:ClSysRefrigChgAdjFctr	= {	if (NumHtPumpSystemTypes > 8 .AND. LocalCompAssigned( HtPumpSystem[9]  ) .AND. IfValidAnd( HtPumpSystem[9]:RefrigChgAdjFctr  > 0 )) then  min( ClSysRefrigChgAdjFctr, HtPumpSystem[9]:RefrigChgAdjFctr  )  else  UNCHANGED  endif  }
 	"Set ResHVACSys:ClSysRefrigChgAdjFctr - 10"	ResHVACSys:ClSysRefrigChgAdjFctr	= {	if (NumHtPumpSystemTypes > 9 .AND. LocalCompAssigned( HtPumpSystem[10] ) .AND. IfValidAnd( HtPumpSystem[10]:RefrigChgAdjFctr > 0 )) then  min( ClSysRefrigChgAdjFctr, HtPumpSystem[10]:RefrigChgAdjFctr )  else  UNCHANGED  endif  }
+
+   ; revised to set for 2025+ only - SAC 04/07/25 (tic #1398)
+   "Set ResHVACSys:HtSysRefrigChgAdjFctr - 1"                       ResHVACSys:HtSysRefrigChgAdjFctr  = {  if (NumHtPumpSystemTypes > 0     .AND. ResProj:EnergyCodeYearNum >= 2025 .AND. IfValidAnd( HtPumpSystem[ 1  ]:RefrigChgAdjFctr > 0 )) then                              HtPumpSystem[ 1  ]:RefrigChgAdjFctr     else      0      endif  }   ; SAC 03/27/25
+   "Set ResHVACSys:HtSysRefrigChgAdjFctr - 2-10"  for:#Eqp=(2to10)  ResHVACSys:HtSysRefrigChgAdjFctr  = {  if (NumHtPumpSystemTypes >= #Eqp .AND. ResProj:EnergyCodeYearNum >= 2025 .AND. IfValidAnd( HtPumpSystem[#Eqp]:RefrigChgAdjFctr > 0 )) then  min( HtSysRefrigChgAdjFctr, HtPumpSystem[#Eqp]:RefrigChgAdjFctr  )  else  UNCHANGED  endif  }
 
 ; RULES TO SUMMARIZE ADDIITONAL COOLING PERFORMANCE PARAMETERS PASSED INTO CSE FOR SIMULATION
 
@@ -3290,7 +3353,7 @@ RULELIST "SetupHVACSys_Round2_HeatPump" 0 0 0 0
 					else if (HtPumpSystem[1]:IsAvailable > 0)
 			;		then	Format( "%.0f %s unit(s), %.1f SEER, %.1f EER, %.1f CFM/ton", NumCoolSysUnits, CoolSysTypeAbbrev, ClSysSEER, ClSysEER, ClSysCFMperTon )
 					then	if (HtPumpSystem[1]:Type == 22 .OR. HtPumpSystem[1]:Type == 33 .OR. HtPumpSystem[1]:Type == 34 .OR.
-                         HtPumpSystem[1]:Type == 35 .OR. HtPumpSystem[1]:Type == 36)   ; SAC 11/2/18 - VCHP   ; VCHP2 - SAC 11/01/20
+                         HtPumpSystem[1]:Type == 35)   ; SAC 11/2/18 - VCHP   ; VCHP2 - SAC 11/01/20
   							then  " "
 							else if (IfValidAnd( HtPumpSystem[1]:ShowCEER > 0 ))
 							then	Format( "%.1f CEER", HtPumpSystem[1]:CEER )
@@ -3425,6 +3488,7 @@ RULELIST "SetupHVACSys_Round2_CentralHtgClg_FPFC" 0 0 0 0
 	"Set ResHVACSys:ClSysCFMperTon - 1"		ResHVACSys:ClSysCFMperTon	= {	350 }
 
 	"Set ResHVACSys:ClSysRefrigChgAdjFctr - 1"	ResHVACSys:ClSysRefrigChgAdjFctr	= {	0 }
+	"Set ResHVACSys:HtSysRefrigChgAdjFctr - 1"	ResHVACSys:HtSysRefrigChgAdjFctr	= {	0 }
 
 ; RULES TO SUMMARIZE ADDIITONAL COOLING PERFORMANCE PARAMETERS PASSED INTO CSE FOR SIMULATION
 
@@ -3451,6 +3515,8 @@ RULELIST "SetupHVACSys_Round2_CentralHtgClg_FPFC" 0 0 0 0
 ;	"Set ResHVACSys:ClSysCapacity - 8" 		ResHVACSys:ClSysCapacity	= {	if (AutoSizeCool[8]  == 0 .AND. NumCentralEquipTypes > 7 .AND. LocalCompAssigned( HVACCentralRef[8]  ) .AND. CentralEquipCount[8]  > 0) then  ClSysCapacity + (HVACCentralRef[8]:ClgCapTotNetRtd  * CentralEquipCount[8] )  else  UNCHANGED  endif  }
 ;	"Set ResHVACSys:ClSysCapacity - 9" 		ResHVACSys:ClSysCapacity	= {	if (AutoSizeCool[9]  == 0 .AND. NumCentralEquipTypes > 8 .AND. LocalCompAssigned( HVACCentralRef[9]  ) .AND. CentralEquipCount[9]  > 0) then  ClSysCapacity + (HVACCentralRef[9]:ClgCapTotNetRtd  * CentralEquipCount[9] )  else  UNCHANGED  endif  }
 ;	"Set ResHVACSys:ClSysCapacity - 10"		ResHVACSys:ClSysCapacity	= {	if (AutoSizeCool[10] == 0 .AND. NumCentralEquipTypes > 9 .AND. LocalCompAssigned( HVACCentralRef[10] ) .AND. CentralEquipCount[10] > 0) then  ClSysCapacity + (HVACCentralRef[10]:ClgCapTotNetRtd * CentralEquipCount[10])  else  UNCHANGED  endif  }
+
+   "Set ResHVACSys:HPBackupOption"     ResHVACSys:HPBackupOption  = {  0  }      ; no backup - SAC 04/16/25
 
 	"Set ResHVACSys:HtPumpEquipIssue"		ResHVACSys:HtPumpEquipIssue		=
 				{	if (IfValidAnd( NumCentralEquipTypes > 0 )==0) then  " "
@@ -3634,6 +3700,7 @@ RULELIST "SetupHVACSys_Round2_CentralHtgClg_WSHP" 0 0 0 0
 	"Set ResHVACSys:ClSysCFMperTon - 1"		ResHVACSys:ClSysCFMperTon	= {	350  }
 
 	"Set ResHVACSys:ClSysRefrigChgAdjFctr - 1"	ResHVACSys:ClSysRefrigChgAdjFctr	= {	0  }
+	"Set ResHVACSys:HtSysRefrigChgAdjFctr - 1"	ResHVACSys:HtSysRefrigChgAdjFctr	= {	0  }
 
 ; RULES TO SUMMARIZE ADDIITONAL COOLING PERFORMANCE PARAMETERS PASSED INTO CSE FOR SIMULATION
 
@@ -3650,6 +3717,8 @@ RULELIST "SetupHVACSys_Round2_CentralHtgClg_WSHP" 0 0 0 0
 	"Set ResHVACSys:ClSysSizingFactor - XX"	ResHVACSys:ClSysSizingFactor	= {	if (IfValidAnd( NumCentralEqpUnits > 0.5 )) then  ClSysSizingFactor / NumCentralEqpUnits  else  UNCHANGED  endif  }   ; fix similar to prev one for VRF below - SAC 08/05/22
 
 	"Set ResHVACSys:ClSysCapacity - 1"		ResHVACSys:ClSysCapacity	= {	0  }
+
+   "Set ResHVACSys:HPBackupOption"        ResHVACSys:HPBackupOption  = {  0  }      ; no backup - SAC 04/16/25
 
 	;"Set ResHVACSys:CoolEquipSummary"	ResHVACSys:CoolEquipSummary	=     - set in ResCentralHVACSys.rule
    ;	"debug ResHVACSys:CoolEquipSummary"		ResHVACSys:Action		= {	if (FloorAreaServed > 0.5) then PostWarning( "ResHVACSys: '%s' CoolEquipSummary: '%s'", Name, CoolEquipSummary ) else UNCHANGED endif }
@@ -3800,6 +3869,8 @@ RULELIST "SetupHVACSys_Round2_CentralHtgClg_VRF" 0 0 0 0
 
 	"Set ResHVACSys:HPDFAFUE"	   ResHVACSys:HPDFAFUE  = {	0  }
 
+   "Set ResHVACSys:HPBackupOption"     ResHVACSys:HPBackupOption  = {  0  }      ; no backup - SAC 04/16/25
+
 	"Set ResHVACSys:HPLockoutTemp"	   ResHVACSys:HPLockoutTemp  = {	-999  }
 
    "Set ResHVACSys:LrgHtPumpStdFanPwr"    ResHVACSys:LrgHtPumpStdFanPwr =     
@@ -3820,6 +3891,7 @@ RULELIST "SetupHVACSys_Round2_CentralHtgClg_VRF" 0 0 0 0
 	"Set ResHVACSys:ClSysCFMperTon"		ResHVACSys:ClSysCFMperTon	= {	350  }
 
 	"Set ResHVACSys:ClSysRefrigChgAdjFctr"	ResHVACSys:ClSysRefrigChgAdjFctr	= {	0  }
+	"Set ResHVACSys:HtSysRefrigChgAdjFctr"	ResHVACSys:HtSysRefrigChgAdjFctr	= {	0  }
 
 ; RULES TO SUMMARIZE ADDIITONAL COOLING PERFORMANCE PARAMETERS PASSED INTO CSE FOR SIMULATION
 
@@ -3936,6 +4008,14 @@ RULELIST "Force_HVACHtPump_UseEERinAnalysis_On" 1 0 1 1
    "Force ResHtPumpSys:UseEERinAnalysis on"	   ResHtPumpSys:UseEERinAnalysis = {  1  }
 END
 ;*************************************************************************
+
+;************************************************************************* SAC 02/24/25 (tic #1379)
+RULELIST "Force_HVACHtPump_BackupOption_DualFuel" 1 0 1 1
+   "remove ResHtPumpSys:IsDualFuel setting"                 ResHtPumpSys:IsDualFuel   = {  UNDEFINED  }
+   "Force ResHtPumpSys:BackupOption to Gas (dual fuel)"	   ResHtPumpSys:BackupOption = {  "Gas Furnace"  }
+END
+;*************************************************************************
+
 
 ; SAC 6/21/14 - setup secondary set of DwellUnitType Heat/Cool assignment properties
 ;*************************************************************************
@@ -4593,12 +4673,13 @@ RULELIST "SetupHVACSys_Round2_common" 0 0 0 0
 																				endif endif endif  } 
 	"Set ResHVACSys:ServesHeating"	ResHVACSys:ServesHeating = {	if (HaveHeating .AND. FloorAreaServed[1] > 0.5) then  1  else  0  endif  }    ; SAC 5/14/19
 
-   ; SAC 1/11/14 - added logic to set HaveCooling to 0 when cooling sys type = NoCooling  ; VCHP3 - SAC 05/16/24 (tic #1379)																				
+   ; SAC 1/11/14 - added logic to set HaveCooling to 0 when cooling sys type = NoCooling  ; VCHP3 - SAC 05/16/24 (tic #1379)  ; add logic to include check for valid Cap95 - SAC 03/13/25 (tic #1379)
 	"Set ResHVACSys:HaveCooling"		ResHVACSys:HaveCooling	= {	if (Type < 1) then  0
 																				else if (Type == 2)
 																				then	if (NumHtPumpSystemTypes <= 0 .OR. LocalCompAssigned( HtPumpSystem[1] ) == 0) then  0
 																						else if (IfValidAnd( AutoSizeCool[1] > 0.5 ) .OR. IfValidAnd( HtPumpSystem[1]:Type = 33 ) .OR.
                                                                            IfValidAnd( HtPumpSystem[1]:Type = 36 ) .OR. IfValidAnd( ClSysCapacity > 1 ) .OR.
+                                                                           IfValidAnd( HtPumpSystem[1]:Cap95 > 100 ) .OR.
 																									T24RCoolingEquipment:PropEqStd( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", HtPumpSysTypeAbbrev ) > 0.5) then  1
 																						else  0
 																						endif endif
@@ -5556,7 +5637,7 @@ RULELIST "Default_HVACDist_OtherThanType" 0 0 0 0
 ; SFam only (?)
 ;   "Set HVACDist:MinDuctInsRval - Mandatory min R-val (x00)"      HVACDist:MinDuctInsRval =        ; SAC 04/25/24 (tic #1363)
 ;      {  if (DuctsPresent < 1 .OR. (Proj:ShowStatus > 0 .AND. Status == 1) .OR.
-;             IfValidAnd( Proj:EnergyCodeYearNum >= 2022 )==0) then  0
+;             IfValidAnd( ResProj:EnergyCodeYearNum >= 2022 )==0) then  0
 ;         else if ( (Type >= 1 .AND. Type <= 4) .OR.   ; attic, crawl space or garage
 ;                    Type == 9 )                       ; outdoors
 ;         then  600
@@ -6108,7 +6189,7 @@ RULELIST "Default_HVACHeat" 0 0 0 0
 
    "Default ResHtgSys:AutoSize"			ResHtgSys:AutoSize				= {	MinRevRef( ResHVACSys:HeatSystem, ResHVACSys:AutoSizeHeat, ResHVACSys:NumHeatSystemTypes )  }
    "Default ResHtgSys:AutoSize - 2"		ResHtgSys:AutoSize				= {	if (LocalStatus( AutoSize ) < 1) then  1  else  UNCHANGED  endif  }
-   "Default ResHtgSys:SizingFactor"		ResHtgSys:SizingFactor		= {	2  }   ; BAW changed from 1.5 to 2 130508
+   "Default ResHtgSys:SizingFactor"		ResHtgSys:SizingFactor		= {	if (IfValidAnd( ResProj:EnergyCodeYearNum >= 2025 )) then  1.2  else  2  endif  }   ; BAW changed from 1.5 to 2 130508  ; SAC 03/28/25 (2025)
 
 ; SAC 5/13/13 - properties for combined hydronic
 ;	"Default ResHtgSys:DisplayCHData"		ResHtgSys:DisplayCHData		= {	-1  }
@@ -6216,15 +6297,15 @@ RULELIST "Default_HVACHeatPump" 0 0 0 0
 
    "Default ResHtPumpSys:ClSizingFactor"		ResHtPumpSys:ClSizingFactor		= {	1.2  }      ; SAC 02/25/22
 
-   "Set ResHtPumpSys:Speeds"                ResHtPumpSys:Speeds             = {   if (Type == 36) then  9  else  0  endif  }   ; SAC 07/21/24 (VCHP3)
-   "Set ResHtPumpSys:SpeedsLbl"             ResHtPumpSys:SpeedsLbl          = {   if (Type == 36) then  "Speed"  else  UNDEFINED  endif  } 
+   "Set ResHtPumpSys:Speeds"                ResHtPumpSys:Speeds             = {   if (UsePMModel) then  1  else  0  endif  }   ; SAC 07/21/24 (VCHP3)  ; switch default to Single speed for UsePMModel - SAC 03/12/25 (tic #1379)
+   "Set ResHtPumpSys:SpeedsLbl"             ResHtPumpSys:SpeedsLbl          = {   if (UsePMModel) then  "Speed"  else  UNDEFINED  endif  } 
 
 	"Set ResHtPumpSys:ShowMultiSpeed"			ResHtPumpSys:ShowMultiSpeed		= {	if (Type < 1 .OR. IsAvailable < 0.5) then  0
 																										else if (T24RCoolingEquipment:ShowMultSpd( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", TypeAbbrevStr ) < 1)
                                                                               then  0
                                                                               else if (Type == 34 .OR. (Type != 10 .AND. Type < 20))
                                                                               then  1  else  0  endif endif endif  }
-	"Default ResHtPumpSys:IsMultiSpeed"		ResHtPumpSys:IsMultiSpeed			= {	if (Type == 36 .AND. Speeds > 1) then  1  else  0  endif  }
+	"Default ResHtPumpSys:IsMultiSpeed"		ResHtPumpSys:IsMultiSpeed			= {	if (UsePMModel .AND. Speeds > 1) then  1  else  0  endif  }    ; revised for VCHP3 - SAC 07/21/24
 
 	"Set ResHtPumpSys:ShowIsZonal"		ResHtPumpSys:ShowIsZonal	= {	if (CountRefs( ResHVACSys:HtPumpSystem, ResHVACSys:NumHtPumpSystemTypes ) < 1) then  0
 																						else if (SumRevRef( ResHVACSys:HtPumpSystem, ResHVACSys:HtPumpDucted ) < 1) then  0  else	1  endif endif  }		; SAC 11/19/15 - CoolDucted -> HtPumpDucted
@@ -6262,9 +6343,14 @@ RULELIST "Default_HVACCool" 0 0 0 0
   ; SAC 3/4/13
 	"Default ResClgSys:RefrigChgAdjFctr"		ResClgSys:RefrigChgAdjFctr	= {	UNDEFINED  }
 
+   "Set ResClgSys:Speeds"               ResClgSys:Speeds            = {   if (UsePMModel) then  1  else  0  endif  }   ; SAC 03/05/25 (tic #1379)  ; ported to MF - SAC 04/14/25
+   "Set ResClgSys:SpeedsLbl"            ResClgSys:SpeedsLbl         = {   if (UsePMModel) then  "Speed"  else  UNDEFINED  endif  } 
+
 	"Set ResClgSys:ShowMultiSpeed"			ResClgSys:ShowMultiSpeed		= {	if (Type < 1 .OR. IsAvailable < 0.5) then  0
 																								else  T24RCoolingEquipment:ShowMultSpd( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", TypeAbbrevStr )  endif  }
-	"Default ResClgSys:IsMultiSpeed"		ResClgSys:IsMultiSpeed		= {	0  }
+   "Blast ResClgSys:IsMultiSpeed if user defined and Speeds option is available"     ResClgSys:Action =
+      {  if (UsePMModel .AND. Localstatus( IsMultiSpeed ) > 4) then  EvalRulelist( "Blast_HVACCool_IsMultiSpeed", 1 )  else  UNCHANGED  endif  }
+	"Default ResClgSys:IsMultiSpeed"		ResClgSys:IsMultiSpeed		= {	if (UsePMModel .AND. Speeds > 1) then  1  else  0  endif  }    ; SAC 03/05/25 (tic #1379)
 
 ;	mjb - moved from HVAC:Dist 	8/21/13
 ;	"Set ResClgSys:ShowIsZonal"		ResClgSys:ShowIsZonal		= {	if (ResClgSys:Ducted < 1) then  0  else	1  endif  }
@@ -8616,8 +8702,8 @@ RULELIST "Default_HtPump_VariableCapHeatPump2" 0 0 0 1
            else  UNCHANGED
            endif  }
 END
-;*************************************************************************    ; VCHP3 - SAC 05/15/24 (tic #1379)
-RULELIST "Default_HtPump_VariableCapHeatPump3" 0 0 0 1
+;*************************************************************************    ; VCHP3 - SAC 05/15/24 (tic #1379)  ; renamed - SAC 03/12/25 (tic #1379)
+RULELIST "Default_HtPump_SplitHeatPumpPM" 0 0 0 1
 ;*************************************************************************
 	"Default HVACHtPump:TotalCapacity"   	ResHtPumpSys:TotalCapacity  = {  UNDEFINED  }
 	"Set HVACHtPump:TypeDescrip"			   ResHtPumpSys:TypeDescrip	  = { "RTF\Ht_VCHP3.rtf" } 
@@ -8752,7 +8838,7 @@ RULELIST "Default_HtPump_VariableCapHeatPump3" 0 0 0 1
 
    "Default HVACHtPump:VCHPFanPwrHC[1]-h"    ResHtPumpSys:VCHPFanPwrHC[1] = {   0.1  }
    "Default HVACHtPump:VCHPFanPwrHC[2]-c"    ResHtPumpSys:VCHPFanPwrHC[2] = {   0.1  }
-   "Default HVACHtPump:HtgSizingFactor"      ResHtPumpSys:HtgSizingFactor = {   1.1  }      ; updated from 1.2 to 1.1 - SAC 09/06/24 (VCHP3)
+   "Default HVACHtPump:HtgSizingFactor"      ResHtPumpSys:HtgSizingFactor = {   1.2  }      ; updated from 1.2 to 1.1 - SAC 09/06/24 (VCHP3)  ; restored 1.2 - SAC 03/28/25 (2025)
    "Default HVACHtPump:HtgAuxSizingFactor"   ResHtPumpSys:HtgAuxSizingFactor = {   1.2  }      ; SAC 03/03/22 (VCHP2)
    ; set to undef for 2022+ analysis crankcase htrs (rsParElec) (to force use of new default) - SAC 02/28/23
    "Default HVACHtPump:ParElecExprs"         ResHtPumpSys:ParElecExprs    =     ; revise crankcase htrs (rsParElec) mods to depend on Proj:AnalysisVersion >= 220202 - SAC 05/07/23
@@ -8799,7 +8885,7 @@ RULELIST "Default_HtPump_VariableCapHeatPump3" 0 0 0 1
 ;         else  1  endif endif  }
 
    "Evaluate VCHP3-specific calc prep rules"    ResHtPumpSys:Action =
-      {  EvalRulelist( "VCHP3_Defaulting", 1 )  }
+      {  EvalRulelist( "HtPumpPerfMap_Defaulting", 1 )  }
 
    ; RJH 2/13/20 tic #1176
    "Set HVACHtPump:SpeclFeatrs_ComplianceOptionVCHP"    ResHtPumpSys:SpeclFeatrs_ComplianceOptionVCHP = {
@@ -8954,6 +9040,43 @@ END
 RULELIST "Default_Cool_None" 0 0 0 1    
 ;*************************************************************************
 	"Default ResClgSys:ACCharge"        		ResClgSys:ACCharge         = {  "Not Verified"  }		; mjb 10/30/14 - switched default enum to 'Not Verified' (issue #403)
+END
+;************************************************************************* ; SAC 03/05/25 (tic #1379)
+RULELIST "Default_Cool_SplitAirCondPM" 0 0 0 1      ; defaulting for HVACCool:Type = "SplitAirCondPM - Split air conditioning system"
+;*************************************************************************
+	"Default ResClgSys:TotalCapacity"   		ResClgSys:TotalCapacity    = {   UNDEFINED  }
+   "Default ResClgSys:Cap95"               ResClgSys:Cap95            =      ; based on default sizing of VCHP3 - SAC 03/05/25 (tic #1379)
+      {  if (Speeds == 1)
+         then  int( ((36000 - 180) / 0.98 )+0.5 )
+         else  int( ((36000 - 607) / 1.022)+0.5 )  endif  }
+
+	"Default ResClgSys:SEER"            		ResClgSys:SEER             = {   T24RCoolingEquipment:SEER( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", TypeAbbrevStr )  }
+   "Default ResClgSys:SEER2"               ResClgSys:SEER2            = {   if (T24RCoolingEquipment:SEER2Valid( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", TypeAbbrevStr ) > 0)
+                                                                          then  T24RCoolingEquipment:SEER2(    "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", TypeAbbrevStr )
+                                                                          else  UNDEFINED  endif  }
+	"Default ResClgSys:EER (via rulelist)"	ResClgSys:Action           = {		EvalRulelist( "Default_Cool_CaliforniaSEERtoEERFormula", 1 )  }
+   "Default ResClgSys:CEER"                ResClgSys:CEER             = {  UNDEFINED  }     ; SAC 08/19/20 (tic #1003)
+; mjb 1/30/15 - mods to lookup CFMperTon and ACCharge from T24RClimateZoneCodeBase
+;	"Default ResClgSys:CFMperTon"       		ResClgSys:CFMperTon        = {  350  }
+;	"Default ResClgSys:ACCharge"        		ResClgSys:ACCharge         = {  "Verified"  }		; SAC 4/1/13 - switched default enum to 'Verified' (issue #59)
+	; SAC 2/21/15 - fixed bug in following rules where obejct being set were HVACHtPump but should have been ResClgSys ! (during debugging of GC issue 473)
+	; SAC 1/5/16 - added logic to set default CFMperTon to 150 for CEC 2013/16 & IsZonal & NOT IsMultiSpeed (tic 140, comment 6/22/15) - same change to each Default_Cool_* rulelist
+	"Default ResClgSys:CFMperTon"       		ResClgSys:CFMperTon        = {	if ((Proj:StdDesignBase == 2013 .OR. Proj:StdDesignBase >= 2016) .AND. IfValidAnd( ShowMultiSpeed > 0 ) .AND. IsMultiSpeed < 0.5 .AND.
+																											IfValidAnd( ShowIsZonal > 0 ) .AND. IsZonal > 0.5 ) then  150
+																								else	T24RClimateZoneCodeBase:CFMperTon( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )  endif  }
+	"Default ResClgSys:ACCharge"        		ResClgSys:ACCharge         = {  if ( T24RClimateZoneCodeBase:VerifyCharge( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr ) > 0.5 ) then "Verified" else "Not Verified" endif }    ; SAC 4/1/13 - switched default enum to 'Verified' (issue #59)
+	"Default HVACCResClgSysool:RefrigerantType" 		ResClgSys:RefrigerantType  = {  "R410A"     }
+  ; SAC 3/4/13 - based on e-mail from BAW 3/1/13
+	"Default ResClgSys:RefrigChgAdjFctr"		ResClgSys:RefrigChgAdjFctr	= {	switch (ACCharge)
+																										case  2 :  0.96		; "Verified"
+																										case  3 :  0.96		; 2013: "CID (charge indicator)"  2016: "FID (fault indicator)"
+																										default :  0.90		; "Not Verified" (or any other setting)
+																									endswitch    }
+;	"Default HVACCResClgSysool:EvapCondEff" 			ResClgSys:EvapCondEff  		= {  UNDEFINED   }
+	"Default ResClgSys:UseEERinAnalysis"		ResClgSys:UseEERinAnalysis	= {	0  }
+
+   "Evaluate PerfMap calc prep rules"     ResClgSys:Action  =
+      {  EvalRulelist( "ClgPerfMap_Defaulting", 1 )  }
 END
 ;*************************************************************************
 RULELIST "Default_Cool_SplitAirCond" 0 0 0 1      ; defaulting for ResClgSys:Type = "SplitAirCond - Split air conditioning system"
@@ -10311,7 +10434,7 @@ END
 ;*************************************************************************
 RULELIST "Setup_HVACSys_Heat_CntrlFurnace" 1 0 1 0
 	"Set ResHVACSys:AutoSizeHeat[1]"		ResHVACSys:AutoSizeHeat[1]		= {	1  }
-   "Set ResHVACSys:HtSysSizingFactor"	ResHVACSys:HtSysSizingFactor	= {	2  }   ; BAW changed from 1.5 to 2 130508
+   "Set ResHVACSys:HtSysSizingFactor"	ResHVACSys:HtSysSizingFactor	= {	if (IfValidAnd( ResProj:EnergyCodeYearNum >= 2025 )) then  1.2  else  2  endif  }   ; BAW changed from 1.5 to 2 130508  ; 2025+ to 1.2 - SAC 03/28/25
 	"Set ResHVACSys:HtSysCapacity"		ResHVACSys:HtSysCapacity		= {	UNDEFINED  }
 ; SAC 12/26/14 - replaced logic triggering use of existing/verified properties to reflect OVERALL heating equipment beter/equal/worse status (rather than only a comparison of AFUE or HSPF)
 	"Set ResHVACSys:HtSysAFUE"				ResHVACSys:HtSysAFUE				= {	if (ResProj:RunScope == 2 .AND. Status == 2 .AND. IsVerified .AND.
@@ -10328,7 +10451,7 @@ END
 ;*************************************************************************
 RULELIST "Setup_HVACSys_Heat_WallFurnaceFan"       1 0 1 0
 	"Set ResHVACSys:AutoSizeHeat[1]"		ResHVACSys:AutoSizeHeat[1]		= {	1  }
-  "Set ResHVACSys:HtSysSizingFactor"	ResHVACSys:HtSysSizingFactor	= {	2  }   ; BAW changed from 1.5 to 2 130508
+  "Set ResHVACSys:HtSysSizingFactor"	ResHVACSys:HtSysSizingFactor	= {	if (IfValidAnd( ResProj:EnergyCodeYearNum >= 2025 )) then  1.2  else  2  endif  }   ; BAW changed from 1.5 to 2 130508  ; 2025+ to 1.2 - SAC 03/28/25
 	"Set ResHVACSys:HtSysCapacity"		ResHVACSys:HtSysCapacity		= {	UNDEFINED  }
 ; SAC 12/26/14 - replaced logic triggering use of existing/verified properties to reflect OVERALL heating equipment beter/equal/worse status (rather than only a comparison of AFUE or HSPF)
 	"Set ResHVACSys:HtSysAFUE"				ResHVACSys:HtSysAFUE				= {	if (ResProj:RunScope == 2 .AND. Status == 2 .AND. IsVerified .AND.
@@ -10344,21 +10467,21 @@ END
 ;*************************************************************************
 RULELIST "Setup_HVACSys_Heat_Boiler"       1 0 1 0
 	"Set ResHVACSys:AutoSizeHeat[1]"		  ResHVACSys:AutoSizeHeat[1]		= {	1  }
-  "Set ResHVACSys:HtSysSizingFactor" 	ResHVACSys:HtSysSizingFactor	= {	2  }   ; BAW changed from 1.5 to 2 130508
+  "Set ResHVACSys:HtSysSizingFactor" 	ResHVACSys:HtSysSizingFactor	= {	if (IfValidAnd( ResProj:EnergyCodeYearNum >= 2025 )) then  1.2  else  2  endif  }   ; BAW changed from 1.5 to 2 130508  ; 2025+ to 1.2 - SAC 03/28/25
 	"Set ResHVACSys:HtSysCapacity"		    ResHVACSys:HtSysCapacity		= {	UNDEFINED  }
 	"Set ResHVACSys:HtSysAFUE"				    ResHVACSys:HtSysAFUE				= {	UNDEFINED  }
 END
 ;*************************************************************************
 RULELIST "Setup_HVACSys_Heat_WoodHeat"       1 0 1 0
 	"Set ResHVACSys:AutoSizeHeat[1]"		  ResHVACSys:AutoSizeHeat[1]		= {	1  }
-  "Set ResHVACSys:HtSysSizingFactor"   ResHVACSys:HtSysSizingFactor	= {	2  }   
+  "Set ResHVACSys:HtSysSizingFactor"   ResHVACSys:HtSysSizingFactor	= {	if (IfValidAnd( ResProj:EnergyCodeYearNum >= 2025 )) then  1.2  else  2  endif  }      ; 2025+ to 1.2 - SAC 03/28/25
 	"Set ResHVACSys:HtSysCapacity"		    ResHVACSys:HtSysCapacity		= {	UNDEFINED  }
 	"Set ResHVACSys:HtSysAFUE"				    ResHVACSys:HtSysAFUE				= {	78  } ; See tic 632, wood heat 
 END
 ;*************************************************************************
 RULELIST "Setup_HVACSys_Heat_WallFurnaceGravity"       1 0 1 0
 	"Set ResHVACSys:AutoSizeHeat[1]"		ResHVACSys:AutoSizeHeat[1]		= {	1  }
-  "Set ResHVACSys:HtSysSizingFactor"	ResHVACSys:HtSysSizingFactor	= {	2  }   ; BAW changed from 1.5 to 2 130508
+  "Set ResHVACSys:HtSysSizingFactor"	ResHVACSys:HtSysSizingFactor	= {	if (IfValidAnd( ResProj:EnergyCodeYearNum >= 2025 )) then  1.2  else  2  endif  }   ; BAW changed from 1.5 to 2 130508  ; 2025+ to 1.2 - SAC 03/28/25
 	"Set ResHVACSys:HtSysCapacity"		ResHVACSys:HtSysCapacity		= {	UNDEFINED  }
 ; SAC 12/26/14 - replaced logic triggering use of existing/verified properties to reflect OVERALL heating equipment beter/equal/worse status (rather than only a comparison of AFUE or HSPF)
 	"Set ResHVACSys:HtSysAFUE"				ResHVACSys:HtSysAFUE				= {	if (ResProj:RunScope == 2 .AND. Status == 2 .AND. IsVerified .AND.
@@ -10374,7 +10497,7 @@ END
 ;*************************************************************************
 RULELIST "Setup_HVACSys_Heat_FloorFurnace"       1 0 1 0
 	"Set ResHVACSys:AutoSizeHeat[1]"		ResHVACSys:AutoSizeHeat[1]		= {	1  }
-  "Set ResHVACSys:HtSysSizingFactor"	ResHVACSys:HtSysSizingFactor	= {	2  }   ; BAW changed from 1.5 to 2 130508
+  "Set ResHVACSys:HtSysSizingFactor"	ResHVACSys:HtSysSizingFactor	= {	if (IfValidAnd( ResProj:EnergyCodeYearNum >= 2025 )) then  1.2  else  2  endif  }   ; BAW changed from 1.5 to 2 130508  ; 2025+ to 1.2 - SAC 03/28/25
 	"Set ResHVACSys:HtSysCapacity"		ResHVACSys:HtSysCapacity		= {	UNDEFINED  }
 ; SAC 12/26/14 - replaced logic triggering use of existing/verified properties to reflect OVERALL heating equipment beter/equal/worse status (rather than only a comparison of AFUE or HSPF)
 	"Set ResHVACSys:HtSysAFUE"				ResHVACSys:HtSysAFUE				= {	if (ResProj:RunScope == 2 .AND. Status == 2 .AND. IsVerified .AND.
@@ -10390,7 +10513,7 @@ END
 ;*************************************************************************
 RULELIST "Setup_HVACSys_Heat_RoomHeater"       1 0 1 0
 	"Set ResHVACSys:AutoSizeHeat[1]"		ResHVACSys:AutoSizeHeat[1]		= {	1  }
-  "Set ResHVACSys:HtSysSizingFactor"	ResHVACSys:HtSysSizingFactor	= {	2  }   ; BAW changed from 1.5 to 2 130508
+  "Set ResHVACSys:HtSysSizingFactor"	ResHVACSys:HtSysSizingFactor	= {	if (IfValidAnd( ResProj:EnergyCodeYearNum >= 2025 )) then  1.2  else  2  endif  }   ; BAW changed from 1.5 to 2 130508  ; 2025+ to 1.2 - SAC 03/28/25
 	"Set ResHVACSys:HtSysCapacity"		ResHVACSys:HtSysCapacity		= {	UNDEFINED  }
 ; SAC 12/26/14 - replaced logic triggering use of existing/verified properties to reflect OVERALL heating equipment beter/equal/worse status (rather than only a comparison of AFUE or HSPF)
 	"Set ResHVACSys:HtSysAFUE"				ResHVACSys:HtSysAFUE				= {	if (ResProj:RunScope == 2 .AND. Status == 2 .AND. IsVerified .AND.
@@ -10406,14 +10529,14 @@ END
 ;*************************************************************************
 RULELIST "Setup_HVACSys_Heat_Electric"     1 0 1 0
 	"Set ResHVACSys:AutoSizeHeat[1]"		ResHVACSys:AutoSizeHeat[1]		= {	1  }
-  "Set ResHVACSys:HtSysSizingFactor"	ResHVACSys:HtSysSizingFactor	= {	2  }   ; BAW changed from 1.5 to 2 130508
+  "Set ResHVACSys:HtSysSizingFactor"	ResHVACSys:HtSysSizingFactor	= {	if (IfValidAnd( ResProj:EnergyCodeYearNum >= 2025 )) then  1.2  else  2  endif  }   ; BAW changed from 1.5 to 2 130508  ; 2025+ to 1.2 - SAC 03/28/25
 	"Set ResHVACSys:HtSysCapacity"		ResHVACSys:HtSysCapacity		= {	UNDEFINED  }
 	"Set ResHVACSys:HtSysAFUE"				ResHVACSys:HtSysAFUE				= {	UNDEFINED  }
 END
 ;*************************************************************************
 RULELIST "Setup_HVACSys_Heat_CombHydro"    1 0 1 0
 	"Set ResHVACSys:AutoSizeHeat[1]"		ResHVACSys:AutoSizeHeat[1]		= {	1  }
-  "Set ResHVACSys:HtSysSizingFactor"	ResHVACSys:HtSysSizingFactor	= {	2  }   ; BAW changed from 1.5 to 2 130508
+  "Set ResHVACSys:HtSysSizingFactor"	ResHVACSys:HtSysSizingFactor	= {	if (IfValidAnd( ResProj:EnergyCodeYearNum >= 2025 )) then  1.2  else  2  endif  }   ; BAW changed from 1.5 to 2 130508  ; 2025+ to 1.2 - SAC 03/28/25
 	"Set ResHVACSys:HtSysCapacity"		ResHVACSys:HtSysCapacity		= {	UNDEFINED  }
 ; SAC 12/26/14 - replaced logic triggering use of existing/verified properties to reflect OVERALL heating equipment beter/equal/worse status (rather than only a comparison of AFUE or HSPF)
 	"Set ResHVACSys:HtSysAFUE"				ResHVACSys:HtSysAFUE				= {	if (ResProj:RunScope == 2 .AND. Status == 2 .AND. IsVerified .AND.
@@ -10548,10 +10671,20 @@ RULELIST "SwitchSystemToHeatPump"		1 0 1 1   ; prevent Resets so that HtPumpSyst
 	"Round2 of HVACSys HtPump property init"		ResHVACSys:Action		= {	EvalRulelist( "SetupHVACSys_Round2_HeatPump", 1 )  }
 END
 
+
+; add rulelist to force setup of HtPump system even if current system HP - for 2025 PM model equipment - SAC 03/12/25 (tic #1379)  ; ported to MF - SAC 04/14/25
+;*************************************************************************
+RULELIST "Setup_HVACSys_SplitHeatPumpPM"       1 0 1 1
+   "set HVACSys:Type to HP"                     HVACSys:Type                  = {  2  }
+   "set HVACSys:NumHtPumpSystemTypes to 1"      HVACSys:NumHtPumpSystemTypes  = {  1  }
+   "set HVACSys:HtPumpSystemCount to 1"         HVACSys:HtPumpSystemCount     = {  1  }
+   "set HVACSys:HtPumpSystem[1] from library"   HVACSys:HtPumpSystem[1]       = {  RuleLibrary( HVACHtPump, "t24-SplitHeatPumpMP", 1 )  }
+END
+
 ; SAC 12/5/13 - replaced individual equipment-based HVACHtPump budget conversion mechanism (above) w/ following that sets data directly to the HVACSys object(s)
 ;*************************************************************************
 RULELIST "Setup_HVACSys_HtPump_SplitHeatPump"       1 0 1 0
-; SAC 1/13/14 - added rule to switch system type to HtPump (if it isn't already set)
+   ; SAC 1/13/14 - added rule to switch system type to HtPump (if it isn't already set)
 	"Ensure ResHVACSys:Type set to HtPump"		ResHVACSys:Action	= {	if (Type != 2 && LocalCompAssigned( HtPumpSystem[1] ) > 0)
 																					then  EvalRulelist( "SwitchSystemToHeatPump", 1 )  else  UNCHANGED  endif  }
 
@@ -10596,8 +10729,11 @@ RULELIST "Setup_HVACSys_HtPump_SplitHeatPump"       1 0 1 0
    "Set ResHVACSys:HPSysCOP47"					ResHVACSys:HPSysCOP47				= {	0  }  ; UNDEFINED  }
    "Set ResHVACSys:HPSysCOP35"					ResHVACSys:HPSysCOP35				= {	0  }  ; UNDEFINED  }
    "Set ResHVACSys:HPSysCOP17"					ResHVACSys:HPSysCOP17				= {	0  }  ; UNDEFINED  }
+   "Set ResHVACSys:HPSysCap95"               ResHVACSys:HPSysCap95            = {	0  }     ; SAC 03/18/25 (tic #1401)
    "Set ResHVACSys:HPSysAuxHtgCap"				ResHVACSys:HPSysAuxHtgCap			= {	0  }  ; if (LocalStatus( HPSysCap47 ) < 2) then  UNDEFINED  else  (HPSysCap47 * 10)  endif  }
-   "Set ResHVACSys:HPModelDualFuel"			   ResHVACSys:HPModelDualFuel		   = {	0  }     ; SAC 12/08/20
+   "Set ResHVACSys:HPBackupOption"			   ResHVACSys:HPBackupOption		   = {	if( IfValidAnd( ResProj:EnergyCodeYearNum >= 2025 ) ) then  1
+                                                                                    else  0  endif  }     ; SAC 02/23/25  ; switched from none(0) to ElecRes(1) - SAC 04/02/25 
+;   "Set ResHVACSys:HPModelDualFuel"			   ResHVACSys:HPModelDualFuel		   = {	0  }     ; SAC 12/08/20
 ;	"debug Setup Split HP"	ResHVACSys:Action	=	{ if (FloorAreaServed > 0.5) then PostWarning( "Setup_HVACSys_HtPump_SplitHeatPump -> ResHVACSys:HPSysHSPF = %g", HPSysHSPF ) else UNCHANGED endif }
 END
 ; SAC 1/7/16 - added SDHVSplitHeatPump (small duct, high velocity) heating type (tic 598)
@@ -10645,8 +10781,10 @@ RULELIST "Setup_HVACSys_HtPump_SDHVSplitHeatPump"       1 0 1 0
    "Set ResHVACSys:HPSysCOP47"					ResHVACSys:HPSysCOP47				= {	0  }  ; UNDEFINED  }
    "Set ResHVACSys:HPSysCOP35"					ResHVACSys:HPSysCOP35				= {	0  }  ; UNDEFINED  }
    "Set ResHVACSys:HPSysCOP17"					ResHVACSys:HPSysCOP17				= {	0  }  ; UNDEFINED  }
+   "Set ResHVACSys:HPSysCap95"               ResHVACSys:HPSysCap95            = {	0  }     ; SAC 03/18/25 (tic #1401)
    "Set ResHVACSys:HPSysAuxHtgCap"				ResHVACSys:HPSysAuxHtgCap			= {	0  }  ; if (LocalStatus( HPSysCap47 ) < 2) then  UNDEFINED  else  (HPSysCap47 * 10)  endif  }
-   "Set ResHVACSys:HPModelDualFuel"			   ResHVACSys:HPModelDualFuel		   = {	0  }     ; SAC 12/08/20
+   "Set ResHVACSys:HPBackupOption"			   ResHVACSys:HPBackupOption		   = {	0  }     ; SAC 02/23/25
+;   "Set ResHVACSys:HPModelDualFuel"			   ResHVACSys:HPModelDualFuel		   = {	0  }     ; SAC 12/08/20
 ;	"debug Setup Split HP"	ResHVACSys:Action	=	{ if (FloorAreaServed > 0.5) then PostWarning( "Setup_HVACSys_HtPump_SplitHeatPump -> ResHVACSys:HPSysHSPF = %g", HPSysHSPF ) else UNCHANGED endif }
 END
 ;*************************************************************************
@@ -10673,8 +10811,10 @@ RULELIST "Setup_HVACSys_HtPump_DuctlessMiniSplitHeatPump"       1 0 1 0
    "Set ResHVACSys:HPSysCOP47"					ResHVACSys:HPSysCOP47				= {	0  }  
    "Set ResHVACSys:HPSysCOP35"					ResHVACSys:HPSysCOP35				= {	0  }  
    "Set ResHVACSys:HPSysCOP17"					ResHVACSys:HPSysCOP17				= {	0  }  
+   "Set ResHVACSys:HPSysCap95"               ResHVACSys:HPSysCap95            = {	0  }     ; SAC 03/18/25 (tic #1401)
    "Set ResHVACSys:HPSysAuxHtgCap"			ResHVACSys:HPSysAuxHtgCap		= {	0  }  
-   "Set ResHVACSys:HPModelDualFuel"			ResHVACSys:HPModelDualFuel		= {	0  }     ; SAC 12/08/20
+   "Set ResHVACSys:HPBackupOption"			ResHVACSys:HPBackupOption		= {	0  }     ; SAC 02/23/25
+;   "Set ResHVACSys:HPModelDualFuel"			ResHVACSys:HPModelDualFuel		= {	0  }     ; SAC 12/08/20
 
 	"Set ResHVACSys:ClSysSEER"           ResHVACSys:ClSysSEER             = {   if (EffMetric > 1) then  UNCHANGED
                                                                            else  T24RCoolingEquipment:SEER( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", EnumString( StdCoolingType ) )  endif  }
@@ -10714,10 +10854,12 @@ RULELIST "Setup_HVACSys_HtPump_DuctlessMiniSplitHeatPump"       1 0 1 0
 
 	"Set ResHVACSys:ClSysCFMperTon"       		ResHVACSys:ClSysCFMperTon        = {	T24RClimateZoneCodeBase:CFMperTon( "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )  }
 	"Set ResHVACSys:ClSysRefrigChgAdjFctr"		ResHVACSys:ClSysRefrigChgAdjFctr = {	UNDEFINED  }
+	"Set ResHVACSys:HtSysRefrigChgAdjFctr"		ResHVACSys:HtSysRefrigChgAdjFctr = {	UNDEFINED  }      ; SAC 03/31/25
 END
 ;*************************************************************************
 RULELIST "Setup_HVACSys_HtPump_RoomHeatPump" 1 0 1 0
 	"Set ResHVACSys:ClSysRefrigChgAdjFctr"		ResHVACSys:ClSysRefrigChgAdjFctr	= {	UNDEFINED  }
+	"Set ResHVACSys:HtSysRefrigChgAdjFctr"		ResHVACSys:HtSysRefrigChgAdjFctr = {	UNDEFINED  }      ; SAC 03/31/25
    "Set ResHVACSys:ClSysSizingFactor"			ResHVACSys:ClSysSizingFactor		= {	1.2  }      ; SAC 02/25/22
 ;	"Set ResHVACSys:HtPump:IsMultiSpeed"		ResHtPumpSys:IsMultiSpeed			= {	0  }
 ;	"Set ResHVACSys:HtPump:IsZonal"				ResHtPumpSys:IsZonal				= {	0  }
@@ -10755,10 +10897,10 @@ RULELIST "Setup_HVACSys_Cool_SplitAirCond" 1 0 1 0
 ;	"Set ResClgSys:IsMultiSpeed"				ResClgSys:IsMultiSpeed		= {	0  }
 ;	"Set ResClgSys:IsZonal"						ResClgSys:IsZonal				= {	0  }
 
-; SAC 12/26/14 - added logic to set based on existing/verified value - and do this BEFORE resetting ClSysSEER or use of an existing SEER value can screw up the logic
-; SAC 12/26/14 - replaced logic triggering use of existing/verified properties to reflect OVERALL cooling equipment beter/equal/worse status (rather than only a comparison of SEER)
-; KN 02/24/2015 to support use of codebase for setting verified charge. Concerned about how many different places this same variable is set
-; KN 02/24/2015 old version of test replaced by codebase call	;else if (Proj:CliZnNum == 2 .OR. (Proj:CliZnNum >= 8 .AND. Proj:CliZnNum <= 15))
+   ; SAC 12/26/14 - added logic to set based on existing/verified value - and do this BEFORE resetting ClSysSEER or use of an existing SEER value can screw up the logic
+   ; SAC 12/26/14 - replaced logic triggering use of existing/verified properties to reflect OVERALL cooling equipment beter/equal/worse status (rather than only a comparison of SEER)
+   ; KN 02/24/2015 to support use of codebase for setting verified charge. Concerned about how many different places this same variable is set
+   ; KN 02/24/2015 old version of test replaced by codebase call	;else if (Proj:CliZnNum == 2 .OR. (Proj:CliZnNum >= 8 .AND. Proj:CliZnNum <= 15))
 	"Set ResHVACSys:ClSysRefrigChgAdjFctr"		ResHVACSys:ClSysRefrigChgAdjFctr	= {	if (ResProj:RunScope == 2 .AND. Status == 2 .AND. IsVerified .AND.
 																												CoolEqpVsStandard >= 0 .AND.		; => equal or better than standard
 																												MaxRevRef( ResZn:AltHVACSystem, ResZn:VerifExistingFChg ) > 0.0001)
@@ -10768,6 +10910,7 @@ RULELIST "Setup_HVACSys_Cool_SplitAirCond" 1 0 1 0
 																										then	0.96 ; verified, CID
 																										else	0.90 ; not verified
 																										endif endif endif  }
+	"Set ResHVACSys:HtSysRefrigChgAdjFctr"		ResHVACSys:HtSysRefrigChgAdjFctr = {	if (ResProj:EnergyCodeYearNum >= 2025) then  ClSysRefrigChgAdjFctr  else  UNDEFINED  endif  }   ; SAC 03/31/25  ; set for 2025+ only - SAC 04/07/25 (tic #1398)
    ; moved up from below to set iff existing equipment where ClSysCFMperTon & ClSysSEER invalid but SEERValid for StdCoolingType - SAC 09/13/21 (user/CEC support)
    "Set ResHVACSys:ClSysCFMperTon"        ResHVACSys:ClSysCFMperTon  =
       {  if (ResProj:RunScope != 2 .OR. Status != 1 .OR.
@@ -10882,6 +11025,7 @@ RULELIST "Setup_HVACSys_Cool_RoomAirCond" 1 0 1 0
 	"Set ResHVACSys:AutoSizeCool[1]"				ResHVACSys:AutoSizeCool[1]			= {	1  }
 	"Set ResHVACSys:ClSysSizingFactor"			ResHVACSys:ClSysSizingFactor		= {	1.2  }      ; SAC 02/25/22
 	"Set ResHVACSys:ClSysRefrigChgAdjFctr"		ResHVACSys:ClSysRefrigChgAdjFctr = {	UNDEFINED  }
+	"Set ResHVACSys:HtSysRefrigChgAdjFctr"		ResHVACSys:HtSysRefrigChgAdjFctr = {	UNDEFINED  }      ; SAC 03/31/25
 ;	"Set ResClgSys:IsMultiSpeed"				ResClgSys:IsMultiSpeed		= {	0  }
 ;	"Set ResClgSys:IsZonal"						ResClgSys:IsZonal				= {	0  }
 
@@ -10984,8 +11128,6 @@ RULELIST "Setup_HVACSys_Cool_RoomAirCond" 1 0 1 0
 ;																										350  
 																										T24RClimateZoneCodeBase:CFMperTon( "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )
 																									endif endif  }
-
-	"Set ResHVACSys:ClSysRefrigChgAdjFctr"		ResHVACSys:ClSysRefrigChgAdjFctr	= {	UNDEFINED  }
 END
 ;*************************************************************************
 RULELIST "Setup_HVACSys_Cool_SplitHeatPump" 1 0 1 0
@@ -11008,6 +11150,8 @@ RULELIST "Setup_HVACSys_Cool_SplitHeatPump" 1 0 1 0
 																												then	0.96 ; verified,CID
 																												else	0.90 ; not verified
 																												endif endif  }
+   ; added for consistency w/ ClSysRefrigChgAdjFctr - SAC 03/31/25 (tic #1398)
+	"Set ResHVACSys:HtSysRefrigChgAdjFctr"		ResHVACSys:HtSysRefrigChgAdjFctr = {	if (ResProj:EnergyCodeYearNum >= 2025) then  ClSysRefrigChgAdjFctr  else  UNDEFINED  endif  }   ; set for 2025+ only - SAC 04/07/25 (tic #1398)
 
    "Set ResHVACSys:EffMetric depending on StandardsVersion, RunScope & Status"   ResHVACSys:EffMetric =     ; SAC 10/09/22 (tic #3431)
       {  if ( (ResProj:RunScope == 2 .AND. Status == 1) .OR.    ; existing
@@ -11101,6 +11245,7 @@ RULELIST "Setup_HVACSys_Cool_RoomHeatPump" 1 0 1 0
 	"Set ResHVACSys:AutoSizeCool[1]"				ResHVACSys:AutoSizeCool[1]			= {	1  }
 	"Set ResHVACSys:ClSysSizingFactor"			ResHVACSys:ClSysSizingFactor		= {	1.2  }      ; SAC 02/25/22
 	"Set ResHVACSys:ClSysRefrigChgAdjFctr"		ResHVACSys:ClSysRefrigChgAdjFctr = {	UNDEFINED  }
+	"Set ResHVACSys:HtSysRefrigChgAdjFctr"		ResHVACSys:HtSysRefrigChgAdjFctr = {	UNDEFINED  }      ; SAC 03/31/25
 ;	"Set ResClgSys:IsMultiSpeed"				ResClgSys:IsMultiSpeed		= {	0  }
 ;	"Set ResClgSys:IsZonal"						ResClgSys:IsZonal				= {	0  }
 
@@ -11188,8 +11333,6 @@ RULELIST "Setup_HVACSys_Cool_RoomHeatPump" 1 0 1 0
 ;																										350  
 																										T24RClimateZoneCodeBase:CFMperTon( "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )
 																									endif endif  }
-
-	"Set ResHVACSys:ClSysRefrigChgAdjFctr"		ResHVACSys:ClSysRefrigChgAdjFctr = {	UNDEFINED  }
 END
 ;*************************************************************************
 
@@ -11251,35 +11394,36 @@ RULELIST "Setup_HVACCool_SplitAirCond" 1 0 1 0
 																								endif  }
 
 END
-;*************************************************************************
-RULELIST "Setup_HVACCool_RoomAirCond" 1 0 1 0
-   "Set ResClgSys:Type to RoomAirCond" 		ResClgSys:Type	= {	5  }	; "RoomAirCond"
-	"Call subordinate rulelist to default generic cooling system data"			ResClgSys:Action = {	EvalRulelist( "Default_HVACCool", 1 )  }
-   "Call subordinate rulelist to default type-specific cooling system data"	ResClgSys:Action = {	EvalRulelist( "Default_Cool_RoomAirCond", 1 )  }
-END
-;*************************************************************************
-RULELIST "Setup_HVACCool_SplitHeatPump" 1 0 1 0
-   "Set ResClgSys:Type to SplitHeatPump" 	ResClgSys:Type	= {	6  }	; "SplitHeatPump"
-	"Call subordinate rulelist to default generic cooling system data"			ResClgSys:Action = {	EvalRulelist( "Default_HVACCool", 1 )  }
-   "Call subordinate rulelist to default type-specific cooling system data"	ResClgSys:Action = {	EvalRulelist( "Default_Cool_SplitHeatPump", 1 )  }
-  ; SAC 3/4/13 - based on e-mail from BAW 3/1/13
-;	"Set ResClgSys:RefrigChgAdjFctr"		ResClgSys:RefrigChgAdjFctr	= {	if (Proj:CliZnNum == 2 .OR. (Proj:CliZnNum >= 8 .AND. Proj:CliZnNum <= 15))
-;																								then	0.96
-;																								else	0.90  endif  }
-; KN 03/24/2015 to use codebase to determine ACCharge
-	"Set ResClgSys:RefrigChgAdjFctr"		ResClgSys:RefrigChgAdjFctr	= {	if (T24RClimateZoneCodeBase:VerifyCharge( "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr ) > 0.5 )
-																								then	0.96  ; verified
-																								else	0.90  ; not verified
-																								endif  }
-
-END
-;*************************************************************************
-RULELIST "Setup_HVACCool_RoomHeatPump" 1 0 1 0
-   "Set ResClgSys:Type to RoomHeatPump" 	ResClgSys:Type	= {	10  }	; "RoomHeatPump"
-	"Call subordinate rulelist to default generic cooling system data"			ResClgSys:Action = {	EvalRulelist( "Default_HVACCool", 1 )  }
-   "Call subordinate rulelist to default type-specific cooling system data"	ResClgSys:Action = {	EvalRulelist( "Default_Cool_RoomHeatPump", 1 )  }
-END
-;*************************************************************************
+; never called - SAC 03/31/25
+; ;*************************************************************************
+; RULELIST "Setup_HVACCool_RoomAirCond" 1 0 1 0
+;    "Set ResClgSys:Type to RoomAirCond" 		ResClgSys:Type	= {	5  }	; "RoomAirCond"
+; 	"Call subordinate rulelist to default generic cooling system data"			ResClgSys:Action = {	EvalRulelist( "Default_HVACCool", 1 )  }
+;    "Call subordinate rulelist to default type-specific cooling system data"	ResClgSys:Action = {	EvalRulelist( "Default_Cool_RoomAirCond", 1 )  }
+; END
+; ;*************************************************************************
+; RULELIST "Setup_HVACCool_SplitHeatPump" 1 0 1 0
+;    "Set ResClgSys:Type to SplitHeatPump" 	ResClgSys:Type	= {	6  }	; "SplitHeatPump"
+; 	"Call subordinate rulelist to default generic cooling system data"			ResClgSys:Action = {	EvalRulelist( "Default_HVACCool", 1 )  }
+;    "Call subordinate rulelist to default type-specific cooling system data"	ResClgSys:Action = {	EvalRulelist( "Default_Cool_SplitHeatPump", 1 )  }
+;   ; SAC 3/4/13 - based on e-mail from BAW 3/1/13
+; ;	"Set ResClgSys:RefrigChgAdjFctr"		ResClgSys:RefrigChgAdjFctr	= {	if (Proj:CliZnNum == 2 .OR. (Proj:CliZnNum >= 8 .AND. Proj:CliZnNum <= 15))
+; ;																								then	0.96
+; ;																								else	0.90  endif  }
+; ; KN 03/24/2015 to use codebase to determine ACCharge
+; 	"Set ResClgSys:RefrigChgAdjFctr"		ResClgSys:RefrigChgAdjFctr	= {	if (T24RClimateZoneCodeBase:VerifyCharge( "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr ) > 0.5 )
+; 																								then	0.96  ; verified
+; 																								else	0.90  ; not verified
+; 																								endif  }
+; 
+; END
+; ;*************************************************************************
+; RULELIST "Setup_HVACCool_RoomHeatPump" 1 0 1 0
+;    "Set ResClgSys:Type to RoomHeatPump" 	ResClgSys:Type	= {	10  }	; "RoomHeatPump"
+; 	"Call subordinate rulelist to default generic cooling system data"			ResClgSys:Action = {	EvalRulelist( "Default_HVACCool", 1 )  }
+;    "Call subordinate rulelist to default type-specific cooling system data"	ResClgSys:Action = {	EvalRulelist( "Default_Cool_RoomHeatPump", 1 )  }
+; END
+; ;*************************************************************************
 
 
 ;;*************************************************************************
@@ -11441,6 +11585,12 @@ END
 ;*************************************************************************
 RULELIST "Blast_HVACCool_CFMperTon" 1 0 0 0
    "Blast ResClgSys:CFMperTon"    ResClgSys:CFMperTon   = {  UNDEFINED  }
+END
+;*************************************************************************
+
+;************************************************************************* SAC 03/05/25 (tic #1379)
+RULELIST "Blast_HVACCool_IsMultiSpeed" 1 0 0 0
+   "Blast ResClgSys:IsMultiSpeed"    ResClgSys:IsMultiSpeed   = {  UNDEFINED  }
 END
 ;*************************************************************************
 
@@ -12126,6 +12276,16 @@ RULELIST "ForceDefault_HVACHtPump_Capacities_HeatPumpV3"  1 0 0 1
    "Blast HVACHtPump:Cap17"      HVACHtPump:Cap17  = {  UNDEFINED  }
    "Blast HVACHtPump:Cap82"      HVACHtPump:Cap82  = {  UNDEFINED  }
    "Blast HVACHtPump:Cap95"      HVACHtPump:Cap95  = {  UNDEFINED  }
+END
+;*************************************************************************
+
+;*************************************************************************
+RULELIST "Blast_HVACCool_SEER2" 1 0 0 1
+   "blast ResClgSys:SEER2"   ResClgSys:SEER2  = {  UNDEFINED  }
+END
+;*************************************************************************
+RULELIST "Blast_HVACCool_EER2" 1 0 0 1
+   "blast ResClgSys:EER2"    ResClgSys:EER2   = {  UNDEFINED  }
 END
 ;*************************************************************************
 
