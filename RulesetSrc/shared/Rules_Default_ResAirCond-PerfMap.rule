@@ -1,0 +1,518 @@
+; -------------------------------------------------------------------------
+; Rules pertaining to:   defaulting, CSE simulation inputs & reporting for new SplitAirCondPM equipment
+; CEC Title-24 Residential Energy Code
+; -------------------------------------------------------------------------
+; Copyright (c) 2012-2024, California Energy Commission
+; Copyright (c) 2024, SAC Software Solutions, LLC
+; All rights reserved.
+; Redistribution and use in source and binary forms, with or without modification,
+; are permitted provided that the following conditions are met:
+; - Redistributions of source code must retain the above copyright notice, this
+;   list of conditions and the following disclaimer.
+; - Redistributions in binary form must reproduce the above copyright notice, this
+;   list of conditions, the following disclaimer in the documentation and/or other
+;   materials provided with the distribution.
+; - Neither the name of the California Energy Commission nor the names of its
+;   contributors may be used to endorse or promote products derived from this
+;   software without specific prior written permission.
+; DISCLAIMER: THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+; "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+; THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+; NON-INFRINGEMENT ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION,
+; SAC SOFTWARE SOLUTIONS, WRIGHTSOFT CORPORATION, ITRON, INC. OR ANY OTHER AUTHOR
+; OR COPYRIGHT HOLDER OF THIS SOFTWARE (COLLECTIVELY, THE "AUTHORS") BE LIABLE FOR
+; ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+; (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+; OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+; THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+; NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
+; IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.  EACH LICENSEE AND SUBLICENSEE OF
+; THE SOFTWARE AGREES NOT TO ASSERT ANY CLAIM AGAINST ANY OF THE AUTHORS RELATING
+; TO THIS SOFTWARE, WHETHER DUE TO PERFORMANCE ISSUES, TITLE OR INFRINGEMENT
+; ISSUES, STRICT LIABILITY OR OTHERWISE.
+; -------------------------------------------------------------------------
+
+ENUM_PROPERTIES_VALUE   ; ensures retrieval/logic/us of enum properties assume numeric value (alternative is ENUM_PROPERTIES_STRING)
+
+;************************************************************************* SAC 03/05/25 (tic #1379)
+RULELIST "ClgPerfMap_Defaulting" 1 0 0 0
+;*************************************************************************
+
+   "default HVACCool:Speeds"     HVACCool:Speeds =
+      {  if (LocalStatus( Speeds ) < 5 .OR. Speeds < 1) then  1  else  UNCHANGED  endif  }      ; SAC 03/12/25 (tic #1379)
+
+   "blast HVACCool:SEER2 if it is user defined when SEER is what is active"    HVACCool:Action =
+      {  if (EffMetric == 1 .AND. LocalStatus( SEER2 ) > 5 .AND. LocalStatus( SEER ) > 5 .AND. IfValidAnd( Proj:StdDesignBase >= 2019 ))
+         then  EvalRulelist( "Blast_HVACCool_SEER2", 1 )  else  UNCHANGED  endif  }
+   "blast HVACCool:EER2 if it is user defined when EER is what is active"      HVACCool:Action =
+      {  if (EffMetric == 1 .AND. LocalStatus( EER2 ) > 5 .AND. LocalStatus( EER ) > 5 .AND. IfValidAnd( Proj:StdDesignBase >= 2019 ))
+         then  EvalRulelist( "Blast_HVACCool_EER2", 1 )  else  UNCHANGED  endif  }
+   "Default HVACCool:SEER2 based on SEER for VCHP3 calcs"    HVACCool:SEER2 =
+      {  if (EffMetric == 1 .AND. LocalStatus( SEER2 ) < 6 .AND. LocalStatus( SEER ) > 5 .AND. IfValidAnd( Proj:StdDesignBase >= 2019 ) .AND.
+             SEER != T24RCoolingEquipment:SEER( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", TypeAbbrevStr ))
+         then  SEER * T24RCoolingEquipment:SEER2perSEER( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", TypeAbbrevStr )
+         else  UNCHANGED  endif  }
+   "Default HVACCool:EER2 based on EER for VCHP3 calcs"      HVACCool:EER2 =
+      {  if (EffMetric == 1 .AND. LocalStatus( EER2 ) < 6 .AND. LocalStatus( EER ) > 5 .AND. IfValidAnd( Proj:StdDesignBase >= 2019 ) .AND.
+             EER != T24RCoolingEquipment:EER( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", TypeAbbrevStr ))
+         then  EER * T24RCoolingEquipment:EER2perEER( "CodeBase", Proj:StdDesignBase, "StdVer", ResProj:StdsVersionYr, "SysType", TypeAbbrevStr )
+         else  UNCHANGED  endif  }
+
+   ; Inputs/Constants
+;    "Set HVACCool:PerfMap_Tdefrost"  HVACCool:PerfMap_Tdefrost = {  40 }
+   "Set HVACCool:PerfMap_Tmax"      HVACCool:PerfMap_Tmax     = { 125 }
+
+   "Perform unit type-specific defaulting"   HVACCool:Action =
+      {  switch (Speeds)
+            case  1 :  EvalRulelist( "ClgPerfMap_Defaulting_Single",   1 ) 
+            case  2 :  EvalRulelist( "ClgPerfMap_Defaulting_Two",      1 ) 
+            case  9 :  EvalRulelist( "ClgPerfMap_Defaulting_Variable", 1 ) 
+            default :  UNCHANGED
+         endswitch  }
+END
+;*************************************************************************
+
+;************************************************************************* SAC 09/05/24 (tic #1379)
+RULELIST "ClgPerfMap_Defaulting_Single" 1 0 0 0
+;*************************************************************************
+
+;    "Set HVACCool:PerfMap_Tmin"    HVACCool:PerfMap_Tmin      = {  0  }
+   "Set HVACCool:PM_Cd"          HVACCool:PM_Cd          = {  0.08  }      ; 0.15->0.08 - SAC 09/18/24
+
+   ; Cutler Correlations - calcs in spreadsheet col.s AD-AH, rows 1-20
+   "Set HVACCool:Qm95rated - Capacity Maintenance at 95°F Rated"   HVACCool:Qm95rated    = {  1 / 1.0686  }   ; AE19/AE18
+;    "Set HVACCool:EIRm17rated - EIR Maintenance at 17°F Rated"      HVACCool:EIRm17rated  = {  1.3557 / 1  }   ; AH19/AH20
+
+   ; Intermediate Calculation Quantites
+   "Set HVACCool:EER2B82"                  HVACCool:EER2B82      = {  ValidOr( SEER2, 14.3 ) / (1 - (0.5 * PM_Cd))  } 
+;    "Set HVACCool:Pm17rated"                HVACCool:Pm17rated    = {  EIRm17rated * ValidOr( Cap17, 2000 ) / ValidOr( Cap47, 4000 )  } 
+
+   ; Cap* (Q*rated)
+;    "Set HVACCool:Cap40rtd"        HVACCool:Cap40rtd        = {  Cap17    + (((Cap47    - Cap17   )/(47 - 17))*(40 - 17))  }
+;    "Set HVACCool:Cap05"           HVACCool:Cap05           = {  Cap17    - (((Cap40rtd - Cap17   )/(40 - 17))*(17 -  5))  }
+;    "Set HVACCool:Capm30rtd"       HVACCool:Capm30rtd       = {  Cap05    - (((Cap17    - Cap05   )/(17 -  5))*( 5 - PerfMap_Tmin))  }
+
+   "Set HVACCool:Cap82rtd"        HVACCool:Cap82rtd        = {  Cap95    / Qm95rated  }
+   "Set HVACCool:Cap125rtd"       HVACCool:Cap125rtd       = {  Cap95    + (((Cap95    - Cap82rtd)/(95 - 82    ))*(PerfMap_Tmax - 95))  }
+
+   ; Net Power
+;    "Set HVACCool:NetPwr47rtd"     HVACCool:NetPwr47rtd     = {  Cap47       / ValidOr( COP47rated, 3.64 )  }
+;    "Set HVACCool:NetPwr17rtd"     HVACCool:NetPwr17rtd     = {  NetPwr47rtd * Pm17rated  }
+;    "Set HVACCool:NetPwr40rtd"     HVACCool:NetPwr40rtd     = {  NetPwr17rtd + (((NetPwr47rtd - NetPwr17rtd)/(47 - 17))*(40 - 17))  }
+;    "Set HVACCool:NetPwr05rtd"     HVACCool:NetPwr05rtd     = {  NetPwr17rtd - (((NetPwr40rtd - NetPwr17rtd)/(40 - 17))*(17 -  5))  }
+;    "Set HVACCool:NetPwrm30rtd"    HVACCool:NetPwrm30rtd    = {  NetPwr05rtd - (((NetPwr17rtd - NetPwr05rtd)/(17 -  5))*( 5 - PerfMap_Tmin))  }
+
+   "Set HVACCool:NetPwr95rtd"     HVACCool:NetPwr95rtd     = {  Cap95    / (ValidOr( EER2,    10 ) / 3.41214)  }
+   "Set HVACCool:NetPwr82rtd"     HVACCool:NetPwr82rtd     = {  Cap82rtd / (ValidOr( EER2B82, 15 ) / 3.41214)  }
+   "Set HVACCool:ClgT60"          HVACCool:ClgT60          = {  82 + (((NetPwr82rtd * 0.5) - NetPwr82rtd) / (NetPwr95rtd - NetPwr82rtd) * (95 - 82))  }    ; SAC 02/27/25
+   "Set HVACCool:NetPwr60rtd"     HVACCool:NetPwr60rtd     = {  max( NetPwr82rtd - (((NetPwr95rtd - NetPwr82rtd)/(95 - 82))*(82 - ClgT60)), NetPwr82rtd/2 )  }
+   "Set HVACCool:NetPwr125rtd"    HVACCool:NetPwr125rtd    = {  NetPwr95rtd + (((NetPwr95rtd - NetPwr82rtd)/(95 - 82))*(PerfMap_Tmax - 95))  }
+
+   "Set HVACCool:Cap60rtd"        HVACCool:Cap60rtd        = {  Cap82rtd - (((Cap95    - Cap82rtd)/(95 - 82    ))*(82         - ClgT60))  }
+   "Set HVACCool:Cap40crtd"       HVACCool:Cap40crtd       = {  Cap60rtd - (((Cap82rtd - Cap60rtd)/(82 - ClgT60))*(ClgT60     - 40))  }     ; added 40F cooling values - SAC 02/27/25
+END
+;*************************************************************************
+
+;************************************************************************* 
+RULELIST "ClgPerfMap_Defaulting_Two" 1 0 0 0
+;*************************************************************************
+
+;    "Set HVACCool:PerfMap_Tmin"      HVACCool:PerfMap_Tmin      = {  0  }
+   "Set HVACCool:PM_Cd"          HVACCool:PM_Cd          = {  0.08  }      ; SAC 09/18/24
+
+END
+;*************************************************************************
+
+;************************************************************************* SAC 08/25/24 (tic #1379)
+RULELIST "ClgPerfMap_Defaulting_Variable" 1 0 0 0
+;*************************************************************************
+
+;    "Set HVACCool:PerfMap_Tmin"      HVACCool:PerfMap_Tmin      = { -30 }
+   "Set HVACCool:PM_Cd"          HVACCool:PM_Cd          = {  0.40  }      ; SAC 09/18/24
+
+   ; HtPumpV3 2D interpolation - SAC 08/21/24 (VCHP3)
+   "Set HVACCool:PM_SEER2Min"          HVACCool:PM_SEER2Min          = {  HtPump3_Interp_VarSpeed_Low_SEER2EER2ratio_COP:SEER2Limit( "2DInterpolate", "Min", "SEER2", -999 )  }
+   "Set HVACCool:PM_SEER2Max"          HVACCool:PM_SEER2Max          = {  HtPump3_Interp_VarSpeed_Low_SEER2EER2ratio_COP:SEER2Limit( "2DInterpolate", "Max", "SEER2", -999 )  }
+   "Set HVACCool:PM_SEER2EER2Ratio"    HVACCool:PM_SEER2EER2Ratio    = {  if (IfValidAnd( EER2 > 0 )) then  SEER2 / EER2  else  0  endif  }
+   "Set HVACCool:PM_SEER2EER2RatioMin" HVACCool:PM_SEER2EER2RatioMin = {  HtPump3_Interp_VarSpeed_Low_SEER2EER2ratio_COP:SEER2EER2Ratio( "2DInterpolate", "Min", "SEER2", -999 )  }
+   "Set HVACCool:PM_SEER2EER2RatioMax" HVACCool:PM_SEER2EER2RatioMax = {  HtPump3_Interp_VarSpeed_Low_SEER2EER2ratio_COP:SEER2EER2Ratio( "2DInterpolate", "Max", "SEER2", -999 )  }
+
+   "Set HVACCool:Qr95rated - Capacity Ratio at 95°F Rated"         HVACCool:Qr95rated    = {  VCHP3_NEEPStatistics:mean( "quantity", "Qr95rated"    )  } 
+   "Set HVACCool:Qm95max - Capacity Maintenance at 95°F Max"       HVACCool:Qm95max      = {  VCHP3_NEEPStatistics:mean( "quantity", "Qm95max"      )  } 
+   "Set HVACCool:EIRr95rated - EIR Ratio at 95°F Rated"            HVACCool:EIRr95rated  = {  VCHP3_NEEPStatistics:mean( "quantity", "EIRr95rated"  )  } 
+   "Set HVACCool:Pr95rated"                                        HVACCool:Pr95rated    = {  ValidOr( Qr95rated,   0 ) * ValidOr( EIRr95rated, 1 )  } 
+   "Set HVACCool:EIRm95max - EIR Maintenance at 95°F Max"          HVACCool:EIRm95max    = {  VCHP3_NEEPStatistics:mean( "quantity", "EIRm95max"  )  } 
+   "Set HVACCool:Pm95max"                                          HVACCool:Pm95max      = {  ValidOr( Qm95max,  2000 ) * ValidOr( EIRm95max,   1 )  }
+
+   "Set HVACCool:PM_Var_Clg_NetCap_Max82__W4"                     HVACCool:PM_Var_Clg_NetCap_Max82__W4 =
+      {  if (IfValidAnd( Cap95 > 0 )==0 .OR. IfValidAnd( Qr95rated > 0 )==0 .OR. IfValidAnd( Qm95max > 0 )==0) then  6800
+         else  ((Cap95 / Qr95rated) / Qm95max)  endif  }
+
+   "Set HVACCool:PM_Var_Clg_NetPwr_Max82__W7"                     HVACCool:PM_Var_Clg_NetPwr_Max82__W7 =
+      {  if (IfValidAnd( Cap95 > 0 )==0 .OR. IfValidAnd( EER2 > 0 )==0 .OR.
+             IfValidAnd( Pr95rated > 0 )==0 .OR. IfValidAnd( Pm95max > 0 )==0) then  2400
+         else  ((Cap95 / (EER2 / 3.41214)) / Pr95rated) / Pm95max  endif  }
+
+   "Set HVACCool:COP82min - COP at 82F Min vs SEER2 over EER2"        HVACCool:COP82min =
+      {  if (IfValidAnd( SEER2 >= PM_SEER2Min ) .AND. IfValidAnd( SEER2 <= PM_SEER2Max ) .AND.
+             IfValidAnd( PM_SEER2EER2Ratio >= PM_SEER2EER2RatioMin ) .AND. IfValidAnd( PM_SEER2EER2Ratio <= PM_SEER2EER2RatioMax ))
+         then  HtPump3_Interp_VarSpeed_Low_SEER2EER2ratio_COP:2DInterpolate( "SEER2EER2Ratio", PM_SEER2EER2Ratio, "SEER2", SEER2 )
+         else    VCHP3_NEEPRegressions:intercept( "quantity", "EIRr82min"  ) +
+               ( VCHP3_NEEPRegressions:slope(     "quantity", "EIRr82min"  ) * ValidOr( SEER2, 14.3 ) / ValidOr( EER2, 11.7 ) )  endif  }
+
+   "Set HVACCool:Qr95min - Capacity Ratio at 95F Min vs SEER2 over EER2"    HVACCool:Qr95min =
+      {  if (IfValidAnd( PM_Var_Clg_NetPwr_Max82__W7 > 0 )==0 .OR. IfValidAnd( COP82min > 0 )==0) then  0.18
+         else  min( max( ( VCHP3_NEEPRegressions:intercept( "quantity", "Cap95ratVsEIR82" ) +
+                          (VCHP3_NEEPRegressions:slope(     "quantity", "Cap95ratVsEIR82" ) *
+                              (PM_Var_Clg_NetCap_Max82__W4 / PM_Var_Clg_NetPwr_Max82__W7) / COP82min )), 0.1 ), ValidOr( Qr95rated, 0.934 ) )  endif  }
+
+   ; VCHP3 NEEP Statistical Quantities
+;    "Set HVACCool:Qr47rated - Capacity Ratio at 47°F Rated"                 HVACCool:Qr47rated        = {  VCHP3_NEEPStatistics:mean( "quantity", "Qr47rated"  )  } 
+;    "Set HVACCool:Qr47min - Capacity Ratio at 47°F Min"                     HVACCool:Qr47min          = {  VCHP3_NEEPStatistics:mean( "quantity", "Qr47min"  )  } 
+;    "Set HVACCool:Qr17rated - Capacity Ratio at 17°F Rated"                 HVACCool:Qr17rated        = {  VCHP3_NEEPStatistics:mean( "quantity", "Qr17rated"  )  } 
+;    "Set HVACCool:Qr17min - Capacity Ratio at 17°F Min"                     HVACCool:Qr17min          = {  VCHP3_NEEPStatistics:mean( "quantity", "Qr17min"  )  } 
+;    "Set HVACCool:Qm5max - Capacity Maintenance at 5°F Max"                 HVACCool:Qm5max           = {  VCHP3_NEEPStatistics:mean( "quantity", "Qm5max"  )  } 
+;    "Set HVACCool:Qr5rated - Capacity Ratio at 5°F Rated"                   HVACCool:Qr5rated         = {  VCHP3_NEEPStatistics:mean( "quantity", "Qr5rated"  )  } 
+;    "Set HVACCool:Qr5min - Capacity Ratio at 5°F Min"                       HVACCool:Qr5min           = {  VCHP3_NEEPStatistics:mean( "quantity", "Qr5min"  )  } 
+   "Set HVACCool:QmslopeLCTmax - Capacity Maintenance Slope at LCT°F Max"  HVACCool:QmslopeLCTmax    = {  VCHP3_NEEPStatistics:mean( "quantity", "QmslopeLCTmax"  )  } 
+   "Set HVACCool:QmslopeLCTmin - Capacity Maintenance Slope at LCT°F Min"  HVACCool:QmslopeLCTmin    = {  VCHP3_NEEPStatistics:mean( "quantity", "QmslopeLCTmin"  )  } 
+
+   "Set HVACCool:Qm95min - Capacity Maintenance at 95°F Min"               HVACCool:Qm95min          = {  VCHP3_NEEPStatistics:mean( "quantity", "Qm95min"  )  } 
+;    "Set HVACCool:EIRr47rated - EIR Ratio at 47°F Rated"                    HVACCool:EIRr47rated      = {  VCHP3_NEEPStatistics:mean( "quantity", "EIRr47rated"  )  } 
+;    "Set HVACCool:EIRr47min - EIR Ratio at 47°F Min"                        HVACCool:EIRr47min        = {  VCHP3_NEEPStatistics:mean( "quantity", "EIRr47min"  )  } 
+;    "Set HVACCool:EIRm17rated - EIR Maintenance at 17°F Rated"              HVACCool:EIRm17rated      = {  VCHP3_NEEPStatistics:mean( "quantity", "EIRm17rated"  )  } 
+;    "Set HVACCool:EIRr17rated - EIR Ratio at 17°F Rated"                    HVACCool:EIRr17rated      = {  VCHP3_NEEPStatistics:mean( "quantity", "EIRr17rated"  )  } 
+;    "Set HVACCool:EIRr17min - EIR Ratio at 17°F Min"                        HVACCool:EIRr17min        = {  VCHP3_NEEPStatistics:mean( "quantity", "EIRr17min"  )  } 
+;    "Set HVACCool:EIRm5max - EIR Maintenance at 5°F Max"                    HVACCool:EIRm5max         = {  VCHP3_NEEPStatistics:mean( "quantity", "EIRm5max"  )  } 
+;    "Set HVACCool:EIRr5rated - EIR Ratio at 5°F Rated"                      HVACCool:EIRr5rated       = {  VCHP3_NEEPStatistics:mean( "quantity", "EIRr5rated"  )  } 
+;    "Set HVACCool:EIRr5min - EIR Ratio at 5°F Min"                          HVACCool:EIRr5min         = {  VCHP3_NEEPStatistics:mean( "quantity", "EIRr5min"  )  } 
+   "Set HVACCool:EIRmslopeLCTmax - EIR Maintenance Slope at LCT°F Max"     HVACCool:EIRmslopeLCTmax  = {  VCHP3_NEEPStatistics:mean( "quantity", "EIRmslopeLCTmax"  )  } 
+   "Set HVACCool:EIRmslopeLCTmin - EIR Maintenance Slope at LCT°F Min"     HVACCool:EIRmslopeLCTmin  = {  VCHP3_NEEPStatistics:mean( "quantity", "EIRmslopeLCTmin"  )  } 
+   "Set HVACCool:EIRm95min - EIR Maintenance at 95°F Min"                  HVACCool:EIRm95min        = {  VCHP3_NEEPStatistics:mean( "quantity", "EIRm95min"  )  } 
+
+   ; Cap* (Q*rated/max/min)
+   "Set HVACCool:Cap95max"        HVACCool:Cap95max        = {  ValidOr( Cap95,    2000 ) / ValidOr( Qr95rated, 1.2 )  }
+   "Set HVACCool:Cap95min"        HVACCool:Cap95min        = {  ValidOr( Cap95max, 2000 ) * ValidOr( Qr95min,   0.3 )  }
+   "Set HVACCool:Cap82max"        HVACCool:Cap82max        = {  ValidOr( Cap95max, 2000 ) / ValidOr( Qm95max,   1.3 )  }
+   "Set HVACCool:Cap82min"        HVACCool:Cap82min        = {  ValidOr( Cap95min, 2000 ) / ValidOr( Qm95min,   1.1 )  }
+;    "Set HVACCool:Cap47max"        HVACCool:Cap47max        = {  ValidOr( Cap47,    2000 ) / ValidOr( Qr47rated, 1.2  )  }
+;    "Set HVACCool:Cap47min"        HVACCool:Cap47min        = {  ValidOr( Cap47max, 2000 ) * ValidOr( Qr47min,   0.25 )  }
+;    "Set HVACCool:Cap17max"        HVACCool:Cap17max        = {  ValidOr( Cap17,    2000 ) / ValidOr( Qr17rated, 1.2  )  }
+;    "Set HVACCool:Cap17min"        HVACCool:Cap17min        = {  ValidOr( Cap17max, 2000 ) * ValidOr( Qr17min,   0.25 )  }
+;    "Set HVACCool:Cap05max"        HVACCool:Cap05max        = {  ValidOr( Cap17max, 2000 ) * ValidOr( Qm5max,    0.75 )  }
+;    "Set HVACCool:Cap05"           HVACCool:Cap05           = {  ValidOr( Cap05max, 2000 ) * ValidOr( Qr5rated,  0.90 )  }
+;    "Set HVACCool:Cap05min"        HVACCool:Cap05min        = {  ValidOr( Cap05max, 2000 ) * ValidOr( Qr5min,    0.25 )  }
+   "Set HVACCool:Cap82rtd"        HVACCool:Cap82rtd        = {  Cap82min + (((Cap95    - Cap95min)/(Cap95max - Cap95min))*(Cap82max - Cap82min))  }  ; SAC 09/02/24
+
+   ; VCHP3 Intermediate Calculation Quantites
+;    "Set HVACCool:QmLCTmax"                 HVACCool:QmLCTmax     = {  1 / (1 - ValidOr( QmslopeLCTmax, 0 ) * (5-PerfMap_Tmin))  }
+;    "Set HVACCool:QmLCTmin"                 HVACCool:QmLCTmin     = {  1 / (1 - ValidOr( QmslopeLCTmin, 0 ) * (5-PerfMap_Tmin))  }
+;    "Set HVACCool:Capm30max"                HVACCool:Capm30max    = {  Cap05max * QmLCTmax  }   ; 
+;    "Set HVACCool:Capm30min"                HVACCool:Capm30min    = {  Cap05min * QmLCTmin  }
+;    "Set HVACCool:Pr47rated"                HVACCool:Pr47rated    = {  ValidOr( EIRr47rated, 0 ) * ValidOr( Qr47rated,   0 )  } 
+;    "Set HVACCool:Pr47min"                  HVACCool:Pr47min      = {  ValidOr( EIRr47min,   0 ) * ValidOr( Qr47min,     0 )  }
+   ; "Set HVACCool:Pr82min"                  HVACCool:Pr82min      = {  ValidOr( Cap82min, 2000 ) / ValidOr( Cap82max, 2000 ) * ValidOr( COP82min, 1 )  }
+   "Set HVACCool:Pm95min"                  HVACCool:Pm95min      = {  ValidOr( Qm95min,  2000 ) * ValidOr( EIRm95min,   1 )  }
+;    "Set HVACCool:Pm17rated"                HVACCool:Pm17rated    = {  ValidOr( EIRm17rated, 1 ) * (ValidOr( Cap17, 2000 ) / max( 1, ValidOr( Cap47, 2000 ) ))  } 
+;    "Set HVACCool:Pr17rated"                HVACCool:Pr17rated    = {  ValidOr( EIRr17rated, 1 ) * ValidOr( Qr17rated, 2000 )  } 
+;    "Set HVACCool:Pr17min"                  HVACCool:Pr17min      = {  ValidOr( EIRr17min,   1 ) * (ValidOr( Cap17min, 2000 ) / ValidOr( Cap17max, 2000 ))  }
+;    "Set HVACCool:Pr5rated"                 HVACCool:Pr5rated     = {  ValidOr( EIRr5rated,  1 ) * (ValidOr( Cap05,    2000 ) / ValidOr( Cap05max, 2000 ))  }
+;    "Set HVACCool:Pr5min"                   HVACCool:Pr5min       = {  ValidOr( EIRr5min,    1 ) * (ValidOr( Cap05min, 2000 ) / ValidOr( Cap05max, 2000 ))  }
+;    "Set HVACCool:EIRmLCTmax"               HVACCool:EIRmLCTmax   = {  1 / (1 - ValidOr( EIRmslopeLCTmax, 0.8 ) * (5-PerfMap_Tmin))  }  
+;    "Set HVACCool:EIRmLCTmin"               HVACCool:EIRmLCTmin   = {  1 / (1 - ValidOr( EIRmslopeLCTmin, 0.3 ) * (5-PerfMap_Tmin))  }  
+;    "Set HVACCool:PmLCTmax"                 HVACCool:PmLCTmax     = {  ValidOr( EIRmLCTmax,  1 ) * (Capm30max / Cap05max)  }
+;    "Set HVACCool:PmLCTmin"                 HVACCool:PmLCTmin     = {  ValidOr( EIRmLCTmin,  1 ) * (Capm30min / Cap05min)  }
+
+;    "Set HVACCool:Capm30rtd"       HVACCool:Capm30rtd       = {  Capm30min + (((Cap05 - Cap05min)/(Cap05max - Cap05min))*(Capm30max - Capm30min))  }     ; SAC 09/01/24
+
+   "Set HVACCool:NetPwr95rtd"     HVACCool:NetPwr95rtd     = {  Cap95 / (ValidOr( EER2, 13 ) / 3.41214)  }
+   "Set HVACCool:NetPwr95max"     HVACCool:NetPwr95max     = {  NetPwr95rtd / Pr95rated  }
+   "Set HVACCool:NetPwr82max"     HVACCool:NetPwr82max     = {  NetPwr95max / Pm95max    }
+   "Set HVACCool:NetPwr82min"     HVACCool:NetPwr82min     = {  Cap82min    / COP82min   }
+   "Set HVACCool:NetPwr95min"     HVACCool:NetPwr95min     = {  NetPwr82min * Pm95min  }
+   "Set HVACCool:NetPwr82rtd"     HVACCool:NetPwr82rtd     = {  NetPwr82min + (((NetPwr95rtd - NetPwr95min)/(NetPwr95max - NetPwr95min))*(NetPwr82max - NetPwr82min))  }
+   "Set HVACCool:NetPwr125max"    HVACCool:NetPwr125max    = {  NetPwr95max + (((NetPwr95max - NetPwr82max)/(95 - 82))*(PerfMap_Tmax - 95))  }
+   "Set HVACCool:NetPwr125rtd"    HVACCool:NetPwr125rtd    = {  NetPwr95rtd + (((NetPwr95rtd - NetPwr82rtd)/(95 - 82))*(PerfMap_Tmax - 95))  }
+   "Set HVACCool:NetPwr125min"    HVACCool:NetPwr125min    = {  NetPwr95min + (((NetPwr95min - NetPwr82min)/(95 - 82))*(PerfMap_Tmax - 95))  }
+   "Set HVACCool:ClgT60"          HVACCool:ClgT60          = {  82 + (((NetPwr82min * 0.5) - NetPwr82min) / (NetPwr95min - NetPwr82min) * (95 - 82))  }    ; SAC 02/27/25
+   "Set HVACCool:NetPwr60max"     HVACCool:NetPwr60max     = {  max( NetPwr82max - (((NetPwr95max - NetPwr82max)/(95 - 82))*(82 - ClgT60)), NetPwr82max/2 )  }
+   "Set HVACCool:NetPwr60rtd"     HVACCool:NetPwr60rtd     = {  max( NetPwr82rtd - (((NetPwr95rtd - NetPwr82rtd)/(95 - 82))*(82 - ClgT60)), NetPwr82rtd/2 )  }
+   "Set HVACCool:NetPwr60min"     HVACCool:NetPwr60min     = {  max( NetPwr82min - (((NetPwr95min - NetPwr82min)/(95 - 82))*(82 - ClgT60)), NetPwr82min/2 )  }
+;    "Set HVACCool:NetPwr47rtd"     HVACCool:NetPwr47rtd     = {  Cap47       / ValidOr( COP47rated, 3.37 )  }
+;    "Set HVACCool:NetPwr47max"     HVACCool:NetPwr47max     = {  NetPwr47rtd / ValidOr( Pr47rated,  0.85 )  }
+;    "Set HVACCool:NetPwr47min"     HVACCool:NetPwr47min     = {  NetPwr47max * ValidOr( Pr47min,    0.20 )  }
+
+;    "Set HVACCool:NetPwr17rtd"     HVACCool:NetPwr17rtd     = {  NetPwr47rtd * Pm17rated  }
+;    "Set HVACCool:NetPwr17max"     HVACCool:NetPwr17max     = {  NetPwr17rtd / Pr17rated  }
+;    "Set HVACCool:NetPwr17min"     HVACCool:NetPwr17min     = {  NetPwr17max * Pr17min    }
+;    "Set HVACCool:NetPwr05max"     HVACCool:NetPwr05max     = {  NetPwr17max * EIRm5max  * (Cap05max / Cap17max) }   ; add *(Cap05/Cap17) portion omitted from original source - SAC 02/14/25
+;    "Set HVACCool:NetPwr05rtd"     HVACCool:NetPwr05rtd     = {  NetPwr05max * Pr5rated   }
+;    "Set HVACCool:NetPwr05min"     HVACCool:NetPwr05min     = {  NetPwr05max * Pr5min     }
+;    "Set HVACCool:NetPwrm30max"    HVACCool:NetPwrm30max    = {  NetPwr05max * PmLCTmax   }
+;    "Set HVACCool:NetPwrm30min"    HVACCool:NetPwrm30min    = {  NetPwr05min * PmLCTmin   }
+;    "Set HVACCool:NetPwrm30rtd"    HVACCool:NetPwrm30rtd    = {  NetPwrm30min + (((NetPwr05rtd - NetPwr05min)/(NetPwr05max - NetPwr05min))*(NetPwrm30max - NetPwrm30min))  }
+
+   "Set HVACCool:Cap125max"       HVACCool:Cap125max       = {  Cap95max + (((Cap95max - Cap82max)/(95 - 82))*(PerfMap_Tmax - 95))  }
+   "Set HVACCool:Cap125rtd"       HVACCool:Cap125rtd       = {  Cap95    + (((Cap95    - Cap82rtd)/(95 - 82))*(PerfMap_Tmax - 95))  }
+   "Set HVACCool:Cap125min"       HVACCool:Cap125min       = {  Cap95min + (((Cap95min - Cap82min)/(95 - 82))*(PerfMap_Tmax - 95))  }
+   "Set HVACCool:Cap60max"        HVACCool:Cap60max        = {  Cap82max - (((Cap95max - Cap82max)/(95 - 82))*(82 - ClgT60))  }
+   "Set HVACCool:Cap60rtd"        HVACCool:Cap60rtd        = {  Cap82rtd - (((Cap95    - Cap82rtd)/(95 - 82))*(82 - ClgT60))  }
+   "Set HVACCool:Cap60min"        HVACCool:Cap60min        = {  Cap82min - (((Cap95min - Cap82min)/(95 - 82))*(82 - ClgT60))  }
+   "Set HVACCool:Cap40cmax"       HVACCool:Cap40cmax       = {  Cap60max - (((Cap82max - Cap60max)/(82 - ClgT60))*(ClgT60 - 40))  }      ; added 40F cooling values - SAC 02/27/25
+   "Set HVACCool:Cap40crtd"       HVACCool:Cap40crtd       = {  Cap60rtd - (((Cap82rtd - Cap60rtd)/(82 - ClgT60))*(ClgT60 - 40))  }
+   "Set HVACCool:Cap40cmin"       HVACCool:Cap40cmin       = {  Cap60min - (((Cap82min - Cap60min)/(82 - ClgT60))*(ClgT60 - 40))  }
+
+;   "Set HVACCool:PerfMap_Tmin"      HVACCool:PerfMap_Tmin     = { -30 }
+
+      ; Excel Key:
+      ;     D14 - COP82min
+      ;     D15 - Qr47rated
+      ;     D16 - Qr47min
+      ;     D17 - Qr17rated
+      ;     D22 - QmslopeLCTmax
+      ;     D23 - QmslopeLCTmin
+      ;     D24 - Qr95rated
+      ;     D25 - Qm95max
+      ;     D26 - Qm95min
+      ;     D27 - EIRr47rated
+      ;     D28 - EIRr47min
+      ;     D29 - EIRm17rated
+      ;     D30 - EIRr17rated
+      ;     D31 - EIRr17min
+      ;     D32 - EIRm5max
+      ;     D33 - EIRr5rated
+      ;     D34 - EIRr5min
+      ;     D35 - EIRmslopeLCTmax
+      ;     D36 - EIRmslopeLCTmin
+      ;     D37 - EIRr95rated
+      ;     D38 - EIRm95max
+      ;     D39 - EIRm95min
+      ;     D53 - EIRmLCTmax
+      ;     D54 - EIRmLCTmin
+      ;     $H$3 = PerfMap_Tmin
+
+
+;   "Set ResZn:CUACErrorMsg"      ResZn:CUACErrorMsg =       ; SAC 08/07/22
+;      {  if (IfValidAnd( AffordableHousing > 0 )==0) then  UNDEFINED
+;         else if (NumAffordableUnitTypes < 1)
+;         then  "CUAC Error: No Affordable Dwellings present"
+;         else if (NumAffordableUnitTypes > 1)
+;         then  "CUAC Error: Dwellings must have same # of bedrooms"
+;         else if (IfValidAnd( AffordableUnitsByBedrmsWithMult[8] > 0 ))
+;         then  "CUAC Error: No CUAC calcs/reporting for >6 bedroom units"
+;         else  UNDEFINED  endif endif endif endif  }
+;   "Set ResZn:CUACError"   ResZn:CUACError = {  if (LocalStatus( CUACErrorMsg) > 0) then  1  else  UNDEFINED  endif  }
+
+
+END
+;*************************************************************************
+
+
+;************************************************************************* SAC 05/14/24 (tic #1379)
+RULELIST "ClgPerfMap_CreatePerformanceMaps_Variable" 1 0 0 0
+;*************************************************************************
+;"debug" HVACCool:Action = {  PostMessageToLog( Format( "   creating CSE PerfMap objects for run %s, Variable Speed HVACCool %s", Proj:RunAbbrev, Name ) )  }
+
+   ; COOLING
+   "Create HVACCool:PerfMapClgRef"                   HVACCool:PerfMapClgRef          = {  CreateComp( csePERFORMANCEMAP, Name + "-clgperfmap" )  }
+   "Set HVACCool:PerfMapClgRef:CSEComment"           HVACCool:PerfMapClgRef:CSEComment   =
+      {  if (IfValidAnd( EER2 > 0 ) .AND. IfValidAnd( SEER2 > 0 ))
+         then  if (IfValidAnd( AutoSize > 0 ))
+               then  Format( "Variable speed: Autosized / EER2 %.1f / SEER2 %.1f", EER2, SEER2 )
+               else if (IfValidAnd( Cap95 > 0 ))
+               then  Format( "Variable speed: Cap95 %s / EER2 %.1f / SEER2 %.1f", FltToStr( Cap95, 0 ), EER2, SEER2 )
+               else  UNDEFINED  endif endif
+         else  UNDEFINED  endif  }
+
+   "Create HVACCool:PerfMapClgAxesRef[1]"            HVACCool:PerfMapClgAxesRef[1]   = {  CreateComp( csePMGRIDAXIS, Name + "-clgdbtaxis" )  }
+   "Set HVACCool:PerfMapClgAxesRef[1]:Parent"        HVACCool:PerfMapClgAxesRef[1]:Parent        = {  PerfMapClgRef:Name  }
+   "Set HVACCool:PerfMapClgAxesRef[1]:pmGXType"      HVACCool:PerfMapClgAxesRef[1]:pmGXType      = {  "DBT"  }
+   ; revised perf map to exclude fixed 40deg point iff ClgT60 <= 41 - SAC 03/12/25 (tic #1379)
+   "Set HVACCool:PerfMapClgAxesRef[1]:pmGXValues[1]" HVACCool:PerfMapClgAxesRef[1]:pmGXValues[1] = {  if (ClgT60 > 41) then  40                             else  (int( ClgT60*10 + 0.5 ) / 10)  endif  }
+   "Set HVACCool:PerfMapClgAxesRef[1]:pmGXValues[2]" HVACCool:PerfMapClgAxesRef[1]:pmGXValues[2] = {  if (ClgT60 > 41) then  (int( ClgT60*10 + 0.5 ) / 10)  else  82                             endif  }   ; was: 60  - SAC 02/27/25
+   "Set HVACCool:PerfMapClgAxesRef[1]:pmGXValues[3]" HVACCool:PerfMapClgAxesRef[1]:pmGXValues[3] = {  if (ClgT60 > 41) then  82                             else  95                             endif  }
+   "Set HVACCool:PerfMapClgAxesRef[1]:pmGXValues[4]" HVACCool:PerfMapClgAxesRef[1]:pmGXValues[4] = {  if (ClgT60 > 41) then  95                             else  PerfMap_Tmax                   endif  }
+   "Set HVACCool:PerfMapClgAxesRef[1]:pmGXValues[5]" HVACCool:PerfMapClgAxesRef[1]:pmGXValues[5] = {  if (ClgT60 > 41) then  PerfMap_Tmax                   else     UNDEFINED                   endif  }
+   "Set HVACCool:PerfMapClgAxesRef[1]:pmGXRefValue"  HVACCool:PerfMapClgAxesRef[1]:pmGXRefValue  = {  95  }
+
+   "Create HVACCool:PerfMapClgAxesRef[2]"            HVACCool:PerfMapClgAxesRef[2]   = {  CreateComp( csePMGRIDAXIS, Name + "-clgspdaxis" )  }
+   "Set HVACCool:PerfMapClgAxesRef[2]:Parent"        HVACCool:PerfMapClgAxesRef[2]:Parent        = {  PerfMapClgRef:Name  }
+   "Set HVACCool:PerfMapClgAxesRef[2]:pmGXType"      HVACCool:PerfMapClgAxesRef[2]:pmGXType      = {  "Speed"  }
+   "Set HVACCool:PerfMapClgAxesRef[2]:pmGXValues[1]" HVACCool:PerfMapClgAxesRef[2]:pmGXValues[1] = {  1  }
+   "Set HVACCool:PerfMapClgAxesRef[2]:pmGXValues[2]" HVACCool:PerfMapClgAxesRef[2]:pmGXValues[2] = {  2  }
+   "Set HVACCool:PerfMapClgAxesRef[2]:pmGXValues[3]" HVACCool:PerfMapClgAxesRef[2]:pmGXValues[3] = {  3  }
+   "Set HVACCool:PerfMapClgAxesRef[2]:pmGXRefValue"  HVACCool:PerfMapClgAxesRef[2]:pmGXRefValue  = {  2  }
+
+   "Create HVACCool:PerfMapClgDataRef[1]"                  HVACCool:PerfMapClgDataRef[1] = {  CreateComp( csePMLOOKUPDATA,   Name + "-clgcapdata" )  }
+   "Set HVACCool:PerfMapClgDataRef[1]:Parent"              HVACCool:PerfMapClgDataRef[1]:Parent              = {  PerfMapClgRef:Name  }
+   "Set HVACCool:PerfMapClgDataRef[1]:pmLUType"            HVACCool:PerfMapClgDataRef[1]:pmLUType            = {  "CapRat"  }
+   "Set HVACCool:PerfMapClgDataRef[1]:PMLUValuesPerRow"    HVACCool:PerfMapClgDataRef[1]:PMLUValuesPerRow    = {  3  }
+   "Set HVACCool:PerfMapClgDataRef[1]:PMLUValuesLabels[1]" HVACCool:PerfMapClgDataRef[1]:PMLUValuesLabels[1] = {  if (ClgT60 > 41) then  "40F"                                             else  Format( "%.1fF at min, mid, max speed", ClgT60 )  endif  }
+   "Set HVACCool:PerfMapClgDataRef[1]:PMLUValuesLabels[2]" HVACCool:PerfMapClgDataRef[1]:PMLUValuesLabels[2] = {  if (ClgT60 > 41) then  Format( "%.1fF at min, mid, max speed", ClgT60 )  else  "82F"                                             endif  }
+   "Set HVACCool:PerfMapClgDataRef[1]:PMLUValuesLabels[3]" HVACCool:PerfMapClgDataRef[1]:PMLUValuesLabels[3] = {  if (ClgT60 > 41) then  "82F"                                             else  "95F"                                             endif  }
+   "Set HVACCool:PerfMapClgDataRef[1]:PMLUValuesLabels[4]" HVACCool:PerfMapClgDataRef[1]:PMLUValuesLabels[4] = {  if (ClgT60 > 41) then  "95F"                                             else  format( "%.0fF", PerfMap_Tmax )                   endif  }
+   "Set HVACCool:PerfMapClgDataRef[1]:PMLUValuesLabels[5]" HVACCool:PerfMapClgDataRef[1]:PMLUValuesLabels[5] = {  if (ClgT60 > 41) then  format( "%.0fF", PerfMap_Tmax )                   else     UNDEFINED                              endif  }
+
+   "Set HVACCool:PerfMapClgDataRef[1]:pmLUValues[1]-min"   HVACCool:PerfMapClgDataRef[1]:pmLUValues[1]  = {  if (ClgT60 > 41) then  Cap40cmin / Cap95  else  Cap60min / Cap95   endif  }     ; 40
+   "Set HVACCool:PerfMapClgDataRef[1]:pmLUValues[2]-mid"   HVACCool:PerfMapClgDataRef[1]:pmLUValues[2]  = {  if (ClgT60 > 41) then  Cap40crtd / Cap95  else  Cap60rtd / Cap95   endif  }
+   "Set HVACCool:PerfMapClgDataRef[1]:pmLUValues[3]-max"   HVACCool:PerfMapClgDataRef[1]:pmLUValues[3]  = {  if (ClgT60 > 41) then  Cap40cmax / Cap95  else  Cap60max / Cap95   endif  }
+   "Set HVACCool:PerfMapClgDataRef[1]:pmLUValues[4]-min"   HVACCool:PerfMapClgDataRef[1]:pmLUValues[4]  = {  if (ClgT60 > 41) then  Cap60min / Cap95   else  Cap82min / Cap95   endif  }     ; 60ish
+   "Set HVACCool:PerfMapClgDataRef[1]:pmLUValues[5]-mid"   HVACCool:PerfMapClgDataRef[1]:pmLUValues[5]  = {  if (ClgT60 > 41) then  Cap60rtd / Cap95   else  Cap82rtd / Cap95   endif  }
+   "Set HVACCool:PerfMapClgDataRef[1]:pmLUValues[6]-max"   HVACCool:PerfMapClgDataRef[1]:pmLUValues[6]  = {  if (ClgT60 > 41) then  Cap60max / Cap95   else  Cap82max / Cap95   endif  }
+   "Set HVACCool:PerfMapClgDataRef[1]:pmLUValues[7]-min"   HVACCool:PerfMapClgDataRef[1]:pmLUValues[7]  = {  if (ClgT60 > 41) then  Cap82min / Cap95   else  Cap95min / Cap95   endif  }     ; 82
+   "Set HVACCool:PerfMapClgDataRef[1]:pmLUValues[8]-mid"   HVACCool:PerfMapClgDataRef[1]:pmLUValues[8]  = {  if (ClgT60 > 41) then  Cap82rtd / Cap95   else  1.0                endif  }
+   "Set HVACCool:PerfMapClgDataRef[1]:pmLUValues[9]-max"   HVACCool:PerfMapClgDataRef[1]:pmLUValues[9]  = {  if (ClgT60 > 41) then  Cap82max / Cap95   else  Cap95max / Cap95   endif  }
+   "Set HVACCool:PerfMapClgDataRef[1]:pmLUValues[10]-min"  HVACCool:PerfMapClgDataRef[1]:pmLUValues[10] = {  if (ClgT60 > 41) then  Cap95min / Cap95   else  Cap125min / Cap95  endif  }     ; 95
+   "Set HVACCool:PerfMapClgDataRef[1]:pmLUValues[11]-mid"  HVACCool:PerfMapClgDataRef[1]:pmLUValues[11] = {  if (ClgT60 > 41) then  1.0                else  Cap125rtd / Cap95  endif  }
+   "Set HVACCool:PerfMapClgDataRef[1]:pmLUValues[12]-max"  HVACCool:PerfMapClgDataRef[1]:pmLUValues[12] = {  if (ClgT60 > 41) then  Cap95max / Cap95   else  Cap125max / Cap95  endif  }
+   "Set HVACCool:PerfMapClgDataRef[1]:pmLUValues[13]-min"  HVACCool:PerfMapClgDataRef[1]:pmLUValues[13] = {  if (ClgT60 > 41) then  Cap125min / Cap95  else     UNDEFINED       endif  }     ; Tmax
+   "Set HVACCool:PerfMapClgDataRef[1]:pmLUValues[14]-mid"  HVACCool:PerfMapClgDataRef[1]:pmLUValues[14] = {  if (ClgT60 > 41) then  Cap125rtd / Cap95  else     UNDEFINED       endif  }
+   "Set HVACCool:PerfMapClgDataRef[1]:pmLUValues[15]-max"  HVACCool:PerfMapClgDataRef[1]:pmLUValues[15] = {  if (ClgT60 > 41) then  Cap125max / Cap95  else     UNDEFINED       endif  }
+
+   "Create HVACCool:PerfMapClgDataRef[2]"                  HVACCool:PerfMapClgDataRef[2] = {  CreateComp( csePMLOOKUPDATA,   Name + "-clgcopdata" )  }
+   "Set HVACCool:PerfMapClgDataRef[2]:Parent"              HVACCool:PerfMapClgDataRef[2]:Parent              = {  PerfMapClgRef:Name  }
+   "Set HVACCool:PerfMapClgDataRef[2]:pmLUType"            HVACCool:PerfMapClgDataRef[2]:pmLUType            = {  "COP"  }
+   "Set HVACCool:PerfMapClgDataRef[2]:PMLUValuesPerRow"    HVACCool:PerfMapClgDataRef[2]:PMLUValuesPerRow    = {  3  }
+   "Set HVACCool:PerfMapClgDataRef[2]:PMLUValuesLabels[1]" HVACCool:PerfMapClgDataRef[2]:PMLUValuesLabels[1] = {  if (ClgT60 > 41) then  "40F"                                             else  Format( "%.1fF at min, mid, max speed", ClgT60 )  endif  }
+   "Set HVACCool:PerfMapClgDataRef[2]:PMLUValuesLabels[2]" HVACCool:PerfMapClgDataRef[2]:PMLUValuesLabels[2] = {  if (ClgT60 > 41) then  Format( "%.1fF at min, mid, max speed", ClgT60 )  else  "82F"                                             endif  }
+   "Set HVACCool:PerfMapClgDataRef[2]:PMLUValuesLabels[3]" HVACCool:PerfMapClgDataRef[2]:PMLUValuesLabels[3] = {  if (ClgT60 > 41) then  "82F"                                             else  "95F"                                             endif  }
+   "Set HVACCool:PerfMapClgDataRef[2]:PMLUValuesLabels[4]" HVACCool:PerfMapClgDataRef[2]:PMLUValuesLabels[4] = {  if (ClgT60 > 41) then  "95F"                                             else  format( "%.0fF", PerfMap_Tmax )                   endif  }
+   "Set HVACCool:PerfMapClgDataRef[2]:PMLUValuesLabels[5]" HVACCool:PerfMapClgDataRef[2]:PMLUValuesLabels[5] = {  if (ClgT60 > 41) then  format( "%.0fF", PerfMap_Tmax )                   else     UNDEFINED                                      endif  }
+
+   "Set HVACCool:PerfMapClgDataRef[2]:pmLUValues[1]-min"   HVACCool:PerfMapClgDataRef[2]:pmLUValues[1]  = {  if (ClgT60 > 41) then  Cap40cmin / NetPwr60min   else  Cap60min / NetPwr60min    endif  }      ; 40
+   "Set HVACCool:PerfMapClgDataRef[2]:pmLUValues[2]-mid"   HVACCool:PerfMapClgDataRef[2]:pmLUValues[2]  = {  if (ClgT60 > 41) then  Cap40crtd / NetPwr60rtd   else  Cap60rtd / NetPwr60rtd    endif  }
+   "Set HVACCool:PerfMapClgDataRef[2]:pmLUValues[3]-max"   HVACCool:PerfMapClgDataRef[2]:pmLUValues[3]  = {  if (ClgT60 > 41) then  Cap40cmax / NetPwr60max   else  Cap60max / NetPwr60max    endif  }
+   "Set HVACCool:PerfMapClgDataRef[2]:pmLUValues[4]-min"   HVACCool:PerfMapClgDataRef[2]:pmLUValues[4]  = {  if (ClgT60 > 41) then  Cap60min / NetPwr60min    else  Cap82min / NetPwr82min    endif  }      ; 60ish
+   "Set HVACCool:PerfMapClgDataRef[2]:pmLUValues[5]-mid"   HVACCool:PerfMapClgDataRef[2]:pmLUValues[5]  = {  if (ClgT60 > 41) then  Cap60rtd / NetPwr60rtd    else  Cap82rtd / NetPwr82rtd    endif  }
+   "Set HVACCool:PerfMapClgDataRef[2]:pmLUValues[6]-max"   HVACCool:PerfMapClgDataRef[2]:pmLUValues[6]  = {  if (ClgT60 > 41) then  Cap60max / NetPwr60max    else  Cap82max / NetPwr82max    endif  }
+   "Set HVACCool:PerfMapClgDataRef[2]:pmLUValues[7]-min"   HVACCool:PerfMapClgDataRef[2]:pmLUValues[7]  = {  if (ClgT60 > 41) then  Cap82min / NetPwr82min    else  Cap95min / NetPwr95min    endif  }      ; 82
+   "Set HVACCool:PerfMapClgDataRef[2]:pmLUValues[8]-mid"   HVACCool:PerfMapClgDataRef[2]:pmLUValues[8]  = {  if (ClgT60 > 41) then  Cap82rtd / NetPwr82rtd    else  Cap95    / NetPwr95rtd    endif  }
+   "Set HVACCool:PerfMapClgDataRef[2]:pmLUValues[9]-max"   HVACCool:PerfMapClgDataRef[2]:pmLUValues[9]  = {  if (ClgT60 > 41) then  Cap82max / NetPwr82max    else  Cap95max / NetPwr95max    endif  }
+   "Set HVACCool:PerfMapClgDataRef[2]:pmLUValues[10]-min"  HVACCool:PerfMapClgDataRef[2]:pmLUValues[10] = {  if (ClgT60 > 41) then  Cap95min / NetPwr95min    else  Cap125min / NetPwr125min  endif  }      ; 95
+   "Set HVACCool:PerfMapClgDataRef[2]:pmLUValues[11]-mid"  HVACCool:PerfMapClgDataRef[2]:pmLUValues[11] = {  if (ClgT60 > 41) then  Cap95    / NetPwr95rtd    else  Cap125rtd / NetPwr125rtd  endif  }
+   "Set HVACCool:PerfMapClgDataRef[2]:pmLUValues[12]-max"  HVACCool:PerfMapClgDataRef[2]:pmLUValues[12] = {  if (ClgT60 > 41) then  Cap95max / NetPwr95max    else  Cap125max / NetPwr125max  endif  }
+   "Set HVACCool:PerfMapClgDataRef[2]:pmLUValues[13]-min"  HVACCool:PerfMapClgDataRef[2]:pmLUValues[13] = {  if (ClgT60 > 41) then  Cap125min / NetPwr125min  else     UNDEFINED              endif  }      ; Tmax
+   "Set HVACCool:PerfMapClgDataRef[2]:pmLUValues[14]-mid"  HVACCool:PerfMapClgDataRef[2]:pmLUValues[14] = {  if (ClgT60 > 41) then  Cap125rtd / NetPwr125rtd  else     UNDEFINED              endif  }
+   "Set HVACCool:PerfMapClgDataRef[2]:pmLUValues[15]-max"  HVACCool:PerfMapClgDataRef[2]:pmLUValues[15] = {  if (ClgT60 > 41) then  Cap125max / NetPwr125max  else     UNDEFINED              endif  }
+
+END
+;*************************************************************************
+
+;************************************************************************* SAC 07/21/24 (VCHP3)
+RULELIST "ClgPerfMap_CreatePerformanceMaps_SingleSpeed" 1 0 0 0
+;*************************************************************************
+;"debug" HVACCool:Action = {  PostMessageToLog( Format( "   creating CSE PerfMap objects for run %s, Single Speed HVACCool %s", Proj:RunAbbrev, Name ) )  }
+
+   ; COOLING
+   "Create HVACCool:PerfMapClgRef"                   HVACCool:PerfMapClgRef          = {  CreateComp( csePERFORMANCEMAP, Name + "-clgperfmap" )  }
+   "Set HVACCool:PerfMapClgRef:CSEComment"           HVACCool:PerfMapClgRef:CSEComment   =
+      {  if (IfValidAnd( EER2 > 0 ) .AND. IfValidAnd( SEER2 > 0 ))
+         then  if (IfValidAnd( AutoSize > 0 ))
+               then  Format( "Single speed: Autosized / EER2 %.1f / SEER2 %.1f", EER2, SEER2 )
+               else if (IfValidAnd( Cap95 > 0 ))
+               then  Format( "Single speed: Cap95 %s / EER2 %.1f / SEER2 %.1f", FltToStr( Cap95, 0 ), EER2, SEER2 )
+               else  UNDEFINED  endif endif
+         else  UNDEFINED  endif  }
+
+   "Create HVACCool:PerfMapClgAxesRef[1]"            HVACCool:PerfMapClgAxesRef[1]   = {  CreateComp( csePMGRIDAXIS, Name + "-clgdbtaxis" )  }
+   "Set HVACCool:PerfMapClgAxesRef[1]:Parent"        HVACCool:PerfMapClgAxesRef[1]:Parent        = {  PerfMapClgRef:Name  }
+   "Set HVACCool:PerfMapClgAxesRef[1]:pmGXType"      HVACCool:PerfMapClgAxesRef[1]:pmGXType      = {  "DBT"  }
+   ; revised perf map to exclude fixed 40deg point iff ClgT60 <= 41 - SAC 03/12/25 (tic #1379)
+   "Set HVACCool:PerfMapClgAxesRef[1]:pmGXValues[1]" HVACCool:PerfMapClgAxesRef[1]:pmGXValues[1] = {  if (ClgT60 > 41) then  40                             else  (int( ClgT60*10 + 0.5 ) / 10)  endif  }      ; added - SAC 02/27/25
+   "Set HVACCool:PerfMapClgAxesRef[1]:pmGXValues[2]" HVACCool:PerfMapClgAxesRef[1]:pmGXValues[2] = {  if (ClgT60 > 41) then  (int( ClgT60*10 + 0.5 ) / 10)  else  82                             endif  }   ; was: 60  - SAC 02/27/25
+   "Set HVACCool:PerfMapClgAxesRef[1]:pmGXValues[3]" HVACCool:PerfMapClgAxesRef[1]:pmGXValues[3] = {  if (ClgT60 > 41) then  82                             else  95                             endif  }
+   "Set HVACCool:PerfMapClgAxesRef[1]:pmGXValues[4]" HVACCool:PerfMapClgAxesRef[1]:pmGXValues[4] = {  if (ClgT60 > 41) then  95                             else  PerfMap_Tmax                   endif  }
+   "Set HVACCool:PerfMapClgAxesRef[1]:pmGXValues[5]" HVACCool:PerfMapClgAxesRef[1]:pmGXValues[5] = {  if (ClgT60 > 41) then  PerfMap_Tmax                   else     UNDEFINED                   endif  }
+   "Set HVACCool:PerfMapClgAxesRef[1]:pmGXRefValue"  HVACCool:PerfMapClgAxesRef[1]:pmGXRefValue  = {  95  }
+
+   "Create HVACCool:PerfMapClgAxesRef[2]"            HVACCool:PerfMapClgAxesRef[2]   = {  CreateComp( csePMGRIDAXIS, Name + "-clgspdaxis" )  }
+   "Set HVACCool:PerfMapClgAxesRef[2]:Parent"        HVACCool:PerfMapClgAxesRef[2]:Parent        = {  PerfMapClgRef:Name  }
+   "Set HVACCool:PerfMapClgAxesRef[2]:pmGXType"      HVACCool:PerfMapClgAxesRef[2]:pmGXType      = {  "Speed"  }
+   "Set HVACCool:PerfMapClgAxesRef[2]:pmGXValues[1]" HVACCool:PerfMapClgAxesRef[2]:pmGXValues[1] = {  1  }
+   "Set HVACCool:PerfMapClgAxesRef[2]:pmGXRefValue"  HVACCool:PerfMapClgAxesRef[2]:pmGXRefValue  = {  1  }
+
+   "Create HVACCool:PerfMapClgDataRef[1]"                  HVACCool:PerfMapClgDataRef[1] = {  CreateComp( csePMLOOKUPDATA,   Name + "-clgcapdata" )  }
+   "Set HVACCool:PerfMapClgDataRef[1]:Parent"              HVACCool:PerfMapClgDataRef[1]:Parent              = {  PerfMapClgRef:Name  }
+   "Set HVACCool:PerfMapClgDataRef[1]:pmLUType"            HVACCool:PerfMapClgDataRef[1]:pmLUType            = {  "CapRat"  }
+   "Set HVACCool:PerfMapClgDataRef[1]:PMLUValuesPerRow"    HVACCool:PerfMapClgDataRef[1]:PMLUValuesPerRow    = {  1  }
+   "Set HVACCool:PerfMapClgDataRef[1]:PMLUValuesLabels[1]" HVACCool:PerfMapClgDataRef[1]:PMLUValuesLabels[1] = {  if (ClgT60 > 41) then  "40F"                            else  Format( "%.1fF", ClgT60 )        endif  }
+   "Set HVACCool:PerfMapClgDataRef[1]:PMLUValuesLabels[2]" HVACCool:PerfMapClgDataRef[1]:PMLUValuesLabels[2] = {  if (ClgT60 > 41) then  Format( "%.1fF", ClgT60 )        else  "82F"                            endif  }
+   "Set HVACCool:PerfMapClgDataRef[1]:PMLUValuesLabels[3]" HVACCool:PerfMapClgDataRef[1]:PMLUValuesLabels[3] = {  if (ClgT60 > 41) then  "82F"                            else  "95F"                            endif  }
+   "Set HVACCool:PerfMapClgDataRef[1]:PMLUValuesLabels[4]" HVACCool:PerfMapClgDataRef[1]:PMLUValuesLabels[4] = {  if (ClgT60 > 41) then  "95F"                            else  format( "%.0fF", PerfMap_Tmax )  endif  }
+   "Set HVACCool:PerfMapClgDataRef[1]:PMLUValuesLabels[5]" HVACCool:PerfMapClgDataRef[1]:PMLUValuesLabels[5] = {  if (ClgT60 > 41) then  format( "%.0fF", PerfMap_Tmax )  else     UNDEFINED                     endif  }
+
+   "Set HVACCool:PerfMapClgDataRef[1]:pmLUValues[1]-mid"   HVACCool:PerfMapClgDataRef[1]:pmLUValues[1]  = {  if (ClgT60 > 41) then  Cap40crtd  /  Cap95  else  Cap60rtd  /  Cap95  endif  }  ; 40
+   "Set HVACCool:PerfMapClgDataRef[1]:pmLUValues[2]-mid"   HVACCool:PerfMapClgDataRef[1]:pmLUValues[2]  = {  if (ClgT60 > 41) then  Cap60rtd  /  Cap95   else  Cap82rtd  /  Cap95  endif  }  ; 60ish
+   "Set HVACCool:PerfMapClgDataRef[1]:pmLUValues[3]-mid"   HVACCool:PerfMapClgDataRef[1]:pmLUValues[3]  = {  if (ClgT60 > 41) then  Cap82rtd  /  Cap95   else  1.0                 endif  }  ; 82
+   "Set HVACCool:PerfMapClgDataRef[1]:pmLUValues[4]-mid"   HVACCool:PerfMapClgDataRef[1]:pmLUValues[4]  = {  if (ClgT60 > 41) then  1.0                  else  Cap125rtd /  Cap95  endif  }  ; 95
+   "Set HVACCool:PerfMapClgDataRef[1]:pmLUValues[5]-mid"   HVACCool:PerfMapClgDataRef[1]:pmLUValues[5]  = {  if (ClgT60 > 41) then  Cap125rtd /  Cap95   else     UNDEFINED        endif  }  ; Tmax
+
+;   "Set HVACCool:PerfMapClgDataRef[1]:pmLUValues[3]-mid"   HVACCool:PerfMapClgDataRef[1]:pmLUValues[3]  = {  1.0  }  ; 95
+;   "Set HVACCool:PerfMapClgDataRef[1]:pmLUValues[2]-mid"   HVACCool:PerfMapClgDataRef[1]:pmLUValues[2]  =
+;      {  ( (((Cap95 / Qr95rated) * Qr95min) / Qm95min)  +
+;                (   Cap95               -  ((Cap95 / Qr95rated) * Qr95min) ) / 
+;                (  (Cap95 / Qr95rated)  -  ((Cap95 / Qr95rated) * Qr95min) ) *
+;                ( ((Cap95 / Qr95rated) / Qm95max)  -  (((Cap95 / Qr95rated) * Qr95min) / Qm95min) ))  /  Cap95  }  ; 82
+;   "Set HVACCool:PerfMapClgDataRef[1]:pmLUValues[1]-mid"   HVACCool:PerfMapClgDataRef[1]:pmLUValues[1]  =     
+;      {  ( (PerfMapClgDataRef[1]:pmLUValues[2] * Cap95) - ( Cap95 - (PerfMapClgDataRef[1]:pmLUValues[2] * Cap95) ) / (95-82)*(82-60) )  /  Cap95  }  ; 60
+;   "Set HVACCool:PerfMapClgDataRef[1]:pmLUValues[4]-mid"   HVACCool:PerfMapClgDataRef[1]:pmLUValues[4]  =     
+;      {  (                                            Cap95  + (                                            Cap95  - (PerfMapClgDataRef[1]:pmLUValues[2] * Cap95) ) / (95-82)*( PerfMap_Tmax -95) )  /  Cap95  }  ; Tmax
+
+   "Create HVACCool:PerfMapClgDataRef[2]"                  HVACCool:PerfMapClgDataRef[2] = {  CreateComp( csePMLOOKUPDATA,   Name + "-clgcopdata" )  }
+   "Set HVACCool:PerfMapClgDataRef[2]:Parent"              HVACCool:PerfMapClgDataRef[2]:Parent              = {  PerfMapClgRef:Name  }
+   "Set HVACCool:PerfMapClgDataRef[2]:pmLUType"            HVACCool:PerfMapClgDataRef[2]:pmLUType            = {  "COP"  }
+   "Set HVACCool:PerfMapClgDataRef[2]:PMLUValuesPerRow"    HVACCool:PerfMapClgDataRef[2]:PMLUValuesPerRow    = {  1  }
+   "Set HVACCool:PerfMapClgDataRef[2]:PMLUValuesLabels[1]" HVACCool:PerfMapClgDataRef[2]:PMLUValuesLabels[1] = {  if (ClgT60 > 41) then  "40F"                            else  Format( "%.1fF", ClgT60 )        endif  }
+   "Set HVACCool:PerfMapClgDataRef[2]:PMLUValuesLabels[2]" HVACCool:PerfMapClgDataRef[2]:PMLUValuesLabels[2] = {  if (ClgT60 > 41) then  Format( "%.1fF", ClgT60 )        else  "82F"                            endif  }
+   "Set HVACCool:PerfMapClgDataRef[2]:PMLUValuesLabels[3]" HVACCool:PerfMapClgDataRef[2]:PMLUValuesLabels[3] = {  if (ClgT60 > 41) then  "82F"                            else  "95F"                            endif  }
+   "Set HVACCool:PerfMapClgDataRef[2]:PMLUValuesLabels[4]" HVACCool:PerfMapClgDataRef[2]:PMLUValuesLabels[4] = {  if (ClgT60 > 41) then  "95F"                            else  format( "%.0fF", PerfMap_Tmax )  endif  }
+   "Set HVACCool:PerfMapClgDataRef[2]:PMLUValuesLabels[5]" HVACCool:PerfMapClgDataRef[2]:PMLUValuesLabels[5] = {  if (ClgT60 > 41) then  format( "%.0fF", PerfMap_Tmax )  else     UNDEFINED                     endif  }
+
+   "Set HVACCool:PerfMapClgDataRef[2]:pmLUValues[1]-mid"   HVACCool:PerfMapClgDataRef[2]:pmLUValues[1]  = {  if (ClgT60 > 41) then  Cap40crtd / NetPwr60rtd   else  Cap60rtd  / NetPwr60rtd   endif  }   ; 40
+   "Set HVACCool:PerfMapClgDataRef[2]:pmLUValues[2]-mid"   HVACCool:PerfMapClgDataRef[2]:pmLUValues[2]  = {  if (ClgT60 > 41) then  Cap60rtd  / NetPwr60rtd   else  Cap82rtd  / NetPwr82rtd   endif  }   ; 60ish
+   "Set HVACCool:PerfMapClgDataRef[2]:pmLUValues[3]-mid"   HVACCool:PerfMapClgDataRef[2]:pmLUValues[3]  = {  if (ClgT60 > 41) then  Cap82rtd  / NetPwr82rtd   else  Cap95     / NetPwr95rtd   endif  }   ; 82
+   "Set HVACCool:PerfMapClgDataRef[2]:pmLUValues[4]-mid"   HVACCool:PerfMapClgDataRef[2]:pmLUValues[4]  = {  if (ClgT60 > 41) then  Cap95     / NetPwr95rtd   else  Cap125rtd / NetPwr125rtd  endif  }   ; 95
+   "Set HVACCool:PerfMapClgDataRef[2]:pmLUValues[5]-mid"   HVACCool:PerfMapClgDataRef[2]:pmLUValues[5]  = {  if (ClgT60 > 41) then  Cap125rtd / NetPwr125rtd  else     UNDEFINED              endif  }   ; Tmax
+
+;   "Set HVACCool:PerfMapClgDataRef[2]:pmLUValues[1]-mid"   HVACCool:PerfMapClgDataRef[2]:pmLUValues[1]  =          ; 60
+;      {  ( (((((Cap95 / Qr95rated) * Qr95min) / Qm95min) + ( Cap95 - ((Cap95 / Qr95rated) * Qr95min)) / ((Cap95 / Qr95rated) - ((Cap95 / Qr95rated) * Qr95min)) *
+;                 (((Cap95 / Qr95rated) / Qm95max) - (((Cap95 / Qr95rated) * Qr95min) / Qm95min))) -
+;            ( Cap95 -                   ((((Cap95 / Qr95rated) * Qr95min) / Qm95min) + ( Cap95 - ((Cap95 / Qr95rated) * Qr95min)) /
+;                  ((Cap95 / Qr95rated) - ((Cap95 / Qr95rated) * Qr95min)) *
+;                 (((Cap95 / Qr95rated) / Qm95max) - (((Cap95 / Qr95rated) * Qr95min) / Qm95min))) ) / (95-82)*(82-60) ) /
+;           ((((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) + ((Cap95 / (EER2/3.41214)) - (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) /
+;                 (((Cap95 / (EER2/3.41214)) / Pr95rated) - (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) *
+;                ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) -
+;                 ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min))) -
+;            ((Cap95 / (EER2/3.41214)) - (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) + ((Cap95 / (EER2/3.41214)) -
+;             (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) /
+;              (((Cap95 / (EER2/3.41214)) / Pr95rated) -
+;               (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) *
+;                ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) -
+;                 ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min))) ) / (95-82)*(82-60) ) )  }
+;   "Set HVACCool:PerfMapClgDataRef[2]:pmLUValues[2]-mid"   HVACCool:PerfMapClgDataRef[2]:pmLUValues[2]  =          ; 82
+;      {  ( ((((Cap95 / Qr95rated) * Qr95min) / Qm95min) + (Cap95 - ((Cap95 / Qr95rated) * Qr95min)) / ((Cap95 / Qr95rated) - ((Cap95 / Qr95rated) * Qr95min)) *
+;            (((Cap95 / Qr95rated) / Qm95max) - (((Cap95 / Qr95rated) * Qr95min) / Qm95min)))    /
+;          (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) + ((Cap95 / (EER2/3.41214)) - (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) /
+;            (((Cap95 / (EER2/3.41214)) / Pr95rated) - (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) * ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) -
+;            ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min)))   )  }
+;   "Set HVACCool:PerfMapClgDataRef[2]:pmLUValues[3]-mid"   HVACCool:PerfMapClgDataRef[2]:pmLUValues[3]  =          ; 95
+;      {  (     Cap95                            /  (Cap95 / (EER2/3.41214))   )  }
+;   "Set HVACCool:PerfMapClgDataRef[2]:pmLUValues[4]-mid"   HVACCool:PerfMapClgDataRef[2]:pmLUValues[4]  =          ; Tmax
+;      {  ( (Cap95                    + (Cap95                    - ((((Cap95 / Qr95rated) * Qr95min) / Qm95min) + ( Cap95 - ((Cap95 / Qr95rated) * Qr95min)) / 
+;           ((Cap95 / Qr95rated) - ((Cap95 / Qr95rated) * Qr95min)) * (((Cap95 / Qr95rated) / Qm95max) - (((Cap95 / Qr95rated) * Qr95min) / Qm95min)))) / (95-82)*(PerfMap_Tmax-95) ) /
+;           ((Cap95 / (EER2/3.41214)) + ((Cap95 / (EER2/3.41214)) - (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) + 
+;           ((Cap95 / (EER2/3.41214)) - (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) / (((Cap95 / (EER2/3.41214)) / Pr95rated) -
+;           (((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min) * Pm95min)) * ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) -
+;           ((((Cap95 / (EER2/3.41214)) / Pr95rated) / Pm95max) * Pr82min)))) / (95-82)*(PerfMap_Tmax-95) ) )  }
+
+END
+;*************************************************************************
+
+
+
+
+;*************************************************************************
+;*************************************************************************
+
+ENDFILE
