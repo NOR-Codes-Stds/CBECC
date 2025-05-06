@@ -1,0 +1,1070 @@
+// HVAC Primary Systems - Boilers
+//
+// -------------------------------------------------------------------------
+//  Copyright (c) 2012-2017, California Energy Commission
+//  All rights reserved.
+//  Redistribution and use in source and binary forms, with or without
+//  modification, are permitted provided that the following conditions are
+//  met:
+//
+//    * Redistributions of source code must retain the above copyright
+//  notice, this list of conditions and the following disclaimer.
+//    * Redistributions in binary form must reproduce the above copyright
+//  notice, this list of conditions and the following disclaimer in
+//  the documentation and/or other materials provided with the
+//  distribution.
+//    * Neither the name of the California Energy Commission nor the names of its
+//  contributors may be used to endorse or promote products
+//  derived from this software without specific prior written
+//  permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+//  IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+//  TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL CALifORNIA ENERGY COMMISSION
+//  BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+//  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+//  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+//  BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+//  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN if
+//  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// -------------------------------------------------------------------------
+
+RULE NEW FluidSys:HtPumpCnt
+  DATATYPE
+    Integer
+  DESCRIPTION
+    "The number of Heat-Pumps in a FluidSystem."
+  HELP
+    ""
+  INPUTCLASS
+    NotInput
+  MINIMUM
+    0
+  COMMONMINIMUM
+    1
+  DEFAULT
+    ChildCount( HtPump )
+  CHECKSIM
+    if( ChildCount( WtrHtr ) > 0 .AND. ChildCount( HtPump ) > 0 )
+    then  PostError( "The fluid system '%s' has a mix of heat-pump(s) and water-heater(s) modeled. 
+                     This is currently not supported. Please update your model to include only one 
+                     type of heating equipment.", Name )    
+    else  UNCHANGED
+    endif
+  SIZING
+    if( Type = "HotWater" .AND. 
+        IsBaseSys .AND. 
+        name = "BaseHPHWSystem" )
+    then  1
+    else  ChildCount( HtPump )
+    endif
+  ANNUAL
+    if( Type = "HotWater" .AND. 
+        IsBaseSys .AND. 
+        name = "BaseHPHWSystem" )
+    then  if( Bldg:TotCondFlrArea > 15000 )
+          then 2
+          else 1
+          endif
+    else  ChildCount( HtPump )
+    endif
+ENDRULE
+
+RULE HtPump:Type
+  DESCRIPTION
+    "The type of the heat pump."
+  OPTION
+    Heating
+    Cooling
+    ; HeatingAndCooling we might support this for change-over or condenser loop in the future
+  DEFAULT
+    if( IfValidAnd( Parent( Type ) = "HotWater" ) )
+    then  "Heating"
+    else if( IfValidAnd( Parent( Type )  = "ChilledWater" ) )
+    then  "Cooling"
+    else  UNDEFINED
+    endif endif
+  CHECKSIM
+    if( Parent( Type )  = "CondenserWater" .OR.
+        Parent( Type )  = "ServiceHotWater" )
+    then  PostError( "HeatPump is not supported for '%s' system. Remove HeatPump '%s' from 
+                     FluidSystem '%s'.", Parent( Type ) , Name, Parent( Name ) )
+    else  UNCHANGED
+    endif
+ENDRULE
+
+RULE HtPump:CompanionHtPumpRef
+  DESCRIPTION
+    "Companion heat pump reference"
+  HELP
+    "This input links the heating and cooling components of the same heat pump together. In the
+    report, these two HeatPump obejcts will be reported as one heat pump equipment."
+  DEFAULT
+    if( Type = "Heating" )
+    then  MaxRevRefComp( HtPump:CompanionHtPumpRef, HtPump:ClgCapRtd )
+    else if( Type = "Cooling" )
+    then  MaxRevRefComp( HtPump:CompanionHtPumpRef, HtPump:HtgCapRtd )
+    else  UNDEFINED
+    endif endif
+  CHECKSIM
+    if( LocalCompAssigned( CompanionHtPumpRef ) )
+    then  if( CompanionHtPumpRef:CompanionHtPumpRef != Name )
+          then  PostError( "The assignment of companion HeatPump '%s' and '%s' is inconsistent.
+                           Double check the inputs", Name, CompanionHtPumpRef )
+          else if( CompanionHtPumpRef:Type = Type )
+          then  PostError( "A heating HeatPump can only be linked to a cooling HeatPump. '%s' and
+                           '%s' are both '%s' HeatPumps and can't be linked as one heat pump",
+                           Name, CompanionHtPumpRef, Type )
+          else  UNCHANGED
+          endif endif
+    else  UNCHANGED
+    endif
+ENDRULE
+
+RULE HtPump:NameRpt
+  DESCRIPTION
+    "The name for the heat pump equipment that will be shown in the report"
+  HELP
+    "The one heat pump is modeled as two HeatPump object in CBECC, both HeatPump object should
+    share the same reporting name."
+  DEFAULT
+    if( LocalCompAssigned( CompanionHtPumpRef ) .AND. Type = "Cooling" )
+    then  ValidOr( CompanionHtPumpRef:NameRpt, "" )
+    else  Name
+    endif
+  CHECKSIM
+    if( LocalCompAssigned( CompanionHtPumpRef ) )
+    then  if( CompanionHtPumpRef:NameRpt != NameRpt )
+          then  PostError( "The reported name of HeatPump '%s' and '%s' is inconsistent.
+                           Double check the inputs", Name, CompanionHtPumpRef )
+          else  UNCHANGED
+          endif
+    else  UNCHANGED
+    endif
+ENDRULE
+
+RULE HtPump:CndsrType
+  DESCRIPTION
+    "The type of Condenser for the HeatPump system"
+  HELP
+    "Required input for a HeatPump"
+  OPTION
+    AirSource
+    WaterSource
+  DEFAULT
+    "AirSource" ; WaterSource is not supported yet
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// Connections
+
+RULE HtPump:CprsrLoc
+  DESCRIPTION
+    "The heat pump compressor location"
+  OPTION
+    Zone
+    Outdoor
+  DEFAULT
+    "Outdoor"
+ENDRULE
+
+RULE HtPump:CprsrZnRef
+  DESCRIPTION
+    "The name of the zone where the heat pump compressor is located."
+  HELP
+    "Currently, the compressor can only be placed in 'Unconditioned' zone. A large heat pump
+    compressor in a 'Conditioned' zone can cause a large number of UMLHs."
+ENDRULE
+
+RULE NEW HtPump:ParentFluidSysRef
+  DATATYPE
+    FluidSys
+  LONGFORM
+    ParentFluidSysRef
+  DESCRIPTION
+    "The parent FluidSystem of the HeatPump object."
+  INPUTCLASS 
+    NotInput
+  DEFAULT
+    Parent( Name )
+  SIZING
+    Parent( Name )
+ENDRULE
+
+RULE HtPump:HtgFluidSegInRef
+  DESCRIPTION
+    "The heat pump inlet connection, to hot water return, or HWR)"
+  HELP
+    "Must be FluidSeg:Type = PrimaryReturn for parallel-piped heat pumps"
+  CHECKSIM
+    if( Type = "Heating" )
+    then  if( LocalCompAssigned( HtgFluidSegInRef ) = 0 )
+          then  PostError( "HeatPump '%s' inlet is not connected to the FluidSegment", Name )
+          else if( HtgFluidSegInRef:Type != "PrimaryReturn" )
+          then  PostError( "HeatPump '%s' inlet is not connected to the PrimaryReturn fluid segment", Name )
+          else if( HtgFluidSegInRef:ParentFluidSysType != "HotWater" .AND.
+                    HtgFluidSegInRef:ParentFluidSysType != "CondenserWater" )
+          then  PostError( "The inlet fluid segment of HeatPump '%s' must belong to a
+                           HotWater system or a CondenserWater", Name )
+          else  UNCHANGED
+          endif endif endif
+    else  UNCHANGED
+    endif
+ENDRULE
+
+RULE HtPump:HtgFluidSegOutRef
+  DESCRIPTION
+    "The heat pump outlet connection, to hot water supply, or HWS)"
+  HELP
+    "Must be FluidSeg:Type = PrimarySupply for parallel-piped heat pumprs"
+  CHECKSIM
+    if( Type = "Heating" )
+    then  if( LocalCompAssigned( HtgFluidSegOutRef ) = 0 ) 
+          then  PostError( "HeatPump '%s' outlet is not connected to the FluidSegment", Name)
+          else if( HtgFluidSegOutRef:Type != "PrimarySupply" )
+          then  PostError( "HeatPump '%s' outlet is not connected to the PrimarySupply fluid segment", Name )
+          else if( HtgFluidSegOutRef:ParentFluidSysType != "HotWater" .AND.
+                    HtgFluidSegOutRef:ParentFluidSysType != "CondenserWater" )
+          then  PostError( "The outlet fluid segment of HeatPump '%s' must belong to a
+                           HotWater system or a CondenserWater", Name )
+          else  UNCHANGED
+          endif endif endif
+    else  UNCHANGED
+    endif
+ENDRULE
+
+RULE HtPump:ClgFluidSegInRef
+  DESCRIPTION
+    "The heat pump inlet connection, to chilled water return, or ChWR)"
+  HELP
+    "Must be FluidSeg:Type = PrimaryReturn for parallel-piped heat pumps"
+  CHECKSIM
+    if( Type = "Cooling" )
+    then  if( LocalCompAssigned( ClgFluidSegInRef ) = 0 )
+          then  PostError( "HeatPump '%s' inlet is not connected to the FluidSegment", Name )
+          else if( ClgFluidSegInRef:Type != "PrimaryReturn" )
+          then  PostError( "HeatPump '%s' inlet is not connected to the PrimaryReturn fluid segment", Name )
+          else if( ClgFluidSegInRef:ParentFluidSysType != "ChilledWater" .AND.
+                    ClgFluidSegInRef:ParentFluidSysType != "CondenserWater" )
+          then  PostError( "The inlet fluid segment of HeatPump '%s' must belong to a
+                           Chilled system or a CondenserWater", Name )
+          else  UNCHANGED
+          endif endif endif
+    else  UNCHANGED
+    endif
+ENDRULE
+
+RULE HtPump:ClgFluidSegOutRef
+  DESCRIPTION
+    "The heat pump outlet connection, to chilled water supply, or ChWS)"
+  HELP
+    "Must be FluidSeg:Type = PrimarySupply for parallel-piped heat pumprs"
+  CHECKSIM
+    if( Type = "Cooling" )
+    then  if( LocalCompAssigned( ClgFluidSegOutRef ) = 0 ) 
+          then  PostError( "HeatPump '%s' outlet is not connected to the FluidSegment", Name)
+          else if( ClgFluidSegOutRef:Type != "PrimarySupply" )
+          then  PostError( "HeatPump '%s' outlet is not connected to the PrimarySupply fluid segment", Name )
+          else if( ClgFluidSegOutRef:ParentFluidSysType != "ChilledWater" .AND.
+                    ClgFluidSegOutRef:ParentFluidSysType != "CondenserWater" )
+          then  PostError( "The outlet fluid segment of HeatPump '%s' must belong to a
+                           Chilled system or a CondenserWater", Name )
+          else UNCHANGED
+          endif endif endif
+    else  UNCHANGED
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// Status
+RULE HtPump:Status
+  DESCRIPTION
+    "The status of the system or component, used for additions and alterations."
+  INPUTCLASS 
+    Default
+  DEFAULT
+    // Status defined from top-down
+    if( Parent( IsNew ) ) then "New" else "Existing" endif
+  CHECKCODE
+    if( ( Proj:IsNewMech .AND. Status != "New" ) .OR.
+        ( Proj:IsAlt = 0 .AND. Status = "Altered" ) )
+    then  PostWarning( "HeatPump '%s' has a Status of '%s', but Compliance Type is '%s'.
+                       The status of the system will be changed to 'New' for compliance
+                       analysis.", Name, Status, Proj:CompType )
+    else UNCHANGED
+    endif
+   SIZING
+    if( IfValidAnd( FluidSys:IsBaseSys > 0 ) .OR. Proj:IsNewMech )
+    then  "New"
+    else  u:Status
+    endif
+  ANNUAL
+    if( IfValidAnd( FluidSys:IsBaseSys > 0 ) .OR. Proj:IsNewMech )
+    then  "New"
+    else  z:Status
+    endif
+ENDRULE
+
+RULE NEW HtPump:IsNew
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( Status = "New" .OR. Proj:IsNewMech ) then 1 else 0 endif
+  SIZING
+    if( Status = "New" .OR. Proj:IsNewMech ) then 1 else 0 endif
+  ANNUAL
+    if( Status = "New" .OR. Proj:IsNewMech ) then 1 else 0 endif
+ENDRULE
+
+RULE NEW HtPump:IsExisting
+  DATATYPE
+    Integer
+  INPUTCLASS
+    NotInput
+  DEFAULT
+    if( IsNew ) then 0 else 1 endif
+  SIZING
+    if( IsNew ) then 0 else 1 endif
+  ANNUAL
+    if( IsNew ) then 0 else 1 endif
+ENDRULE
+
+RULE NEW HtPump:IsBaseHlthCare
+  DATATYPE
+    Integer
+  LONGFORM
+    IsBaselineHealthCare
+  DESCRIPTION
+    "Whether the boiler is a baseline boiler that is part of FluidSys
+     that serves a healthcare facility."
+  INPUTCLASS
+    NotInput
+  SIZING
+    FluidSys:IsBaseHlthCareSys
+ENDRULE 
+
+// -----------------------------------------------------------------------------
+// Heating Inputs
+
+RULE HtPump:HtgCapRtd
+  DESCRIPTION
+    "Heat output of the heat pump at full load and AHRI 550/590 rated conditions of outdoor air 
+    dry-bulb temperature 47°F and leaving heating water temperature 120°F."
+  INPUTCLASS
+    Default
+  MINIMUM
+    0
+  UNITS
+    Btu/hr
+  REPORTPRECISION
+    -3
+  DEFAULT
+    if( Proj:AutoHardSize = 1 .AND.
+        LocalCompAssigned( HtgFluidSegInRef ) .AND.
+        IfValidAnd( FluidSys:HtPumpCnt > 0 ) )
+    then  // For PROPOSED AutoHardSizing only
+          // Non-coincident total capacity of all heating coils
+          if( Parent( Type ) = "HotWater" )
+          then  HtgFluidSegOutRef:CoilHtgCapHydronic / Parent( HtPumpCnt )
+          else if( Parent( Type ) = "CondenserWater" )
+          then  HtgFluidSegOutRef:CoilHtExtractionLd / Parent( HtPumpCnt )
+          else  UNDEFINED
+          endif endif  
+    else  UNDEFINED
+    endif
+  SIZING
+    if( IsBaseSys )
+    then  UNDEFINED // AutoSize
+    else if( LocalStatus( HtgCapRtd ) = 4 .AND. ; defaulted via rules in the ruleset
+              LocalCompAssigned( HtgFluidSegInRef ) )
+    then  ; define again for MF to avoid double counting fo ResHVACSys and DwellUnitType
+          if( Parent( Type ) = "HotWater" )
+          then  HtgFluidSegOutRef:CoilHtgCapHydronic / Parent( HtPumpCnt )
+          else if( Parent( Type ) = "CondenserWater" )
+          then  HtgFluidSegOutRef:CoilHtExtractionLd / Parent( HtPumpCnt )
+          else  UNCHANGED
+          endif endif
+    else  UNCHANGED
+    endif endif
+  ANNUAL
+    if( IsBaseSys )
+    then  UNDEFINED
+    else if( IsExisting )
+    then  zp:HtgCapRtd
+    else  z:HtgCapRtd
+    endif endif
+ENDRULE
+
+RULE HtPump:HtgCapRtdSim
+  DESCRIPTION
+    "Heat output of the heat pump at full load and rated conditions for simulation."
+  INPUTCLASS
+    NotInput
+  UNITS
+    Btu/hr
+  REPORTPRECISION
+    -3
+  DEFAULT
+    HtgCapRtd // TO DO might need adjustments
+  SIZING
+    if( IsBaseSys > 0 )
+    then  UNDEFINED
+    else  HtgCapRtd
+    endif
+  ANNUAL
+    if( IsBaseSys )
+    then  if( Parent( HWLoopLd ) > 0 ) 
+          then Parent( HWLoopLd ) / Parent( HtPumpCnt ) * Proj:HtgSizingRat
+          else 10
+          endif
+    else if( IsExisting )
+    then  zp:HtgCapRtd
+    else  z:HtgCapRtd
+    endif endif
+ENDRULE
+
+RULE HtPump:HtgLdSideFlowRt
+  DESCRIPTION
+    "Heat load side flow rate"
+  DEFAULT
+    if( IfValidAnd( HtgCapRtd > 0 ) .AND.
+        IfValidAnd( ParentValid( DsgnSupWtrDelT ) > 0 ) )
+    then  // gpm = Btuh / 8.3365 (lb/gal) / 60 (min/hr) / Design loop dT
+          HtgCapRtd / 500.19 / Parent( DsgnSupWtrDelT )
+    else  UNDEFINED
+    endif
+  SIZING
+    UNDEFINED
+ENDRULE
+
+RULE HtPump:HtgCOP
+  DESCRIPTION
+    "The COP of the heat pump at AHRI 550/590 rated conditions of outdoor air dry-bulb temperature 
+    47°F and leaving heating water temperature 120°F. This is the heat input into the water divided 
+    by the input to the compressor."
+  UNITS
+    Btu/Btu
+  DEFAULT
+    if( Proj:AutoEffInput = 1 )
+    then  2.31 
+    else  UNDEFINED
+    endif  
+  CHECKSIM
+    if( Type = "Heating" .AND. LocalStatus( HtgCOP ) < 1  )
+    then  PostError( "A COP is required for HeatPump '%s'.", Name )
+    else  UNCHANGED
+    endif
+  SIZING
+    if( IsBaseSys )
+    then  2.31
+    else  UNCHANGED
+    endif
+ENDRULE
+
+RULE HtPump:HtgCOPSim
+  DESCRIPTION
+    "The COP used in simulation."
+  DEFAULT
+    HtgCOP // TO DO might need adjustments
+  SIZING
+    HtgCOP
+ENDRULE
+
+RULE HtPump:HtgCap_fTempCrvRef
+  DESCRIPTION
+    "A bivariate curve or table that defines an available capacity modifier of the unit as a 
+    function of the load side outlet temperature and the source side inlet temperature. The 
+    temperatures are in degrees Celsius when used in the function and the output of the 
+    function is multiplied by the referencec apacity to get a current available capacity."
+  SIZING
+    if( Type = "Heating" )
+    then  RuleLibrary( CrvDblQuad, "HtPumpHtgQRatio_fTlwTdbSI" )
+    else  UNDEFINED
+    endif
+ENDRULE
+
+RULE HtPump:HtgEIR_fTempCrvRef
+  DESCRIPTION
+    "A bivariate curve or table that defines an EIR (1/COP) modifier as a function of the load side
+    outlet temperature and the source side inlet temperature. The temperatures are in degrees
+    Celsius when used in the function. The output of this function and the output of the EIR 
+    Modifier Function of PLR are multiplied by the reference EIR to get a current EIR."
+  SIZING
+    if( Type = "Heating" )
+    then  RuleLibrary( CrvDblQuad, "HtPumpHtgEIRRatio_fTlwTdbSI" )
+    else  UNDEFINED
+    endif
+ENDRULE
+
+RULE HtPump:HtgEIR_fPLRCrvRef
+  DESCRIPTION
+    "A univariate curve or table that defines an EIR modifier as a function of the current part load
+    ratio. The output of this function and the output of the EIR Modifier Function of Temperature
+    are multiplied by the reference EIR to get a current EIR."
+  SIZING
+    if( Type = "Heating" )
+    then  RuleLibrary( CrvCubic,"HtPumpHtgEIRRatio_fPLR" )
+    else  UNDEFINED
+    endif
+ENDRULE
+
+RULE HtPump:HtgSizingMthd
+  DESCRIPTION
+    "This input specifies whether the heat pump is sized based on the cooling plant load, the 
+    heating plant load, or the larger of these values."
+  OPTION
+    HeatingCapacity
+    CoolingCapacity
+    GreaterOfHeatingOrCooling
+  SIZING
+    if( LocalCompAssigned( CompanionHtPumpRef ) )
+    then  "GreaterOfHeatingOrCooling"
+    else if( Type = "Heating" )
+    then  "HeatingCapacity"
+    else  "CoolingCapacity"
+    endif endif
+ENDRULE
+
+RULE HtPump:HtgCtrlType
+  DESCRIPTION
+    "This input allows the user to choose between Load and Setpoint control."
+  OPTION
+    Load
+    Setpoint
+  SIZING
+    if( Type = "Heating" )
+    then  "Load"
+    else  UNDEFINED
+    endif
+ENDRULE
+
+RULE HtPump:HtgFlowMode
+  DESCRIPTION
+    "This input allows the user to choose between ConstantFlow and VariableSpeedPumping. The default 
+    value is ConstantFlow. When the plant is served by variable speed pumps the water flow through 
+    this equipment will vary."
+  OPTION
+    ConstantFlow
+    VariableSpeedPumping
+  SIZING
+    if( Type = "Heating" )
+    then  if( IsBaseSys ) 
+          then  "VariableSpeedPumping"
+          else if( PumpCntConstantSpd > 0 .OR. Parent( PriPumpCntConstantSpd ) > 0 )
+          then  "ConstantFlow"
+          else if( PumpCntVarSpd > 0 .OR. Parent( PriPumpCntVarSpd ) > 0 )
+          then  "VariableSpeedPumping"
+          else  UNDEFINED
+          endif endif endif
+    else  UNDEFINED
+    endif
+ENDRULE
+
+RULE HtPump:HtgPLRMin
+  DESCRIPTION
+    "The minimum operating part load ratio. Below this value the compressor will cycle 
+    proportionally to the load."
+  DEFAULT
+    if( Type = "Heating" .AND. Proj:AutoEffInput = 1 )
+    then  0.25
+    else  UNDEFINED
+    endif
+  CHECKSIM
+    if( Type = "Heating" .AND. LocalStatus( HtgPLRMin ) < 1  )
+    then  PostError( "A minimum part-load ratio is required for HeatPump '%s'.", Name )
+    else  UNCHANGED
+    endif
+  SIZING
+    if( Type = "Heating" .AND. IsBaseSys )
+    then  0.25
+    else  UNCHANGED
+    endif
+ENDRULE
+
+RULE NEW HtPump:HtgCprsrLockoutTemp
+  DATATYPE
+    Float
+  LONGFORM
+    HeatingCompressorLockoutTemperature
+  DESCRIPTION
+    "The outside dry-bulb temperature below which the compressor is shut-off."
+  INPUTCLASS
+    Default
+  DEFAULT
+    if( Type = "Heating" .AND. Proj:AutoEffInput = 1 )
+    then  30
+    else  UNDEFINED
+    endif
+  CHECKSIM
+    if( Type = "Heating" .AND. LocalStatus( HtgCprsrLockoutTemp ) < 1  )
+    then  PostError( "A compressor lockout temperature is required for HeatPump '%s'.", Name )
+    else  UNCHANGED
+    endif
+  SIZING
+    if( Type = "Heating" .AND. IsBaseSys )
+    then  30
+    else  UNCHANGED
+    endif
+ENDRULE
+
+RULE HtPump:HtgSrcTempMin
+  DESCRIPTION
+    "The minimum entering air or water temperature at the source inlet. Below this value the 
+    compressor will be off."
+  SIZING
+    if( Type = "Heating" )
+    then  HtgCprsrLockoutTemp
+    else  UNDEFINED
+    endif
+ENDRULE
+
+RULE HtPump:HtgSrcTempMax
+  DESCRIPTION
+    "The maximum entering air or water temperature at the source inlet. Above this value the 
+    compressor will be off. The default value is 100C in EnergyPlus."
+  DEFAULT
+    UNDEFINED
+ENDRULE
+
+RULE HtPump:HtgDefrostTempMax
+  DESCRIPTION
+    "The maximum temperature where defrost will occur. Defrost operation will not be active above 
+    this outdoor temperature."
+  DEFAULT
+    if( Type = "Heating" .AND. Proj:AutoEffInput = 1 )
+    then  50
+    else  UNDEFINED
+    endif
+  CHECKSIM
+    if( Type = "Heating" .AND. LocalStatus( HtgDefrostTempMax ) < 1  )
+    then  PostError( "A maximum defrost temperature is required for HeatPump '%s'.", Name )
+    else  UNCHANGED
+    endif
+  SIZING
+    if( Type = "Heating" .AND. IsBaseSys )
+    then  50
+    else  UNCHANGED
+    endif
+ENDRULE
+
+RULE HtPump:HtgDefrostCtrl
+  DESCRIPTION
+    "The defrost control mechanism."
+  RESETS
+    ResetThisWhenTheFollowingIsModified
+      Type
+  OPTION
+    None
+    Timed
+    OnDemand
+    TimedEmpirical
+  DEFAULT
+    if( Type = "Heating" .AND. Proj:AutoEffInput = 1 )
+    then  "TimedEmpirical"
+    else  UNDEFINED
+    endif
+  SIZING
+    if( Type = "Heating" .AND. IsBaseSys )
+    then  "TimedEmpirical"
+    else  UNCHANGED
+    endif
+ENDRULE
+
+RULE HtPump:HtgDefrostTimeFrac
+  DESCRIPTION
+    "The nominal defrost time in hours when Timed or TimedEmpirical defrost control methods are
+    chosen. The time that defrost operation is active will be adjusted based on outdoor weather."
+  DEFAULT
+    if( IfValidAnd( HtgDefrostCtrl = "Timed" ) .OR. IfValidAnd( HtgDefrostCtrl = "TimedEmpirical" ) )
+    then  0.058333 ; (5 minutes)
+    else  UNDEFINED
+    endif
+  SIZING
+    if( Type = "Heating" .AND. IsBaseSys )
+    then  0.058333 ; (5 minutes)
+    else  UNCHANGED
+    endif
+ENDRULE
+
+RULE HtPump:HtgDefrostEIR_fTempCrvRef
+  DESCRIPTION
+    "a bivariate curve or table that defines the defrost energy based on outdoor air moisture
+    content. This curve is used only when Timed or OnDemand defrost control is selected."
+  SIZING
+    if( IfValidAnd( HtgDefrostCtrl = "Timed" ) .OR. IfValidAnd( HtgDefrostCtrl = "OnDemand" ) )
+    then  UNDEFINED // TO DO Test and see if this curve is required. If it is, we need to generate one.
+    else  UNDEFINED
+    endif
+ENDRULE
+
+RULE HtPump:HtgDefrostFreq_fTempCrvRef
+  DESCRIPTION
+    "A univariate curve or table that defines the frequency of defrost based on outdoor temperature.
+    This curve is used only when TimedEmpirical defrost control is selected."
+  SIZING
+    if( IfValidAnd( HtgDefrostCtrl = "TimedEmpirical" ) )
+    then  RuleLibrary( CrvDblQuad, "HtPumpDefrostFreq_fTdbSI" )
+    else  UNDEFINED
+    endif
+ENDRULE
+
+RULE HtPump:HtgDefrostHtLd_fTempCrvRef
+  DESCRIPTION
+    "A univariate or bivariant curve or table that defines the heating penalty of defrost based on 
+    outdoor conditions. This curve is used only when TimedEmpirical defrost control is selected."
+  SIZING
+    if( IfValidAnd( HtgDefrostCtrl = "TimedEmpirical" ) )
+    then  RuleLibrary( CrvDblQuad, "HtPumpDefrostHtLd_fTdbSI" )
+    else  UNDEFINED
+    endif
+ENDRULE
+
+RULE HtPump:HtgDefrostHIFrac_fTempCrvRef
+  DESCRIPTION
+    "A univariate or bivariant curve or table that defines the heating energy fraction of defrost 
+    based on outdoor conditions. This curve is used only when TimedEmpirical defrost control is selected."
+  SIZING
+    if( IfValidAnd( HtgDefrostCtrl = "TimedEmpirical" ) )
+    then  RuleLibrary( CrvDblQuad, "HtPumpDefrostHIFrac_fTdbSI" )
+    else  UNDEFINED
+    endif
+ENDRULE
+
+RULE HtPump:HtgSuppBlrRef
+  DESCRIPTION
+    "The name of the Boiler object that provide supplemental heating for the HeatPump."
+  HELP
+    "The Boiler referenced by this input will be in series with the HeatPump. Otherwise, the Boiler
+    will be in parallel with the HeatPump. If a single Boiler is referenced by multiple HeatPumps, 
+    the Boiler will be evenly divided and put in series with each HeatPump."
+  CHECKSIM
+    if( LocalCompAssigned( HtgSuppBlrRef ) )
+    then  if( HtgSuppBlrRef:ParentFluidSysRef != Parent( Name ) )
+          then  PostError( "Heat pump '%s' and its supplemental boiler '%s' must be parts of the 
+                           same FluidSystem", Name, HtgSuppBlrRef )
+          else  UNCHANGED
+          endif
+    else  UNCHANGED
+    endif
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// Cooling Inputs
+
+RULE HtPump:ClgCapRtd
+  DESCRIPTION
+    "Heat output of the heat pump at full load and AHRI 550/590 rated conditions of outdoor air 
+    dry-bulb temperature 95°F and leaving heating water temperature 44°F."
+  INPUTCLASS
+    Default
+  MINIMUM
+    0
+  UNITS
+    Btu/hr
+  REPORTPRECISION
+    -3
+  DEFAULT
+    if( Proj:AutoHardSize = 1 .AND.
+        LocalCompAssigned( ClgFluidSegInRef ) .AND.
+        IfValidAnd( FluidSys:HtPumpCnt > 0 ) )
+    then  // For PROPOSED AutoHardSizing only
+          // Non-coincident total capacity of all heating coils
+          ClgFluidSegOutRef:CoilClgCapHydronic / Parent( HtPumpCnt )
+    else  UNDEFINED
+    endif
+  SIZING
+    if( IsBaseSys )
+    then  UNDEFINED // AutoSize
+    else if( LocalStatus( ClgCapRtd ) = 4 .AND. ; defaulted via rules in the ruleset
+              LocalCompAssigned( ClgFluidSegInRef ) )
+    then  ; define again for MF to avoid double counting fo ResHVACSys and DwellUnitType
+          ClgFluidSegOutRef:CoilClgCapHydronic / Parent( HtPumpCnt )
+    else  UNCHANGED
+    endif endif
+  ANNUAL
+    if( IsBaseSys )
+    then  UNDEFINED // not in baseline system
+    else if( IsExisting )
+    then  zp:ClgCapRtd
+    else  z:ClgCapRtd
+    endif endif
+ENDRULE
+
+RULE HtPump:ClgCapRtdSim
+  DESCRIPTION
+    "Heat output of the heat pump at full load and rated conditions for simulation."
+  INPUTCLASS
+    NotInput
+  UNITS
+    Btu/hr
+  REPORTPRECISION
+    -3
+  DEFAULT
+    ClgCapRtd // TO DO might need adjustments
+  SIZING
+    if( IsBaseSys > 0 )
+    then  UNDEFINED // AutoSize
+    else  ClgCapRtd
+    endif
+  ANNUAL
+    if( IsBaseSys )
+    then  UNDEFINED // not in baseline system
+    else if( IsExisting )
+    then  zp:ClgCapRtd
+    else  z:ClgCapRtd
+    endif endif
+ENDRULE
+
+RULE HtPump:ClgLdSideFlowRt
+  DESCRIPTION
+    "Heat load side flow rate"
+  DEFAULT
+    if( IfValidAnd( ClgCapRtd > 0 ) .AND.
+        IfValidAnd( ParentValid( DsgnSupWtrDelT ) > 0 ) )
+    then  // gpm = Btuh / 8.3365 (lb/gal) / 60 (min/hr) / Design loop dT
+          ClgCapRtd / 500.19 / Parent( DsgnSupWtrDelT )
+    else  UNDEFINED
+    endif
+  SIZING
+    UNDEFINED
+ENDRULE
+
+RULE HtPump:ClgEER
+  DESCRIPTION
+    "The EER of the heat pump at AHRI 550/590 rated conditions of outdoor air dry-bulb temperature 
+    95°F and leaving heating water temperature 44°F (full load). This is the cooling provided by the 
+    heat pump in Btu/hr divided by the electricity consumption in Watts at rating conditions."
+  UNITS
+    Btu/h-W
+  DEFAULT
+    if( Proj:AutoEffInput = 1 )
+    then  9.215 // minimum EER for air source heat pump (path B)
+    else  UNDEFINED
+    endif  
+  CHECKSIM
+    if( Type = "Cooling" .AND. LocalStatus( ClgEER ) < 1  )
+    then  PostError( "A EER is required for HeatPump '%s'.", Name )
+    else  UNCHANGED
+    endif
+ENDRULE
+
+RULE HtPump:ClgIPLV
+  DESCRIPTION
+    "The IPLV of the heat pump at AHRI 550/590 rated conditions of outdoor air dry-bulb temperature 
+    95°F and leaving heating water temperature 44°F in EER unit. This is a measure of part load 
+    performance expressed in EER units."
+  UNITS
+    Btu/h-W
+  DEFAULT
+    if( Proj:AutoEffInput = 1 )
+    then  15.01 // minimum IPLV for air source heat pump (path B)
+    else  UNDEFINED
+    endif  
+  CHECKSIM
+    if( Type = "Cooling" .AND. LocalStatus( ClgIPLV ) < 1  )
+    then  PostError("A ClgIPLV is required for HeatPump '%s'.", Name)
+    else  UNCHANGED
+    endif
+ENDRULE
+
+RULE HtPump:ClgCOPSim
+  DESCRIPTION
+    "The COP used in simulation."
+  DEFAULT
+    ClgEER / 3.412 // TO DO might need adjustments
+ENDRULE
+
+RULE HtPump:ClgCap_fTempCrvRef
+  DESCRIPTION
+    "A bivariate curve or table that defines an available capacity modifier of the unit as a 
+    function of the load side outlet temperature and the source side inlet temperature. The 
+    temperatures are in degrees Celsius when used in the function and the output of the 
+    function is multiplied by the referencec apacity to get a current available capacity."
+  SIZING
+    if( Type = "Cooling" )
+    then  RuleLibrary( CrvDblQuad, "HtPumpClgQRatio_fTlwTdbSI" )
+    else  UNDEFINED
+    endif
+ENDRULE
+
+RULE HtPump:ClgEIR_fTempCrvRef
+  DESCRIPTION
+    "A bivariate curve or table that defines an EIR (1/COP) modifier as a function of the load side
+    outlet temperature and the source side inlet temperature. The temperatures are in degrees
+    Celsius when used in the function. The output of this function and the output of the EIR 
+    Modifier Function of PLR are multiplied by the reference EIR to get a current EIR."
+  SIZING
+    if( Type = "Cooling" )
+    then  RuleLibrary( CrvDblQuad, "HtPumpClgEIRRatio_fTlwTdbSI" )
+    else  UNDEFINED
+    endif
+ENDRULE
+
+RULE HtPump:ClgEIR_fPLRCrvRef
+  DESCRIPTION
+    "A univariate curve or table that defines an EIR modifier as a function of the current part load
+    ratio. The output of this function and the output of the EIR Modifier Function of Temperature
+    are multiplied by the reference EIR to get a current EIR."
+  SIZING
+    if( Type = "Cooling" )
+    then  RuleLibrary( CrvCubic,"HtPumpClgEIRRatio_fPLR" )
+    else  UNDEFINED
+    endif
+ENDRULE
+
+RULE HtPump:ClgCtrlType
+  DESCRIPTION
+    "This input allows the user to choose between Load and Setpoint control."
+  OPTION
+    Load
+    Setpoint
+  SIZING
+    if( Type = "Cooling" )
+    then  "Load"
+    else  UNDEFINED
+    endif
+ENDRULE
+
+RULE HtPump:ClgFlowMode
+  DESCRIPTION
+    "This input allows the user to choose between ConstantFlow and VariableSpeedPumping. The default 
+    value is ConstantFlow. When the plant is served by variable speed pumps the water flow through 
+    this equipment will vary."
+  OPTION
+    ConstantFlow
+    VariableSpeedPumping
+  SIZING
+    if( Type = "Cooling" )
+    then  if( PumpCntConstantSpd > 0 .OR. Parent( PriPumpCntConstantSpd ) > 0 )
+          then  "ConstantFlow"
+          else if( PumpCntVarSpd > 0 .OR. Parent( PriPumpCntVarSpd ) > 0 )
+          then  "VariableSpeedPumping"
+          else  UNDEFINED
+          endif endif
+    else  UNDEFINED
+    endif
+ENDRULE
+
+RULE HtPump:ClgPLRMin
+  DESCRIPTION
+    "The minimum operating part load ratio. Below this value the compressor will cycle 
+    proportionally to the load."
+  DEFAULT
+    if( Type = "Cooling" .AND. Proj:AutoEffInput = 1 )
+    then  0.25
+    else  UNDEFINED
+    endif
+  CHECKSIM
+    if( Type = "Cooling" .AND. LocalStatus( ClgPLRMin ) < 1  )
+    then  PostError( "A minimum part-load ratio is required for HeatPump '%s'.", Name )
+    else  UNCHANGED
+    endif
+  SIZING
+    UNCHANGED
+ENDRULE
+
+// -----------------------------------------------------------------------------
+// Others properties added so rules for other plant equipment can be used for HtPump
+RULE NEW HtPump:CapRtd
+  DATATYPE
+    Float
+  DESCRIPTION
+    "Output of the heat pump at full load and rated conditions."
+  INPUTCLASS
+    NotInput
+  MINIMUM
+    0
+  UNITS
+    Btu/hr
+  DEFAULT
+    if( Type = "Heating" )
+    then  HtgCapRtd
+    else if( Type = "Cooling" )
+    then  ClgCapRtd
+    else  0
+    endif endif
+  SIZING
+    if( Type = "Heating" )
+    then  ValidOr( HtgCapRtd, UNDEFINED )
+    else if( Type = "Cooling" )
+    then  ValidOr( ClgCapRtd, UNDEFINED )
+    else  0
+    endif endif
+  ANNUAL
+    if( Type = "Heating" )
+    then  ValidOr( HtgCapRtd, UNDEFINED )
+    else if( Type = "Cooling" )
+    then  ValidOr( ClgCapRtd, UNDEFINED )
+    else  0
+    endif endif
+ENDRULE
+
+RULE NEW HtPump:WtrFlowCap
+  DATATYPE
+    Float
+  DESCRIPTION
+    "The heat pump supply water flow rate."
+  INPUTCLASS
+    NotInput
+  MINIMUM
+    0
+  UNITS
+    gpm
+  REPORTPRECISION
+    1
+  DEFAULT
+    if( Type = "Heating" )
+    then  HtgLdSideFlowRt
+    else if( Type = "Cooling" )
+    then  ClgLdSideFlowRt
+    else  0
+    endif endif
+  SIZING
+    if( Type = "Heating" )
+    then  HtgLdSideFlowRt
+    else if( Type = "Cooling" )
+    then  ClgLdSideFlowRt
+    else  0
+    endif endif
+  ANNUAL
+    if( Type = "Heating" )
+    then  HtgLdSideFlowRt
+    else if( Type = "Cooling" )
+    then  ClgLdSideFlowRt
+    else  0
+    endif endif  
+ENDRULE
+
+RULE NEW Blr:SupWtrFlowCap
+  DATATYPE
+    Float
+  DESCRIPTION
+    "The boiler supply water flow rate as a supplemental boiler."
+  INPUTCLASS
+    NotInput
+  MINIMUM
+    0
+  UNITS
+    gpm
+  REPORTPRECISION
+    1
+  DEFAULT
+    if( SumRevRef( HtPump:HtgSuppBlrRef, HtPump:CapRtd ) > 0 )
+    then  WtrFlowCap
+    else  0
+    endif 
+  SIZING
+    if( SumRevRef( HtPump:HtgSuppBlrRef, HtPump:CapRtd ) > 0 )
+    then  WtrFlowCap
+    else  0
+    endif 
+  ANNUAL
+    if( SumRevRef( HtPump:HtgSuppBlrRef, HtPump:CapRtd ) > 0 )
+    then  WtrFlowCap
+    else  0
+    endif 
+ENDRULE
