@@ -8429,6 +8429,25 @@ RULELIST "PostProposedInput_HVAC" 1 0 0 1
 ;*************************************************************************
 	; SAC 9/24/14 - extracted HVAC rules from PostProposedInput rulelist
 
+  "set Proj:TempCompCount[1] to # of HVACHtPump"  Proj:TempCompCount[1] = { ComponentCount( HVACHtPump ) }    ; SAC 05/16/25 (tic #1379)
+  "set Proj:TempCompCount[2] to # of HVACCool"    Proj:TempCompCount[2] = { ComponentCount( HVACCool   ) }    ; SAC 05/19/25 (tic #1379)
+
+  "force import & setup of HVACHtPump for New PropEqStd PerfMap HtPumps in 2025+"   HVACSys:Action =    ; SAC 05/15/25 (tic #1379)
+    { if( FloorAreaServed < 0.1 .OR. Type != 2 .OR. LocalStatus( HtPumpSysTypeAbbrev ) < 1 ) then  UNCHANGED
+      else if( T24RHeatingEquipment:PropEqStd(  "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion,
+                                                "SysType", HtPumpSysTypeAbbrev ) == 0 ) then  UNCHANGED
+      else if( StdHeatingType == 4 .AND. Proj:EnergyCodeYearNum >= 2025 )
+      then  EvalRulelist( "Setup_HVACSys_SplitHeatPumpPM_PropEqStd", 1 )
+      else  UNCHANGED  endif endif endif  }
+  "force import & setup of HVACCool for New PropEqStd PerfMap AC/Furn in 2025+"     HVACSys:Action =    ; SAC 05/19/25 (tic #1379)
+    { if( FloorAreaServed < 0.1 .OR. Type == 2 .OR. LocalStatus( CoolSysTypeAbbrev ) < 1 ) then  UNCHANGED
+      else if( CoolSysType != 1 .AND.     ; No Cooling
+               T24RCoolingEquipment:PropEqStd(  "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion,
+                                                "SysType", CoolSysTypeAbbrev ) == 0 ) then  UNCHANGED
+      else if( StdCoolingType == 2 .AND. Proj:EnergyCodeYearNum >= 2025 )
+      then  EvalRulelist( "Setup_HVACSys_SplitAirCondPM_PropEqStd", 1 )
+      else  UNCHANGED  endif endif endif  }
+
    ;--------------------------------------------------------------------
    ; Override certain Proposed Heat/Cool/HtPump systems w/ Std Design performance 		- SAC 4/22/14
    ;--------------------------------------------------------------------
@@ -8528,6 +8547,12 @@ RULELIST "PostProposedInput_HVAC" 1 0 0 1
 																									else if (T24RCoolingEquipment:DuctFlag(  "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", EnumString( StdCoolingType ) ) > 0.5)
 																									then	HtOrClDucted + 2		else  0  endif endif endif  }
 
+  "re-default all HVAC if one or more PM HVACHtPumps or HVACCools added"    Proj:Action =   ; SAC 05/16/25 (tic #1379)  ; SAC 05/19/25 (tic #1379)
+    { if( ComponentCount( HVACHtPump ) > TempCompCount[1] .OR.
+          ComponentCount( HVACCool   ) > TempCompCount[2] )
+      then  EvalRulelist( "Default_AllHVAC" )
+      else  UNCHANGED  endif  }
+
    ; prevent PostError when HeatSysTypeAbbrev set while StdHeatingType = SplitHeatPump - SAC 04/11/24 (tic #1367)
 	"Setup Standard heating system properties - HVACHeat"
 			HVACSys:Action		= {	if (FloorAreaServed < 0.1 .OR. LocalStatus( HeatSysTypeAbbrev ) < 1) then  UNCHANGED
@@ -8546,12 +8571,13 @@ RULELIST "PostProposedInput_HVAC" 1 0 0 1
 													endswitch  endif endif  }
 	"Setup Standard heating system properties - HVACHtPump"
 			HVACSys:Action		= {	if (FloorAreaServed < 0.1 .OR. LocalStatus( HtPumpSysTypeAbbrev ) < 1) then  UNCHANGED
-											else if (T24RHeatingEquipment:PropEqStd( "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", HtPumpSysTypeAbbrev ) == 0) then  UNCHANGED
+											else if ( T24RHeatingEquipment:PropEqStd( "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", HtPumpSysTypeAbbrev ) == 0 .AND.
+                                IfValidAnd( PropEqStdImport > 0 )==0 ) then  UNCHANGED
 											else	switch (StdHeatingType)
 														case  1 :	UNCHANGED		; CntrlFurnace
 														case  2 :	UNCHANGED		; Heater
 														case  3 :	UNCHANGED		; Boiler
-		  												case  4 :	EvalRulelist( "Setup_HVACSys_HtPump_SplitHeatPump", 1 )
+		  											case  4 :	EvalRulelist( "Setup_HVACSys_HtPump_SplitHeatPump", 1 )
 														case 19 :	EvalRulelist( "Setup_HVACSys_HtPump_SDHVSplitHeatPump", 1 )
 														case 10 :	EvalRulelist( "Setup_HVACSys_HtPump_DuctlessMiniSplitHeatPump", 1 )
 														case  7 :	EvalRulelist( "Setup_HVACSys_HtPump_RoomHeatPump" , 1 )
@@ -8561,7 +8587,8 @@ RULELIST "PostProposedInput_HVAC" 1 0 0 1
 													endswitch  endif endif  }
 	"Setup Standard cooling system properties - HVACCool"
 			HVACSys:Action		= {	if (FloorAreaServed < 0.1 .OR. LocalStatus( CoolSysTypeAbbrev ) < 1) then  UNCHANGED
-											else if (T24RCoolingEquipment:PropEqStd( "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", CoolSysTypeAbbrev ) == 0) then  UNCHANGED
+											else if( T24RCoolingEquipment:PropEqStd( "CodeBase", Proj:StdDesignBase, "StdVer", Proj:StandardsVersion, "SysType", CoolSysTypeAbbrev ) == 0 .AND.
+                               IfValidAnd( PropEqStdImport > 0 )==0 ) then  UNCHANGED
 											else	switch (StdCoolingType)
 														case 37 :	Evalrulelist( "Setup_HVACSys_Cool_SplitAirCond" , 1 )       ; SAC 03/05/25 (tic #1379)
 														case  2 :	Evalrulelist( "Setup_HVACSys_Cool_SplitAirCond" , 1 )
@@ -9464,11 +9491,58 @@ END
 ; add rulelist to force setup of HtPump system even if current system HP - for 2025 PM model equipment - SAC 03/12/25 (tic #1379)
 ;*************************************************************************
 RULELIST "Setup_HVACSys_SplitHeatPumpPM"       1 0 1 1
-   "set HVACSys:Type to HP"                     HVACSys:Type                  = {  2  }
-   "set HVACSys:NumHtPumpSystemTypes to 1"      HVACSys:NumHtPumpSystemTypes  = {  1  }
-   "set HVACSys:HtPumpSystemCount to 1"         HVACSys:HtPumpSystemCount     = {  1  }
-   "set HVACSys:HtPumpSystem[1] from library"   HVACSys:HtPumpSystem[1]       = {  RuleLibrary( HVACHtPump, "t24-SplitHeatPumpMP", 1 )  }
+  "set HVACSys:Type to HP"                    HVACSys:Type                  = {  2  }
+  "set HVACSys:NumHtPumpSystemTypes to 1"     HVACSys:NumHtPumpSystemTypes  = {  1  }
+  "set HVACSys:HtPumpSystemCount to 1"        HVACSys:HtPumpSystemCount     = {  1  }
+  "set HVACSys:HtPumpSystem[1] from library"  HVACSys:HtPumpSystem[1]       = {  RuleLibrary( HVACHtPump, "t24-SplitHeatPumpPM", 1 )  }
+  "set HVACSys:HPSysAutoSize"                 HVACSys:HPSysAutoSize         = {  0  }     ; SAC 05/16/25 (tic #1379)
 END
+;************************************************************************* SAC 05/17/25 (tic #1379)
+RULELIST "Setup_HVACSys_SplitHeatPumpPM_PropEqStd"       1 0 1 1
+  "setup SplitHeatPumpPM"         HVACSys:Action          = {  EvalRulelist( "Setup_HVACSys_SplitHeatPumpPM", 1 )  }
+  "set HVACSys:PropEqStdImport"   HVACSys:PropEqStdImport = {  1  }
+  "set HVACSys:HtPumpSystem[1]:ACCharge"  HVACSys:HtPumpSystem[1]:ACCharge =    ; SAC 05/18/25 (#1379)
+    { if( Proj:EnergyCodeYearNum >= 2025 .AND.
+          ( ( (Proj:RunScope == 2 .OR. (Proj:RunScope == 1 .AND. Proj:IsAddAlone < 0.5)) .AND. IfValidAnd( Proj:CondFloorArea > 500 ) ) .OR.
+            ( Proj:RunScope == 1 .AND. Proj:IsAddAlone > 0.5 .AND. IfValidAnd( Proj:AddAloneAddedArea > 500 ) ) ))
+      then  2  ; Verified - New, > 500SF, 2025+
+      else if (Proj:EnergyCodeYearNum >= 2025 .AND.
+               ( ( Proj:RunScope == 2 .AND. IfValidAnd( Proj:CondFloorArea <= 500 ) ) .OR.
+                 ( Proj:RunScope == 1 .AND. Proj:IsAddAlone > 0.5 .AND. IfValidAnd( Proj:AddAloneAddedArea <= 500 ) ) ))
+      then  1  ; Not Verified - Add/Alter, <= 500SF, 2025+
+      else if (T24RClimateZoneCodeBase:VerifyCharge( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr ) > 0.5 )
+      then  2  ; verified,CID
+      else  1  ; not verified
+      endif endif endif  }
+END
+
+; add rulelist to force setup of AirCond-PM system - for 2025 PM model equipment - SAC 05/19/25 (tic #1379)
+;*************************************************************************
+RULELIST "Setup_HVACSys_SplitAirCondPM"       1 0 1 1
+  "set HVACSys:Type to AC/Furn"             HVACSys:Type                = {  1  }
+  "set HVACSys:NumCoolSystemTypes to 1"     HVACSys:NumCoolSystemTypes  = {  1  }
+  "set HVACSys:CoolSystemCount to 1"        HVACSys:CoolSystemCount[1]  = {  1  }
+  "set HVACSys:CoolSystem[1] from library"  HVACSys:CoolSystem[1]       = {  RuleLibrary( HVACHtPump, "t24-SplitAirCondPM", 1 )  }
+END
+;************************************************************************* 
+RULELIST "Setup_HVACSys_SplitAirCondPM_PropEqStd"       1 0 1 1
+  "setup SplitAirCondPM"          HVACSys:Action          = {  EvalRulelist( "Setup_HVACSys_SplitAirCondPM", 1 )  }
+  "set HVACSys:PropEqStdImport"   HVACSys:PropEqStdImport = {  1  }
+  "set HVACSys:CoolSystem[1]:ACCharge"  HVACSys:CoolSystem[1]:ACCharge = 
+    { if( Proj:EnergyCodeYearNum >= 2025 .AND.
+          ( ( (Proj:RunScope == 2 .OR. (Proj:RunScope == 1 .AND. Proj:IsAddAlone < 0.5)) .AND. IfValidAnd( Proj:CondFloorArea > 500 ) ) .OR.
+            ( Proj:RunScope == 1 .AND. Proj:IsAddAlone > 0.5 .AND. IfValidAnd( Proj:AddAloneAddedArea > 500 ) ) ))
+      then  2  ; Verified - New, > 500SF, 2025+
+      else if (Proj:EnergyCodeYearNum >= 2025 .AND.
+               ( ( Proj:RunScope == 2 .AND. IfValidAnd( Proj:CondFloorArea <= 500 ) ) .OR.
+                 ( Proj:RunScope == 1 .AND. Proj:IsAddAlone > 0.5 .AND. IfValidAnd( Proj:AddAloneAddedArea <= 500 ) ) ))
+      then  1  ; Not Verified - Add/Alter, <= 500SF, 2025+
+      else if (T24RClimateZoneCodeBase:VerifyCharge( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr ) > 0.5 )
+      then  2  ; verified,CID
+      else  1  ; not verified
+      endif endif endif  }
+END
+
 
 ; SAC 12/5/13 - replaced individual equipment-based HVACHtPump budget conversion mechanism (above) w/ following that sets data directly to the HVACSys object(s)
 ;*************************************************************************
