@@ -274,6 +274,34 @@ RULE NEW ThrmlZn:ExhFanFlowEff
     endif
 ENDRULE
 
+// Calculated normalized lab exhaust fan power adjustment (W/cfm)
+RULE NEW ThrmlZn:BaseLabExhHtRcvryPwrAdj
+  DATATYPE
+    Float
+  LONGFORM
+    BaselineLabExhaustHeatRecoveryPowerAdjustment
+  DESCRIPTION
+    "The total allowance to be added to the baseline design if it requires heat recovery for the
+     lab system." 
+  INPUTCLASS
+    NotInput
+  UNITS
+    W/cfm
+  ANNUAL
+    if( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 .AND. LabArea > 0 )
+    then  if( PriAirCondgSysRef[1]:PrescriptiveHtRcvryReq > 0 )
+          then  if( PriAirCondgSysRef[1]:BaseSysNum = 14 .AND. 
+                    PriAirCondgSysRef[1]:BaseSysNumOpt = "s" )
+                then  T24N_2025FanPwrIdxAdj:ERVCoilRunaroundReturn( "SysType", "AllOther",
+                                                    "FlowCap", ExhFlow )
+                else  T24N_2025FanPwrIdxAdj:ERVCoilRunaroundReturn( "SysType", "MultiZoneVAV",
+                                                    "FlowCap", StoryRef:LabExhFlow / StoryRef:Mult )
+                endif
+          else  0
+          endif
+    else  0
+    endif
+ENDRULE
 // Calculated normalized exhaust fan power for zone (W/cfm)
 RULE NEW ThrmlZn:ExhSysPwrIdx
   DATATYPE
@@ -289,119 +317,94 @@ RULE NEW ThrmlZn:ExhSysPwrIdx
     W/cfm
   DEFAULT
     if( PropVentSysIsExh > 0 .AND. LocalCompAssigned( VentSysRef ) )
-    then // Ventilation system is exhaust
-      ValidOr( VentSysRef:ExhSysFanPwrIdx, 0 ) * ValidOr( VentSysRef:HRRFanPwrAdj, 1 )
-    else // Other exhaust systems
-    if( LocalCompAssigned( ExhSysRef ) )
-    then ValidOr( ExhSysRef:ExhSysFanPwrIdx, 0 )
-    else 0
+    then  // Ventilation system is exhaust
+          ValidOr( VentSysRef:ExhSysFanPwrIdx, 0 ) * ValidOr( VentSysRef:HRRFanPwrAdj, 1 )
+    else  // Other exhaust systems
+          if( LocalCompAssigned( ExhSysRef ) )
+          then  ValidOr( ExhSysRef:ExhSysFanPwrIdx, 0 )
+          else  0
     endif endif
   CHECKCODE
     if( HasUnknownHVAC = 0 .AND. ExhFlow > 0 .AND. LocalCompAssigned( ExhSysRef ) )
     then // Zone exhaust flow is > 0 cfm but there is no exhuast fan power
-      if( ( IfValidAnd( ExhSysRef:Type = "DOASCV" ) .OR. IfValidAnd( ExhSysRef:Type = "DOASVAV" ) ) .AND.
-          IfValidAnd( ExhSysRef:ExhFanPwr = 0 ) )
-      then // Exhuast system is DOAS
-        PostError("ThermalZone '%s' has a design exhaust flow > 0 and the exhaust system is a 
-                   'DOAS', but the exhaust fan power is 0.", Name, ExhSysRef:Name)
-      else
-      if( IfValidAnd( ExhSysRef:IsExhSys > 0 ) .AND. IfValidAnd( ExhSysRef:ExhFanPwr = 0 ) )
-      then // Exhaust system is 'Exhaust'
-        PostError("ThermalZone '%s' has a design exhaust flow > 0, but the exhaust system '%s'
-                   fan power is 0.", Name, ExhSysRef:Name)
-      else UNCHANGED
-      endif endif
-    else UNCHANGED
+          if( ( IfValidAnd( ExhSysRef:Type = "DOASCV" ) .OR. IfValidAnd( ExhSysRef:Type = "DOASVAV" ) ) .AND.
+              IfValidAnd( ExhSysRef:ExhFanPwr = 0 ) )
+          then // Exhuast system is DOAS
+                PostError( "ThermalZone '%s' has a design exhaust flow > 0 and the exhaust system is a 
+                           'DOAS', but the exhaust fan power is 0.", Name, ExhSysRef:Name )
+          else if( IfValidAnd( ExhSysRef:IsExhSys > 0 ) .AND. IfValidAnd( ExhSysRef:ExhFanPwr = 0 ) )
+          then  // Exhaust system is 'Exhaust'
+                PostError( "ThermalZone '%s' has a design exhaust flow > 0, but the exhaust system '%s'
+                           fan power is 0.", Name, ExhSysRef:Name )
+          else  UNCHANGED
+          endif endif
+    else  UNCHANGED
     endif
   ANNUAL
     if( BaseSysNum > 0 .AND. IsNewExh != 0 .AND. ExhFlow > 0 )
-    then
-      if( CommKitArea > 0 )
-      then // Commerical kitchen system has separate exhaust fan power allowance
-        0.65
-      else 
-      if( LabArea > 0 ) 
-      then
-        if( Bldg:LabExhFlow > 10000 )
-        then // Trigger lab exhaust fan power limit per 140.9(c)3
-          if( IfValidAnd( ExhFiltersPwrAdj > 0 ) )
-          then // Lab system has ExhFilters PD credit
-            0.85
-          else // Lab system has NO ExhFilters PD credit
-            0.65
-          endif
-        else
-        if( HasUnknownHVAC > 0 )
-        then // Use 140.4(c) fan power allowance rules, but use ratio of zone flow to total at baseline system
-          PriAirCondgSysRef[1]:BaseFanPwrWithAdj * PriAirCondgSysRef[1]:ExhFanPwrRat * 1000 *
-          ZnToSysExhFlowRat / ExhFlow
-        else // Use 140.4(c) fan power allowance rules
-          PriAirCondgSysRef[1]:BaseFanPwrWithAdj * PriAirCondgSysRef[1]:ExhFanPwrRat * 1000 *
-          ZnToSysPropExhFanPwrRat / ExhFlow
-        endif endif
-      else
-      if( PrkgGarArea > 0 )
-      then // Parking garage system. 
-        if( HasUnknownHVAC > 0 )
-        then // Set default fan power if HasUnknownHVAC is set
-          if( ExhCtrlMthd = "COControl" )
-          then 0.35 * 0.125 // Reduction for CO controls
-          else 0.35
-          endif
-        else // Ticket 3061: Baseline parking fan power = proposed, use ExhSysPwrIdx
-          ValidOr( ExhSysPwrIdx, 0 )
-        endif
-;      else
-// Ticket 3040/3057: Baseline HRR ventilation to be same as proposed up to 1.20 W/cfm. 
-// Rule used for 2019.1.2/1.3 release
-;      if( BaseVentSysIsExh = 2 )
-;      then // Baseline HRR vent is exhaust
-;        if( PropResVentSysPwrIdx > 0 )
-;        then // Min of proposed fan power or 1.20 W/cfm
-;          Min( PropResVentSysPwrIdx, 1.20 )
-;        else // Default assumption for HasUnknownHVAC > 0 or proposed = 0 W/cfm
-;          ValidOr( ExhSysPwrIdx, 0.60 ) 
-;        endif
-      else
-      if( BaseVentSysIsExh = 3 )
-      then // Hotel/Motel Guestroom
-        0.58
-      else
-      if( LocalCompAssigned( PriAirCondgSysRef[1] ) )
-      then// Calculate baseline exahust fan power using 140.4(c) fan power allowance rules
-          PriAirCondgSysRef[1]:BaseFanPwrWithAdj * PriAirCondgSysRef[1]:ExhFanPwrRat * 1000 *
-          ZnToSysPropExhFanPwrRat / ExhFlow
-      else // Same as proposed or 0.2
-        Max( ValidOr( ap:ExhSysPwrIdx, 0 ), 0.2 ) 
-      endif endif endif endif endif
-    else
-    if( HasBaseHlthCareExh > 0  )
+    then  if( CommKitArea > 0 )
+          then  0.65 // Commerical kitchen system has separate exhaust fan power allowance
+          else if( LabArea > 0 ) 
+          then  if( Bldg:LabExhFlow > 10000 )
+                then // Trigger lab exhaust fan power limit per 140.9(c)3
+                      if( IfValidAnd( ExhFiltersPwrAdj > 0 ) )
+                      then  // Lab system has ExhFilters PD credit
+                            0.85 + BaseLabExhHtRcvryPwrAdj
+                      else  // Lab system has NO ExhFilters PD credit
+                            0.65 + BaseLabExhHtRcvryPwrAdj
+                      endif
+                else if( HasUnknownHVAC > 0 )
+                then  // Use 140.4(c) fan power allowance rules, but use ratio of zone flow to total at baseline system
+                      PriAirCondgSysRef[1]:BaseFanPwrWithAdj * PriAirCondgSysRef[1]:ExhFanPwrRat * 1000 *
+                      ZnToSysExhFlowRat / ExhFlow
+                else  // Use 140.4(c) fan power allowance rules
+                      PriAirCondgSysRef[1]:BaseFanPwrWithAdj * PriAirCondgSysRef[1]:ExhFanPwrRat * 1000 *
+                      ZnToSysPropExhFanPwrRat / ExhFlow
+                endif endif
+          else if( PrkgGarArea > 0 )
+          then  // Parking garage system. 
+                if( HasUnknownHVAC > 0 )
+                then  // Set default fan power if HasUnknownHVAC is set
+                      if( ExhCtrlMthd = "COControl" )
+                      then  0.35 * 0.125 // Reduction for CO controls
+                      else  0.35
+                      endif
+                else  // Ticket 3061: Baseline parking fan power = proposed, use ExhSysPwrIdx
+                      ValidOr( ExhSysPwrIdx, 0 )
+                endif
+          else if( BaseVentSysIsExh = 3 )
+          then  0.58 // Hotel/Motel Guestroom
+          else if( LocalCompAssigned( PriAirCondgSysRef[1] ) )
+          then  // Calculate baseline exahust fan power using 140.4(c) fan power allowance rules
+                PriAirCondgSysRef[1]:BaseFanPwrWithAdj * PriAirCondgSysRef[1]:ExhFanPwrRat * 1000 *
+                ZnToSysPropExhFanPwrRat / ExhFlow
+          else  // Same as proposed or 0.2
+                Max( ValidOr( ap:ExhSysPwrIdx, 0 ), 0.2 ) 
+          endif endif endif endif endif
+    else if( HasBaseHlthCareExh > 0  )
     then // Healthcare facility baseline
-      if( PropVentSysIsExh > 0 .AND. LocalCompAssigned( VentSysRef ) )
-      then // Ventilation system is exhaust
-        VentSysRef:ExhFanPwrIdxAllow
-      else // Other exhaust systems
-      if( LocalCompAssigned( ExhSysRef ) )
-      then ExhSysRef:ExhFanPwrIdxAllow
-      else 0
-      endif endif
-    else // Based on proposed 
-    if( IfValidAnd( ExhSysPwrIdx > 0 ) )
+          if( PropVentSysIsExh > 0 .AND. LocalCompAssigned( VentSysRef ) )
+          then  // Ventilation system is exhaust
+                VentSysRef:ExhFanPwrIdxAllow
+          else if( LocalCompAssigned( ExhSysRef ) )
+          then  // Other exhaust systems
+                ExhSysRef:ExhFanPwrIdxAllow
+          else  0
+          endif endif
+    else if( IfValidAnd( ExhSysPwrIdx > 0 ) )  // Based on proposed 
     then // Make adjustments to proposed exhaust fan power based on controls
-      if( PrkgGarArea > 0 .AND. ExhCtrlMthd = "COControl" )
-      then // Reduction for CO controls
-        ExhSysPwrIdx * 0.125 // Reduction for CO controls
-      else
-      if( LabArea > 0 )
-      then // Adjust lab exhaust fan power for applicable controls
-        ExhSysPwrIdx - ExhLabCtrlPwrIdxAdj
-      else // No adjustment to proposed
-        ExhSysPwrIdx
-      endif endif
-    else 
-    if( ExhFlow > 0 )
-    then 0.2 // Nominal W/cfm for non-compliance exhaust 
-    else 0
+          if( PrkgGarArea > 0 .AND. ExhCtrlMthd = "COControl" )
+          then  // Reduction for CO controls
+                ExhSysPwrIdx * 0.125 // Reduction for CO controls
+          else if( LabArea > 0 )
+          then  // Adjust lab exhaust fan power for applicable controls
+                ExhSysPwrIdx - ExhLabCtrlPwrIdxAdj
+          else  // No adjustment to proposed
+                ExhSysPwrIdx
+          endif endif
+    else if( ExhFlow > 0 )
+    then  0.2 // Nominal W/cfm for non-compliance exhaust 
+    else  0
     endif endif endif endif
 ENDRULE
 

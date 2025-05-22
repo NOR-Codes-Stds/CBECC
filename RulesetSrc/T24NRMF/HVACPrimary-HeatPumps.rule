@@ -64,10 +64,7 @@ RULE NEW FluidSys:HtPumpCnt
     if( Type = "HotWater" .AND. 
         IsBaseSys .AND. 
         name = "BaseHPHWSystem" )
-    then  if( Bldg:TotCondFlrArea > 15000 )
-          then 2
-          else 1
-          endif
+    then  1
     else  ChildCount( HtPump )
     endif
 ENDRULE
@@ -93,6 +90,13 @@ RULE HtPump:Type
                      FluidSystem '%s'.", Parent( Type ) , Name, Parent( Name ) )
     else  UNCHANGED
     endif
+  SIZING
+    if( Parent( Type ) = "HotWater" )
+    then  "Heating"
+    else if( Parent( Type )  = "ChilledWater" )
+    then  "Cooling"
+    else  UNDEFINED
+    endif endif
 ENDRULE
 
 RULE HtPump:CompanionHtPumpRef
@@ -150,11 +154,18 @@ RULE HtPump:CndsrType
     "The type of Condenser for the HeatPump system"
   HELP
     "Required input for a HeatPump"
+  INPUTCLASS
+    NotInput
   OPTION
     AirSource
     WaterSource
   DEFAULT
     "AirSource" ; WaterSource is not supported yet
+  SIZING
+    if( IsBaseSys )
+    then  "AirSource"
+    else  UNCHANGED
+    endif
 ENDRULE
 
 // -----------------------------------------------------------------------------
@@ -168,6 +179,11 @@ RULE HtPump:CprsrLoc
     Outdoor
   DEFAULT
     "Outdoor"
+  SIZING
+    if( IsBaseSys )
+    then  "Outdoor"
+    else  UNCHANGED
+    endif
 ENDRULE
 
 RULE HtPump:CprsrZnRef
@@ -295,15 +311,10 @@ RULE HtPump:Status
                        analysis.", Name, Status, Proj:CompType )
     else UNCHANGED
     endif
-   SIZING
+  SIZING
     if( IfValidAnd( FluidSys:IsBaseSys > 0 ) .OR. Proj:IsNewMech )
     then  "New"
     else  u:Status
-    endif
-  ANNUAL
-    if( IfValidAnd( FluidSys:IsBaseSys > 0 ) .OR. Proj:IsNewMech )
-    then  "New"
-    else  z:Status
     endif
 ENDRULE
 
@@ -316,8 +327,6 @@ RULE NEW HtPump:IsNew
     if( Status = "New" .OR. Proj:IsNewMech ) then 1 else 0 endif
   SIZING
     if( Status = "New" .OR. Proj:IsNewMech ) then 1 else 0 endif
-  ANNUAL
-    if( Status = "New" .OR. Proj:IsNewMech ) then 1 else 0 endif
 ENDRULE
 
 RULE NEW HtPump:IsExisting
@@ -328,8 +337,6 @@ RULE NEW HtPump:IsExisting
   DEFAULT
     if( IsNew ) then 0 else 1 endif
   SIZING
-    if( IsNew ) then 0 else 1 endif
-  ANNUAL
     if( IsNew ) then 0 else 1 endif
 ENDRULE
 
@@ -369,9 +376,15 @@ RULE HtPump:HtgCapRtd
     then  // For PROPOSED AutoHardSizing only
           // Non-coincident total capacity of all heating coils
           if( Parent( Type ) = "HotWater" )
-          then  HtgFluidSegOutRef:CoilHtgCapHydronic / Parent( HtPumpCnt )
+          then  if( LocalCompAssigned( HtgSuppBlrRef ) )
+                then  HtgFluidSegOutRef:CoilHtgCapHydronic / Parent( HtPumpCnt ) / 2
+                else  HtgFluidSegOutRef:CoilHtgCapHydronic / Parent( HtPumpCnt )
+                endif
           else if( Parent( Type ) = "CondenserWater" )
-          then  HtgFluidSegOutRef:CoilHtExtractionLd / Parent( HtPumpCnt )
+          then  if( LocalCompAssigned( HtgSuppBlrRef ) )
+                then  HtgFluidSegOutRef:CoilHtExtractionLd / Parent( HtPumpCnt ) / 2
+                else  HtgFluidSegOutRef:CoilHtExtractionLd / Parent( HtPumpCnt )
+                endif
           else  UNDEFINED
           endif endif  
     else  UNDEFINED
@@ -383,9 +396,15 @@ RULE HtPump:HtgCapRtd
               LocalCompAssigned( HtgFluidSegInRef ) )
     then  ; define again for MF to avoid double counting fo ResHVACSys and DwellUnitType
           if( Parent( Type ) = "HotWater" )
-          then  HtgFluidSegOutRef:CoilHtgCapHydronic / Parent( HtPumpCnt )
+          then  if( LocalCompAssigned( HtgSuppBlrRef ) )
+                then  HtgFluidSegOutRef:CoilHtgCapHydronic / Parent( HtPumpCnt ) / 2 ; another half goes to the supplemental boiler
+                else  HtgFluidSegOutRef:CoilHtgCapHydronic / Parent( HtPumpCnt )
+                endif
           else if( Parent( Type ) = "CondenserWater" )
-          then  HtgFluidSegOutRef:CoilHtExtractionLd / Parent( HtPumpCnt )
+          then  if( LocalCompAssigned( HtgSuppBlrRef ) )
+                then  HtgFluidSegOutRef:CoilHtExtractionLd / Parent( HtPumpCnt ) / 2 ; another half goes to the supplemental boiler
+                else  HtgFluidSegOutRef:CoilHtExtractionLd / Parent( HtPumpCnt )
+                endif
           else  UNCHANGED
           endif endif
     else  UNCHANGED
@@ -418,7 +437,7 @@ RULE HtPump:HtgCapRtdSim
   ANNUAL
     if( IsBaseSys )
     then  if( Parent( HWLoopLd ) > 0 ) 
-          then Parent( HWLoopLd ) / Parent( HtPumpCnt ) * Proj:HtgSizingRat
+          then Parent( HWLoopLd ) / Parent( HtPumpCnt ) * Proj:HtgSizingRat / 2 ; another half goes to the supplemental boiler
           else 10
           endif
     else if( IsExisting )
@@ -437,8 +456,11 @@ RULE HtPump:HtgLdSideFlowRt
           HtgCapRtd / 500.19 / Parent( DsgnSupWtrDelT )
     else  UNDEFINED
     endif
-  SIZING
-    UNDEFINED
+  ANNUAL
+    if( IsBaseSys )
+    then  HtgCapRtdSim / 500.19 / Parent( DsgnSupWtrDelT )
+    else  UNCHANGED
+    endif
 ENDRULE
 
 RULE HtPump:HtgCOP
@@ -829,8 +851,11 @@ RULE HtPump:ClgLdSideFlowRt
           ClgCapRtd / 500.19 / Parent( DsgnSupWtrDelT )
     else  UNDEFINED
     endif
-  SIZING
-    UNDEFINED
+  ANNUAL
+    if( IsBaseSys .AND. IfValidAnd( ClgCapRtd > 0 ) )
+    then  ClgCapRtdSim / 500.19 / Parent( DsgnSupWtrDelT )
+    else  UNCHANGED
+    endif
 ENDRULE
 
 RULE HtPump:ClgEER
@@ -1053,17 +1078,17 @@ RULE NEW Blr:SupWtrFlowCap
   REPORTPRECISION
     1
   DEFAULT
-    if( SumRevRef( HtPump:HtgSuppBlrRef, HtPump:CapRtd ) > 0 )
+    if( CountRefs( HtPump:HtgSuppBlrRef ) > 0 )
     then  WtrFlowCap
     else  0
     endif 
   SIZING
-    if( SumRevRef( HtPump:HtgSuppBlrRef, HtPump:CapRtd ) > 0 )
+    if( CountRefs( HtPump:HtgSuppBlrRef ) > 0 )
     then  WtrFlowCap
     else  0
     endif 
   ANNUAL
-    if( SumRevRef( HtPump:HtgSuppBlrRef, HtPump:CapRtd ) > 0 )
+    if( CountRefs( HtPump:HtgSuppBlrRef ) > 0 )
     then  WtrFlowCap
     else  0
     endif 
