@@ -36,7 +36,55 @@
 //  Section 5.6.5.2 - Fan Powered Boxes
 //      Fan Powered Box Type
 
+// ---------- System 15 PFPB Switching Rules -----------------------------------
+RULE NEW TrmlUnit:ExtZnSys15CapSim
+  DATATYPE
+    Float
+  LONGFORM
+    ExteriorZoneSystem15CapacitySimulated
+  INPUTCLASS 
+    NotInput
+  ANNUAL
+    if( BaseSysNum = 15 .AND. ZnServedRef:IsExtZn > 0 )
+    then  CoilHtgRef:CapTotGrossRtdSim
+    else  0
+    endif
+ENDRULE
 
+RULE TrmlUnit:StdToPFPB
+  ANNUAL
+    if( Bldg:PredominantFuncGrp = "Office" .AND.
+        Proj:CliZnNum > 6 .AND. Proj:CliZnNum < 16 )
+    then  UNCHANGED  //  Set by RULE AirSys:NumTrmlUnitsStdToPFPB
+    else if( ExtZnSys15CapSim > 0 )
+    then  1  // 100% perimeter zone
+    else  UNDEFINED
+    endif endif
+ENDRULE
+
+RULE TrmlUnit:Type
+  ANNUAL
+    if( IfValidAnd( StdToPFPB > 0 ) )
+    then  "ParallelFanBox"
+    else  UNCHANGED
+    endif
+ENDRULE
+
+RULE TrmlUnit:FanRef
+  ANNUAL
+    if( IfValidAnd( StdToPFPB > 0 ) )
+    then  RuleLibrary( Fan, "BasePFPB Fan", 0, Name )
+    else  UNCHANGED
+    endif
+ENDRULE
+
+RULE TrmlUnit:Fan:SysCnt
+  ANNUAL
+    if( IfValidAnd( StdToPFPB > 0 ) )
+    then TrmlUnit:SysCnt
+    else  UNCHANGED
+    endif
+ENDRULE
 
 // ---------- Section 5.6.5.2 - Fan Powered Boxes -----------------------------------
 RULE NEW TrmlUnit:IsFanBox
@@ -48,16 +96,19 @@ RULE NEW TrmlUnit:IsFanBox
     NotInput
   DEFAULT
     if( Type = "ParallelFanBox" .OR. Type = "SeriesFanBox" )
-    then 1
-    else 0
+    then  1
+    else  0
     endif
   SIZING
     if( Type = "ParallelFanBox" .OR. Type = "SeriesFanBox" )
-    then 1
-    else 0
+    then  1
+    else  0
     endif
   ANNUAL
-    z:IsFanBox
+    if( Type = "ParallelFanBox" .OR. Type = "SeriesFanBox" )
+    then  1
+    else  0
+    endif
 ENDRULE
 
 RULE NEW TrmlUnit:FanFlowCap
@@ -76,7 +127,10 @@ RULE NEW TrmlUnit:FanFlowCap
   SIZING
     UNDEFINED
   ANNUAL
-    SumChildren( Fan:FlowCap ) * Cnt
+    if( IfValidAnd( StdToPFPB > 0 ) )
+    then  PriAirFlowMax * Cnt
+    else  SumChildren( Fan:FlowCap ) * Cnt
+    endif
 ENDRULE
 
 
@@ -93,8 +147,6 @@ RULE TrmlUnit:InductionRat
      For 'ActiveBeam' terminals, this is the ratio of the air flow induced 
      from the zone through the coils, to the primary supply air flow from
      the main air handler."
-  REFERENCE 
-    NACM Section 5.6.5.2
   INPUTCLASS 
     Default
   MINIMUM
@@ -132,7 +184,10 @@ RULE TrmlUnit:InductionRat
     else UNDEFINED
     endif endif endif
   ANNUAL
-    z:InductionRat
+    if( IfValidAnd( StdToPFPB > 0 ) )
+    then  1 // For T24N
+    else  UNCHANGED
+    endif
 ENDRULE
 
 RULE AirSys:TrmlUnit:Fan:FlowCap
@@ -162,14 +217,13 @@ RULE AirSys:TrmlUnit:Fan:FlowCap
     endif
   ANNUAL
     if( TrmlUnit:IsFanBox = 1 )
-    then 
-      if( TrmlUnit:Type = "ParallelFanBox" ) 
-      then // Parallel box
-        TrmlUnit:PriAirFlowMax * TrmlUnit:InductionRat
-      else // Series box
-        TrmlUnit:PriAirFlowMax
-      endif
-    else UNDEFINED
+    then  if( TrmlUnit:Type = "ParallelFanBox" ) 
+          then  // Parallel box
+                TrmlUnit:PriAirFlowMax * TrmlUnit:InductionRat
+          else  // Series box
+                TrmlUnit:PriAirFlowMax
+          endif
+    else  UNDEFINED
     endif
 ENDRULE
 
@@ -185,20 +239,18 @@ RULE TrmlUnit:InducedAirZnRef
      can be specified. However, another 'Conditioned' ThermalZone cannot be
      referenced. For active beams, the induced air zone must alwasy be the zone
      the beam serves."
-  REFERENCE 
-    NACM Section 5.6.5.2
   INPUTCLASS 
     CondRequired
   DEFAULT
     if( IsFanBox .AND. LocalCompAssigned( ZnServedRef ) )
     then ZnServedRef
-// TO DO: Add logic to only set to plenum if plenum is only referenced by one PIU terminal
-;     if( IfValidAnd( ZnServedRef:IsPlenumRet > 0 ) )
-;     then ZnServedRef:RetPlenumZnRef
-;     else if( IfValidAnd( ZnServedRef:IsPlenumSup > 0 ) )
-;     then ZnServedRef:SupPlenumZnRef 
-;     else ZnServedRef
-;     endif endif
+    // TO DO: Add logic to only set to plenum if plenum is only referenced by one PIU terminal
+    ;     if( IfValidAnd( ZnServedRef:IsPlenumRet > 0 ) )
+    ;     then ZnServedRef:RetPlenumZnRef
+    ;     else if( IfValidAnd( ZnServedRef:IsPlenumSup > 0 ) )
+    ;     then ZnServedRef:SupPlenumZnRef 
+    ;     else ZnServedRef
+    ;     endif endif
     else
     if( IfValidAnd( IsActiveBeam > 0 ) .AND. 
         LocalCompAssigned( ZnServedRef ) ) 
@@ -242,21 +294,25 @@ RULE TrmlUnit:InducedAirZnRef
     endif 
   SIZING
     if( IsFanBox )
-    then
-      if( BaseSysNum > 0 )
-      then 
-        if( ZnServedRef:IsPlenumRet > 0 )
-        then ZnServedRef:RetPlenumZnRef
-        else ZnServedRef
-        endif
-      else InducedAirZnRef
-      endif
+    then  if( BaseSysNum > 0 )
+          then  if( ZnServedRef:IsPlenumRet > 0 )
+                then  ZnServedRef:RetPlenumZnRef
+                else  ZnServedRef
+                endif
+          else  InducedAirZnRef
+          endif
     else if( IfValidAnd( IsActiveBeam > 0 ) )
-    then ZnServedRef
-    else UNDEFINED
+    then  ZnServedRef
+    else  UNDEFINED
     endif endif
   ANNUAL
-    z:InducedAirZnRef
+    if( IfValidAnd( StdToPFPB > 0 ) )
+    then  if( ZnServedRef:IsPlenumRet > 0 )
+          then  ZnServedRef:RetPlenumZnRef
+          else  ZnServedRef
+          endif
+    else  UNCHANGED
+    endif
 ENDRULE
 
 
@@ -268,8 +324,6 @@ RULE TrmlUnit:FanPwrPerFlow
     "This property is used to define the fan power of fan powered TerminalUnits.
      The child Fan object power inputs are defaulted based on this input and therefore
      (currently) not editable when used in this application."
-  REFERENCE 
-    NACM Section 5.6.5.2
   INPUTCLASS 
     Default
   UNITS
@@ -295,15 +349,17 @@ RULE TrmlUnit:FanPwrPerFlow
     endif 
   SIZING
     if( IsFanBox )
-    then
-      if( BaseSysNum > 0 )
-      then 0.35 // For 90.1
-      else FanPwrPerFlow
-      endif
-    else UNDEFINED
+    then  if( BaseSysNum > 0 )
+          then  0.35 // For 90.1
+          else  FanPwrPerFlow
+          endif
+    else  UNDEFINED
     endif
   ANNUAL
-    z:FanPwrPerFlow
+    if( IfValidAnd( StdToPFPB > 0 ) )
+    then  0.3 // For T24N
+    else  UNCHANGED
+    endif
 ENDRULE
 
 RULE AirSys:TrmlUnit:Fan:CtrlMthd
@@ -315,7 +371,10 @@ RULE AirSys:TrmlUnit:Fan:CtrlMthd
     else UNDEFINED
     endif
   ANNUAL
-    z:CtrlMthd
+    if( IsFanBox )
+    then "ConstantVolume"
+    else UNDEFINED
+    endif
 ENDRULE
 
 RULE AirSys:TrmlUnit:Fan:PwrIdx
@@ -330,7 +389,10 @@ RULE AirSys:TrmlUnit:Fan:PwrIdx
     else UNDEFINED
     endif
   ANNUAL
-    z:PwrIdx
+    if( IsFanBox )
+    then TrmlUnit:FanPwrPerFlow
+    else UNDEFINED
+    endif
 ENDRULE
 
 RULE AirSys:TrmlUnit:Fan:FlowEff
@@ -344,7 +406,10 @@ RULE AirSys:TrmlUnit:Fan:FlowEff
     else UNDEFINED 
     endif
   ANNUAL
-    z:FlowEff
+    if( TrmlUnit:IsFanBox )
+    then 0.5
+    else UNDEFINED 
+    endif
 ENDRULE
 
 RULE AirSys:TrmlUnit:Fan:MtrEff
@@ -361,7 +426,10 @@ RULE AirSys:TrmlUnit:Fan:MtrEff
     else UNDEFINED 
     endif 
   ANNUAL
-    z:MtrEff
+    if( IfValidAnd( PwrIdx >= 0 ) )
+    then 0.855
+    else UNDEFINED 
+    endif 
 ENDRULE
 
 RULE AirSys:TrmlUnit:Fan:TotEff
@@ -378,7 +446,10 @@ RULE AirSys:TrmlUnit:Fan:TotEff
     else UNDEFINED 
     endif 
   ANNUAL
-    z:TotEff
+    if( IfValidAnd( FlowEff >= 0 ) .AND. IfValidAnd( MtrEff > 0 ) )
+    then FlowEff * MtrEff
+    else UNDEFINED 
+    endif 
 ENDRULE
 
 RULE AirSys:TrmlUnit:Fan:TotStaticPress
@@ -395,7 +466,10 @@ RULE AirSys:TrmlUnit:Fan:TotStaticPress
     else UNDEFINED
     endif
   ANNUAL
-    z:TotStaticPress
+    if( IfValidAnd( PwrIdx > 0 ) .AND. IfValidAnd( TotEff > 0 ) )
+    then PwrIdx * ( TotEff / 0.1175 )   
+    else UNDEFINED
+    endif
 ENDRULE
 
 RULE AirSys:TrmlUnit:Fan:MtrHP
@@ -412,7 +486,10 @@ RULE AirSys:TrmlUnit:Fan:MtrHP
     else UNDEFINED 
     endif 
   ANNUAL
-    z:MtrEff
+    if( IfValidAnd( Pwr >= 0 ) )
+    then StdElecMtrSize:MotorHPValue("InputMotorHP", Pwr / 1000 / 745.6 )
+    else UNDEFINED 
+    endif 
 ENDRULE
 
 
@@ -422,14 +499,12 @@ RULE TrmlUnit:ParallelBoxFanCtrlMthd
     "The control scheme used to define when a parallel fan-powered box fans operate."
   HELP
     "Currently only 'FlowFraction' is supported."
-  REFERENCE 
-    NACM Section 5.6.5.2
   INPUTCLASS 
     NotInput
   OPTION
     FlowFraction
-;    ThermostatOffset     // Not supported
-;    TemperatureSchedule  // Not supported
+    ;    ThermostatOffset     // Not supported
+    ;    TemperatureSchedule  // Not supported
   DEFAULT
     if( Type = "ParallelFanBox" )
     then "FlowFraction"
@@ -441,7 +516,10 @@ RULE TrmlUnit:ParallelBoxFanCtrlMthd
     else "FlowFraction"
     endif
   ANNUAL
-    z:ParallelBoxFanCtrlMthd
+    if( Type != "ParallelFanBox" )
+    then UNDEFINED
+    else "FlowFraction"
+    endif
 ENDRULE
 
 
@@ -449,21 +527,14 @@ ENDRULE
 RULE TrmlUnit:ParallelBoxFanFlowFrac
   DESCRIPTION
     "The fraction of the primary air flow at which parallel fan turns on."
-  HELP : T24N_2016
-    "For parallel fan boxes, the fan operation is intermittent. If the primary air
-     flow is above this fraction, the fan is off. Otherwise the
-     parallel box fan will run according to the TerminalUnit availability schedule,
-     unless it is over-ridden by night-cycle control."
   HELP
-// As of E+ 8.7, parallel box fans can now be operated to only turn on the fan for heating
-// if the flow fraction is set to 0.
+    // As of E+ 8.7, parallel box fans can now be operated to only turn on the fan for heating
+    // if the flow fraction is set to 0.
     "For parallel fan boxes, the fan operation is intermittent. If the primary air
      flow is above this fraction, the fan is off. Otherwise the
      parallel box fan will run according to the TerminalUnit availability schedule,
      unless it is over-ridden by night-cycle control. If the fraction is set to 0,
      the fan will only run when there is a call for heating in the zone."
-  REFERENCE 
-    NACM Section 5.6.5.2
   INPUTCLASS 
     Default
   MINIMUM
@@ -497,12 +568,13 @@ RULE TrmlUnit:ParallelBoxFanFlowFrac
     endif endif
   ANNUAL
     if( Type != "ParallelFanBox" )
-    then UNDEFINED
-    else
-    if( BaseSysNum > 0 )
-    then Min( ( PriAirFlowMin / PriAirFlowMax ), 1.0 ) // For 90.1, see GC issue 806
-    else z:ParallelBoxFanFlowFrac
-    endif endif
+    then  UNDEFINED
+    else if( IfValidAnd( StdToPFPB > 0 ) )
+    then  0
+    else if( BaseSysNum > 0 )
+    then  Min( ( PriAirFlowMin / PriAirFlowMax ), 1.0 ) // For 90.1, see GC issue 806
+    else  z:ParallelBoxFanFlowFrac
+    endif endif endif
 ENDRULE
 
 
