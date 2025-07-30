@@ -1,0 +1,220 @@
+<%#INTERFACE
+parameter "zonename", :name => "Zone Name", :domain => String
+parameter "systemname", :name => "Zone System Name", :domain => String
+
+parameter "type", :name => "Zone System Type",
+  :domain => String, :default => "EvaporativeCooler"  # always EvaporativeCooler
+parameter "subtype", :name => "Zone System Subtype",
+  :domain => String, :default => "Standard IEC"  # (Standard IEC | Advanced IEC)
+parameter "directevap", :name => "Direct Evaporative Module Flag",
+  :domain => Integer, :default => 0  # (0 | 1) - 1 means it exists
+
+parameter "count", :name => "Count of Actual Units Serving Zone",
+  :domain => Integer, :default => 1
+
+parameter "evapclrprisupflow", :name => "Primary Design Supply Air Flow",
+  :domain => Numeric, :default => 2283.2  # CFM, or approx. 1.32 kg/s rated mass flow at 15 C and 1 atm
+parameter "evapclrprisupstaticpress", :name => "Primary Supply Static Pressure",
+  :domain => Numeric, :default => 0.69  # inch H2O, or approx. 172 Pa rated static pressure for Standard IEC
+%>
+<%
+if (not ["Standard IEC", "Advanced IEC"].include?(subtype))
+  raise("invalid value \"#{subtype}\" for subtype, must be \"Standard IEC\" or \"Advanced IEC\"")
+end
+if (not [0, 1].include?(directevap))
+  raise("invalid value #{directevap} for directevap, must be 0 or 1")
+end
+if (not count > 0)
+  raise("invalid value #{count} for count, must be greater than zero")
+end
+if (not evapclrprisupflow > 0)
+  raise("invalid value #{evapclrprisupflow} for evapclrprisupflow, must be greater than zero")
+end
+if (not evapclrprisupstaticpress > 0)
+  raise("invalid value #{evapclrprisupstaticpress} for evapclrprisupstaticpress, must be greater than zero")
+end
+
+
+system_name = "#{zonename} #{systemname}"
+
+# Map evaporative cooler type to rated static pressures consistent with table data assumptions.
+if (subtype == "Standard IEC" and directevap == 0)
+  hybrid_model = "standard-iec"
+  rated_static_pressure = 172  # Pa
+elsif (subtype == "Standard IEC" and directevap == 1)
+  hybrid_model = "standard-idec"
+  rated_static_pressure = 202  # Pa
+elsif (subtype == "Advanced IEC" and directevap == 0)
+  hybrid_model = "advanced-iec"
+  rated_static_pressure = 210  # Pa
+elsif (subtype == "Advanced IEC" and directevap == 1)
+  hybrid_model = "advanced-idec"
+  rated_static_pressure = 240  # Pa
+end
+
+primary_flow = evapclrprisupflow / 2118.88 * count  # Convert to m3/s and scale for number of units
+supply_static_pressure = evapclrprisupstaticpress * 249.089  # Convert to Pa
+
+secondary_flow = 0.82 * primary_flow  # Set to 82% consistent with table data assumptions
+rated_primary_flow = 2283.2 / 2118.88  # Convert to m3/s from rated flow of 2283.2 CFM consistent with table data assumptions
+
+# Calculate factor to scale electric power and water use for different system sizes.
+scaling_factor = primary_flow / rated_primary_flow
+
+# Assume primary static pressure is 67% of the supply static pressure; secondary static pressure is remainder.
+rated_primary_pressure = 0.67 * rated_static_pressure
+rated_secondary_pressure = 0.33 * rated_static_pressure
+
+actual_primary_pressure = 0.67 * supply_static_pressure
+actual_secondary_pressure = 0.33 * supply_static_pressure
+
+# Calculate Table:Lookup divisor to adjust fan energy for the difference betweeen actual and rated static pressures.
+fan_power_divisor = (primary_flow * rated_primary_pressure + secondary_flow * rated_secondary_pressure) /
+  (primary_flow * actual_primary_pressure + secondary_flow * actual_secondary_pressure)
+
+%>
+
+! NOTE: ZoneHVAC:HybridUnitaryHVAC has several issues to work around:
+! - Object name must be all caps or else it fails with an error.
+! - Availability Schedule must be specified or unit does not operate.
+! - System Maximum Supply Air Flow Rate and External Static Pressure are not actually used by the object.
+! - Mode 2 Maximum Outside Air Temperature must have a value otherwise cooling does not operate.
+! - Setting Mode 2 Minimum and Maximum Outside Air Fraction to 1 significantly cuts simulation run time.
+ZoneHVAC:HybridUnitaryHVAC,
+  <%= system_name.upcase %>,  !- Name
+  <%= system_name %> Operation Schedule,  !- Availability Schedule Name
+  ,                        !- Availability Manager List Name
+  <%= system_name %> Min Supply Temp Schedule,  !- Minimum Supply Air Temperature Schedule Name
+  <%= system_name %> Max Supply Temp Schedule,  !- Maximum Supply Air Temperature Schedule Name
+  <%= system_name %> Min Supply HR Schedule,  !- Minimum Supply Air Humidity Ratio Schedule Name
+  <%= system_name %> Max Supply HR Schedule,  !- Maximum Supply Air Humidity Ratio Schedule Name
+  Automatic,               !- Method to Choose Controlled Inputs and Part Runtime Fraction
+  <%= system_name %> Return Air Node,  !- Return Air Node Name
+  <%= system_name %> Outdoor Air Node,  !- Outside Air Node Name
+  <%= system_name %> Supply Air Node,  !- Supply Air Node Name
+  <%= system_name %> Relief Node,  !- Relief Node Name
+  1.0,                     !- System Maximum Supply Air Flow Rate {m3/s}
+  ,                        !- External Static Pressure at System Maximum Supply Air Flow Rate {Pa}
+  Yes,                     !- Fan Heat Included in Lookup Tables
+  ,                        !- Fan Heat Gain Location
+  ,                        !- Fan Heat in Air Stream Fraction
+  <%= scaling_factor %>,   !- Scaling Factor
+  10,                      !- Minimum Time Between Mode Change {minutes}
+  Electricity,             !- First Fuel Type
+  None,                    !- Second Fuel Type
+  None,                    !- Third Fuel Type
+  Electricity Use,         !- Objective Function to Minimize
+  ,                        !- Design Specification Outdoor Air Object Name
+  Standby,                 !- Mode 0 Name
+  ,                        !- Mode 0 Supply Air Temperature Lookup Table Name
+  ,                        !- Mode 0 Supply Air Humidity Ratio Lookup Table Name
+  Hybrid HVAC Standby Power Lookup,  !- Mode 0 System Electric Power Lookup Table Name
+  ,                        !- Mode 0 Supply Fan Electric Power Lookup Table Name
+  ,                        !- Mode 0 External Static Pressure Lookup Table Name
+  ,                        !- Mode 0 System Second Fuel Consumption Lookup Table Name
+  ,                        !- Mode 0 System Third Fuel Consumption Lookup Table Name
+  ,                        !- Mode 0 System Water Use Lookup Table Name
+  ,                        !- Mode 0 Outside Air Fraction
+  ,                        !- Mode 0 Supply Air Mass Flow Rate Ratio
+  Ventilation Only,        !- Mode 1 Name
+  Hybrid HVAC Ventilation SAT Lookup,  !- Mode 1 Supply Air Temperature Lookup Table Name
+  Hybrid HVAC HR Lookup,   !- Mode 1 Supply Air Humidity Ratio Lookup Table Name
+  ,                        !- Mode 1 System Electric Power Lookup Table Name
+  <%= system_name %> Fan Power Lookup,  !- Mode 1 Supply Fan Electric Power Lookup Table Name
+  ,                        !- Mode 1 External Static Pressure Lookup Table Name
+  ,                        !- Mode 1 System Second Fuel Consumption Lookup Table Name
+  ,                        !- Mode 1 System Third Fuel Consumption Lookup Table Name
+  ,                        !- Mode 1 System Water Use Lookup Table Name
+  ,                        !- Mode 1 Minimum Outside Air Temperature {C}
+  ,                        !- Mode 1 Maximum Outside Air Temperature {C}
+  ,                        !- Mode 1 Minimum Outside Air Humidity Ratio {kgWater/kgDryAir}
+  ,                        !- Mode 1 Maximum Outside Air Humidity Ratio {kgWater/kgDryAir}
+  ,                        !- Mode 1 Minimum Outside Air Relative Humidity {percent}
+  ,                        !- Mode 1 Maximum Outside Air Relative Humidity {percent}
+  ,                        !- Mode 1 Minimum Return Air Temperature {C}
+  ,                        !- Mode 1 Maximum Return Air Temperature {C}
+  ,                        !- Mode 1 Minimum Return Air Humidity Ratio {kgWater/kgDryAir}
+  ,                        !- Mode 1 Maximum Return Air Humidity Ratio {kgWater/kgDryAir}
+  ,                        !- Mode 1 Minimum Return Air Relative Humidity {percent}
+  ,                        !- Mode 1 Maximum Return Air Relative Humidity {percent}
+  ,                        !- Mode 1 Minimum Outside Air Fraction
+  ,                        !- Mode 1 Maximum Outside Air Fraction
+  ,                        !- Mode 1 Minimum Supply Air Mass Flow Rate Ratio
+  ,                        !- Mode 1 Maximum Supply Air Mass Flow Rate Ratio
+  Evaporative Cooling,     !- Mode 2 Name
+  <%= system_name %> Cooling SAT Lookup,  !- Mode 2 Supply Air Temperature Lookup Table Name
+  Hybrid HVAC HR Lookup,   !- Mode 2 Supply Air Humidity Ratio Lookup Table Name
+  <%= system_name %> Pump Power Lookup,  !- Mode 2 System Electric Power Lookup Table Name
+  <%= system_name %> Fan Power Lookup,  !- Mode 2 Supply Fan Electric Power Lookup Table Name
+  ,                        !- Mode 2 External Static Pressure Lookup Table Name
+  ,                        !- Mode 2 System Second Fuel Consumption Lookup Table Name
+  ,                        !- Mode 2 System Third Fuel Consumption Lookup Table Name
+  <%= system_name %> Water Use Lookup,  !- Mode 2 System Water Use Lookup Table Name
+  ,                        !- Mode 2 Minimum Outside Air Temperature {C}
+  100,                     !- Mode 2 Maximum Outside Air Temperature {C}
+  ,                        !- Mode 2 Minimum Outside Air Humidity Ratio {kgWater/kgDryAir}
+  ,                        !- Mode 2 Maximum Outside Air Humidity Ratio {kgWater/kgDryAir}
+  ,                        !- Mode 2 Minimum Outside Air Relative Humidity {percent}
+  ,                        !- Mode 2 Maximum Outside Air Relative Humidity {percent}
+  ,                        !- Mode 2 Minimum Return Air Temperature {C}
+  ,                        !- Mode 2 Maximum Return Air Temperature {C}
+  ,                        !- Mode 2 Minimum Return Air Humidity Ratio {kgWater/kgDryAir}
+  ,                        !- Mode 2 Maximum Return Air Humidity Ratio {kgWater/kgDryAir}
+  ,                        !- Mode 2 Minimum Return Air Relative Humidity {percent}
+  ,                        !- Mode 2 Maximum Return Air Relative Humidity {percent}
+  1,                       !- Mode 2 Minimum Outside Air Fraction
+  1,                       !- Mode 2 Maximum Outside Air Fraction
+  ,                        !- Mode 2 Minimum Supply Air Mass Flow Rate Ratio
+  ;                        !- Mode 2 Maximum Supply Air Mass Flow Rate Ratio
+
+Schedule:Compact,
+  <%= system_name %> Operation Schedule,  !- Name
+  OnOff,                   !- Schedule Type Limits Name
+  Through: 12/31,          !- Field 1
+  For: AllDays,            !- Field 2
+  Until: 24:00,            !- Field 3
+  1;                       !- Field 4
+
+Schedule:Compact,
+  <%= system_name %> Min Supply Temp Schedule,  !- Name
+  Temperature,             !- Schedule Type Limits Name
+  Through: 12/31,          !- Field 1
+  For: AllDays,            !- Field 2
+  Until: 24:00,            !- Field 3
+  -20;                     !- Field 4
+
+Schedule:Compact,
+  <%= system_name %> Max Supply Temp Schedule,  !- Name
+  Temperature,             !- Schedule Type Limits Name
+  Through: 12/31,          !- Field 1
+  For: AllDays,            !- Field 2
+  Until: 24:00,            !- Field 3
+  100;                     !- Field 4
+
+Schedule:Compact,
+  <%= system_name %> Min Supply HR Schedule,  !- Name
+  Temperature,             !- Schedule Type Limits Name
+  Through: 12/31,          !- Field 1
+  For: AllDays,            !- Field 2
+  Until: 24:00,            !- Field 3
+  0;                       !- Field 4
+
+Schedule:Compact,
+  <%= system_name %> Max Supply HR Schedule,  !- Name
+  Temperature,             !- Schedule Type Limits Name
+  Through: 12/31,          !- Field 1
+  For: AllDays,            !- Field 2
+  Until: 24:00,            !- Field 3
+  0.03;                    !- Field 4
+
+OutdoorAir:Node,
+  <%= system_name %> Outdoor Air Node;  !- Name
+
+<%
+if (not $inserted_common)
+  insert "hybrid-tables-common.pxt"
+  $inserted_common = true
+end
+
+insert "hybrid-tables-#{hybrid_model}.pxt", :system_name => system_name, :fan_power_divisor => fan_power_divisor
+%>

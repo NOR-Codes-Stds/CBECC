@@ -1,0 +1,207 @@
+ripl(1) -- Ruby Interactive Print Loop - A light, modular alternative to irb
+====================================
+
+## SYNOPSIS
+
+    ripl [COMMAND] [ARGS] [-r|--require] [-I] [-f] [-d] [-h|--help] [-v|--version]
+
+## DESCRIPTION
+
+ripl is a light, modular alternative to irb. Like irb, it loads ~/.irbrc, has autocompletion and
+keeps history in ~/.irb_history.  Unlike irb, it is highly customizable via plugins and supports
+commands.  This customizability makes it easy to build custom shells (i.e. for a gem or application)
+and complex shells (i.e. for the web).
+
+## COMING FROM IRB
+
+When first trying ripl, you may experience errors in your ~/.irbrc due to an irb-specific
+configuration. In order to have ripl and irb coexist peacefully, you should silence these errors.
+To silence them without touching your ~/.irbrc, install the ripl-irb gem. This ripl plugin fakes
+irb's existence and points to ripl equivalents for your irb configurations. Otherwise, if you don't mind
+modifying ~/.irbrc, wrap your irb-specific configuration in a block as follow:
+
+    if defined? IRB
+      IRB.conf[:BLAH] = 'blah'
+      # ...
+    end
+
+## CONFIGURATION
+
+All ripl shells load the ruby file ~/.riplrc if it exists. In this file, plugins are required and
+configuration options are set. To configure ripl and its plugins, use Ripl.config. By default,
+Ripl.config is a hash with the following keys:
+
+* `:binding`:
+  Binding to use for eval(). Default is TOPLEVEL_BINDING.
+
+* `:completion`:
+  A hash that configures completion via Bond.start. See bond for more details.
+
+* `:history`:
+  A file used to store input history. Default is '~/.irb_history'.
+
+* `:irbrc`:
+  A ruby file to load at startup or false to not load anything. Default is '~/.irbrc'.
+
+* `:name`:
+  Name of the shell. Default is 'ripl'.
+
+* `:prompt`:
+  A string or lambda to generate string that prompts user for input. Default is '>> '.
+
+* `:readline`:
+  A boolean or string to enable Readline. Default is true. If a string, requires the readline-like library.
+
+* `:result_prompt`:
+  A string that prefixes the result of an eval. Default is '=> '.
+
+Plugins can optionally provide their own config key(s) for use here. It is strongly recommended that
+a plugin start with an underscored version of its name i.e. Ripl::ColorError -> Ripl.config[:color_error].
+
+An example ~/.riplrc:
+
+      require 'ripl/multi_line'
+      require 'ripl/color_error'
+      Ripl.config[:color_error] = :blue
+
+## PLUGINS
+
+A ripl plugin is a module that is included into Ripl::Shell or extended into Ripl::Runner.  Being
+simply modules, they can be packaged as gems and reused across shells as needed.  ripl highly
+encourages plugins by loading them as early as possible and allowing them to extend most of ripl's
+functionality. As mentioned in the `CONFIGURATION` section, a plugin can be configured via
+Ripl.config.
+
+To always use a plugin, require it in ~/.riplrc. To sometimes use it, require it from
+the commandline:
+
+    $ ripl -rripl/multi_line
+
+Plugins can also be required in the console but it is not recommended since plugins can depend on
+initialization that occurs before the console is started. For this same reason, plugins should not
+be required in ~/.irbrc.
+
+## CREATE PLUGINS
+
+For an example shell plugin, let's color error messages red:
+
+    require 'ripl'
+
+    # To try place in ~/.riplrc
+    module Ripl
+      module RedError
+        def format_error(error)
+          "\e[31m#{super}\e[m"
+        end
+      end
+    end
+    Ripl::Shell.include Ripl::RedError
+
+Note this plugin extends format_error() by invoking the original format_error() with super. To see
+what methods are available for extension, see Ripl::Shell::API and Ripl::Runner::API.
+
+Points to consider when creating plugins:
+
+* When adding functionality to a method, make sure to call `super` to preserve existing functionality.
+
+* When replacing functionality for a method, make sure the method's expectations are met i.e.
+  setting a specific instance variable or calling certain methods. Failure to do so can `break` ripl
+  for you and anyone else who uses your plugin!
+
+* Plugins can setup and teardown anything around a shell by extending Shell#before_loop and Shell#after_loop:
+
+    module Ripl::MyPlugin
+      # When requiring a plugin within ripl, this callback isn't called
+      def before_loop
+        super
+        # Open file, open connection ...
+      end
+
+      def after_loop
+        super
+        # Write to file, close a connection ...
+      end
+    end
+
+* To add configuration for a plugin, add a key to Ripl.config that matches the underscored version
+  of the plugin name i.e. Ripl::RedError -> Ripl.config[:red_error]. To set a default config value, just set it
+  after including the plugin into Ripl::Shell.
+
+* To add console commands for a plugin, make them methods in a module and include the module into Ripl::Commands.  For example:
+
+    module Ripl::SuperHistory
+      # plugin hooks into history
+      # then defines command
+      module Commands
+        def history
+          # ...
+        end
+      end
+    end
+
+    Ripl::Commands.include Ripl::SuperHistory::Commands
+
+    \>\> history # use command in ripl
+
+* To define custom autocompletion for a plugin and its commands, create a completion file in
+  lib/ripl/completions/plugin_name i.e. ripl-super_history plugin -> lib/ripl/completions/super_history.rb.
+  The syntax of this file is explained [in bond's docs](http://tagaholic.me/bond/doc/Bond/Rc.html).
+  To autocomplete a console command, define a :method completion. For an example plugin that uses this, see
+  [ripl-commands](http://github.com/cldwalker/ripl-commands).
+
+* For plugins with console commands, commands aren't immediately recognized if the plugin is required within ripl.
+  To fix this: Ripl.shell.add_commands(self).
+
+* A plugin should not have Ripl.shell in the top-level i.e. touch Ripl.shell when it's required. Doing
+  this can make commandline options buggy.
+
+* For more examples of plugins, see gems I've made that start with 'ripl-'.
+
+## CREATE CUSTOM SHELLS
+
+Creating and starting a custom shell is as simple as:
+
+    require 'ripl'
+    # Define plugins, load files, etc...
+    Ripl.start
+
+Ripl.start takes the same config keys mentioned in the `CONFIGURATION` section. For example if you wanted to
+start on a specific binding:
+
+    Ripl.start :binding => MyClass.instance_eval{ binding }
+
+Also, since all shells load ~/.riplrc, Ripl.start can be used to override undesirable global
+configuration for a custom shell.
+
+## COMMANDS
+
+A ripl command is a command passed to ripl that loads a custom shell. It's a convenient way to
+package and invoke custom shells. A ripl command can take standard ripl options as long as they are
+before the command:
+
+    # Load rails console without ~/.irbrc
+    $ ripl rails -f
+
+    # Load rails console with debugger
+    $ ripl rails -rrdebug
+
+To create a ripl command, create an executable in the format ripl-command and make sure it's in your
+shell's $PATH. For example, the file 'ripl-my_gem' would be invoked with 'ripl my_gem'. A ripl
+command can take arguments, local options and global options (i.e. -f). To avoid conflicts between
+local and global options, local options *must be parsed and deleted* by the command before
+Ripl.start is invoked.  For example commands, see
+[ripl-rails](http://github.com/cldwalker/ripl-rails) and
+[ripl-play](http://github.com/cldwalker/ripl-play).
+
+## BUGS
+
+Please report bugs at <http://github.com/cldwalker/ripl/issues>.
+
+## COPYRIGHT
+
+`ripl` is Copyright (C) 2010 Gabriel Horner
+
+## SEE ALSO
+
+<http://github.com/cldwalker/ripl>, <http://github.com/cldwalker/bond>, <http://github.com/cldwalker/nirvana>,
+<http://github.com/cldwalker/ripl-irb>, <http://github.com/cldwalker/ripl-rails>, <http://github.com/janlelis/multi_line>

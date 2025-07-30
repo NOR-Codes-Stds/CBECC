@@ -1,0 +1,94 @@
+// Rules to be processed prior to each transform simulation
+//
+// -------------------------------------------------------------------------
+//  Copyright (c) 2022, SAC Software Solutions, LLC
+//  All rights reserved.
+//  Redistribution and use in source and binary forms, with or without
+//  modification, are permitted provided that the following conditions are
+//  met:
+// 
+//    * Redistributions of source code must retain the above copyright
+//  notice, this list of conditions and the following disclaimer.
+//    * Redistributions in binary form must reproduce the above copyright
+//  notice, this list of conditions and the following disclaimer in
+//  the documentation and/or other materials provided with the
+//  distribution.
+//    * Neither the name of the California Energy Commission nor the names of its
+//  contributors may be used to endorse or promote products
+//  derived from this software without specific prior written
+//  permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+//  IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+//  TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+//  PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION
+//  BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+//  CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+//  SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR
+//  BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+//  WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+//  OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+//  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// -------------------------------------------------------------------------
+//
+
+
+; rulelists evaluated prior to IDF manipulation via Modelkit - SAC 06/22/22
+
+
+;*************************************************************************
+RULELIST "ModekitPrep_HybridCooling" 1 0 0 0
+; if we are here that means that there is at least 1 ZnSys where Type = "EvaporativeCooler" (needing Modelkit IDF processing)
+
+;   "write BEMBase details to export"  Proj:Action = {  StoreBEMProc( Format( "b4-modelkit-prep-%s", RunAbbrev ), 0 )  }
+
+   "Open Modelkit CSV file"      Proj:ModelkitCSVExportFileIdx =
+      {  OpenExportFile( ProcessingPath + ModelFile + " - " + RunAbbrev + " - HybridHVAC.csv", "wt" )  }
+   "Write Modelkit CSV header"   Proj:Action  =
+      {  WriteToExportFile( ModelkitCSVExportFileIdx, "ZoneName,SystemName,Type,SubType,Count,DirectEvap,EvapClrPriSupFlow,EvapClrPriSupStaticPress\n" )  }
+   ; removed final column, EvapClrSecExhFlow - SAC 12/19/23
+   ;   {  WriteToExportFile( ModelkitCSVExportFileIdx, "ZoneName,SystemName,Type,SubType,Count,DirectEvap,EvapClrPriSupFlow,EvapClrPriSupStaticPress,EvapClrSecExhFlow\n" )  }
+   "Write Modelkit CSV record for each EvaporativeCooler ZnSys"   ZnSys:Action =
+      {  if (Type = "EvaporativeCooler" .AND. LocalCompAssigned( CtrlZnRef ))
+         then  EvalRulelist( "ModekitPrep_HybridCooling_ZnSys", 1 )
+         else  UNCHANGED  endif  }
+   "Close Modelkit CSV file"     Proj:Action =
+      {  CloseExportFile( ModelkitCSVExportFileIdx )  }
+
+   "Set Proj:ModelkitProcessingID"     Proj:ModelkitProcessingID = {  1  }
+
+;   "write BEMBase details to export"  Proj:Action = {  StoreBEMProc( Format( "after-modelkit-prep-%s", RunAbbrev ), 0 )  }
+;   "pause analysis"  Proj:Action = {  MessageBox(  Format( "after writing Modelkit processing CSV for run: %s", RunAbbrev ) )  }
+
+END
+;*************************************************************************
+RULELIST "ModekitPrep_HybridCooling_ZnSys" 1 0 0 0
+   "Write Modelkit CSV record"   ZnSys:Action  =
+      {  WriteToExportFile( Proj:ModelkitCSVExportFileIdx, "%c%s%c,%c%s%c,%c%s%c,%c%s%c,%g,%g,%g,%g,\n",
+                                    34, CtrlZnRef:Name, 34, 34, Name, 34, 34, Type, 34, 34, SubType, 34,
+                                    Cnt, ValidOr( HasDirectEvap, 0 ), ValidOr( EvapClrPriSupFlow, 0 ),
+                                    ValidOr( EvapClrPriSupStaticPress, 0 ) )  }
+   ; removed final column, EvapClrSecExhFlow - SAC 12/19/23
+   ;   {  WriteToExportFile( Proj:ModelkitCSVExportFileIdx, "%c%s%c,%c%s%c,%c%s%c,%c%s%c,%g,%g,%g,%g,%g,\n",
+   ;                                 34, CtrlZnRef:Name, 34, 34, Name, 34, 34, Type, 34, 34, SubType, 34,
+   ;                                 Cnt, ValidOr( HasDirectEvap, 0 ), ValidOr( EvapClrPriSupFlow, 0 ),
+   ;                                 ValidOr( EvapClrPriSupStaticPress, 0 ), ValidOr( EvapClrSecExhFlow, 0 ) )  }
+; replaced following (hard-wired to old selections) w/ export of final enumerations above - SAC 07/11/22
+;      {  if (SubType = "Standard IEC")
+;         then  WriteToExportFile( Proj:ModelkitCSVExportFileIdx, "%c%s%c,%c%s%c,%c%s%c,%c%s%c,%g,%g,%g,%g,%g\n",
+;                                    34, CtrlZnRef:Name, 34, 34, Name, 34, 34, Type, 34, 34, "Indirect", 34,
+;                                    Cnt, ValidOr( HasDirectEvap, 0 ), ValidOr( EvapClrPriSupFlow, 0 ),
+;                                    ValidOr( EvapClrPriSupStaticPress, 0 ), ValidOr( EvapClrSecExhFlow, 0 ) )
+;         else  WriteToExportFile( Proj:ModelkitCSVExportFileIdx, "%c%s%c,%c%s%c,%c%s%c,%c%s%c,%g,%g,%g,%g,%g\n",
+;                                    34, CtrlZnRef:Name, 34, 34, Name, 34, 34, Type, 34, 34, "M-Cycle", 34,
+;                                    Cnt, ValidOr( HasDirectEvap, 0 ), ValidOr( EvapClrPriSupFlow, 0 ),
+;                                    ValidOr( EvapClrPriSupStaticPress, 0 ), ValidOr( EvapClrSecExhFlow, 0 ) )
+;         endif  }
+
+END
+;*************************************************************************
+
+
+;*************************************************************************
+ENDFILE
+
