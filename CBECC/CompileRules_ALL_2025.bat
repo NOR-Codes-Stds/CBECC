@@ -1,9 +1,9 @@
 if not exist "Data\Rulesets" mkdir "Data\Rulesets"
 if not exist "Data\Rulesets\T24_2025" mkdir "Data\Rulesets\T24_2025"
 if not exist "Data\Rulesets\CA Res 2025" mkdir "Data\Rulesets\CA Res 2025"
-if exist BEMCompiler25c.exe BEMCompiler25c.exe --sharedPath1="../RulesetSrc/shared/" --bemBaseTxt="../RulesetSrc/BEMBase.txt" --bemEnumsTxt="../RulesetSrc/T24NRMF/T24N_2025 BEMEnums.txt" --bemBaseBin="Data/Rulesets/T24_2025/T24_2025 BEMBase.bin" --rulesTxt="../RulesetSrc/T24NRMF/T24N_2025.txt" --rulesBin="Data/Rulesets/T24_2025.bin" --rulesLog="_T24-2025 Rules Log.out" --compileDM --compileRules
+if exist BEMCompiler25.exe BEMCompiler25.exe --sharedPath1="../RulesetSrc/shared/" --bemBaseTxt="../RulesetSrc/BEMBase.txt" --bemEnumsTxt="../RulesetSrc/T24NRMF/T24N_2025 BEMEnums.txt" --bemBaseBin="Data/Rulesets/T24_2025/T24_2025 BEMBase.bin" --rulesTxt="../RulesetSrc/T24NRMF/T24N_2025.txt" --rulesBin="Data/Rulesets/T24_2025.bin" --rulesLog="_T24-2025 Rules Log.out" --compileDM --compileRules
 echo OFF
-echo BEMCompiler25c.exe returned (%ERRORLEVEL%) for T24N_2025
+echo BEMCompiler25.exe returned (%ERRORLEVEL%) for T24N_2025
 if %ERRORLEVEL%==0 goto :copyfiles
 goto :error
 :copyfiles
@@ -30,8 +30,8 @@ echo -
 echo off
   echo --------------------------------------------
   echo Compiling 2025 SFam ruleset...
-if exist BEMCompiler25c.exe BEMCompiler25c.exe --bemBaseTxt="../RulesetSrc/BEMBase-SFam.txt" --bemEnumsTxt="../RulesetSrc/T24SFam/CAR25 BEMEnums.txt" --bemBaseBin="Data/Rulesets/CA Res 2025/CAR25 BEMBase.bin" --rulesTxt="../RulesetSrc/T24SFam/Rules-2025.txt" --rulesBin="Data/Rulesets/CA Res 2025.bin" --rulesLog="_Rules-SFam-2025 Log.out" --compileDM --compileRules
-echo BEMCompiler25c.exe returned (%ERRORLEVEL%) for CA Res 2025
+if exist BEMCompiler25.exe BEMCompiler25.exe --bemBaseTxt="../RulesetSrc/BEMBase-SFam.txt" --bemEnumsTxt="../RulesetSrc/T24SFam/CAR25 BEMEnums.txt" --bemBaseBin="Data/Rulesets/CA Res 2025/CAR25 BEMBase.bin" --rulesTxt="../RulesetSrc/T24SFam/Rules-2025.txt" --rulesBin="Data/Rulesets/CA Res 2025.bin" --rulesLog="_Rules-SFam-2025 Log.out" --compileDM --compileRules
+echo BEMCompiler25.exe returned (%ERRORLEVEL%) for CA Res 2025
 if %ERRORLEVEL%==0 goto :copyfiles2
 goto :error2
 :copyfiles2
