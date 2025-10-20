@@ -13,7 +13,6 @@ copy "..\RulesetSrc\T24NRMF\RTF\*.*" "..\CBECC\Data\Rulesets\T24_2025\RTF\*.*"
 copy "..\RulesetSrc\shared\RTF\*.*" "..\CBECC\Data\Rulesets\T24_2025\RTF\*.*"
 copy "..\RulesetSrc\shared\Screens_Res_2025.txt" "..\CBECC\Data\Rulesets\T24_2025\*.*"
 copy "..\RulesetSrc\shared\*.jpg" "..\CBECC\Data\Rulesets\T24_2025\*.*"
-copy "..\RulesetSrc\shared\*.png" "..\CBECC\Data\Rulesets\T24_2025\*.*"
 rem copy "..\RulesetSrc\CEC 2013 Nonres\CEC 2013 NonRes Defaults.dbd" "..\CBECC-Com\Data\Rulesets\T24_2025\T24_2025 Defaults.dbd"
 rem copy "..\RulesetSrc\T24NRMF\DHWDU2.txt" "..\CBECC\CSE\*.*"
 goto :done
