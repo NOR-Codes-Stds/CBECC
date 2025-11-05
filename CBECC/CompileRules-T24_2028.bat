@@ -1,8 +1,8 @@
 if not exist "Data\Rulesets" mkdir "Data\Rulesets"
 if not exist "Data\Rulesets\T24_2028" mkdir "Data\Rulesets\T24_2028"
-if exist BEMCompiler25c.exe BEMCompiler25c.exe --sharedPath1="../RulesetSrc/shared/" --bemBaseTxt="../RulesetSrc/BEMBase.txt" --bemEnumsTxt="../RulesetSrc/T24NRMF/T24N_2025 BEMEnums.txt" --bemBaseBin="Data/Rulesets/T24_2028/T24_2028 BEMBase.bin" --rulesTxt="../RulesetSrc/T24NRMF/T24N_2028.txt" --rulesBin="Data/Rulesets/T24_2028.bin" --rulesLog="_T24-2028 Rules Log.out" --compileDM --compileRules
+if exist BEMCompiler25.exe BEMCompiler25.exe --sharedPath1="../RulesetSrc/shared/" --bemBaseTxt="../RulesetSrc/BEMBase.txt" --bemEnumsTxt="../RulesetSrc/T24NRMF/T24N_2025 BEMEnums.txt" --bemBaseBin="Data/Rulesets/T24_2028/T24_2028 BEMBase.bin" --rulesTxt="../RulesetSrc/T24NRMF/T24N_2028.txt" --rulesBin="Data/Rulesets/T24_2028.bin" --rulesLog="_T24-2028 Rules Log.out" --compileDM --compileRules
 echo OFF
-echo BEMCompiler25c.exe returned (%ERRORLEVEL%) for T24N_2028
+echo BEMCompiler25.exe returned (%ERRORLEVEL%) for T24N_2028
 if %ERRORLEVEL%==0 goto :copyfiles
 goto :error
 :copyfiles
