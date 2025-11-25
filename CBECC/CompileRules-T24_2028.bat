@@ -6,7 +6,7 @@ echo BEMCompiler25.exe returned (%ERRORLEVEL%) for T24N_2028
 if %ERRORLEVEL%==0 goto :copyfiles
 goto :error
 :copyfiles
-copy "..\RulesetSrc\T24NRMF\T24N_2025 Screens.txt"  "..\CBECC\Data\Rulesets\T24_2028\T24_2028 Screens.txt"
+copy "..\RulesetSrc\T24NRMF\T24N_2028 Screens.txt"  "..\CBECC\Data\Rulesets\T24_2028\T24_2028 Screens.txt"
 copy "..\RulesetSrc\T24NRMF\T24N ToolTips.txt" "..\CBECC\Data\Rulesets\T24_2028\T24_2028 ToolTips.txt"
 copy "..\RulesetSrc\T24NRMF\*.jpg" "..\CBECC\Data\Rulesets\T24_2028\*.*"
 copy "..\RulesetSrc\T24NRMF\RTF\*.*" "..\CBECC\Data\Rulesets\T24_2028\RTF\*.*"
