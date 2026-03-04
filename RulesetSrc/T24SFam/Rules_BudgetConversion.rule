@@ -1558,6 +1558,22 @@ RULELIST  "BudgetConversion" 1 0 1 0
          then  EvalRulelist( "Setup_HVACSys_SplitHeatPumpPM", 1 )
          else  UNCHANGED  endif endif  }
 
+   "defaulting of imported library HVACHtPump"    HVACHtPump:Action =                         ; SAC 02/24/26 (support #498)
+    { if( LocalStatus( UsePMModel ) < 1 .AND. IfValidAnd( Type = 4 ) )
+      then  EvalRulelist( "Default_HVACHeatPump", 1 )
+      else  UNCHANGED  endif  }
+   "defaulting of HVACSys w/ newly imported library HVACHtPump (rnd1)"   HVACSys:Action =     ; SAC 02/24/26 (support #498)
+    { if( IfValidAnd( Type = 2 ) .AND. LocalCompAssigned( HtPumpSystem[1] ) .AND.
+          IfValidAnd( HtPumpSystem[1]:Type = HtPumpSysType )==0 )
+      then  EvalRulelist( "SetupHVACSys_Round1_HeatPump", 1 )
+      else  UNCHANGED  endif  }
+   "defaulting of HVACSys w/ newly imported library HVACHtPump (rnd2)"   HVACSys:Action =     ; SAC 02/24/26 (support #498)
+    { if( IfValidAnd( Type = 2 ) .AND. LocalCompAssigned( HtPumpSystem[1] ) > 0 )
+      then  if( EnumString( HtPumpSystem[1]:TypeAbbrev ) != ValidOr( HtPumpSysTypeAbbrev, "unknown" ) )
+            then  EvalRulelist( "SetupHVACSys_Round2_HeatPump", 1 )
+            else  UNCHANGED  endif
+      else  UNCHANGED  endif  }
+
 	"Setup Standard heat pump system properties"		; SAC 12/26/14 - added logic to ensure that Altered/Verified systems get processed via Setup_HVACSys_HtPump_*   ; SAC 9/19/19 - OtherZone (MFamProto)
 			HVACSys:Action		= {	if ((Status != 2 .OR. IsVerified < 0.5) .AND.
 												 (FloorAreaServed < 0.1 .OR.
@@ -1604,8 +1620,9 @@ RULELIST  "BudgetConversion" 1 0 1 0
 
    "Setup budget ducts & fan"    ; SAC 1/17/18
       Proj:Action = {  EvalRulelist( "BudgetConversion_SetupDuctsAndFan" )  }
-;"store BEMProc details" Proj:Action = {  if (IsStdRun) then  StoreBEMProc( "frc HVACDist-type", 0 ) else  UNCHANGED  endif  }
+    ;"store BEMProc details" Proj:Action = {  if (IsStdRun) then  StoreBEMProc( "frc HVACDist-type", 0 ) else  UNCHANGED  endif  }
 ;"debugging" Proj:Action = { if (IsStdRun) then  MessageBox( "Model stored for %s:%s run", RunID, EnumString( StandardsVersion ) )  else  UNCHANGED  endif }
+;"store BEMProc details"	Proj:Action = {  StoreBEMProc( Format( "b4 HVAC rnd2 setup %s", RunAbbrev ), 0 ) }   ; SAC 02/03/26 (support #439)
 
 ; mjb	10/24/14	- mods to keep existing HVAC in Std Design for Additions Alone
 ;	mjb	10/27/14 - mods to keep existing HVAC in Std Design for E+A+A
@@ -3235,6 +3252,16 @@ RULELIST "BudgetConversion_Std_2025" 1 0 1 1
    ;      then  EvalRulelist( "BudgetConversion_SetupElectricHVAC" )
    ;      else if (StdDesignFuel >= 3 .AND. StdDesignFuel_HVAC == 0) then  UNCHANGED    ; std = proposed
    ;      else  EvalRulelist( "BudgetConversion_SetupGasHVAC" )  endif endif  }
+
+   "Convert ElecFurnace HVACSys to HP for s2 run"   HVACSys:Action =        ; add rule to ensure Other HVAC Elec (non-HP) Htg systems get converted to HP for s2 run - SAC 02/04/26 (support #439 & #444)
+      { if( Proj:RunAbbrev == "s2" .AND. Type != 2 .AND. Status == 3 .AND. IfValidAnd( FloorAreaServed[1] > 0 ) .AND.
+            ( IfValidAnd( HeatSystem[1]:Type = 8 ) .OR.                               ; Electric (not HP)
+              ( IfValidAnd( HeatSystem[1]:Type = 9 ) .AND.                            ; Combined Hydronic
+                ( IfValidAnd( HeatSystem[1]:CHWHeater:HeaterElementType = 0 ) .OR.        ; ElecRes
+                  IfValidAnd( HeatSystem[1]:CHWHeater:HeaterElementType = 5 ) ) ) ) )     ; HP
+        then  EvalRulelist( "ConvertTo_HVACSys_HeatPump", 1 )
+        else  UNCHANGED  endif  }
+
    "Setup DHW Fuel"           Proj:Action =
       {  if (RunAbbrev == "s") then        EvalRulelist( "BudgetConversion_SetupElectricDHW" )
          else if (RunAbbrev == "s3") then  EvalRulelist( "BudgetConversion_SetupGasDHW" )
@@ -3320,7 +3347,7 @@ RULELIST "BudgetConversion_SetupGasDHW" 1 0 1 1
 END
 ;************************************************************************* SAC 6/12/20 (2022AllElecStd)
 RULELIST "ConvertTo_HVACSys_HeatPump" 1 0 1 0
-;         "dbg" HVACSys:Action = { PostMessageToLog( "          evaluating 'ConvertTo_HVACSys_HeatPump' rules on '%s' model, system '%s'", Proj:RunAbbrev, Name )  }
+    ;"dbg" HVACSys:Action = { PostMessageToLog( "          evaluating 'ConvertTo_HVACSys_HeatPump' rules on '%s' model, system '%s'", Proj:RunAbbrev, Name )  }
    "Set HVACSys:Type to HtPump"        HVACSys:Type  = {  2  }
    "Set HVACSys:NumHtPumpSystemTypes"  HVACSys:NumHtPumpSystemTypes  = {  1  }
    "Assign HVACSys:HtPumpSystem[1]"    HVACSys:HtPumpSystem[1]  =
