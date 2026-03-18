@@ -43,6 +43,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 ;*************************************************************************
 ;"log status"   Proj:Action = {  if (DevMode==0 .OR. LocalStatus(RunAbbrev) < 1 .OR. EnergyCodeYearNum < 2019) then  UNCHANGED  else
 ;   PostMessageToLog( "    evaluating 'ProposedModelCodeCheck' rules on '%s' model...", RunAbbrev )  endif  }
+  ; add logic to prevent certain errors (throughout this module) when doing CUAC - SAC 03/11/26 & 03/12/26 (dev #741)
 
    "call rulelist to write MxdFuelCmpr Inputs export CSV"      Proj:Action =     ; placed here since right after call to 'CF1RPRF01E_Proposed' rulelist which defines all CF1R input details - SAC 06/26/22
       {  if (IfValidAnd( ShowMixedFuelCompare > 0 ) .AND.
@@ -71,7 +72,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 									else  UNCHANGED  endif  }
 	; SAC 3/8/19 - added logic to perform check on AlterIncl2Categs (& NumAlterations) only for analysis PRIOR to 2019 (tic #1085)
 	"Report AlterIncl2Categs problem"
-		Proj:Action		= {	if (RunScope == 2 .AND. SumAcrossIf( Zone:IsNew, Zone:FloorArea > 1 ) < 0.5 .AND. Proj:EnergyCodeYearNum < 2019)
+		Proj:Action		= {	if (RunScope == 2 .AND. SumAcrossIf( Zone:IsNew, Zone:FloorArea > 1 ) < 0.5 .AND. Proj:EnergyCodeYearNum < 2019 .AND. IfValidAnd( CUACReportID > 0 )==0)
 									then	if (IfValidAnd( AlterIncl2Categs > 0.5 )==0)
 											then	PostError( "Proj:AlterIncl2Categs (CBECC-Res: checkbox in Project dialog > Analysis tab) must be selected to confirm that alterations span multiple categories (as per standard section 150.2(b)2)." )
 											else if (IfValidAnd( NumAlterations < 2 ))
@@ -87,7 +88,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 
 	; SAC 4/21/15 - added check to ensure at least one zone where Status = 'Existing' for EAA projects
 	"Check to ensure at least one zone of Status = 'Existing' present when Run Scope = 'Addition and/or Alteration'"
-		Proj:Action		= {	if (RunScope != 2 .OR. SumChildrenIf( Zone:FloorArea, Zone:Status = 1 ) > 0.1) then  UNCHANGED
+		Proj:Action		= {	if (RunScope != 2 .OR. SumChildrenIf( Zone:FloorArea, Zone:Status = 1 ) > 0.1 .OR. IfValidAnd( CUACReportID > 0 )) then  UNCHANGED
 									else	PostError( "At least one 'Existing' zone must be specified when Run Scope = 'Addition and/or Alteration'.  If this model is of an addition alone, then change Run Scope to 'New Construction' and select 'Addition Alone project'." )  endif  }
 
 	"Prevent analysis of MFam models in Res 2022+ code cycles"     Proj:Action = {   ; SAC 01/20/22 (tic #1323)
@@ -96,7 +97,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 		else  PostError( "Multifamily buildings can no longer be checked for energy code compliance via Residential analysis. Port this project to a Nonresidential/Multifamily tool/analysis to calculate compliance.%c", 10 )  endif  }
 
    "Prevent NEM2 for 2025+ until/unless conversion factor defined"   Proj:Action =     ; SAC 05/19/23 (NEM3)
-      {  if (IfValidAnd( EnergyCodeYearNum >= 2025 ) .AND. NetEnergyMeteringType == 2)
+      {  if (IfValidAnd( EnergyCodeYearNum >= 2025 ) .AND. NetEnergyMeteringType == 2 .AND. IfValidAnd( CUACReportID > 0 )==0)
          then  PostError( "Net Energy Metering 2 (NEM2) adjusters not yet compatible with Long-term System Cost metric." )
          else  UNCHANGED  endif  }
 
@@ -129,13 +130,13 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
       else if (CommunitySolarProjID > 0 .AND. IfValidAnd( CmntySlrProjCZCompat > 0 )==0)
       then  PostError( "Selected Community Solar project '%s' is not avaialble in %s", EnumString( CommunitySolarProject ), EnumString( ClimateZone ) )
       else if (CommunitySolarProjID > 0 .AND. InCmntySlrProjTerritory < 1)
-      then  if (EnableResearchMode > 0 .OR. BypassRuleLimits > 0)
+      then  if (EnableResearchMode > 0 .OR. BypassRuleLimits > 0 .OR. IfValidAnd( CUACReportID > 0 ))
             then  PostWarning( "Before valid analysis, user must acknowledge that this home/building is located within the service territory of the selected community solar project:   %s", EnumString( CommunitySolarProject ) )
             else  PostError(   "User must acknowledge that this home/building is located within the service territory of the selected community solar project:   %s", EnumString( CommunitySolarProject ) )
             endif
       else if (CommunitySolarProjID > 0 .AND. CommunitySolarProject == 1 .AND.
                IfValidAnd( SMUDSlrSharesReserved > 0 )==0)
-      then  if (EnableResearchMode > 0 .OR. BypassRuleLimits > 0)
+      then  if (EnableResearchMode > 0 .OR. BypassRuleLimits > 0 .OR. IfValidAnd( CUACReportID > 0 ))
             then  PostWarning( "Before SMUD SolarShares analysis, user must acknowledge that this home/building is located within SMUD's territory and Neighborhood SolarShares have been reserved" )
             else  PostError(   "User must acknowledge that this home/building is located within SMUD's territory and that Neighborhood SolarShares have been reserved" )
             endif
@@ -143,7 +144,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 
    "Check for BattJA12Compliant confirmation when Battery present"  Proj:Action =         ; SAC 05/27/25 (tic #1395)
     { if( IfValidAnd( AnalysisVersion >= 250100 ) .AND. SimulateBattery > 0 .AND.
-          IfValidAnd( EnableResearchMode > 0 )==0 .AND. IfValidAnd( BattJA12Compliant > 0 )==0 )
+          IfValidAnd( EnableResearchMode > 0 )==0 .AND. IfValidAnd( BattJA12Compliant > 0 )==0 .AND. IfValidAnd( CUACReportID > 0 )==0 )
       then  PostError( "Confirmation of battery being JA12-compliant must be specified (via Proj:BattJA12Compliant) before analysis can occur" )
       else  UNCHANGED  endif }
 
@@ -177,7 +178,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 									then	PostError( "Model IAQ option 'CFI (Central Fan Integrated) IAQ' is not yet implemented.  Another selection needs to be made on the IAQ tab of the Project data dialog box." )
 									else if ( UnitIAQCFMTot[1] < (UnitMinIAQCFM[1] - 0.05) .AND.
                                      (RunScope == 1 .OR. (RunScope == 2 .AND. UnitIAQExistCFM < (UnitIAQCFMTot[1] - 0.5))) )
-									then	if (BypassRuleLimits > 0.5)
+									then	if (BypassRuleLimits > 0.5 .OR. IfValidAnd( CUACReportID > 0 ))
 									      then  PostWarning( "Minimum IAQ Ventilation NOT MET:  %s required, %s entered (CFM).  Review inputs on the IAQ tab of the Project data dialog box.", FltToStr( UnitMinIAQCFM[1] , 1 ), FltToStr( UnitIAQCFMTot[1] , 1 ) )
 									      else  PostError(   "Minimum IAQ Ventilation NOT MET:  %s required, %s entered (CFM).  Review inputs on the IAQ tab of the Project data dialog box.", FltToStr( UnitMinIAQCFM[1] , 1 ), FltToStr( UnitIAQCFMTot[1] , 1 ) )  endif
 									else	UNCHANGED  endif endif endif  }
@@ -190,7 +191,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 									then	PostError( "Model ADU IAQ option 'CFI (Central Fan Integrated) IAQ' is not yet implemented.  Another selection needs to be made on the ADU tab of the Project data dialog box." )
 									else if ( ADUIAQCFMTot[1]  < (UnitMinIAQCFM[2] - 0.05) .AND.
                                      (RunScope == 1 .OR. (RunScope == 2 .AND. ADUIAQExistCFM < (ADUIAQCFMTot[1] - 0.5))) )
-									then	if (BypassRuleLimits > 0.5)
+									then	if (BypassRuleLimits > 0.5 .OR. IfValidAnd( CUACReportID > 0 ))
 									      then  PostWarning( "Minimum ADU IAQ Ventilation NOT MET:  %s required, %s entered (CFM).  Review inputs on the ADU tab of the Project data dialog box.", FltToStr( UnitMinIAQCFM[2] , 1 ), FltToStr( ADUIAQCFMTot[1] , 1 ) )
 									      else  PostError(   "Minimum ADU IAQ Ventilation NOT MET:  %s required, %s entered (CFM).  Review inputs on the ADU tab of the Project data dialog box.", FltToStr( UnitMinIAQCFM[2] , 1 ), FltToStr( ADUIAQCFMTot[1] , 1 ) )  endif
 									else	UNCHANGED  endif endif endif  }
@@ -222,7 +223,8 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 
    "Check for single family IAQ ventilation verified-existing fan assignments"  for:#F=(1to4)  Proj:Action =         ; SAC 05/02/24 (tic #1304)
       {  if (IsMultiFamily > 0.5 .OR. IAQDisabled > 0 .OR. RunScope == 1 .OR.
-             UnitIAQOption[1] != 2 .OR. IfValidAnd( UnitIAQNumFanRefs[1] >= #F )==0) then  UNCHANGED
+             UnitIAQOption[1] != 2 .OR. IfValidAnd( UnitIAQNumFanRefs[1] >= #F )==0 .OR. IfValidAnd( CUACReportID > 0 ))
+         then  UNCHANGED
          else if (IfValidAnd( UnitIAQFanStatus#F[1] = 2 ) .AND. IfValidAnd( UnitIAQVerifEx#F[1] > 0 ))
          then  if (LocalCompAssigned( UnitIAQExFan#F[1] ) < 1)
                then  PostWarning( "Main home IAQ fan ##F '%s' is an Altered fan marked as Verify Existing, but no existing fan is assigned.", UnitIAQFan#F[1]:Name )
@@ -232,7 +234,8 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
          else  UNCHANGED  endif endif  }
    "Check for single family ADU IAQ ventilation verified-existing fan assignments"  for:#F=(1to4)  Proj:Action =     ; SAC 05/02/24 (tic #1304)
       {  if (IsMultiFamily > 0.5 .OR. IAQDisabled > 0 .OR. RunScope == 1 .OR. IfValidAnd( SFamADUIAQUI > 0 )==0 .OR.
-             UnitIAQOption[2] != 2 .OR. IfValidAnd( UnitIAQNumFanRefs[2] >= #F )==0) then  UNCHANGED
+             UnitIAQOption[2] != 2 .OR. IfValidAnd( UnitIAQNumFanRefs[2] >= #F )==0 .OR. IfValidAnd( CUACReportID > 0 ))
+         then  UNCHANGED
          else if (IfValidAnd( UnitIAQFanStatus#F[2] = 2 ) .AND. IfValidAnd( UnitIAQVerifEx#F[2] > 0 ))
          then  if (LocalCompAssigned( UnitIAQExFan#F[2] ) < 1)
                then  PostWarning( "ADU IAQ fan ##F '%s' is an Altered fan marked as Verify Existing, but no existing fan is assigned.", UnitIAQFan#F[2]:Name )
@@ -244,7 +247,9 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
   ; SAC 3/4/16 - Check to confirm validity between PV compliance credit & detailed (EDR) PV system size (tic #609)
   ; SAC 3/25/16 - Revised rule to throw similar error when PVCompCredit and DesignRatingCalcs are selected but No EDR PV
 	"Check for valid EDR PV system size when activated along w/ PV compliance credit"
-		Proj:Action		= {	if (IfValidAnd(StandardsVersion >= 2017)==0 .OR. EnablePVCredit < 1 .OR. PVCompCredit < 1 .OR. IfValidAnd( AllowDesignRating > 0.5 )==0 .OR. IfValidAnd( DesignRatingCalcs > 0.5 )==0) then  UNCHANGED
+		Proj:Action		= {	if (IfValidAnd(StandardsVersion >= 2017)==0 .OR. EnablePVCredit < 1 .OR. PVCompCredit < 1 .OR.
+                          IfValidAnd( AllowDesignRating > 0.5 )==0 .OR. IfValidAnd( DesignRatingCalcs > 0.5 )==0 .OR. IfValidAnd( CUACReportID > 0 ))
+                  then  UNCHANGED
 									else if (IfValidAnd( PVWDCSysTotal > 0 )==0)
 									then	PostError( "When both the PV compliance credit and Energy Design Rating (EDR) PV system credit features are activated, an EDR PV system size must be specified that is >= the minimum PV compliance credit system size of %g kWdc.", PVMinRatedPower[1] )
 									else if (IfValidAnd( PVWDCSysTotal < PVMinRatedPower[1] ))
@@ -252,7 +257,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 									else	UNCHANGED  endif endif endif  }
 
 	"Prevent Unconditioned Zones in compliance analysis (for the time being)"		; SAC 11/18/14 - 
-		Zone:Action		= {	if (IfValidAnd( Type = 10 ))
+		Zone:Action		= {	if (IfValidAnd( Type = 10 ) .AND. IfValidAnd( Proj:CUACReportID > 0 )==0)
 									then  if (Proj:ZonalControl < 0.5)
 											then  PostError( "Zone '%s' Type must be switched from Unconditioned to Conditioned.  Unconditioned zones are not currently supported in compliance analysis", Name )
 											else  PostError( "Zone '%s' Type must be switched from Unconditioned to Living or Sleeping.  Unconditioned zones are not currently supported in compliance analysis", Name )
@@ -319,7 +324,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 	; SAC 6/6/13 - added check for minimum R-5 slab edge insulation when 'Heated Slab' is selected
    ; revised min R-5 slab edge insul check to not apply to Existing slabs - SAC 11/25/24 (tic #1272)
 	"Check for minimum R-5 slab edge insulation when 'Heated Slab' is selected"
-		SlabFloor:Action	= {	if (HeatedSlab > 0.5 .AND. (EdgeInsulRValue < 5 .OR. EdgeInsulDepth < 16) .AND. Status > 1)
+		SlabFloor:Action	= {	if (HeatedSlab > 0.5 .AND. (EdgeInsulRValue < 5 .OR. EdgeInsulDepth < 16) .AND. Status > 1 .AND. IfValidAnd( Proj:CUACReportID > 0 )==0)
 										then	PostError( "Slab floor '%s' requires minimum of R-5, 16 in. depth edge insulation since it is specified as heated", Name )
 										else  UNCHANGED  endif  }
 
@@ -365,7 +370,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
    "Prevent analysis when cool vent flow exceeds code (CEC) maximum"    Proj:Action  =       ; SAC 6/29/20 (tic #1236)
       {  if (IsMultiFamily > 0 .OR. EnableResearchMode > 0 .OR. BypassRuleLimits > 0 .OR. CondFloorArea < 1 .OR.
              (EnableClVent < 0.5 .AND. LimitedClVent < 0.5) .OR. UnitClVentOption < 1 .OR. IfValidAnd( UnitClVentCFMTot > 0 )==0) then  UNCHANGED
-         else if ((UnitClVentCFMTot / CondFloorArea) > (ValidOr( MaxClVentFlow, 1000 ) + 0.01))
+         else if ((UnitClVentCFMTot / CondFloorArea) > (ValidOr( MaxClVentFlow, 1000 ) + 0.01) .AND. IfValidAnd( CUACReportID > 0 )==0)
          then  PostError( "Cool vent flow (%s CFM/ft2) cannot exceed maximum of %s CFM/ft2 (%s CFM)",
                      FltToStr( (UnitClVentCFMTot / CondFloorArea), 2, 1, 0, 1 ), FltToStr( MaxClVentFlow, 2, 1, 0, 1 ), FltToStr( (MaxClVentFlow * CondFloorArea) ) )
          else  UNCHANGED
@@ -635,10 +640,10 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
       {  if ( FloorAreaServed < 0.1 .OR. IfValidAnd( Proj:AnalysisVersion >= 250000 ) .OR.
               (Type != 33 .AND. Type != 36) ) then  UNCHANGED
          else  switch (Type)
-                  case  33 :  if (IfValidAnd( Proj:EnableResearchMode > 0 ))
+                  case  33 :  if (IfValidAnd( Proj:EnableResearchMode > 0 ) .OR. IfValidAnd( Proj:CUACReportID > 0 ))
                               then  PostWarning( "Heat pump system '%s' type 'VCHP - Detailed' is not a valid compliance option (but proceeding in research mode).", Name )
                               else  PostError(   "Heat pump system '%s' type 'VCHP - Detailed' is not a valid compliance option (research mode only).", Name )  endif
-                  case  36 :  if (IfValidAnd( Proj:EnableResearchMode > 0 ))
+                  case  36 :  if (IfValidAnd( Proj:EnableResearchMode > 0 ) .OR. IfValidAnd( Proj:CUACReportID > 0 ))
                               then  PostWarning( "Heat pump system '%s' type 'HeatPumpV3 - Heat pump v3' is not a valid compliance option (but proceeding in research mode).", Name )
                               else  PostError(   "Heat pump system '%s' type 'HeatPumpV3 - Heat pump v3' is not a valid compliance option (research mode only).", Name )  endif
                   default  :  UNCHANGED
@@ -696,14 +701,16 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
             else  UNCHANGED  endif endif endif
       else  UNCHANGED  endif endif endif  }
 
-	"Check for HVACHtPump perf metrics via HSPF2/SEER2/EER2 for 2025+ analysis"	HVACHtPump:Action	=     ; SAC 07/20/23  ; replaced check for Status w/ IsExisting, since Status not necessarily defined - SAC 12/10/25
+  ; SAC 07/20/23  ; replaced check for Status w/ IsExisting, since Status not necessarily defined - SAC 12/10/25
+	"Check for HVACHtPump perf metrics via HSPF2/SEER2/EER2 for 2025+ analysis"	HVACHtPump:Action	=         
       {  if (IfValidAnd( FloorAreaServed > 0 )==0 .OR. IfValidAnd( ShowEffMetric > 0 )==0 .OR.
-             EffMetric > 1 .OR. IfValidAnd( Proj:AnalysisVersion < 250002 ) .OR. 
-             (IfValidAnd( IsExisting > 0 ) .AND. (Proj:RunScope > 1 .OR. Proj:IsAddAlone > 0))) then  UNCHANGED
+             EffMetric > 1 .OR. IfValidAnd( Proj:AnalysisVersion < 250002 ) .OR. IfValidAnd( Proj:CUACReportID > 0 ) .OR. 
+             (IfValidAnd( IsExisting > 0 ) .AND. (Proj:RunScope > 1 .OR. Proj:IsAddAlone > 0)))
+         then  UNCHANGED
          else if (IfValidAnd( Proj:EnableResearchMode > 0 ))
          then  if (Type == 26 .OR. Type == 24 .OR. Type == 11 .OR. Type == 12 .OR. Type == 6)
-               then  PostWarning( "Heat pump '%s' efficiency metric must be switched to 'EER2' for analysis in this code vintage.", Name )
-               else  PostWarning( "Heat pump '%s' efficiency metric must be switched to 'HSPF2/SEER2/EER2' for analysis in this code vintage.", Name )  endif
+               then  PostWarning( "Heat pump '%s' efficiency metric must be switched to 'EER2' for compliance analysis in this code vintage.", Name )
+               else  PostWarning( "Heat pump '%s' efficiency metric must be switched to 'HSPF2/SEER2/EER2' for compliance analysis in this code vintage.", Name )  endif
          else  if (Type == 26 .OR. Type == 24 .OR. Type == 11 .OR. Type == 12 .OR. Type == 6)
                then  PostError( "Heat pump '%s' efficiency metric must be switched to 'EER2' for analysis in this code vintage.", Name )
                else  PostError( "Heat pump '%s' efficiency metric must be switched to 'HSPF2/SEER2/EER2' for analysis in this code vintage.", Name )  endif
@@ -815,7 +822,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
                endif
          else  UNDEFINED  endif endif endif endif  }
 	"Check for mandatory minimum fan system efficacy (ACM 2.2.12) - SFam models"     HVACSys:Action	= 
-		{	if (IfValidAnd( MaxFanPower > 0 )==0 .OR. IfValidAnd( Fan:WperCFMCool <= MaxFanPower )) then  UNCHANGED
+		{	if (IfValidAnd( MaxFanPower > 0 )==0 .OR. IfValidAnd( Fan:WperCFMCool <= MaxFanPower ) .OR. IfValidAnd( Proj:CUACReportID > 0 )) then  UNCHANGED
 			else if (SDHVAreaServed == FloorAreaServed[1])
          then	PostError( "Fan '%s' assigned to HVAC system '%s' has fan efficacy of %g W/CFM which is higher than the mandatory maximum of %g for SDHV system (run %s).", Fan:name, Name, Fan:WperCFMCool, MaxFanPower, Proj:RunAbbrev )
 			else if (SDHVAreaServed != FloorAreaServed[1] .AND. GasFurnAreaServed == FloorAreaServed[1])
@@ -874,7 +881,9 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 
    ; SAC 2/11/19 - revised range check & message for HVACHtPump:CFMperTon to allow a min 250 CFM/ton for SDHV systems (tic #1041)
 	"Check for mandatory minimum HVACHtPump system airflow"     HVACHtPump:Action	= {
-		if ( FloorAreaServed < 0.1 .OR. Proj:RunScope != 1 .OR. Type < 1 .OR. Type == 7 .OR. Type == 10 .OR. Type == 11 .OR. Type == 20 .OR. Type == 21 .OR. Proj:BypassRuleLimits > 0.5) then UNCHANGED
+		if( FloorAreaServed < 0.1 .OR. Proj:RunScope != 1 .OR. Type < 1 .OR. Type == 7 .OR. Type == 10 .OR. Type == 11 .OR. Type == 20 .OR. Type == 21 .OR.
+         Proj:BypassRuleLimits > 0.5 .OR. IfValidAnd( Proj:CUACReportID > 0 ) )
+    then UNCHANGED
 		else if ( IfValidAnd( IsZonal < 1 ) )
 		then  if ( Type == 19 .AND. IfValidAnd( CFMperTon < 250 ) )
       		then PostError( "SDHV Heat Pump System '%s' has airflow of %g CFM/Ton which is less than the mandatory minimum of 250 for non-zonal, SDHV systems", Name, CFMperTon )
@@ -911,7 +920,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 
 	"Check for consistent altered/existing HVAC system types when HVAC altered & verified"
 		Zone:Action		= {	if (Proj:RunScope != 2 .OR. HVACSysStatus != 2 .OR. HVACSysVerified == 0 .OR.
-											LocalCompAssigned( AltHVACSystem ) == 0 .OR. LocalCompAssigned( exHVACSystem ) == 0) then  UNCHANGED
+											LocalCompAssigned( AltHVACSystem ) == 0 .OR. LocalCompAssigned( exHVACSystem ) == 0 .OR. IfValidAnd( Proj:CUACReportID > 0 )) then  UNCHANGED
 									else if (AltHVACSystem:Type != exHVACSystem:Type)
 									then	PostError( "Zone '%s' has incompatible altered and existing HVAC system assignments.  To get compliance credit, altered and verified system types must be consistent.", Name )
 									else if (AltHVACSystem:Type == 2)
@@ -958,7 +967,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 
   ; SAC 2/26/16 - added for error checking associated w/ ticket #607
 	"Ensure that there are valid (new/alt/ex) DHWSys objects to assign to any Zones or DwellUnitTypes lacking DHWSys assignments"
-		Proj:Action		= {	if (IfValidAnd( NoDwellingUnit > 0 )) then  UNCHANGED		; allow no DHW if no DUs
+		Proj:Action		= {	if (IfValidAnd( NoDwellingUnit > 0 ) .OR. IfValidAnd( CUACReportID > 0 )) then  UNCHANGED		; allow no DHW if no DUs
                            else if (LocalCompAssigned( MaxDHWSysByCateg[1] ) < 1 .AND. LocalCompAssigned( MaxDHWSysByCateg[4] ) < 1 .AND. SumAll( Zone:DHWUnassignedFloorArea[1] ) >= 1)
 									then	PostError( "The model includes one or more Zones with a DHW status of 'New' but no New DHWSys object to assign to the Zone(s)." )
 									else if (RunScope == 2 .AND. LocalCompAssigned( MaxDHWSysByCateg[2] ) < 1 .AND. LocalCompAssigned( MaxDHWSysByCateg[5] ) < 1 .AND. SumAll( Zone:DHWUnassignedFloorArea[2] ) >= 1)
@@ -1023,7 +1032,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 	; SAC 10/5/15 - added logic to check to ensure that there is at least one DHWHeater assigned (w/ Count > 0) to every DHWSys object w/ assigned floor area
    ; SAC 1/5/20 - added logic to prevent posting no DHWHeater assignment error for DHWSystems setup as central HPWHs (tic #862)
   	"Ensure DHWSys objects not assigned to serve BOTH new/altered & existing areas"
-		DHWSys:Action		= {	if (Proj:RunScope == 2 .AND. ExFlrAreaServed >= 1 .AND. (AltFlrAreaServed + NewFlrAreaServed) >= 1)
+		DHWSys:Action		= {	if (Proj:RunScope == 2 .AND. ExFlrAreaServed >= 1 .AND. (AltFlrAreaServed + NewFlrAreaServed) >= 1 .AND. IfValidAnd( Proj:CUACReportID > 0 )==0)
 										then	if (Proj:IsMultiFamily > 0.5)
 												then	PostError( "DHW System '%s' is assigned to a combination of existing and new/altered dwelling unit types.  No one system can be referenced as an existing system and a new/altered system by different dwelling unit types.", Name )
 												else	PostError( "DHW System '%s' is assigned to a combination of existing and new/altered zones.  No one system can be referenced as an existing system and a new/altered system by different zones.", Name )
@@ -1036,7 +1045,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
    "Prevent analysis when DHW tank volume exceeds limit for small home elec exception"    for:#Htr=(1to6)   DHWSys:Action =      ; SAC 05/27/22 (tic #1332)
       {  if ( IfValidAnd( ShowNewSmConsInstElecExcept > 0 ) .AND. IfValidAnd( NewSmConsInstElecExcept > 0 ) .AND.
               IfValidAnd( DHWHeater[#Htr]:HeaterElementType = 0 ) .AND. IfValidAnd( DHWHeater[#Htr]:TankType = 12 ) .AND.
-              IfValidAnd( DHWHeater[#Htr]:TankVolume > 20 ) )
+              IfValidAnd( DHWHeater[#Htr]:TankVolume > 20 ) .AND. IfValidAnd( Proj:CUACReportID > 0 )==0 )
          then  PostError( "DHWSys '%s', heater #%g '%s' tank volume of %g gal exceeds maximum of 20 gal to qualify for the small home electric water heating exception (specified for this system)\n", Name, #Htr, DHWHeater[#Htr]:Name, DHWHeater[#Htr]:TankVolume )
          else  UNCHANGED  endif  }
 
@@ -1045,7 +1054,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
    ; SAC 3/25/19 - update for Proj-wide Compact Distrib
    ; removed check associated w/ SFamUserSpecCmpctDist and undefined SFamUserCompactFactor - SAC 09/29/21 (tic #1277)
    "Ensure all required data specified for selected Compact Distrib is specified"    Proj:Action  = {
-         if (Proj:EnergyCodeYearNum < 2019 .OR. SFamCompactDistrib < 1 .OR. IsMultiFamily > 0.5) then  UNCHANGED
+         if (Proj:EnergyCodeYearNum < 2019 .OR. SFamCompactDistrib < 1 .OR. IsMultiFamily > 0.5 .OR. IfValidAnd( Proj:CUACReportID > 0 )) then  UNCHANGED
          else  if (IfValidAnd( SFamCDWeightedDist = 10001 ))
                then  PostError( "Compactness selection is '%s' but the straight-line heater to furthest room fixture distance is unspecified for all compatible recirculation DHW systems.", EnumString( SFamCompactDistrib ) )
                else if (IfValidAnd( SFamCDWeightedDist = 10002 ))
@@ -1162,12 +1171,12 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 
 	; SAC 12/23/14 - new check for conflicts in existing vs. new/altered DHWHeater objects
 	"Ensure DHWHeater objects not assigned to serve BOTH new/altered & existing areas"
-		DHWHeater:Action	= {	if (Proj:RunScope == 2 .AND. ExFlrAreaServed >= 1 .AND. (AltFlrAreaServed + NewFlrAreaServed) >= 1)
+		DHWHeater:Action	= {	if (Proj:RunScope == 2 .AND. ExFlrAreaServed >= 1 .AND. (AltFlrAreaServed + NewFlrAreaServed) >= 1 .AND. IfValidAnd( Proj:CUACReportID > 0 )==0)
 										then	PostError( "DHW Heater '%s' is assigned to DHW system(s) that serve a combination of existing and new/altered zones.  This heater should be copied and assigned separately to systems serving existing vs. new/altered zones before performing compliance analysis.", Name )
 										else	UNCHANGED  endif  }
 	; SAC 10/27/15 - check for this heater serving BOTH new/altered, central DHW systems -AND- other systems (existing or non-central)
 	"Ensure this heater does not serve BOTH new/altered, central DHW systems -AND- other systems (existing or non-central)"
-		DHWHeater:Action	= {	if (NewCntrlAreaServed >= 1 .AND. FloorAreaServed > (NewCntrlAreaServed + 1))
+		DHWHeater:Action	= {	if (NewCntrlAreaServed >= 1 .AND. FloorAreaServed > (NewCntrlAreaServed + 1) .AND. IfValidAnd( Proj:CUACReportID > 0 )==0)
 										then	if (Proj:RunScope == 2)
 												then	PostError( "DHW Heater '%s' is assigned to a combination of new/altered Central DHW system(s) and other (existing and/or non-central) systems, which is not allowed in compliance analysis.", Name )
 												else	PostError( "DHW Heater '%s' is assigned to both Central and Non-Central DHW system(s), which is not allowed in compliance analysis.", Name )
@@ -1175,7 +1184,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 										else  UNCHANGED  endif  }
 
    "Prevent simulation of New/Alt DHWHeaters in 2019 analysis w/ older TankTypes"      DHWHeater:Action  =     ; SAC 5/27/19 (tic #1096)
-      {  if (IfValidAnd( Proj:EnergyCodeYearNum >= 2019 )==0 .OR.
+      {  if (IfValidAnd( Proj:EnergyCodeYearNum >= 2019 )==0 .OR. IfValidAnd( Proj:CUACReportID > 0 ) .OR.
              (AltFlrAreaServed + NewFlrAreaServed) < 1 .OR. HeaterElementType > 1) then  UNCHANGED
          else if (TankType = 2 .OR. TankType = 3 .OR. TankType = 5 .OR. TankType = 6)
          then  if (AltFlrAreaServed > 0 .AND. NewFlrAreaServed > 0)
@@ -1206,7 +1215,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
          else  UNCHANGED  endif endif  }
 
    "Prevent simulation of New/Alt DHWHeaters in 2022+ analysis of type non-UEF HPWH"   DHWHeater:Action  =        ; SAC 02/16/23 (tic #1347)
-      {  if (IfValidAnd( Proj:EnergyCodeYearNum >= 2022 ) .AND. (IfValidAnd( Proj:RunAbbrev = "pp" ) .OR. IfValidAnd( Proj:RunAbbrev = "p" ) .OR. IfValidAnd( Proj:RunAbbrev = "u" )))
+      {  if (IfValidAnd( Proj:EnergyCodeYearNum >= 2022 ) .AND. (IfValidAnd( Proj:RunAbbrev = "pp" ) .OR. IfValidAnd( Proj:RunAbbrev = "p" ) .OR. IfValidAnd( Proj:RunAbbrev = "u" )) .OR. IfValidAnd( Proj:CUACReportID > 0 ))
          then  if (IfValidAnd( HeaterElementType = 5 ) .AND. IfValidAnd( HPWHCategory = 4 ) .AND. IfValidAnd( IsExisting = 0 ) .AND. IfValidAnd( FloorAreaServed > 0 ))
                then  PostError( "%s DHWHeater '%s' is specified as a non-UEF rated HPWH which is only valid for Existing equipment.", EnumString( Status ), Name )
                else  UNCHANGED  endif
@@ -1307,13 +1316,13 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
    "Check that mandatory duct insulation R-values are met"     HVACDist:Action =          ; SAC 04/25/24 (tic #1363)  ; enable violation when in research mode - SAC 11/15/24
       {  if ( FloorAreaServed < 0.1 .OR. IfValidAnd( MinDuctInsRval > 0 )==0 .OR.
               IfValidAnd( DuctsPresent > 0 )==0 .OR. IfValidAnd( DuctDesign > 0.5 ) .OR.
-              IfValidAnd( Proj:EnableResearchMode > 0 ) ) then  UNCHANGED
+              IfValidAnd( Proj:EnableResearchMode > 0 ) .OR. IfValidAnd( Proj:CUACReportID > 0 ) ) then  UNCHANGED
          else if (IfValidAnd( MinDuctInsRval > DuctInsRvalOpt ))
          then  PostError( "HVACDist '%s' duct insulation R-value %.1f doesn't meet code minimum of %.1f.", Name, (DuctInsRvalOpt/100), (MinDuctInsRval/100) )
          else	UNCHANGED  endif endif  }
 
 ; mjb	5/6/14 add check for QII and Buried Duct combo
-	"Check for QII and Buried Ducts"		HVACDist:Action	= {	if (FloorAreaServed < 0.1) then  UNCHANGED
+	"Check for QII and Buried Ducts"		HVACDist:Action	= {	if (FloorAreaServed < 0.1 .OR. IfValidAnd( Proj:CUACReportID > 0 )) then  UNCHANGED
 																					else if (AreBuried .OR. AreDeeplyBuried) then 
 																						if (Project:InsulConsQuality < 1.5) then PostError( "HVACDist '%s' has buried and/or deeply buried ducts. To get compliance credit, this project must also have Quality Insulation Installation (QII).", Name ) 
 																						else UNCHANGED endif
@@ -1324,7 +1333,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
    ; switch error to warning for QII set but not applicable for 2022.3.1 and future releases - SAC 04/15/24 (tic #1360)
    "Check for presence of at least one surface benefitting by QII = Improved"    Proj:Action  = {  
          if (InsulConsQuality < 1.5 .OR.
-             SumAll( CeilingBelowAttic:ICQAtticBypassApplies ) > 0) then UNCHANGED
+             SumAll( CeilingBelowAttic:ICQAtticBypassApplies ) > 0 .OR. IfValidAnd( CUACReportID > 0 )) then UNCHANGED
          else if (SumAcrossIf( Cons:SurfacesQIINotDegraded, Cons:AssignedSurfaceArea > 0 ) > 0) then UNCHANGED
          else if (IfValidAnd( EnergyCodeYearNum >= 2019 ))
          then  if (IfValidAnd( AnalysisVersion >= 220301 )) 
@@ -1337,7 +1346,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 	"Check for HVACDist:DuctInsRvalOpt exceeding allowed value when duct design not verified"       ; don't trigger error when in research mode - SAC 11/15/24
 		HVACDist:Action	= {
 		   if (FloorAreaServed < 0.1 .OR. Status == 1 .OR. DefaultSystem > 0.5 .OR.
-             IfValidAnd( Proj:EnableResearchMode > 0 )) then  UNCHANGED
+             IfValidAnd( Proj:EnableResearchMode > 0 ) .OR. IfValidAnd( Proj:CUACReportID > 0 )) then  UNCHANGED
 			else if (DuctDesign < 0.5 .AND. IfValidAnd( DuctInsRvalOpt >= 801 )) 
 			then	PostError( "Duct insulation R-value of HVACDist '%s' (R-%g) exceeds the maximum of R-8 allowed for ducts that are not verified and buried.", Name, (DuctInsRvalOpt/100) )
 			else if (Proj:StdDesignBase <= 2016 .AND. DuctDesign > 0.5 .AND. IfValidAnd( AreBuried < 0.5 ) .AND. IfValidAnd( AreDeeplyBuried < 0.5 ) .AND.
@@ -1366,7 +1375,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 ;  LH 170524 Added Checks to ensure DHWSys:Status consistancy
   "Check DHWSys1:Status is consistent with assignment from zone"  Zone:DHWSys1 = {
     if ( DHWSys1Status != 3 .OR.    ;  New
-         LocalCompAssigned( DHWSys1 ) < 1 )
+         LocalCompAssigned( DHWSys1 ) < 1 .OR. IfValidAnd( Proj:CUACReportID > 0 ) )
     then UNCHANGED
     else if ( DHWSys1:Status = 3 )  ;  New
     then UNCHANGED
@@ -1379,7 +1388,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 
   "Check AltDHWSys1:Status is consistent with assignment from zone"  Zone:AltDHWSys1 = {
     if ( DHWSys1Status != 2 .OR.       ;  Altered
-         LocalCompAssigned( AltDHWSys1 ) < 1 )       
+         LocalCompAssigned( AltDHWSys1 ) < 1 .OR. IfValidAnd( Proj:CUACReportID > 0 ) )       
     then UNCHANGED
     else if ( AltDHWSys1:Status = 2 )  ;  Altered
     then UNCHANGED
@@ -1393,7 +1402,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
   "Check exDHWSys1:Status is consistent with assignment from zone"  Zone:exDHWSys1 = {
     if ( DHWSys1Status = 3 .OR.
        ( DHWSys1Status = 2 .AND. DHWSys1Verified = 0 ) .OR.
-         LocalCompAssigned( exDHWSys1 ) < 1 )
+         LocalCompAssigned( exDHWSys1 ) < 1 .OR. IfValidAnd( Proj:CUACReportID > 0 ) )
     then UNCHANGED
     else if ( exDHWSys1:Status = 1 )  ;  Existing
     then UNCHANGED
@@ -1418,7 +1427,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
   "Check DHWSys2:Status is consistent with assignment from zone"  Zone:DHWSys2 = {
     if ( IfValidAnd( Proj:AnalysisVersion >= 190200 ) .OR.
          DHWSys2Status != 3 .OR.    ;  New
-         LocalCompAssigned( DHWSys2 ) < 1 )       
+         LocalCompAssigned( DHWSys2 ) < 1 .OR. IfValidAnd( Proj:CUACReportID > 0 ) )       
     then UNCHANGED
     else if ( DHWSys2:Status = 3 )  ;  New
     then UNCHANGED
@@ -1432,7 +1441,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
   "Check AltDHWSys2:Status is consistent with assignment from zone"  Zone:AltDHWSys2 = {
     if ( IfValidAnd( Proj:AnalysisVersion >= 190200 ) .OR.
          DHWSys2Status != 2 .OR.       ;  Altered
-         LocalCompAssigned( AltDHWSys2 ) < 1 )
+         LocalCompAssigned( AltDHWSys2 ) < 1 .OR. IfValidAnd( Proj:CUACReportID > 0 ) )
     then UNCHANGED
     else if ( AltDHWSys2:Status = 2 )  ;  Altered
     then UNCHANGED
@@ -1446,7 +1455,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
   "Check exDHWSys2:Status is consistent with assignment from zone"  Zone:exDHWSys2 = {
     if ( IfValidAnd( Proj:AnalysisVersion >= 190200 ) .OR.
          DHWSys2Status != 1 .OR.      ;  Existing
-         LocalCompAssigned( exDHWSys2 ) < 1 )
+         LocalCompAssigned( exDHWSys2 ) < 1 .OR. IfValidAnd( Proj:CUACReportID > 0 ) )
     then UNCHANGED
     else if ( exDHWSys2:Status = 1 )  ;  Existing
     then UNCHANGED
@@ -1460,7 +1469,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
   "Check exDHWSys1 assignment to AltDHWSys1 is consistent from all zones"  Zone:Action = {
     if( Proj:IsMultiFamily < 0.5 .AND. Proj:RunScope == 2 .AND.
              LocalCompAssigned( AltDHWSys1 ) .AND.
-             DHWSys1Verified .AND. LocalCompAssigned( exDHWSys1 ) )
+             DHWSys1Verified .AND. LocalCompAssigned( exDHWSys1 ) .AND. IfValidAnd( Proj:CUACReportID > 0 )==0 )
     then
       if( exDHWSys1 != AltDHWSys1:VerifExDHWSysRef )
       then PostError( "Altered DHW system '%s' associated with verified existing DHW system '%s'.  However,
@@ -1478,7 +1487,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
     if( IfValidAnd( Proj:AnalysisVersion >= 190200 )==0 .AND.
         Proj:IsMultiFamily < 0.5 .AND. Proj:RunScope == 2 .AND.
         LocalCompAssigned( AltDHWSys2 ) .AND.
-        DHWSys2Verified .AND. LocalCompAssigned( exDHWSys2 ) )
+        DHWSys2Verified .AND. LocalCompAssigned( exDHWSys2 ) .AND. IfValidAnd( Proj:CUACReportID > 0 )==0 )
     then
       if( exDHWSys2 != AltDHWSys2:VerifExDHWSysRef )
       then PostError( "Altered DHW system '%s' associated with verified existing DHW system '%s'.  However,
@@ -1497,7 +1506,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 ;  LH 170524 Added Checks to ensure DHWHeater:Status consistancy
   "Check DHWHeater:Status[1] is consistent with DHWSys:Status" DHWSys:Action = {
     if( IfValidAnd( IsReferenced = 1 ) .AND. 
-        IfValidAnd( DHWHeater[1]:Status > 0 ) )
+        IfValidAnd( DHWHeater[1]:Status > 0 ) .AND. IfValidAnd( Proj:CUACReportID > 0 )==0 )
     then 
       if( DHWHeater[1]:Status != HeaterStatus[1]  .AND. 
           IfValidAnd( HeaterMultFlt[1] > 0 ) )
@@ -1515,7 +1524,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 
   "Check DHWHeater:Status[2] is consistent with DHWSys:Status" DHWSys:Action = {
     if( IfValidAnd( IsReferenced = 1 ) .AND. 
-        IfValidAnd( DHWHeater[2]:Status > 0 ) )
+        IfValidAnd( DHWHeater[2]:Status > 0 ) .AND. IfValidAnd( Proj:CUACReportID > 0 )==0 )
     then 
       if( DHWHeater[2]:Status != HeaterStatus[2]  .AND. 
           IfValidAnd( HeaterMultFlt[2] > 0 ) )
@@ -1533,7 +1542,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 
   "Check DHWHeater:Status[3] is consistent with DHWSys:Status" DHWSys:Action = {
     if( IfValidAnd( IsReferenced = 1 ) .AND. 
-        IfValidAnd( DHWHeater[3]:Status > 0 ) )
+        IfValidAnd( DHWHeater[3]:Status > 0 ) .AND. IfValidAnd( Proj:CUACReportID > 0 )==0 )
     then 
       if( DHWHeater[3]:Status != HeaterStatus[3] .AND. 
           IfValidAnd( HeaterMultFlt[3] > 0 ) )
@@ -1551,7 +1560,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 
   "Check DHWHeater:Status[4] is consistent with DHWSys:Status" DHWSys:Action = {
     if( IfValidAnd( IsReferenced = 1 ) .AND. 
-        IfValidAnd( DHWHeater[4]:Status > 0 ) )
+        IfValidAnd( DHWHeater[4]:Status > 0 ) .AND. IfValidAnd( Proj:CUACReportID > 0 )==0 )
     then 
       if( DHWHeater[4]:Status != HeaterStatus[4]  .AND. 
           IfValidAnd( HeaterMultFlt[4] > 0 ) )
@@ -1569,7 +1578,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 
   "Check DHWHeater:Status[5] is consistent with DHWSys:Status" DHWSys:Action = {
     if( IfValidAnd( IsReferenced = 1 ) .AND. 
-        IfValidAnd( DHWHeater[5]:Status > 0 ) )
+        IfValidAnd( DHWHeater[5]:Status > 0 ) .AND. IfValidAnd( Proj:CUACReportID > 0 )==0 )
     then 
       if( DHWHeater[5]:Status != HeaterStatus[5]  .AND. 
           IfValidAnd( HeaterMultFlt[5] > 0 ) )
@@ -1587,7 +1596,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 
   "Check DHWHeater:Status[6] is consistent with DHWSys:Status" DHWSys:Action = {
     if( IfValidAnd( IsReferenced = 1 ) .AND. 
-        IfValidAnd( DHWHeater[6]:Status > 0 ) )
+        IfValidAnd( DHWHeater[6]:Status > 0 ) .AND. IfValidAnd( Proj:CUACReportID > 0 )==0 )
     then 
       if( DHWHeater[6]:Status != HeaterStatus[6]  .AND. 
           IfValidAnd( HeaterMultFlt[6] > 0 ) )
@@ -1841,7 +1850,7 @@ RULELIST "ProposedModelSimulationCheck" 1 0 0 0
    ; SAC 4/21/19 - added logic to prevent this error for Std or DRtg runs
    "Check for constructions assigned to both new and non-new zone surfaces (when QII being modeled)"   Cons:Action  = {
       if (Proj:ICQEnclCavInsMult <= Proj:StdICQEnclCavInsMult) then  UNCHANGED  ; no QII selected
-      else if (Proj:IsStdOrSMFRun .OR. Proj:RunAbbrev == "dr") then  UNCHANGED  ; no error for Std or DRtg runs
+      else if (Proj:IsStdOrSMFRun .OR. Proj:RunAbbrev == "dr" .OR. IfValidAnd( Proj:CUACReportID > 0 )) then  UNCHANGED  ; no error for Std or DRtg runs (or CUAC)
       else if (IfValidAnd( SurfacesQIIDegraded > 0 )==0 .OR. IfValidAnd( SurfacesQIINotDegraded > 0 )==0) then  UNCHANGED
       else if (CanAssignTo == 7 .OR. CanAssignTo == 8) then  UNCHANGED  ; n/a to Attic Roofs, Slab or Und Flrs  ; now applicable to attic roofs (tic #775) - SAC 5/18/18
       else  switch (Type)
@@ -2022,7 +2031,7 @@ RULELIST "ProposedModelSimulationCheck" 1 0 0 0
 
    "initialize Cons:StdChkAtticRoofCavityLayer"                Cons:StdChkAtticRoofCavityLayer = {  999  }
    "set/check Attic:Construction:StdChkAtticRoofCavityLayer"   Attic:Construction:StdChkAtticRoofCavityLayer =       ; repeat logic setting std design Attic:Construction:CavityLayer in performing check - SAC 12/02/24 (tic #1339)
-      {  if (FloorAreaOverCond > 0.5 .AND. (IsNew .OR. IsAltered) .AND. IfValidAnd( Proj:EnableResearchMode > 0 )==0)
+      {  if (FloorAreaOverCond > 0.5 .AND. (IsNew .OR. IsAltered) .AND. IfValidAnd( Proj:EnableResearchMode > 0 )==0 .AND. IfValidAnd( Proj:CUACReportID > 0 )==0)
          then  if ( (Proj:RunScope == 2 .AND. IfValidAnd( Proj:CondAdditionSize <= 700 ) .AND. IsNew) .OR.
                     (Proj:RunScope == 1 .AND. IfValidAnd( Proj:IsAddAlone > 0.5 ) .AND. IfValidAnd( Proj:AddAloneAddedArea <= 700 )) .OR.
                     (Proj:RunScope == 2 .AND. IsAltered .AND. IfValidAnd( Proj:StdDesignBase >= 2022 )) )
@@ -2203,7 +2212,8 @@ RULELIST "ProposedModelSimulationCheck" 1 0 0 0
 	; RJH 9/30/25 - Issue #381 - ExtWall Mandatory Minimums for Cons
   ; fixed logic problem in final checks ( Masonry/Mass Wall, CZ16 vs. other) -and- moved Cons:Type 4 (Adobe / Strawbale / Log) from 'Opaque nonframed assemblies' to 'Masonry/Mass Wall' check - SAC 01/02/26 (dev #381 / support #361)
 	"Check for ExtWall Cons U-factor not exceeding maximum values"
-                  ExtWall:Action = {      if (IfValidAnd( Proj:AnalysisVersion >= 250000 )==0 .OR. Proj:IsStdOrSMFRun .OR. IfValidAnd( Proj:CondFloorArea > 0 )==0 .OR. IfValidAnd( ZoneArea > 0 )==0 .OR. IfValidAnd( Status == 1 )) 
+                  ExtWall:Action = {      if (IfValidAnd( Proj:AnalysisVersion >= 250000 )==0 .OR. Proj:IsStdOrSMFRun .OR. IfValidAnd( Proj:CondFloorArea > 0 )==0 .OR.
+                                              IfValidAnd( ZoneArea > 0 )==0 .OR. IfValidAnd( Status == 1 ) .OR. IfValidAnd( Proj:CUACReportID > 0 )) 
                                           then UNCHANGED
                                           else  if ((Construction:Type == 0 .OR. Construction:Type == 1) .AND. (Construction:FrameLayer == 416 .OR. Construction:FrameLayer == 424) .AND. Construction:WinterDesUValue > 0.0955) ; Wood or Steel 2x4 Framed Exterior Wall Construction
                                                 then  if (IfValidAnd( Proj:EnableResearchMode > 0 ))
@@ -2243,7 +2253,8 @@ RULELIST "ProposedModelSimulationCheck" 1 0 0 0
 
 	; RJH 9/30/25 - Issue #381 - Mandatory Minimums for Raised Floor (Floor Over Crawlspace) Cons  ; further adjustment for CavityLayer = "R 19 in 5-1/2 in. cavity (R-18)" - SAC 10/26/25 (dev #381)
 	"Check for FloorOverCrawl Cons U-factor not exceeding maximum values"
-                  FloorOverCrawl:Action = {     if (IfValidAnd( Proj:AnalysisVersion >= 250000 )==0 .OR. Proj:IsStdOrSMFRun .OR. IfValidAnd( Proj:CondFloorArea > 0 )==0 .OR. IfValidAnd( Status == 1 )) 
+                  FloorOverCrawl:Action = {     if (IfValidAnd( Proj:AnalysisVersion >= 250000 )==0 .OR. Proj:IsStdOrSMFRun .OR. IfValidAnd( Proj:CondFloorArea > 0 )==0 .OR.
+                                                    IfValidAnd( Status == 1 ) .OR. IfValidAnd( Proj:CUACReportID > 0 )) 
                                                 then UNCHANGED
                                                 else  if (ZoneArea > 0 .AND. Construction:WinterDesUValue > 0.0375 .AND.    ; Floor Over Crawlspace - Assigned
                                                           Construction:CavityLayerRVal < 19 .AND. Construction:CavityLayer != 1801)   ; 1801 => "R 19 in 5-1/2 in. cavity (R-18)"
@@ -2257,7 +2268,8 @@ RULELIST "ProposedModelSimulationCheck" 1 0 0 0
 
 	; RJH 9/11/25 - Issue #381 - Mandatory Minimums for Interior Floor Over Garage Cons  ; further adjustment for CavityLayer = "R 19 in 5-1/2 in. cavity (R-18)" - SAC 10/26/25 (dev #381)
 	"Check for InteriorFloor Cons U-factor not exceeding maximum values"
-                  InteriorFloor:Action = {      if (IfValidAnd( Proj:AnalysisVersion >= 250000 )==0 .OR. Proj:IsStdOrSMFRun .OR. IfValidAnd( Proj:CondFloorArea > 0 )==0 .OR. IfValidAnd( Status == 1 )) 
+                  InteriorFloor:Action = {      if (IfValidAnd( Proj:AnalysisVersion >= 250000 )==0 .OR. Proj:IsStdOrSMFRun .OR. IfValidAnd( Proj:CondFloorArea > 0 )==0 .OR.
+                                                    IfValidAnd( Status == 1 ) .OR. IfValidAnd( Proj:CUACReportID > 0 )) 
                                                 then UNCHANGED
                                                 else  if (ZoneArea > 0 .AND. Construction:WinterDesUValue > 0.0375 .AND.
                                                           Construction:CavityLayerRVal < 19 .AND. Construction:CavityLayer != 1801 .AND.   ; 1801 => "R 19 in 5-1/2 in. cavity (R-18)"
@@ -2272,7 +2284,8 @@ RULELIST "ProposedModelSimulationCheck" 1 0 0 0
 
 	; RJH 9/11/25 - Issue #381 - Mandatory Minimums for Exterior Floor Cons  ; further adjustment for CavityLayer = "R 19 in 5-1/2 in. cavity (R-18)" - SAC 10/26/25 (dev #381)
 	"Check for Cons U-factor not exceeding maximum values"
-                  ExteriorFloor:Action = {      if (IfValidAnd( Proj:AnalysisVersion >= 250000 )==0 .OR. Proj:IsStdOrSMFRun .OR. IfValidAnd( Proj:CondFloorArea > 0 )==0 .OR. IfValidAnd( Status == 1 )) 
+                  ExteriorFloor:Action = {      if (IfValidAnd( Proj:AnalysisVersion >= 250000 )==0 .OR. Proj:IsStdOrSMFRun .OR. IfValidAnd( Proj:CondFloorArea > 0 )==0 .OR.
+                                                    IfValidAnd( Status == 1 ) .OR. IfValidAnd( Proj:CUACReportID > 0 )) 
                                                 then UNCHANGED
                                                 else  if (ZoneArea > 0 .AND. Construction:WinterDesUValue > 0.0375 .AND. Construction:CavityLayerRVal < 19 .AND.
                                                           Construction:CavityLayer != 1801)   ; 1801 => "R 19 in 5-1/2 in. cavity (R-18)"
@@ -2285,23 +2298,40 @@ RULELIST "ProposedModelSimulationCheck" 1 0 0 0
                                                 endif }
 
 	; RJH 9/9/25 - Issue #381 - Mandatory Minimums for Fenestration
+      ; RJH 2/12/26 - CBECC-Dev Issue 666 updated for Exceptions to 2025 Energy Code Section 150.0(q)
 	"Check for Fenestration U-factor not exceeding maximum value"
-                  Proj:Action = {   if (IfValidAnd( AnalysisVersion >= 250000 )==0 .OR. IsStdOrSMFRun .OR. IfValidAnd( CondFloorArea > 0 )==0) 
+                  Proj:Action = {   if (IfValidAnd( AnalysisVersion >= 250000 )==0 .OR. IsStdOrSMFRun .OR. IfValidAnd( CondFloorArea > 0 )==0 .OR. IfValidAnd( Proj:CUACReportID > 0 )) 
                                     then UNCHANGED
-                                    else  if (IfValidAnd( RptWinAreaWgtUfactor <= 0.405 )) 
-                                          then  UNCHANGED  ; everything should be OK accounting for rounding
-                                          else  if ( IfValidAnd( EnableResearchMode > 0 ) )
-                                                then  PostWarning( "Project-wide Fenestration area-weighted average U-factor (%.4f) exceeds mandatory maximum U-0.4", RptWinAreaWgtUfactor )
-                                                else  PostError(   "Project-wide Fenestration area-weighted average U-factor (%.4f) exceeds mandatory maximum U-0.4", RptWinAreaWgtUfactor )
+                                    else  if (MeetsPart7CBC > 0)
+                                          then UNCHANGED
+                                          else  if ( SumAll( Win:TotAreaInclMult[5] ) + SumAll( Win:TotAreaInclMult[6] ) + SumAll( Skylt:TotAreaInclMult[5] ) + SumAll( Skylt:TotAreaInclMult[6] ) > 10.05 .AND. SumAll( Win:TotAreaInclMult[5] ) + SumAll( Win:TotAreaInclMult[6] ) + SumAll( Skylt:TotAreaInclMult[5] ) + SumAll( Skylt:TotAreaInclMult[6] ) > CondFloorArea * 0.0055 )    ; RJH 2/9/26 - Exception 1
+                                                then  if ( IfValidAnd( EnableResearchMode > 0 ) )
+                                                      then  PostWarning( "Sum of all window areas claiming Energy Code Section 150.0(q) Exception 1 (%.2f) cannot exceed 10 square feet AND 0.5 percent of conditioned floor area (%.2f)", SumAll( Win:TotAreaInclMult[5] ) + SumAll( Win:TotAreaInclMult[6] ) + SumAll( Skylt:TotAreaInclMult[5] ) + SumAll( Skylt:TotAreaInclMult[6] ), CondFloorArea * 0.005 )
+                                                      else  PostError(   "Sum of all window areas claiming Energy Code Section 150.0(q) Exception 1 (%.2f) cannot exceed 10 square feet AND 0.5 percent of conditioned floor area (%.2f)", SumAll( Win:TotAreaInclMult[5] ) + SumAll( Win:TotAreaInclMult[6] ) + SumAll( Skylt:TotAreaInclMult[5] ) + SumAll( Skylt:TotAreaInclMult[6] ), CondFloorArea * 0.005 )
+                                                      endif
+                                                else  if ( SumAll( Win:TotAreaInclMult[7] ) + SumAll( Win:TotAreaInclMult[8] ) + SumAll( Skylt:TotAreaInclMult[7] ) + SumAll( Skylt:TotAreaInclMult[8] ) > 30.05 )    ; RJH 2/9/26 - Exception 2
+                                                      then  if ( IfValidAnd( EnableResearchMode > 0 ) )
+                                                            then  PostWarning( "Sum of all window areas claiming Energy Code Section 150.0(q) Exception 2 (%.2f) cannot exceed 30 square feet", SumAll( Win:TotAreaInclMult[7] ) + SumAll( Win:TotAreaInclMult[8] ) + SumAll( Skylt:TotAreaInclMult[7] ) + SumAll( Skylt:TotAreaInclMult[8] ) )
+                                                            else  PostError(   "Sum of all window areas claiming Energy Code Section 150.0(q) Exception 2 (%.2f) cannot exceed 30 square feet", SumAll( Win:TotAreaInclMult[7] ) + SumAll( Win:TotAreaInclMult[8] ) + SumAll( Skylt:TotAreaInclMult[7] ) + SumAll( Skylt:TotAreaInclMult[8] ) )
+                                                            endif
+                                                      else  if (IfValidAnd( RptWinAreaWgtUfactorWithExcept <= 0.405 ))  ; RJH 2/13/26 - CBECC-Dev Issue 666 exclude Except1 and Except2 windows and skylights 
+                                                            then  UNCHANGED  ; everything should be OK accounting for rounding
+                                                            else  if ( IfValidAnd( EnableResearchMode > 0 ) )
+                                                                  then  PostWarning( "Project-wide Fenestration area-weighted average U-factor (%.4f) exceeds mandatory maximum U-0.4", RptWinAreaWgtUfactorWithExcept )
+                                                                  else  PostError(   "Project-wide Fenestration area-weighted average U-factor (%.4f) exceeds mandatory maximum U-0.4", RptWinAreaWgtUfactorWithExcept )
+                                                                  endif
+                                                            endif
+                                                      endif
                                                 endif
-                                          endif 
+                                          endif
                                     endif  }
 
 	; RJH 9/9/25 - Issue #381 - Mandatory Minimums for Duct insulation - already implemented
 
 	; RJH 9/9/25 - Issue #381 - Mandatory Maximum for Duct Leakage
 	"Check for Duct Leakage not exceeding maximum value"
-                  HVACDist:Action = {     if (IfValidAnd( Proj:AnalysisVersion >= 250000 )==0 .OR. Proj:IsStdOrSMFRun .OR. IfValidAnd( Proj:CondFloorArea > 0 )==0 .OR. IfValidAnd( Status == 1 )) 
+                  HVACDist:Action = {     if (IfValidAnd( Proj:AnalysisVersion >= 250000 )==0 .OR. Proj:IsStdOrSMFRun .OR. IfValidAnd( Proj:CondFloorArea > 0 )==0 .OR.
+                                              IfValidAnd( Status == 1 ) .OR. IfValidAnd( Proj:CUACReportID > 0 )) 
                                           then UNCHANGED
                                           else  if (IfValidAnd( DuctLeakageVal <= 5.05 )) 
                                                 then  UNCHANGED  ; everything should be OK accounting for rounding
@@ -2314,7 +2344,8 @@ RULELIST "ProposedModelSimulationCheck" 1 0 0 0
 
 	; RJH 9/14/25 - Issue #381 - Mandatory Minimums for HVACSys
 	"Check for HVACSys exceeding fan efficacy maximum values"
-                  HVACSys:Action = {      if (IfValidAnd( Proj:AnalysisVersion >= 250000 )==0 .OR. Proj:IsStdOrSMFRun .OR. IfValidAnd( Proj:CondFloorArea > 0 )==0 .OR. IfValidAnd( FloorAreaServed > 0 )==0 .OR. IfValidAnd( Status == 1 )) 
+                  HVACSys:Action = {      if (IfValidAnd( Proj:AnalysisVersion >= 250000 )==0 .OR. Proj:IsStdOrSMFRun .OR. IfValidAnd( Proj:CondFloorArea > 0 )==0 .OR.
+                                              IfValidAnd( FloorAreaServed > 0 )==0 .OR. IfValidAnd( Status == 1 ) .OR. IfValidAnd( Proj:CUACReportID > 0 )) 
                                           then UNCHANGED
                                           else  if (Type != 2 .AND. LocalCompAssigned( Fan ))   ; gas furnace air-handling units
                                                 then  if (Fan:WperCFMCool <= 0.455)
@@ -2354,7 +2385,8 @@ RULELIST "ProposedModelSimulationCheck" 1 0 0 0
 
 	; RJH 9/17/25 - Issue #381 - Mandatory Minimums for HVACSys - Updated 9/29/25 with IfValidAnd checks
 	"Check for HVACSys below airflow rate minimum values"
-                  HVACSys:Action = {      if (IfValidAnd( Proj:AnalysisVersion >= 250000 )==0 .OR. Proj:IsStdOrSMFRun .OR. IfValidAnd( Proj:CondFloorArea > 0 )==0 .OR. IfValidAnd( FloorAreaServed > 0 )==0 .OR. IfValidAnd( Status == 1 )) 
+                  HVACSys:Action = {      if (IfValidAnd( Proj:AnalysisVersion >= 250000 )==0 .OR. Proj:IsStdOrSMFRun .OR. IfValidAnd( Proj:CondFloorArea > 0 )==0 .OR.
+                                              IfValidAnd( FloorAreaServed > 0 )==0 .OR. IfValidAnd( Status == 1 ) .OR. IfValidAnd( Proj:CUACReportID > 0 )) 
                                           then UNCHANGED
                                           else  if (Type != 2 .AND. LocalCompAssigned( Fan ) .AND. LocalCompAssigned( CoolSystem[1] ))   ; gas furnace air-handling units
                                                 then  if (IfValidAnd( CoolSystem[1]:CFMperTon >= 349.5 ))
@@ -2402,9 +2434,10 @@ RULELIST "ProposedModelSimulationCheck" 1 0 0 0
                                                             
 	; RJH 9/19/25 - Issue #381 - check for roof decks OR CeilingBelowAttic in newly constructed attic systems insulated to achieve an area-weighted average U-factor not exceeding Mandatory maximum
 	"Check for Attic roof OR CeilingBelowAttic area-weighted average U-factor not exceeding Mandatory maximum"
-                  Attic:Action = {        if (IfValidAnd( Proj:AnalysisVersion >= 250000 )==0 .OR. Proj:IsStdOrSMFRun .OR. IfValidAnd( Proj:CondFloorArea > 0 )==0 .OR. IfValidAnd( Status == 3 )==0 .OR. IfValidAnd( FloorAreaOverCond > 0 )==0 ) 
+                  Attic:Action = {        if (IfValidAnd( Proj:AnalysisVersion >= 250000 )==0 .OR. Proj:IsStdOrSMFRun .OR. IfValidAnd( Proj:CondFloorArea > 0 )==0 .OR.
+                                              IfValidAnd( Status == 3 )==0 .OR. IfValidAnd( FloorAreaOverCond > 0 )==0 .OR. IfValidAnd( Proj:CUACReportID > 0 ) ) 
                                           then UNCHANGED
-							else  if (Type == 0) 
+                                          else  if (Type == 0) 
                                                 then  if (IfValidAnd(AvgCBAUval <= 0.1845))  
                                                       then UNCHANGED  ; everything should be OK accounting for rounding
                                                       else  if( IfValidAnd( Proj:EnableResearchMode > 0 ) )
@@ -2441,7 +2474,8 @@ RULELIST "ProposedModelSimulationCheck" 1 0 0 0
                 ;                          endif
                 ;                    endif }
       ; revised rule to prevent posting error for CathClg objects w/ cavity R-val >= R-22 (code sec 150.0(a)2) - SAC 01/13/26 (dev #681)
-      CathedralCeiling:Action = {   if (IfValidAnd( Proj:AnalysisVersion >= 250000 )==0 .OR. Proj:IsStdOrSMFRun .OR. IfValidAnd( Proj:CondFloorArea > 0 )==0 .OR. IfValidAnd( NewZoneArea > 0.1 )==0 ) 
+      CathedralCeiling:Action = {   if (IfValidAnd( Proj:AnalysisVersion >= 250000 )==0 .OR. Proj:IsStdOrSMFRun .OR. IfValidAnd( Proj:CondFloorArea > 0 )==0 .OR.
+                                        IfValidAnd( NewZoneArea > 0.1 )==0 .OR. IfValidAnd( Proj:CUACReportID > 0 ) ) 
                                     then UNCHANGED
                                     else  if (IfValidAnd( SumAll( CathedralCeiling:NewUvalXOverCondArea ) > 0 ) .AND. IfValidAnd( SumAll( CathedralCeiling:NewZoneArea ) > 0 ))
                                           then  if ((SumAll( CathedralCeiling:NewUvalXOverCondArea ) / SumAll( CathedralCeiling:NewZoneArea )) < 0.0435)
@@ -2473,7 +2507,8 @@ RULELIST "ProposedModelSimulationCheck" 1 0 0 0
                 ;                          endif
                 ;                    endif }
       ; revised rule to prevent posting error for CathClg objects w/ cavity R-val >= R-19 (code sec 150.0(a)2 exception) - SAC 01/12/26 (dev #681)
-      CathedralCeiling:Action = {   if (IfValidAnd( Proj:AnalysisVersion >= 250000 )==0 .OR. Proj:IsStdOrSMFRun .OR. IfValidAnd( Proj:CondFloorArea > 0 )==0 .OR. IfValidAnd( AltZoneArea > 0.1 )==0 ) 
+      CathedralCeiling:Action = {   if (IfValidAnd( Proj:AnalysisVersion >= 250000 )==0 .OR. Proj:IsStdOrSMFRun .OR. IfValidAnd( Proj:CondFloorArea > 0 )==0 .OR.
+                                        IfValidAnd( AltZoneArea > 0.1 )==0 .OR. IfValidAnd( Proj:CUACReportID > 0 ) ) 
                                     then UNCHANGED
                                     else  if (IfValidAnd( SumAll( CathedralCeiling:AltUvalXOverCondArea ) > 0 ) .AND. IfValidAnd( SumAll( CathedralCeiling:AltZoneArea ) > 0 ))
                                           then  if ((SumAll( CathedralCeiling:AltUvalXOverCondArea ) / SumAll( CathedralCeiling:AltZoneArea )) < 0.0545)
@@ -3215,7 +3250,7 @@ END
 ;************************************************************************* SAC 2/17/20 - rulelists to facilitate clean-up of regression test runs - Fan Efficacy
 RULELIST "FIX_2019FanEfficacy_SFam" 1 0 0 0
 			"Check for SFam mandatory minimum fan system efficacy (ACM 2.2.12) - call subordinate rulelist to upate if needed"		HVACSys:Action	= {
-					if ( FloorAreaServed[1] < 0.1 .OR. LocalCompAssigned( Fan ) == 0 .OR.
+					if ( FloorAreaServed[1] < 0.1 .OR. LocalCompAssigned( Fan ) == 0 .OR. IfValidAnd( Proj:CUACReportID > 0 ) .OR.
 						(Proj:RunScope == 2 .AND. Fan:Status == 2 .AND. Fan:IsVerified) .OR. ((Proj:RunScope == 2 .OR. Proj:IsAddAlone > 0) .AND. Fan:Status == 1) ) then  UNCHANGED
 					else if (Fan:Type == 1 .AND. SDHVAreaServed == FloorAreaServed[1] 
 						.AND. Fan:WperCFMCool >T24RClimateZoneCodeBase:SDHVWperCFM( "ClimateZone", Proj:ClimateZone, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr ))
