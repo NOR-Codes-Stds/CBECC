@@ -45,6 +45,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 ;"log status"   ResProj:Action = {  if (DevMode==0 .OR. LocalStatus(RunAbbrev) < 1 .OR. EnergyCodeYearNum < 2019) then  UNCHANGED  else
 ;   PostMessageToLog( "    evaluating 'ProposedModelCodeCheck' rules on '%s' model...", RunAbbrev )  endif  }
 ;"dbg" ResProj:Action = { PostMessageToLog( "    evaluating 'ProposedModelCodeCheck' rules on '%s' model...", RunAbbrev ) }
+  ; add logic to prevent certain errors (throughout this module) when doing CUAC - SAC 03/11/26 (dev #741)
 
 	"Check for valid ClimateZone specified"
 		ResProj:Action		= {	if (ClimateZone > 0.5 .AND. ClimateZone < 16.5) then  UNCHANGED
@@ -156,7 +157,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
     { if (CommunitySolarProjID > 0 .AND. IfValidAnd( AnalysisVersion >= 250200 ) .AND. IfValidAnd( CUACReportID > 0 )==0)
       then  PostError( "Community Solar is not available for code compliance (only for CUAC analysis)" )
       else if (CommunitySolarProjID > 0 .AND. IfValidAnd( CmntySlrProjCZCompat > 0 )==0)
-      then  PostError( "Selected Community Solar project '%s' if not avaialble in %s", EnumString( CommunitySolarProject ), EnumString( ClimateZone ) )
+      then  PostError( "Selected Community Solar project '%s' is not avaialble in %s", EnumString( CommunitySolarProject ), EnumString( ClimateZone ) )
       else if (CommunitySolarProjID > 0 .AND. InCmntySlrProjTerritory < 1)
       then  if (EnableResearchMode > 0)  ; .OR. BypassRuleLimits > 0)
             then  PostWarning( "Before valid analysis, user must acknowledge that this home/building is located within the service territory of the selected community solar project:   %s", EnumString( CommunitySolarProject ) )
@@ -230,8 +231,9 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 									         then  PostWarning( "Minimum IAQ Ventilation NOT MET:  %s required, %s entered (CFM).  Review inputs for DwellUnit '%s' (DwellUnitType '%s').", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ), Name, DwellUnitTypeRef:Name )
 									         else  PostError(   "Minimum IAQ Ventilation NOT MET:  %s required, %s entered (CFM).  Review inputs for DwellUnit '%s' (DwellUnitType '%s').", FltToStr( MinIAQCFM, 1 ), FltToStr( TotalIAQCFM, 1 ), Name, DwellUnitTypeRef:Name )  endif
 										else	UNCHANGED  endif endif endif endif }
-  "Check for multifamily IAQ ventilation type valid"  DwellUnitType:Action =  ; JP 8/27/25 (issue #199)   ; revise logic to only apply to New/Alt-assigned DUTs and to first check for IAQOption = 5 (Minimum Exhaust IAQ Fan (existing only)) - SAC 02/12/26 (dev #710)
-    { if( IfValidAnd( Proj:AnalysisVersion >= 250000 ) .AND. 
+  ; JP 8/27/25 (issue #199)   ; revise logic to only apply to New/Alt-assigned DUTs and to first check for IAQOption = 5 (Minimum Exhaust IAQ Fan (existing only)) - SAC 02/12/26 (dev #710)
+  "Check for multifamily IAQ ventilation type valid"  DwellUnitType:Action =     ; add logic to prevent error when doing CUAC - SAC 03/10/26 (dev #741)
+    { if( IfValidAnd( Proj:AnalysisVersion >= 250000 ) .AND. IfValidAnd( Proj:CUACReportID > 0 )==0 .AND.
           ( IfValidAnd( ResProj:RunScope = 1 ) .OR. SumRevRef( DwellUnit:DwellUnitTypeRef, DwellUnit:NewOrAltHVACFlrAreaWithMult ) > 1 ) )
       then  if( IAQOption == 5 )
             then  PostError( "DwellUnitType '%s' IAQ type '%s' is not permitted for New or Altered dwellings. Please update the design to use a balanced or supply-only system to proceed.", Name, EnumString( IAQOption ) )
@@ -243,7 +245,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
       endif  }
 
    "Check for inconsistencies in IAQ fan types in MFam models"    DwellUnitType:Action =        ; SAC 7/26/20 (tic #1174)
-      {  if ( Proj:IsSFamResRuleset .OR. IfValidAnd( NumAssigningDUs > 0 )==0) then  UNCHANGED
+      {  if ( Proj:IsSFamResRuleset .OR. IfValidAnd( NumAssigningDUs > 0 )==0 .OR. IfValidAnd( Proj:CUACReportID > 0 )) then  UNCHANGED
          else if ( ( ResProj:MostDUIAQ_Balanced > 0 .AND. IAQCFMIsBalanced > 0) .OR.
                    ( ResProj:MostDUIAQ_Exhaust  > 0 .AND. IfValidAnd( MostIAQ_Exhaust > 0 )) .OR.
                    ( ResProj:MostDUIAQ_Supply   > 0 .AND. IfValidAnd( MostIAQ_Supply  > 0 )) ) then  UNCHANGED
@@ -255,14 +257,14 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
          else  UNCHANGED  endif endif endif  }
 
    "Check for Indiv DwellUnitType IAQ HRV fan power in acceptable range"   DwellUnitType:Action =        ; SAC 10/10/22 (tic #3422)
-      {  if ( Proj:IsSFamResRuleset .OR. IfValidAnd( NumAssigningDUs > 0 )==0) then  UNCHANGED
+      {  if ( Proj:IsSFamResRuleset .OR. IfValidAnd( NumAssigningDUs > 0 )==0 .OR. IfValidAnd( Proj:CUACReportID > 0 )) then  UNCHANGED
          else if ( IAQOption == 2 .AND. IAQCFMIsBalanced > 0 .AND. IAQHRVCFM > 0 .AND.
                    IfValidAnd( IAQHRVPwr > IAQHRVCFM ))
          then  PostError( "DwellUnitType '%s' IAQ HRV fan efficacy (%.2f W/CFM) exceeds limit of 1.0 W/CFM (per Std section 160.2(b)2.A.iv.b.1)", Name, (IAQHRVPwr/IAQHRVCFM) )
          else  UNCHANGED  endif endif  }
 
    "Check for Supply air filters, inlets and H/ERV cores accessibility"  DwellUnitType:Action =  ; JP 8/27/25 (issue #199)
-      {  if( IfValidAnd( Proj:AnalysisVersion >= 250000 ) .AND.
+      {  if( IfValidAnd( Proj:AnalysisVersion >= 250000 ) .AND. IfValidAnd( Proj:CUACReportID > 0 )==0 .AND.
              IfValidAnd( IAQDisabled > 0 ) = 0 .AND. IfValidAnd( HasIndvIAQSup > 0 ) .AND. IfValidAnd( IAQSupInletsAccessible > 0 ) = 0 )
          then  PostError( "DwellUnitType '%s' Supply air filters, inlets and H/ERV cores must be accessible", Name )
          else  UNCHANGED
@@ -299,7 +301,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
   ; SAC 3/4/16 - Check to confirm validity between PV compliance credit & detailed (EDR) PV system size (tic #609)
   ; SAC 3/25/16 - Revised rule to throw similar error when PVCompCredit and DesignRatingCalcs are selected but No EDR PV
 	"Check for valid EDR PV system size when activated along w/ PV compliance credit"
-		ResProj:Action		= {	if (IfValidAnd( IsComRuleset > 0 )) then  UNCHANGED
+		ResProj:Action		= {	if (IfValidAnd( IsComRuleset > 0 ) .OR. IfValidAnd( Proj:CUACReportID > 0 )) then  UNCHANGED
                               else if (IfValidAnd(StandardsVersion >= 2017)==0 .OR. EnablePVCredit < 1 .OR. PVCompCredit < 1 .OR. IfValidAnd( AllowDesignRating > 0.5 )==0 .OR. IfValidAnd( DesignRatingCalcs > 0.5 )==0) then  UNCHANGED
 									else if (IfValidAnd( PVWDCSysTotal > 0 )==0)
 									then	PostError( "When both the PV compliance credit and Energy Design Rating (EDR) PV system credit features are activated, an EDR PV system size must be specified that is >= the minimum PV compliance credit system size of %g kWdc.", PVMinRatedPower[1] )
@@ -361,7 +363,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 
 	; SAC 6/6/13 - added check for minimum R-5 slab edge insulation when 'Heated Slab' is selected
 	"Check for minimum R-5 slab edge insulation when 'Heated Slab' is selected"
-		ResSlabFlr:Action	= {	if (HeatedSlab > 0.5 .AND. (EdgeInsulRValue < 5 .OR. EdgeInsulDepth < 16))
+		ResSlabFlr:Action	= {	if (HeatedSlab > 0.5 .AND. (EdgeInsulRValue < 5 .OR. EdgeInsulDepth < 16) .AND. IfValidAnd( Proj:CUACReportID > 0 )==0)
 										then	PostError( "Slab floor '%s' requires minimum of R-5, 16 in. depth edge insulation since it is specified as heated", Name )
 										else  UNCHANGED  endif  }
 
@@ -415,7 +417,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
          else  UNCHANGED  endif endif endif  }
 
    "Prevent analysis when cool vent flow exceeds code (CEC) maximum"    ResProj:Action  =       ; SAC 6/29/20 (tic #1236)
-      {  if (IsMultiFamily > 0 .OR. Proj:EnableResearchMode > 0 .OR. BypassRuleLimits > 0 .OR. CondFloorArea < 1 .OR.
+      {  if (IsMultiFamily > 0 .OR. Proj:EnableResearchMode > 0 .OR. BypassRuleLimits > 0 .OR. CondFloorArea < 1 .OR. IfValidAnd( Proj:CUACReportID > 0 ) .OR.
              (EnableClVent < 0.5 .AND. LimitedClVent < 0.5) .OR. UnitClVentOption < 1 .OR. IfValidAnd( UnitClVentCFMTot > 0 )==0) then  UNCHANGED
          else if ((UnitClVentCFMTot / CondFloorArea) > (ValidOr( MaxClVentFlow, 1000 ) + 0.01))
          then  PostError( "Cool vent flow (%s CFM/ft2) cannot exceed maximum of %s CFM/ft2 (%s CFM)",
@@ -707,7 +709,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
    ; restored and enhanced surface count & area checks - SAC 04/19/23 (tic #3497)  ; added logic to bypass these check when EnableResearchMode is activated - SAC 01/05/24
    ; bypass these checks when automatically generating ZB (zn boundry) int surfaces - SAC 02/01/24
 	"Check for sufficient ResZn:SurfaceCount"		ResZn:Action	=
-      {  if (IfValidAnd( Proj:EnableResearchMode > 0 ) .OR. ResProj:IntSurfModelMthd > 0) then  UNCHANGED
+      {  if (IfValidAnd( Proj:EnableResearchMode > 0 ) .OR. ResProj:IntSurfModelMthd > 0 .OR. IfValidAnd( Proj:CUACReportID > 0 )) then  UNCHANGED
          else if (SurfaceCount < 3)
          then	PostError( "Residential Zone (ResZn) '%s' has too few child and/or adjacent surfaces (%g, minimum is 3) to be simulated.", Name, SurfaceCount )
          else if (SurfaceAreaMax > (SurfaceAreaSum * 0.4))
@@ -724,7 +726,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
          then	PostError( "Residential zone (ResZn) '%s' has too much bottom/floor surface area (%g) - can't be more than 250%% of overall zone area (%g).", Name, SurfaceAreaBot, FloorArea )
          else	UNCHANGED  endif endif endif endif endif endif endif  }
 	"Check for sufficient ResOtherZn:SurfaceCount"	ResOtherZn:Action	=     ; SAC 9/18/19 - (MFamProto)
-      {  if (IfValidAnd( Proj:EnableResearchMode > 0 ) .OR. ResProj:IntSurfModelMthd > 0) then  UNCHANGED
+      {  if (IfValidAnd( Proj:EnableResearchMode > 0 ) .OR. ResProj:IntSurfModelMthd > 0 .OR. IfValidAnd( Proj:CUACReportID > 0 )) then  UNCHANGED
          else if (SurfaceCount < 3)
          then	PostError( "Residential OtherZone (ResOtherZn) '%s' has too few child and/or adjacent surfaces (%g, minimum is 3) to be simulated.", Name, SurfaceCount )
          else if (SurfaceAreaMax > (SurfaceAreaSum * 0.4))
@@ -782,7 +784,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
          else  PostError( "ResOtherZn '%s' has no connection to the outside (via exterior surfaces of this or adjacent zones), which is required", Name )  endif  }
 
 	"Check consistency between Zone area & the sum of the child DwellUnit areas"		; SAC 6/25/14
-		ResZn:Action = {	if ( Proj:IsSFamResRuleset .OR. IfValidAnd( ResProj:ZonalControl > 0.5 ))	then  UNCHANGED
+		ResZn:Action = {	if ( Proj:IsSFamResRuleset .OR. IfValidAnd( ResProj:ZonalControl > 0.5 ) .OR. IfValidAnd( Proj:CUACReportID > 0 ))	then  UNCHANGED
 								else if (Type == 10 .AND.  DwellingUnitArea_Cond > 1) then  PostError( "Zone '%s' in Unconditioned but has conditioned dwelling unit assigned area of %s SqFt.", Name, FltToStr( DwellingUnitArea_Cond ) )
 								else if (Type  < 10 .AND. (DwellingUnitArea_Cond <= (FloorArea-1) .OR. DwellingUnitArea_Cond >= (FloorArea+1)))
 								then	PostError( "There is a mismatch between conditioned area (%s SqFt) and assigned dwelling unit area (%s SqFt) for zone '%s'", FltToStr( FloorArea ), FltToStr( DwellingUnitArea_Cond ), Name )
@@ -1055,14 +1057,15 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
             else  UNCHANGED  endif endif endif
       else  UNCHANGED  endif endif endif  }
 
-	"Check for HVACHtPump perf metrics via HSPF2/SEER2/EER2 for 2025+ analysis"	ResHtPumpSys:Action	=     ; SAC 07/20/23  ; replaced check for Status w/ IsExisting, since Status not necessarily defined - SAC 12/10/25
+  ; SAC 07/20/23  ; replaced check for Status w/ IsExisting, since Status not necessarily defined - SAC 12/10/25
+	"Check for HVACHtPump perf metrics via HSPF2/SEER2/EER2 for 2025+ analysis"	ResHtPumpSys:Action	= 
       {  if ((FloorAreaServed < 0.1 .AND. NumAssigningDUs < 0.1) .OR. IfValidAnd( ShowEffMetric > 0 )==0 .OR.
-             EffMetric > 1 .OR. IfValidAnd( Proj:AnalysisVersion < 250002 ) .OR. 
+             EffMetric > 1 .OR. IfValidAnd( Proj:AnalysisVersion < 250002 ) .OR. IfValidAnd( Proj:CUACReportID > 0 ) .OR. 
              (IfValidAnd( IsExisting > 0 ) .AND. (ResProj:RunScope > 1 .OR. ResProj:IsAddAlone > 0))) then  UNCHANGED
          else if (IfValidAnd( Proj:EnableResearchMode > 0 ))
          then  if (Type == 26 .OR. Type == 24 .OR. Type == 11 .OR. Type == 12 .OR. Type == 6)
-               then  PostWarning( "Heat pump '%s' efficiency metric must be switched to 'EER2' for analysis in this code vintage.", Name )
-               else  PostWarning( "Heat pump '%s' efficiency metric must be switched to 'HSPF2/SEER2/EER2' for analysis in this code vintage.", Name )  endif
+               then  PostWarning( "Heat pump '%s' efficiency metric must be switched to 'EER2' for compliance analysis in this code vintage.", Name )
+               else  PostWarning( "Heat pump '%s' efficiency metric must be switched to 'HSPF2/SEER2/EER2' for compliance analysis in this code vintage.", Name )  endif
          else  if (Type == 26 .OR. Type == 24 .OR. Type == 11 .OR. Type == 12 .OR. Type == 6)
                then  PostError( "Heat pump '%s' efficiency metric must be switched to 'EER2' for analysis in this code vintage.", Name )
                else  PostError( "Heat pump '%s' efficiency metric must be switched to 'HSPF2/SEER2/EER2' for analysis in this code vintage.", Name )  endif
@@ -1155,7 +1158,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
    ; added logic to prevent errors for 2022+ model where Large HtPump Fan power is as high as 0.58 W/CFM - SAC 03/15/21 (tic #1268)
    ; altered checks to be performed on HVACSys for SFam and DwellUnitType for MFam - plus correct invalid fan power check thru use of MaxFanPower properties - SAC 04/08/21 (tic #1268)
    "Set DwellUnitType:MaxFanPower in MFam models"     DwellUnitType:MaxFanPower =
-      {  if ( Proj:IsSFamResRuleset .OR. IfValidAnd( DUFloorAreaServed > 0.1 )==0 .OR. LocalCompAssigned( HVACFanRef ) == 0 .OR. ResProj:BypassRuleLimits > 0.5 .OR.
+      {  if ( Proj:IsSFamResRuleset .OR. IfValidAnd( DUFloorAreaServed > 0.1 )==0 .OR. IfValidAnd( Proj:CUACReportID > 0 ) .OR. LocalCompAssigned( HVACFanRef ) == 0 .OR. ResProj:BypassRuleLimits > 0.5 .OR.
               ( ResProj:RunScope == 2 .AND. HVACFanRef:Status == 2 .AND. HVACFanRef:IsVerified) .OR. (( ResProj:RunScope == 2 .OR. ResProj:IsAddAlone > 0) .AND. HVACFanRef:Status == 1) ) then  UNDEFINED
          else if (HVACFanRef:Type == 1 .AND. DUSDHVFlrAreaServed == DUFloorAreaServed)
          then  T24RClimateZoneCodeBase:SDHVWperCFM( "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )
@@ -1179,7 +1182,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 			then  PostError( "Fan '%s' assigned to DwellUnitType '%s' has fan efficacy of %g W/CFM which is higher than the mandatory maximum of %g (run %s).", HVACFanRef:name, Name, HVACFanRef:WperCFMCool, MaxFanPower, ResProj:RunAbbrev )
          else  UNCHANGED  endif endif  endif endif}
    "Set ResHVACSys:MaxFanPower in SFam models"           ResHVACSys:MaxFanPower =
-      {  if ( ( Proj:IsComRuleset .AND. ComponentCount( OtherZone ) < 1) .OR. FloorAreaServed[1] < 0.1 .OR. LocalCompAssigned( Fan ) == 0 .OR. ResProj:BypassRuleLimits > 0.5 .OR.
+      {  if ( ( Proj:IsComRuleset .AND. ComponentCount( OtherZone ) < 1) .OR. FloorAreaServed[1] < 0.1 .OR. IfValidAnd( Proj:CUACReportID > 0 ) .OR. LocalCompAssigned( Fan ) == 0 .OR. ResProj:BypassRuleLimits > 0.5 .OR.
               ( ResProj:RunScope == 2 .AND. Fan:Status == 2 .AND. Fan:IsVerified) .OR. (( ResProj:RunScope == 2 .OR. ResProj:IsAddAlone > 0) .AND. Fan:Status == 1) ) then  UNDEFINED
          else if (Fan:Type == 1 .AND. SDHVAreaServed == FloorAreaServed[1])
          then  T24RClimateZoneCodeBase:SDHVWperCFM( "ClimateZone", Proj:CliZnNum, "CodeBase", Proj:StdDesignBase, "BldgType", Proj:BldgTypeTblStr )
@@ -1204,7 +1207,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
    ; SAC 2/11/19 - revised range check & message for ResClgSys:CFMperTon to allow a min 250 CFM/ton for SDHV systems (tic #1041)
 	"Check for mandatory minimum HVACCool system airflow"    ResClgSys:Action	=
 	   ; SAC 12/23/13 - added improved defaulting of ResClgSys:FloorAreaServed and revised logic enable this rule to be evaluated on each HVACCool object rather than each HVACSys (which was causing GC issue #249)
-	{  if ( FloorAreaServed < 0.1 .OR. ResProj:RunScope != 1 .OR. Type < 2 .OR. Type == 5 .OR. Type == 16 .OR. Type == 20 .OR. Type == 21 .OR. ResProj:BypassRuleLimits > 0.5) then UNCHANGED
+	{  if ( FloorAreaServed < 0.1 .OR. IfValidAnd( Proj:CUACReportID > 0 ) .OR. ResProj:RunScope != 1 .OR. Type < 2 .OR. Type == 5 .OR. Type == 16 .OR. Type == 20 .OR. Type == 21 .OR. ResProj:BypassRuleLimits > 0.5) then UNCHANGED
 		else if ( IfValidAnd( IsZonal < 1 ) )
 		then  if ( Type == 18 .AND. IfValidAnd( CFMperTon < 250 ) )
       		then PostError( "SDHV Cooling System '%s' has airflow of %g CFM/Ton which is less than the mandatory minimum of 250 for non-zonal, SDHV systems", Name, CFMperTon )
@@ -1251,7 +1254,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 
    ; SAC 2/11/19 - revised range check & message for ResHtPumpSys:CFMperTon to allow a min 250 CFM/ton for SDHV systems (tic #1041)
 	"Check for mandatory minimum HVACHtPump system airflow"     ResHtPumpSys:Action	= {
-		if ( FloorAreaServed < 0.1 .OR. ResProj:RunScope != 1 .OR. Type < 1 .OR. Type == 7 .OR. Type == 10 .OR. Type == 11 .OR. Type == 20 .OR. Type == 21 .OR. ResProj:BypassRuleLimits > 0.5) then UNCHANGED
+		if ( FloorAreaServed < 0.1 .OR. IfValidAnd( Proj:CUACReportID > 0 ) .OR. ResProj:RunScope != 1 .OR. Type < 1 .OR. Type == 7 .OR. Type == 10 .OR. Type == 11 .OR. Type == 20 .OR. Type == 21 .OR. ResProj:BypassRuleLimits > 0.5) then UNCHANGED
 		else if ( IfValidAnd( IsZonal < 1 ) )
 		then  if ( Type == 19 .AND. IfValidAnd( CFMperTon < 250 ) )
       		then PostError( "SDHV Heat Pump System '%s' has airflow of %g CFM/Ton which is less than the mandatory minimum of 250 for non-zonal, SDHV systems", Name, CFMperTon )
@@ -1447,7 +1450,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
    ; SAC 3/25/19 - update for Proj-wide Compact Distrib
    ; removed check associated w/ SFamUserSpecCmpctDist and undefined SFamUserCompactFactor - SAC 09/29/21 (tic #1277)
    "Ensure all required data specified for selected Compact Distrib is specified"    ResProj:Action  = {
-         if (IfValidAnd( IsComRuleset > 0 )) then  UNCHANGED
+         if (IfValidAnd( IsComRuleset > 0 ) .OR. IfValidAnd( Proj:CUACReportID > 0 )) then  UNCHANGED
          else if ( ResProj:EnergyCodeYearNum < 2019 .OR. SFamCompactDistrib < 1 .OR. IsMultiFamily > 0.5) then  UNCHANGED
          else  if (IfValidAnd( SFamCDWeightedDist = 10001 ))
                then  PostError( "Compactness selection is '%s' but the straight-line heater to furthest room fixture distance is unspecified for all compatible recirculation DHW systems.", EnumString( SFamCompactDistrib ) )
@@ -1726,7 +1729,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
 										else	UNCHANGED  endif endif endif  }
 												
 ; mjb	5/6/14 add check for QII and Buried Duct combo
-	"Check for QII and Buried Ducts"		ResDistSys:Action	= {	if (FloorAreaServed < 0.1) then  UNCHANGED
+	"Check for QII and Buried Ducts"		ResDistSys:Action	= {	if (FloorAreaServed < 0.1 .OR. IfValidAnd( Proj:CUACReportID > 0 )) then  UNCHANGED
 																					else if (AreBuried .OR. AreDeeplyBuried) then 
 																						if (ResProj:InsulConsQuality < 1.5) then PostError( "HVACDist '%s' has buried and/or deeply buried ducts. To get compliance credit, this project must also have Quality Insulation Installation (QII).", Name ) 
 																						else UNCHANGED endif
@@ -1737,7 +1740,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
    ; SAC 4/21/19 - added logic to prevent this error for Std or DRtg runs
    ; moved this rule posting error related to Cons assigned to surfaces of New and non-New zones up here from CheckSim rulelist so that it is triggered before sizing run(s) - SAC 06/29/23 (tic #3479)
    "Check for constructions assigned to both new and non-new zone surfaces (when QII being modeled)"   ResConsAssm:Action  = {
-      if ( ResProj:ICQEnclCavInsMult <= ResProj:StdICQEnclCavInsMult) then  UNCHANGED  ; no QII selected
+      if ( ResProj:ICQEnclCavInsMult <= ResProj:StdICQEnclCavInsMult .OR. IfValidAnd( Proj:CUACReportID > 0 )) then  UNCHANGED  ; no QII selected
       else if ( ResProj:RunAbbrev == "s" .OR. ResProj:RunAbbrev == "zb" .OR. ResProj:RunAbbrev == "smf" .OR. ResProj:RunAbbrev == "dr") then  UNCHANGED  ; no error for Std or DRtg runs
       else if (IfValidAnd( SurfacesQIIDegraded > 0 )==0 .OR. IfValidAnd( SurfacesQIINotDegraded > 0 )==0) then  UNCHANGED
       else if (CanAssignTo == 7 .OR. CanAssignTo == 8) then  UNCHANGED  ; n/a to Attic Roofs, Slab or Und Flrs  ; now applicable to attic roofs (tic #775) - SAC 5/18/18
@@ -1754,7 +1757,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
    ; SAC 5/18/18 - revised logic slightly to accommodate wall exception input (tic #798)
    ; switch error to warning for QII set but not applicable for 2022.3.1 and future releases - SAC 04/15/24 (tic #1360)
    "Check for presence of at least one surface benefitting by QII = Improved"    ResProj:Action  = {  
-         if (InsulConsQuality < 1.5 .OR.
+         if (InsulConsQuality < 1.5 .OR. IfValidAnd( Proj:CUACReportID > 0 ) .OR.
              SumAll( ResCeilingBelowAttic:ICQAtticBypassApplies ) > 0) then UNCHANGED
          else if (SumAcrossIf( ResConsAssm:SurfacesQIINotDegraded, ResConsAssm:AssignedSurfaceArea > 0 ) > 0) then UNCHANGED
          else if (IfValidAnd( EnergyCodeYearNum >= 2019 ))
@@ -1767,7 +1770,7 @@ RULELIST "ProposedModelCodeCheck" 1 0 0 0
    ; SAC 4/18/19 - added logic to perform different high duct R-val error logic for pre- & post-2019 models (2019+ based on DuctSeg) (tic #874)
 	"Check for ResDistSys:DuctInsRvalOpt exceeding allowed value when duct design not verified"
 		ResDistSys:Action	= {
-		   if (FloorAreaServed < 0.1 .OR. Status == 1 .OR. DefaultSystem > 0.5) then  UNCHANGED
+		   if (FloorAreaServed < 0.1 .OR. IfValidAnd( Proj:CUACReportID > 0 ) .OR. Status == 1 .OR. DefaultSystem > 0.5) then  UNCHANGED
 			else if (DuctDesign < 0.5 .AND. IfValidAnd( DuctInsRvalOpt >= 801 )) 
 			then	PostError( "Duct insulation R-value of HVACDist '%s' (R-%g) exceeds the maximum of R-8 allowed for ducts that are not verified and buried.", Name, (DuctInsRvalOpt/100) )
 			else if ( Proj:StdDesignBase <= 2016 .AND. DuctDesign > 0.5 .AND. IfValidAnd( AreBuried < 0.5 ) .AND. IfValidAnd( AreDeeplyBuried < 0.5 ) .AND.
