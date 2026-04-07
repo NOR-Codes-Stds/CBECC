@@ -10,6 +10,8 @@ Option 1 and Option 2 are essentially the same, except that the "Open Recent Pro
 
 If "Select an Existing Project to Open" is selected, the default file type in the browse window is either a `.ribd25` or `.cibd25` file. However, this can be changed to `.ribd25x`, `.cibd25x` or `.xml`, allowing you to open an SDD XML file. This option should be used when working on a Detailed Geometry project.
 
+"Create CUAC-only Project from Details CSV" - This feature enables users to import an existing CUAC project hourly results simulated in an earlier version of CBECC (e.g. CBECC 2022) using the details CSV file that was generated for that analysis. Once imported users can then generate an updated rate analysis using the new rates without having to import and re-simulate the model in the new version of CBECC.
+
 The **Import old Access DB CUAC Project** option is for importing legacy Access DB CUAC project files.
 
 The rest of the options, **Create New Project** and **Batch Processing**, allow you to select the project type—Single Family vs Nonresidential/Multifamily.
@@ -30,7 +32,7 @@ This section explains the program features you access by selecting the icons on 
 
 ### Save File
 
-![Save file](images/toolbar-save.png) This button saves the file under its current name or, if you have not named the file, launches the Save As dialog to enable you to provide a new file name.
+![Save file](images/toolbar-save.png) This button saves the file under its current name or, if you have not named the file, launches the _Save As_ dialog to enable you to provide a new file name.
 
 ### Cut Selected Item
 
@@ -38,23 +40,26 @@ This section explains the program features you access by selecting the icons on 
 
 ### Copy Selected Item
 
-![Copy](images/toolbar-copy.png) This button enables you to copy the selected item on the tree control (along with any child components) to the Windows clipboard. The Copy button is not available from within program dialogs, but you can use the keyboard equivalent, **Ctrl+C**, to copy selected text.
+![Copy](images/toolbar-copy.png) This button enables you to copy the selected item on the tree control (along with any child components) to the Windows clipboard. The _Copy_ button is not available from within program dialogs, but you can use the keyboard equivalent, **Ctrl+C**, to copy selected text.
 
 ### Paste Contents of Clipboard
 
-![Paste](images/toolbar-paste.png) This button enables you to paste components copied from the tree control to the selected location in the tree control (provided that location is compatible with the stored component). The Paste button is not available from within program dialogs, but you can use the keyboard equivalent, **Ctrl+V**, to paste text from the Windows clipboard to the selected input field.
+![Paste](images/toolbar-paste.png) This button enables you to paste components copied from the tree control to the selected location in the tree control (provided that location is compatible with the stored component). The _Paste_ button is not available from within program dialogs, but you can use the keyboard equivalent, **Ctrl+V**, to paste text from the Windows clipboard to the selected input field.
 
 ### Print
 
 ![Print](images/toolbar-print.png) This function is not available in CBECC.
 
+### Building Creation Wizard
+This function is not available in CBECC.
+
 ### Perform Analysis
 
-![Perform analysis](images/toolbar-perform-analysis.png) This button enables you to launch a compliance analysis using the currently loaded building description. The behavior of this button is identical to the Tools menu option. You must save the current building description before performing the analysis.
+![Perform analysis](images/toolbar-perform-analysis.png) This button enables you to launch a compliance analysis using the currently loaded building description. The behavior of this button is identical to the _Tools_ menu option. You must save the current building description before performing the analysis.
 
 ### Compliance Reports
 
-![Compliance reports](images/toolbar-compliance-reports.png) This icon opens an approved CBECC Report in your local document viewing software; typically Acrobat Reader. The behavior of this button is identical to the Tools menu option—"View Compliance Report". You cannot open an approved report unless an analysis has been performed and the model has not been modified since the analysis has been performed. This button may or may not be enabled in this version of the software.
+![Compliance reports](images/toolbar-compliance-reports.png) This icon opens an approved _CBECC Report_ in your local document viewing software; typically Acrobat Reader. The behavior of this button is identical to the _Tools_ menu option—"View Compliance Report". You cannot open an approved report unless an analysis has been performed and the model has not been modified since the analysis has been performed. This button may or may not be enabled in this version of the software.
 
 ### About California Building Energy Code Compliance Software
 
@@ -107,7 +112,7 @@ When clicked over an input value in the window, the following choices are availa
 
 ## Building Tree Controls (Parent/Child Relationships)
 
-In order to analyze a building's energy use, it is necessary to track relationships among building components. CBECC displays these relationships using the familiar tree control, found in Windows Explorer and many other applications. For example, under the Envelope tab, exterior walls are shown as parents to windows (windows are connected to exterior walls and appear underneath walls) and children to spaces. The tree controls vary in the components they display and depend on which folder tab is currently selected.
+In order to analyze a building's energy use, it is necessary to track relationships among building components. CBECC displays these relationships using the familiar tree control, found in Windows™ Explorer and many other applications. For example, under the Envelope tab, exterior walls are shown as parents to windows (windows are connected to exterior walls and appear underneath walls) and children to spaces. The tree controls vary in the components they display and depend on which folder tab is currently selected.
 
 ### Use the Tree Control for Rapid Editing
 
@@ -144,10 +149,9 @@ For information on editing features available from the input dialog windows, see
 ---
 
 ## Status Bar
+The second and third panes of the program status bar now report detailed version IDs of (1) the software and (2) the ruleset that is referenced by the project currently loaded into the program.
 
 ![Status bar](images/ui-status-bar.png)
-
-The second and third panes of the program status bar now report detailed version IDs of (1) the software and (2) the ruleset that is referenced by the project currently loaded into the program.
 
 ---
 
@@ -170,9 +174,7 @@ To define a new physical component, follow these steps from the Main Program Scr
 
 If you have created multiple projects under different project names, you may want to delete project files to free up hard disk space on your computer. By default, project files are stored in the `C:\Users\<your username>\My Documents\CBECC 2025 Projects\` directory, although where the files are stored may differ on your computer depending upon where you installed the program and if you selected a different location for storing files.
 
-In the Projects folder, you will find several files with the same project name you used but with differing file extensions. If you have no further use for information on a project, delete all files using the primary file name. If you would like to retain a project but store it as efficiently as possible, delete all files using the primary file name **EXCEPT** the one having a `.cibd` (input building design) file name extension. The other project files are recreated when an analysis is performed, with the exception of the project `.log` file.
-
-The log file lists compliance analysis warnings and errors shown in the UI, as well as other information related to processing/simulating models. Each time analysis is performed, new messages are appended to the end of this file, and should be reviewed when troubleshooting your compliance analysis.
+In the Projects folder, you will find several files with the same project name you used but with differing file extensions. If you have no further use for information on a project, delete all files using the primary file name. If you would like to retain a project but store it as efficiently as possible, delete all files using the primary file name **EXCEPT** the one having a `.cibd` (input building design) file name extension. The other project files are recreated when an analysis is performed, with the exception of the project `.log` file. The `.log` file lists compliance analysis warnings and errors shown in the UI, as well as other information related to processing/simulating models. Each time analysis is performed, new messages are appended to the end of this file, and should be reviewed when troubleshooting your compliance analysis.
 
 ---
 
@@ -187,13 +189,10 @@ When you come across an issue, please submit the issue by sending an email to:
 
 And include as much of the following as possible (copy and paste this template into your email):
 
-![Report problem](images/report-problem.png)
-
 - **Type of Issue**
-- **CBECC version** (Version can be found in the _Help_ → _About_ menu) and is represented as shown below:
+- **CBECC version** (Version can be found in the _Help_ → _About_ menu) and is represented as shown below: CBECC 2025
 
-![Report problem - About](images/report-problem-2.png)
-
+    ![Report problem - About](images/report-problem-2.png)
 - **Describe the error**, using as much detail as possible.
 - **List the steps taken** to produce the error, using as much detail as possible.
 - **If there is an error message**, what is the message? If possible, take a screenshot of the error message and attach it to the email as a file.
@@ -203,7 +202,7 @@ And include as much of the following as possible (copy and paste this template i
 
 ## License Agreement
 
-Copyright (c) 2012-2025, California Energy Commission  
+Copyright (c) 2012-2026, California Energy Commission  
 Copyright (c) 2012-2017, Wrightsoft Corporation  
 All rights reserved.
 
@@ -216,8 +215,8 @@ Redistribution and use in source and binary forms, with or without modification,
 **DISCLAIMER:** THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION, WRIGHTSOFT CORPORATION, ITRON, INC. OR ANY OTHER AUTHOR OR COPYRIGHT HOLDER OF THIS SOFTWARE (COLLECTIVELY, THE "AUTHORS") BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. EACH LICENSEE AND SUBLICENSEE OF THE SOFTWARE AGREES NOT TO ASSERT ANY CLAIM AGAINST ANY OF THE AUTHORS RELATING TO THIS SOFTWARE, WHETHER DUE TO PERFORMANCE ISSUES, TITLE OR INFRINGEMENT ISSUES, STRICT LIABILITY OR OTHERWISE.
 
 ---
-Copyright (c) 2012-2025, California Energy Commission  
-Copyright (c) 2025, SAC Software Solutions, LLC  
+Copyright (c) 2012-2026, California Energy Commission  
+Copyright (c) 2026, SAC Software Solutions, LLC  
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
@@ -226,7 +225,7 @@ Redistribution and use in source and binary forms, with or without modification,
 - Redistributions in binary form must reproduce the above copyright notice, this list of conditions, the following disclaimer in the documentation and/or other materials provided with the distribution.
 - Neither the name of the California Energy Commission nor the names of its contributors may be used to endorse or promote products derived from this software without specific prior written permission.
 
-DISCLAIMER: THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION, WRIGHTSOFT CORPORATION, ITRON, INC. OR ANY OTHER AUTHOR OR COPYRIGHT HOLDER OF THIS SOFTWARE (COLLECTIVELY, THE "AUTHORS") BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.  EACH LICENSEE AND SUBLICENSEE OF THE SOFTWARE AGREES NOT TO ASSERT ANY CLAIM AGAINST ANY OF THE AUTHORS RELATING TO THIS SOFTWARE, WHETHER DUE TO PERFORMANCE ISSUES, TITLE OR INFRINGEMENT ISSUES, STRICT LIABILITY OR OTHERWISE.
+**DISCLAIMER:** THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NON-INFRINGEMENT ARE DISCLAIMED. IN NO EVENT SHALL CALIFORNIA ENERGY COMMISSION, WRIGHTSOFT CORPORATION, ITRON, INC. OR ANY OTHER AUTHOR OR COPYRIGHT HOLDER OF THIS SOFTWARE (COLLECTIVELY, THE "AUTHORS") BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE. EACH LICENSEE AND SUBLICENSEE OF THE SOFTWARE AGREES NOT TO ASSERT ANY CLAIM AGAINST ANY OF THE AUTHORS RELATING TO THIS SOFTWARE, WHETHER DUE TO PERFORMANCE ISSUES, TITLE OR INFRINGEMENT ISSUES, STRICT LIABILITY OR OTHERWISE.
 
 
 ![Footer](images/footer.png)
