@@ -11,6 +11,7 @@ This file is used to track the files that are typically checked for PRs. Please 
 ### All Directories (`non-residential`, `multi-family`, `mixed-use`, `single-family`)
 - `schema-related`
 - `prototypes`
+- `research`
 - `user-support`
 
 ### Specific to `non-residential`, `multi-family`, `mixed-use`
@@ -37,6 +38,9 @@ This sub-directory should exist in directories that are typically packaged withi
 This sub-directory should exist in directories that are used to test the system's ability to handle failures. Currently it only exists as needed. Files in these directories are also not-for-release.
 
 **Important:** Assure to include a README.md file in each of these directories to explain how/why these files are intended to fail.
+
+## `research` Directories
+These directories in each of the core directories hold models used for memos or other research tasks. Create new sub-folders as needed for each new group of research items so related models stay grouped and easy to find.
 
 ## `user-support` Directories
 These directories in each of the core directories are used to store and track models submitted from user-support issues which contain valuable reach-cases that the current testing suite otherwise does not test. 
