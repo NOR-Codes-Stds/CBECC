@@ -1,4 +1,5 @@
 # Quick Start Guide
+_CBECC_ is an open-source software program developed by the California Energy Commission for use in showing compliance with the _2025 Building Energy Efficiency Standards_ for nonresidential, multifamily and single family residential buildings. This guide provides a brief overview of the software program’s user interface when initializing the software for the first time.
 
 ## Starting a New Project
 
