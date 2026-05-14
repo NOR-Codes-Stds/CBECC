@@ -27,7 +27,7 @@ Not mirrored to public repo. This directory is used to store models used for mem
 
 ### Common for `multi-family`
 - `schema-related`
-- `contains-nonres-elements.json` - This json file is used to track the files that contain non-residential elements, such that non-res developers can easily identify and test these files in addition to the non-residential models. Any of these files when running should also assume these models could also be under the sub-directory `not-for-release`. 
+- `contains-nonres-elements.json` - This json file is used to track the files that contain non-residential elements, such that non-res developers can easily identify and test these files in addition to the non-residential models. Any of these files when running should also assume these models could also be under the sub-directory `~not-for-release`. 
 
 ### Common for `single-family`
 - `TDS`
