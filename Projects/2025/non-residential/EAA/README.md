@@ -1,1 +1,0 @@
-EAA = Existing Additions and/or Alterations
