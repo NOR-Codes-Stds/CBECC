@@ -1,12 +1,6 @@
 # Projects Directory
 This directory is a collection of various CBECC models used for testing, development, and reference.
 
-## `release-package.json`
-This file is used to track the files that are typically packaged within a release. Please reference the `Projects/release-package.json` for detail. **TODO:** Create and note the workflow noted in #772
-
-## `pr-checks.json`
-This file is used to track the files that are typically checked for PRs. Please reference the `Projects/pr-checks.json` for detail. **TODO:** Create and note a workflow
-
 ## Year Directory Components
 ### `research`
 Not mirrored to public repo. This directory is used to store models used for memos or other research tasks. Create new sub-folders as needed for each new group of research items so related models stay grouped and easy to find.
@@ -52,3 +46,10 @@ Not mirrored to public repo. These directories in each of the core directories a
 
 ### `README.md` Files
 Add README files as needed to any directory if there is specific information to know about models in that directory.
+
+# Other Key Files for Automated Workflows
+## `release-package.json`
+This file is used to track the files that are typically packaged within a release. Please reference the `Projects/release-package.json` for detail. **TODO:** Create and note the workflow noted in #772
+
+## `pr-checks.json`
+This file is used to track the files that are typically checked for PRs. Please reference the `Projects/pr-checks.json` for detail. **TODO:** Create and note a workflow
