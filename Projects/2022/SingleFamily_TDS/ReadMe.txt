@@ -1,1 +1,0 @@
-Location of 2022 CBECC-Res TDS test sets
